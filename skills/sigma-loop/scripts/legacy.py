@@ -47,7 +47,7 @@ INTERNAL_ENV = frozenset({"SIGMA_RUN_ID", "SIGMA_AUTOWATCH_HOP", "SIGMA_SESSION_
 #: previous-prefix spelling means nothing and is never consulted. `SIGMA_ALLOW_COEXIST` (#240) now
 #: only silences the one-line coexistence notice (#314) -- adopting it from a stale previous-prefix
 #: export would hide that notice by accident.
-POST_RENAME_ENV = frozenset({"SIGMA_ALLOW_COEXIST", "SIGMA_HOST", "SIGMA_CODEX_CMD", "SIGMA_GH_GRAPHQL"})   # #801
+POST_RENAME_ENV = frozenset({"SIGMA_ALLOW_COEXIST", "SIGMA_HOST", "SIGMA_CODEX_CMD", "SIGMA_GH_GRAPHQL", "SIGMA_UPKEEP_JOB"})   # #801, #917
 
 #: The schema ids (kind@version) whose spelling changed only in its brand segment. A previous-name id
 #: of any OTHER kind or version is not understood: it reads as itself (so it matches nothing Sigma

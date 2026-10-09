@@ -58,7 +58,7 @@ REASON = "library, loaded by path; no CLI"
 LIBRARY_ONLY = {
     "setup_wizard", "wizard_actions", "actionlog", "blocker_scan", "blockers", "breaker",
     "decompose_goal", "design_goal", "diff_revert", "feature_classify", "feature_doc", "legacy",
-    "feature_judge", "feature_labels", "feature_registry", "feature_stamp", "features",
+    "feature_judge", "feature_labels", "feature_registry", "feature_stamp", "feature_upkeep", "features",
     "flake_check", "frontmatter", "gh_api", "gh_session", "goal_size", "mutation",
     "scrub", "sources", "state", "tamper_scan", "timing_store", "watch_classify", "witness",
     "merge_queue", "tier_escalation", "board_spec", "red_green", "shell_policy", "logroll",

@@ -12,6 +12,14 @@ All notable changes to Sigma are recorded here, newest first.
   destructive and sees `update-ref --delete`, `--method=DELETE`/`-XDELETE` and the `gh_api` write
   helpers by name. One pinned sentence states what the guard enforces about `refs/sigma/backup/`.
   No inventory row changes and no runtime behaviour changes; nothing calls the new rules yet.
+- **Upkeep gate, off by default (#917, upkeep part A, slice 1).** New `feature_upkeep.py`: the one
+  total reader of a new `upkeep` config block (it never raises, `enabled` must be the JSON boolean
+  `true`, and any invalid key closes the whole block), a machine opt-in variable `SIGMA_UPKEEP_JOB`
+  (exactly `1`, plus `ledger.enabled`), and an entry-point decorator. The shipped config template
+  gains a disabled `upkeep` block with notes, and a recording-trap test proves that while the gate
+  is closed nothing is spawned, fetched, sent to a model or written. Nothing calls the gate yet, so
+  there is no behaviour change; existing projects do not receive the block, and the pick-time switch
+  `work.rebase_upkeep` is untouched.
 
 ## 1.0.4 — 2026-10-09 — GitHub GraphQL capability check (cloud sessions, slice 1)
 

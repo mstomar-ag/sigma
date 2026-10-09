@@ -177,3 +177,10 @@ def _hermetic_graphql_capability_env(monkeypatch):
     capability row to (or otherwise perturb) unrelated tests. Tests that want the signal set it."""
     monkeypatch.delenv("CLAUDE_CODE_REMOTE", raising=False)
     monkeypatch.delenv("SIGMA_GH_GRAPHQL", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_upkeep_machine_env(monkeypatch):
+    """#917: a developer shell that exports SIGMA_UPKEEP_JOB must not open the machine door of an upkeep gate under
+    test. Tests that want the variable set it (or inject an `environ`)."""
+    monkeypatch.delenv("SIGMA_UPKEEP_JOB", raising=False)

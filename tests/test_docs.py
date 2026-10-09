@@ -733,7 +733,7 @@ _COST_CONFIG = {"work": {"enabled": True, "base": "main", "remote": "origin"},
                 "discovery": {"source": "github", "github": {"repo": "acme/app"}}}
 
 
-def _calls_for_one_started_goal(tmp_path, adopted):
+def _calls_for_one_started_goal(tmp_path, adopted, upkeep=None, hook=None):
     """`work.start()` for one goal declaring a unit -> every call it made, as strings.
 
     The answers are the ones that reach the EXPENSIVE branch of rebase upkeep — a feature branch
@@ -743,6 +743,7 @@ def _calls_for_one_started_goal(tmp_path, adopted):
     work, registry = _loop_script("work"), _loop_script("feature_registry")
     issue = json.dumps({"number": 1467, "title": "t", "body": "Feature: voice-interview",
                         "labels": [{"name": "feature:voice-interview"}]})
+    config = _COST_CONFIG if upkeep is None else dict(_COST_CONFIG, upkeep=upkeep)
     calls = []
 
     def run(_cwd, argv):
@@ -763,10 +764,12 @@ def _calls_for_one_started_goal(tmp_path, adopted):
     rebase._git_read = lambda _cwd, args: calls.append("git " + " ".join(map(str, args))) or ""
     sdlc = tmp_path / ("adopted" if adopted else "bare") / ".sdlc"
     (sdlc / "goals").mkdir(parents=True)
-    (sdlc / "config.json").write_text(json.dumps(_COST_CONFIG), encoding="utf-8")
+    (sdlc / "config.json").write_text(json.dumps(config), encoding="utf-8")
     if adopted:
         registry.registry_dir(str(sdlc)).mkdir(parents=True, exist_ok=True)
-    work.start(str(sdlc), _COST_CONFIG, "1467", run=run)
+    if hook is not None:
+        hook(rebase, calls)
+    work.start(str(sdlc), config, "1467", run=run)
     return calls
 
 
