@@ -4,6 +4,15 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Never-delete guard and write-surface ratchet widened ahead of backup refs (#918, upkeep part A,
+  slice 2).** The guard now also flags `git push -d`, colon-empty and backup-namespace refspecs, a
+  REST `DELETE` in any spelling, `update-ref -d`/`--delete` and `gh_api` delete helpers, and its
+  exact-site pin grows by one reviewed site (`gh_api.py` `remove_label`, a label delete). The
+  write-surface scanner now classes a push-scoped `--delete`, colon-empty or forced refspec as
+  destructive and sees `update-ref --delete`, `--method=DELETE`/`-XDELETE` and the `gh_api` write
+  helpers by name. One pinned sentence states what the guard enforces about `refs/sigma/backup/`.
+  No inventory row changes and no runtime behaviour changes; nothing calls the new rules yet.
+
 ## 1.0.4 — 2026-10-09 — GitHub GraphQL capability check (cloud sessions, slice 1)
 
 - **GitHub GraphQL capability check, detection and reporting only (#801, slice 1).** New

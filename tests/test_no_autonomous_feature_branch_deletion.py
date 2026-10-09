@@ -10,16 +10,25 @@ WHAT THIS PROVES, in two parts:
 1. STRUCTURAL INVENTORY (`_delete_call_sites` + `test_every_delete_shaped_call_site_...`). Every
    `.py` file `git` tracks under `skills/` or `hooks/` is scanned, with comments and docstrings
    blanked out first (a tokenize pass, not a raw substring scan -- see `_python_scannable_lines`),
-   for four shapes:
+   for seven kinds:
    - `branch_dD`    -- `git branch -d/-D <name>` (a local delete)
-   - `push_delete`  -- `git push ... --delete <name>` (GitHub's explicit remote-delete flag)
-   - `rest_delete_ref` -- a REST `-X DELETE .../git/refs/heads/<name>` call
-   - `colon_refspec` -- a two-sided push refspec `<src>:refs/heads/<dst>` -- git's THIRD, easy to
-     miss delete syntax: when `<src>` is empty, `git push` DELETES `<dst>`. This is not itself a
-     deletion, but a BUILD SITE for one, and it is exactly the shape a naive "just check for -d/-D
-     and --delete" scanner would miss entirely.
+   - `push_delete`  -- `git push ... --delete <name>` (GitHub's explicit remote-delete flag), or
+     the short `push ... -d` flag on the same line
+   - `rest_delete_ref` -- a REST DELETE in any spelling (`-X DELETE`, `--method DELETE`,
+     `--method=DELETE`, `-XDELETE`) on a line that also names a `.../git/refs/...` endpoint
+   - `rest_delete` -- the same REST DELETE verb with no `git/refs/` on its line. The endpoint may
+     sit on another physical line (`gh_api.remove_label` builds its argument list that way), so the
+     guard cannot tell a ref delete from a label delete and flags both for review
+   - `update_ref_delete` -- `git update-ref -d/--delete <ref>`, optionally after `--no-deref`. Only
+     the delete forms: a plain `update-ref <ref> <sha>` is not a deletion and stays quiet
+   - `gh_api_delete` -- a `gh_api.delete...(` helper call, on a `gh_api` name or on a
+     `_load("gh_api")` style loader receiver
+   - `colon_refspec` -- a two-sided push refspec `<src>:refs/...` (heads, or any other namespace)
+     -- git's THIRD, easy to miss delete syntax: when `<src>` is empty, `git push` DELETES
+     `<dst>`. This is not itself a deletion, but a BUILD SITE for one, and it is exactly the shape
+     a naive "just check for -d/-D and --delete" scanner would miss entirely.
    The inventory is then pinned to the EXACT, already-reviewed set of sites this scan currently
-   finds -- a FIFTH site appearing anywhere (a new delete, or a new unaudited colon-refspec build)
+   finds -- a SEVENTH site appearing anywhere (a new delete, or a new unaudited colon-refspec build)
    fails the pin immediately, by file, function and kind, forcing a conscious decision rather than
    a silent regression.
 
@@ -47,16 +56,27 @@ a `.claude/worktrees/` checkout -- that never ships and is not this project's co
 below asks `git ls-files` the same way, so a stray untracked `.py` file on a developer's disk (or a
 concurrent goal's own worktree) can never spuriously trip the inventory pin at `verify` time.
 
-NAMED, ACCEPTED GAP. Like the SIGSTOP guard, this is a TEXT/line scan, not a full data-flow
+NAMED, ACCEPTED GAPS. Like the SIGSTOP guard, this is a TEXT/line scan, not a full data-flow
 analysis: a delete-shaped call built with the flag as a separate list element assembled across
 several statements (rather than one contiguous literal call) would not be caught. Each pattern is
-also matched PER PHYSICAL LINE, not per logical statement -- a call deliberately wrapped across
-multiple lines (unlike every real call site today, which is single-line) could split a pattern's
-two halves onto different lines and slip through; `test_a_planted_rest_delete_ref_call_is_caught`
-pins today's single-line shape rather than papering over this with a multi-line join. This closes
-the LIKELY reintroduction shape -- a literal `git branch -d/-D`, `--delete`, REST DELETE, or
-colon-refspec construction, written the way every real call site in this repo already is -- not
-every conceivable way to construct one dynamically.
+also matched PER PHYSICAL LINE, not per logical statement, so a call deliberately wrapped across
+multiple lines can split a pattern's two halves onto different lines and slip through (`push` and
+`-d`, `update-ref` and `-d`). Three more gaps are known: a colon-empty refspec whose colon is built
+dynamically (a `":%s"` format, an f-string) has no literal `:refs/` on its line; a `gh_api`
+receiver bound to a variable first, or a bare `from gh_api import ...` name, is not recognised;
+and files under `tools/` and shell scripts are outside the scanned tree. Every one of them is
+pinned as a KNOWN LIMIT by `test_known_limits_of_the_per_line_scan_are_pinned` in
+`tests/test_never_delete_guard_backup_refs.py`, rather than papered over with a multi-line join --
+closing a gap is a conscious edit of that test. The write-surface scanner
+(`tools/readiness/write_surface.py`, AST based) covers `tools/`, shell scripts and the dynamic
+colon builds. This closes the LIKELY reintroduction shape -- a literal `git branch -d/-D`,
+`--delete`, REST DELETE, `update-ref -d` or colon-refspec construction, written the way every real
+call site in this repo already is -- not every conceivable way to construct one dynamically.
+
+THE BACKUP-NAMESPACE RULE. What this guard enforces about `refs/sigma/backup/` is stated once, in
+`NEVER_DELETE_BACKUP_RULE` below, and pinned verbatim by
+`tests/test_never_delete_guard_backup_refs.py`; `_files_carrying_the_rule_wording` finds any other
+tracked file that states it, so a copy cannot drift unlisted.
 """
 import ast
 import io
@@ -90,6 +110,49 @@ ALWAYS_GITHUB = {"work": {"enabled": True, "auto_merge": "always"},
 NOSLEEP = lambda _: None                                          # noqa: E731 - one-liner test stub
 HEAD_SHA = "0" * 40
 REMOTE_URL = "git@github.com:acme/app.git"
+
+NEVER_DELETE_BACKUP_RULE = "The never-delete guard pins every delete-shaped call it can see under skills/ and hooks/; under refs/sigma/backup/ the only sanctioned automatic deletion is a prune by literal prefix."
+_RULE_HOME = "tests/test_no_autonomous_feature_branch_deletion.py"    # the one defining module
+_RULE_PIN_HOME = "tests/test_never_delete_guard_backup_refs.py"       # holds the independent pin literal
+_FILES_STATING_THE_RULE = frozenset()   # EMPTY on purpose: the backup/restore/prune slice lists each copy
+_RULE_VARIANT_MIN_SHARED = 8            # shared word-4-grams that make a file a "variant" (of 28)
+_RULE_FILE_CAP = 2000000                # bytes; a larger tracked file is skipped
+
+
+def _words(text):
+    return re.findall(r"[a-z0-9]+", text.casefold())
+
+
+def _files_carrying_the_rule_wording(root):
+    """{repo-relative path: "exact" | "variant"} over tracked text files, or None when `root` is not a
+    git checkout. Skips `.sdlc/`, the two home paths, files over the cap and unreadable files."""
+    try:
+        out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
+                             capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    sentence = _words(NEVER_DELETE_BACKUP_RULE)
+    whole = " " + " ".join(sentence) + " "
+    grams = [" " + " ".join(sentence[i:i + 4]) + " " for i in range(len(sentence) - 3)]
+    found = {}
+    for rel in sorted(f for f in out.stdout.split("\0") if f):
+        if rel.startswith(".sdlc/") or rel in (_RULE_HOME, _RULE_PIN_HOME):
+            continue
+        try:
+            path = pathlib.Path(root) / rel
+            if path.stat().st_size > _RULE_FILE_CAP:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        flat = " " + " ".join(_words(text)) + " "
+        if whole in flat:
+            found[rel] = "exact"
+        elif sum(1 for g in grams if g in flat) >= _RULE_VARIANT_MIN_SHARED:
+            found[rel] = "variant"
+    return found
 
 
 # =====================================================================================================
@@ -178,9 +241,21 @@ def _owned_py_files(root):
 #: `"branch", "-D"` / `"branch", "-d"` -- a local delete, e.g. `["git", "branch", "-D", branch]`.
 _BRANCH_DD_RE = re.compile(r'"branch"\s*,\s*"-[dD]"')
 
-#: `"-X", "DELETE"` -- paired below with a `refs/heads` check on the same line, since the real REST
-#: delete call (`work.py`'s `_delete_remote_branch`) is a single physical-line call.
-_REST_X_DELETE_RE = re.compile(r'"-X"\s*,\s*"DELETE"')
+#: `"push" ... "-d"` -- the short remote-delete flag, on the SAME physical line as `push` (a bare `"-d"`
+#: alone would also match `curl -d`, so the two halves are paired).
+_PUSH_D_RE = re.compile(r'"push"[^\n]*"-d"')
+
+#: A REST delete in any spelling: `"-X", "DELETE"`, `"--method", "DELETE"`, `"--method=DELETE"`,
+#: `"-XDELETE"`. The endpoint is NOT required on the same line (`gh_api.remove_label` puts the verb and
+#: the endpoint on different physical lines); the kind records whether a `git/refs/` endpoint is there.
+_REST_DELETE_RE = re.compile(r'"(?:-X|--method)"\s*,\s*"(?i:delete)"|"(?:--method=|-X)(?i:delete)"')
+
+#: `update-ref -d` / `--delete`, optionally after `--no-deref` -- the delete forms only; a plain
+#: `update-ref <ref> <sha>` is not a deletion and stays quiet.
+_UPDATE_REF_DELETE_RE = re.compile(r'"update-ref"\s*,\s*(?:"--no-deref"\s*,\s*)?"(?:-d|--delete)"')
+
+#: A `gh_api.delete...(` helper call, on a `gh_api` name or a `_load("gh_api")` style loader receiver.
+_GH_API_DELETE_RE = re.compile(r"\bgh_api\b(?:[\"']\))?\.delete\w*\s*\(")
 
 
 def _delete_call_sites(root):
@@ -196,11 +271,16 @@ def _delete_call_sites(root):
         for lineno, line in enumerate(_python_scannable_lines(text), start=1):
             if _BRANCH_DD_RE.search(line):
                 hits.append((path, lineno, "branch_dD", line))
-            if "--delete" in line:
+            if "--delete" in line or _PUSH_D_RE.search(line):
                 hits.append((path, lineno, "push_delete", line))
-            if _REST_X_DELETE_RE.search(line) and "refs/heads" in line:
-                hits.append((path, lineno, "rest_delete_ref", line))
-            if ":refs/heads/" in line:
+            if _REST_DELETE_RE.search(line):
+                hits.append((path, lineno,
+                             "rest_delete_ref" if "git/refs/" in line else "rest_delete", line))
+            if _UPDATE_REF_DELETE_RE.search(line):
+                hits.append((path, lineno, "update_ref_delete", line))
+            if _GH_API_DELETE_RE.search(line):
+                hits.append((path, lineno, "gh_api_delete", line))
+            if ":refs/" in line:
                 hits.append((path, lineno, "colon_refspec", line))
     return sorted(hits, key=lambda h: (str(h[0]), h[1], h[2]))
 
@@ -304,12 +384,13 @@ def test_owned_py_files_scans_a_meaningful_number_of_real_files():
 
 def test_every_delete_shaped_call_site_in_the_kit_is_one_of_the_known_reviewed_ones():
     """THE INVENTORY PIN. Every branch/ref-delete-shaped (or delete-capable) line in this repo's own
-    tracked `skills/`+`hooks/` tree, today, is one of exactly these five -- two real deletes (both
+    tracked `skills/`+`hooks/` tree, today, is one of exactly these six -- two real deletes (both
     scoped structurally to the GOAL's own throwaway `sdlc/<goal>` branch, never `feature/<name>`,
-    proven behaviorally in Part 2 below) and three colon-refspec BUILD sites, each independently
-    proven safe (Part 2). A sixth site appearing anywhere -- including one that could delete a
-    `feature/<name>` branch -- fails this test immediately, by file, function and kind, which is
-    the whole point: it forces a conscious decision (update this pin AND
+    proven behaviorally in Part 2 below), one label delete (`gh_api.remove_label`, a REST DELETE
+    that touches an issue label and no ref), and three colon-refspec BUILD sites, each
+    independently proven safe (Part 2). A seventh site appearing anywhere -- including one that
+    could delete a `feature/<name>` branch -- fails this test immediately, by file, function and
+    kind, which is the whole point: it forces a conscious decision (update this pin AND
     docs/branching-model.md S13b) instead of a silent regression."""
     hits = _delete_call_sites(ROOT)
     assert hits is not None, "not a git checkout -- cannot verify the real tree"
@@ -318,6 +399,8 @@ def test_every_delete_shaped_call_site_in_the_kit_is_one_of_the_known_reviewed_o
     assert found == {
         ("skills/sigma-loop/scripts/work.py", "finish", "branch_dD"),
         ("skills/sigma-loop/scripts/work.py", "_delete_remote_branch", "rest_delete_ref"),
+        # a label delete, not a ref delete: pinned because the guard cannot see the endpoint
+        ("skills/sigma-loop/scripts/gh_api.py", "remove_label", "rest_delete"),
         ("skills/sigma-define/scripts/define.py", "_step_branch", "colon_refspec"),
         ("skills/sigma-loop/scripts/feature_rebase.py", "_pushed", "colon_refspec"),
         ("skills/sigma-loop/scripts/release_manifest.py", "publish_to_ledger_branch", "colon_refspec"),
@@ -427,7 +510,9 @@ _UNIT_BRANCH = "feature/guard-test-unit"
 
 
 def _delete_shaped(call):
-    return "--delete" in call or "DELETE" in call or re.search(r"\bbranch\s+-[dD]\b", call)
+    return ("--delete" in call or "DELETE" in call or re.search(r"\bbranch\s+-[dD]\b", call)
+            or re.search(r"\bpush\b.*\s-d\b", call) or re.search(r"(?:^|\s):refs/", call)
+            or re.search(r"\bupdate-ref\s+(?:--no-deref\s+)?(?:-d|--delete)\b", call))
 
 
 def test_finish_never_names_the_feature_branch_when_the_goal_declared_a_unit(tmp_path):

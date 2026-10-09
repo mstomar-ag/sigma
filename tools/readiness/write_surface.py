@@ -23,6 +23,49 @@ _GH_ACTIONS = {"issue": {"close", "reopen", "edit", "comment", "create", "delete
                "label": {"create", "edit", "delete"},
                "project": {"item-edit", "item-add", "item-archive", "item-delete", "field-create", "create", "link", "copy", "edit", "delete"}}
 _REMOVE_METHODS = {"unlink", "rmdir"}
+_PUSH_DESTRUCTIVE_FLAGS = {"-d", "--delete", "-f", "--force", "--force-with-lease",
+                           "--force-if-includes", "--mirror", "--prune"}
+
+
+def _push_destructive(args):          # tokens after `push`
+    return any(a in _PUSH_DESTRUCTIVE_FLAGS or a.startswith(("--delete=", "--force-with-lease="))
+               for a in args)
+
+
+def _lead(node):                      # literal text an argv element STARTS with; never name-resolved
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        return _lead(node.values[0]) if node.values else ""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Mod, ast.Add)):
+        return _lead(node.left)
+    return None
+
+
+def _refspec_destructive(call):       # colon-empty `:dst` deletes dst; `+src:dst` forces
+    leads = []
+    for arg in list(call.args) + [kw.value for kw in call.keywords]:
+        leads.extend(_lead(e) for e in (arg.elts if isinstance(arg, (ast.List, ast.Tuple)) else [arg]))
+    return any(t and t.startswith((":", "+")) for t in leads)
+
+
+def _rest_verb(token):                # `-X DELETE`, `--method=DELETE`, `-XDELETE` -> the verb
+    if token.startswith(("-x", "--method=")):
+        return token.rsplit("=", 1)[-1].removeprefix("-x")
+    return token
+
+
+_GH_API_WRITES = {"comment_issue", "add_labels", "remove_label", "create_issue", "close_issue",
+                  "create_pr", "merge_pr"}
+
+
+def _is_gh_api_write_call(func):
+    if not (isinstance(func, ast.Attribute) and func.attr in _GH_API_WRITES):
+        return False
+    owner = func.value
+    if isinstance(owner, ast.Call):       # _load("gh_api").merge_pr(...)
+        return any(isinstance(a, ast.Constant) and a.value == "gh_api" for a in owner.args)
+    return _call_name(owner).rsplit(".", 1)[-1] == "gh_api"
 _WRITE_METHODS = {"write_text", "write_bytes", "mkdir", "touch"}
 
 
@@ -181,10 +224,14 @@ def _shell_rules(line):
         return {"gh-pr"}
     if len(words) >= 3 and words[:2] == ["gh", "project"] and words[2] in _GH_ACTIONS["project"]:
         return {"gh-project"}
-    if words[:2] == ["gh", "api"] and any(w.upper() in {"POST", "PATCH", "PUT", "DELETE"} for w in words):
+    if words[:2] == ["gh", "api"] and any(_rest_verb(w.lower()) in {"post", "patch", "put", "delete"} for w in words):
         return {"gh-api-write"}
     if words[:2] == ["git", "push"]:
+        if _push_destructive(words[2:]) or any(w.startswith((":", "+")) for w in words[2:]):
+            return {"git-push", "git-destructive"}
         return {"git-push"}
+    if words[:2] == ["git", "update-ref"] and any(w in ("-d", "--delete") for w in words[2:]):
+        return {"git-destructive"}
     if words and words[0] == "git" and any(w in {"-D", "--hard", "remove", "rm", "tag"} for w in words[1:]):
         return {"git-destructive"}
     if words and words[0] == "rm" and any(w.startswith("-r") or w.startswith("-R") for w in words[1:]):
@@ -241,7 +288,7 @@ def _rules_for_call(node, values):
             command = tokens
         if len(command) >= 2 and command[0] in _GH_ACTIONS and command[1] in _GH_ACTIONS[command[0]]:
             rules.add("gh-" + ("pr" if command[0] == "pr" else command[0]))
-        if command and command[0] == "api" and any(x in {"post", "patch", "put", "delete"} for x in command):
+        if command and command[0] == "api" and any(_rest_verb(x) in {"post", "patch", "put", "delete"} for x in command):
             rules.add("gh-api-write")
     if ("graphql" in command or name.endswith("_graphql")) and any("mutation" in s.lower() for s in strings):
         rules.add("graphql-mutation")
@@ -251,14 +298,20 @@ def _rules_for_call(node, values):
         git = tokens[tokens.index("git") + 1:]
     elif git_runner:
         git = tokens
-    elif command_call and command and command[0] in {"branch", "reset", "worktree", "tag"}:
+    elif command_call and command and command[0] in {"branch", "reset", "worktree", "tag", "update-ref"}:
         # These verbs occur only in git's CLI grammar; `run` is the repository's git/gh runner.
         git = command
     if git:
         if "push" in git:
             rules.add("git-push")
+            if _push_destructive(git[git.index("push") + 1:]) or _refspec_destructive(node):
+                rules.add("git-destructive")
         if any(x in git for x in ("-d", "-D", "--hard", "remove", "rm", "tag", "--force", "--force-with-lease")) or any(x.startswith("--force-with-lease=") for x in git):
             rules.add("git-destructive")
+        if "update-ref" in git and any(x in ("-d", "--delete") for x in git):
+            rules.add("git-destructive")
+    if _is_gh_api_write_call(node.func):
+        rules.add("gh-api-write")
     if name == "shutil.rmtree":
         rules.add("fs-rmtree")
     elif name.startswith("os.") and name.split(".")[-1] in {"unlink", "remove", "rmdir", "replace", "rename"}:
