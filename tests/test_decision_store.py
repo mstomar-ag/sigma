@@ -88,14 +88,14 @@ def test_public_removes_free_text(tmp_path):
     rid = ds.append(tmp_path, _rec(), _cfg("public"), now=NOW)
     text = (tmp_path / "decisions" / (rid + ".json")).read_text()
     assert "free text" not in text and "option a" not in text
-    got = ds.get(tmp_path, rid)
+    got = ds.get(tmp_path, rid, _cfg())
     assert got["qkind"] == "scope" and got["how"] == "human" and "reason" not in got
 
 
 def test_private_keeps_free_text(tmp_path):
     ds = _ds()
     rid = ds.append(tmp_path, _rec(), _cfg("private"), now=NOW)
-    got = ds.get(tmp_path, rid)
+    got = ds.get(tmp_path, rid, _cfg())
     assert got["reason"] == "because of the free text" and got["choice"] == "option a"
 
 
@@ -118,9 +118,9 @@ def test_list_by_filters_and_survives_a_stale_index(tmp_path):
     ds.append(tmp_path, _rec(area="loop", qkind="merge"), _cfg(), now=NOW)
     ds.reindex(tmp_path, _cfg())
     ds.append(tmp_path, _rec(area="docs"), _cfg(), now=NOW)  # index now stale
-    assert len(ds.list_by(tmp_path, area="docs")) == 2
-    assert len(ds.list_by(tmp_path, qkind="merge")) == 1
-    assert len(ds.list_by(tmp_path)) == 3
+    assert len(ds.list_by(tmp_path, _cfg(), area="docs")) == 2
+    assert len(ds.list_by(tmp_path, _cfg(), qkind="merge")) == 1
+    assert len(ds.list_by(tmp_path, _cfg())) == 3
 
 
 def test_archive_folds_old_records(tmp_path):
@@ -131,8 +131,8 @@ def test_archive_folds_old_records(tmp_path):
     assert ds.archive(tmp_path, 180, _cfg(), now=NOW) == 2
     assert _files(tmp_path) == sorted([new + ".json", "archive-2025.json"])
     for rid in ids:
-        assert ds.get(tmp_path, rid)["qkind"] == "scope"
-    assert len(ds.list_by(tmp_path)) == 3
+        assert ds.get(tmp_path, rid, _cfg())["qkind"] == "scope"
+    assert len(ds.list_by(tmp_path, _cfg())) == 3
     assert ds.archive(tmp_path, 180, _cfg(), now=NOW) == 0
 
 
@@ -174,6 +174,44 @@ def test_untracked_old_records_are_named(tmp_path):
     os.utime(f, (old, old))
     assert ds.untracked_old(sdlc, now=NOW) == [rid]
     assert ds.untracked_old(sdlc, now=NOW - datetime.timedelta(days=5)) == []
+
+
+def test_archive_keys_on_the_file_name_stem(tmp_path):
+    ds = _ds()
+    old = NOW - datetime.timedelta(days=400)
+    a = ds.append(tmp_path, _rec(), _cfg(), now=old)
+    b = ds.append(tmp_path, _rec(), _cfg(), now=old)
+    d = tmp_path / "decisions"
+    for rid, body in ((a, {"how": "human", "qkind": "scope", "choice": "x"}),
+                      (b, {"id": a, "how": "human", "qkind": "scope", "choice": "y"})):
+        (d / (rid + ".json")).write_text(json.dumps(body))
+    assert ds.archive(tmp_path, 180, _cfg(), now=NOW) == 2
+    assert not (d / (a + ".json")).exists() and not (d / (b + ".json")).exists()
+    assert ds.get(tmp_path, a, _cfg())["choice"] == "x"
+    assert ds.get(tmp_path, b, _cfg())["choice"] == "y"
+    assert len(ds.list_by(tmp_path, _cfg())) == 2
+
+
+def test_archive_prefixed_id_is_rejected(tmp_path):
+    ds = _ds()
+    assert ds.validate(_rec(id="archive-2025"))
+    with pytest.raises(ValueError):
+        ds.append(tmp_path, _rec(id="archive-x"), _cfg(), now=NOW)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_readers_require_config_and_honour_the_gate(tmp_path):
+    ds = _ds()
+    rid = ds.append(tmp_path, _rec(), _cfg(), now=NOW)
+    for fn, args in ((ds.get, (tmp_path, rid)), (ds.list_by, (tmp_path,)), (ds.reindex, (tmp_path,))):
+        with pytest.raises(TypeError):
+            fn(*args)
+    closed = {"decision_rubric": {"records": {"enabled": False}}}
+    assert ds.get(tmp_path, rid, closed) is None
+    assert ds.list_by(tmp_path, closed) == []
+    assert ds.reindex(tmp_path, closed) == {"skipped": "closed"}
+    assert ds.reindex(tmp_path, None) == {"skipped": "closed"}
+    assert not (tmp_path / "decisions" / "_index.json").exists()
 
 
 LOGIN = "log" + "in"
