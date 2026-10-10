@@ -191,13 +191,13 @@ def test_overrun_raises_a_typed_error_and_stops_the_group(tmp_path, monkeypatch)
             run(tmp_path, ["git", "fetch", "origin"])
         grand = support.pid_in(pidfile)
         error = caught.value
-        assert isinstance(error, RuntimeError) and error.argv == ["git", "fetch", "origin"]
+        assert isinstance(error, RuntimeError) and error.argv == ["git", "fetch"]
         assert (error.limit, error.escalated) == (2.0, False) and "git fetch: timed out after 2s" in str(error)
         assert error.seconds < 8 and support.gone(grand), "the git tree must be gone after an overrun"
         assert str(error) == "git fetch: timed out after 2s" and "origin" not in str(error), "no argv in the message"
         with pytest.raises(ug.GitTimeout) as leaky:
             run(tmp_path, ["git", "fetch", "leaky-remote-920"])
-        assert "leaky-remote-920" not in str(leaky.value) and leaky.value.argv[-1] == "leaky-remote-920"
+        assert "leaky-remote-920" not in str(leaky.value) and leaky.value.argv == ["git", "fetch"]
         run = ug.make_runner({"default": 2, "fetch": 30}, term_grace=3)
         with pytest.raises(ug.GitTimeout) as default:
             run(tmp_path, ["git", "status"])

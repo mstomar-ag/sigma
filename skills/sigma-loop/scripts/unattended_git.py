@@ -23,7 +23,7 @@ WHAT IT ADDS to a git command, all per command and never stored in any configura
     neither.)
   * A TIME LIMIT per command, REQUIRED (`limits` maps a git verb to seconds and must carry "default"; the caller
     derives the numbers, this module has no constants for them). An overrun stops the whole process group
-    (SIGTERM first, see `bounded_run`) and raises `GitTimeout`, a RuntimeError that carries the argv, the limit and
+    (SIGTERM first, see `bounded_run`) and raises `GitTimeout`, a RuntimeError that carries the program and verb only (the argument text is redacted), the limit and
     whether SIGKILL was needed, so a caller can tell a timeout from a conflict.
 
 KNOWN GAPS. The ssh transport has no prompt lever here (none was measured); the time limit and the group stop bound
@@ -59,9 +59,13 @@ class GitTimeout(RuntimeError):
     """A git command overran its limit and its process group was stopped."""
 
     def __init__(self, argv, limit, escalated, seconds):
-        self.argv, self.limit, self.escalated, self.seconds = list(argv), limit, escalated, seconds
-        verb = verb_of(self.argv)
-        super().__init__("%s %s: timed out after %gs" % (os.path.basename(self.argv[0]), verb or "", limit))
+        argv = [str(a) for a in argv]
+        verb = verb_of(argv)
+        # REDACTED: only the program and the verb are kept. A remote URL, a path or a config value in the full argv
+        # could carry a credential, and an exception is logged and re-raised far from here.
+        self.argv = [os.path.basename(argv[0])] + ([verb] if verb and verb != os.path.basename(argv[0]) else [])
+        self.limit, self.escalated, self.seconds = limit, escalated, seconds
+        super().__init__("%s %s: timed out after %gs" % (os.path.basename(argv[0]), verb or "", limit))
 
 
 def verb_index(argv):

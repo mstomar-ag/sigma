@@ -29,7 +29,10 @@ HOW A RUN ENDS, and what is left behind (the answers were measured, see the plan
 
 OUTPUT IS BOUNDED. Pipes are read without blocking into a ring that keeps the LAST `tail_bytes` (merged stdout and
 stderr), or, in split mode, the first `max_out_bytes` of stdout and the last `tail_bytes` of stderr. A command that
-prints 200 MB costs a few tens of MB of memory, not a multiple of its output. A descendant that escaped the group
+prints 200 MB costs a bounded amount of memory, not a multiple of its output: MEASURED, merged mode keeps about the
+tail plus one chunk, and split mode peaks near three times `max_out_bytes` (the kept bytes, a copy made to decode
+them, the decoded text), so the default 16 MiB cap peaked near 74 MiB under a 300 MB flood (the earlier 64 MiB cap
+peaked near 227 MiB, hence the lower figure). A descendant that escaped the group
 (its own session) and still holds a pipe cannot stall the run: after the group is stopped the pipes are drained for
 at most REAP_SECONDS and then closed.
 
@@ -91,8 +94,9 @@ REAP_SECONDS = 5.0
 #: The kept tail of merged output, and of stderr in split mode.
 TAIL_BYTES = 65536
 #: The cap on stdout in split mode. Far above any answer the engine reads (a name list for a repository one hundred
-#: times this one is a few megabytes) and far below a runaway; output beyond it is dropped and flagged.
-MAX_OUT_BYTES = 64 * 1024 * 1024
+#: times this one is a few megabytes) and far below a runaway; output beyond it is dropped and flagged. Measured
+#: peak memory is about three times the cap (a 64 MiB cap peaked near 227 MiB, this one near 74 MiB).
+MAX_OUT_BYTES = 16 * 1024 * 1024
 #: The longest budget accepted: the upper bound of the gate's own verify.timeout_minutes (1440 minutes).
 MAX_SECONDS = 86400
 _CHUNK = 65536
@@ -240,9 +244,27 @@ def _start_lifeline(grace):
     return sentinel, write_fd
 
 
-def _end_lifeline(sentinel, write_fd):
-    """Release the sentinel with `done` (this process is alive and has stopped the group itself), then reap it."""
-    for action in (lambda: os.write(write_fd, b"done"), lambda: os.close(write_fd)):
+def _group_confirmed_gone(proc):
+    """True only when the group `proc` led is gone, checked after reaping the leader. A run that never started has
+    no group and nothing for the lifeline to guard."""
+    if proc is None:
+        return True
+    proc.poll()
+    end = time.monotonic() + REAP_SECONDS
+    while _group_alive(proc.pid):
+        if time.monotonic() >= end:
+            return False
+        proc.poll()
+        time.sleep(0.05)
+    return True
+
+
+def _end_lifeline(sentinel, write_fd, group_gone=True):
+    """Release the sentinel and reap it. `done` is told only when `group_gone` (the group is confirmed gone); else
+    the pipe is just closed, and the sentinel treats end-of-file as a dead caller and stops the group itself, so a
+    second interrupt during the stop cannot disarm it."""
+    actions = [lambda: os.write(write_fd, b"done")] if group_gone else []
+    for action in actions + [lambda: os.close(write_fd)]:
         try:
             action()
         except OSError:
@@ -376,7 +398,7 @@ def run_group(command, cwd, timeout, *, shell=False, env=None, stop_path=None, m
                       {TIMEOUT: "timed out after %gs; the process group was stopped" % timeout,
                        STOPPED: "stop file appeared; the process group was stopped"}.get(outcome, ""))
     finally:
-        _end_lifeline(sentinel, write_fd)
+        _end_lifeline(sentinel, write_fd, _group_confirmed_gone(proc))
 
 
 # ------------------------------------------------------------------------------------------ the verify entry

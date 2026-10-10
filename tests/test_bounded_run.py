@@ -193,7 +193,9 @@ def test_overrun_stops_the_whole_group(tmp_path, monkeypatch):
     finally:
         support.reap(grand)
     direct = support.variant("bounded_run", ("os.killpg(pgid, signum)", "os.kill(pgid, signum)"),
-                             ("REAP_SECONDS = 5.0", "REAP_SECONDS = 0.5"))
+                             ("REAP_SECONDS = 5.0", "REAP_SECONDS = 0.5"),
+                             # #979: the lifeline now backstops an unconfirmed stop, so the control also tells it `done`
+                             ("_group_confirmed_gone(proc))", "True)"))
     grand2 = None
     try:
         _result, grand2 = attempt(direct, "direct")
