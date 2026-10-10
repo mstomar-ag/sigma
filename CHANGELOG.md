@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Write-surface row for the offline rubric end-to-end run script (#1108).** Registers its throwaway-repo writes, which slice 21 left out.
 - **Shared-path registry catch-up (#1108, part of #988).** Eight vetted-writer additions in the predecessor written-paths fixture for the new applier config read, the triage finish step in `handoff.py` and the spend-approval counter, so the shared-path guard is green again.
 - **Decision rubric, slice 21: docs rewrites and the offline rubric end-to-end run script (#1011, story #988).** The label model, README, skills and instruction files no longer describe a confirmation queue (the label is legacy; triage arms or parks at filing; the README names queued as the filing default). The run script (`run` verb) drives records, classifier, ladder, judge, triage and migration offline on a throwaway repository; with every switch off it matches a run with no rubric config.
 - **Decision rubric, slice 20: `promote.py migrate-confirmation` (#1010, story #988).** A one-time verb that moves every issue still carrying the confirmation label to armed or an ordinary park through the rubric triage, the blocker predicate and the one-mutation label swap; dry run by default (`--apply` to write), pages past the 200-issue window, prints `covered N of M` and exits non-zero when N is below M, leaves closed issues untouched, and is a no-op on a second run. Nothing else changes.

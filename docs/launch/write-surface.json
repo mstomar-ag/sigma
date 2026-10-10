@@ -3313,6 +3313,14 @@
       "risk": "medium"
     },
     {
+      "path": "tools/rubric_e2e.py",
+      "function": "run",
+      "rule": "fs-write",
+      "count": 3,
+      "gate": "ungated",
+      "risk": "medium"
+    },
+    {
       "path": "skills/sigma-loop/scripts/autonomy.py",
       "function": "_write_new",
       "rule": "fs-write",
