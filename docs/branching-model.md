@@ -1620,8 +1620,18 @@ given set of units (use `upkeep.units.include` and `exclude` to split units betw
 **What is and is not proven.** The pass, the backup, the restore and the prune were run end to end on a bare remote in a
 temporary directory, offline, with the clock set: see `docs/launch/evidence/upkeep-local-run.md`. That is a local bare
 remote only. It has not been run against a hosting service, so nothing here is a claim about branch protection rulesets,
-bypass actors, ref-name or ref-count limits, authentication, rate limits or network cost there. Until that run is
-approved and recorded, treat the feature as unproven on a hosting service.
+bypass actors, ref-name or ref-count limits, authentication, rate limits or network cost there. The hosted run described next is a single
+sanitized record, and a gap list.
+
+**Hosted run (2026-10-10, one private throwaway repository).** The real scripts passed init with a board, a unit with two
+goals through pull requests, the pass with an atomic backup ref the host accepted, restore (and a refused restore on a
+wrong expected tip), a restore that is not sticky, a prune of exactly the old backups, a guarded head-pinned landing
+(rehearsal, merge, then `already-landed` on replay), the mechanical conflict level (a non-union conflict refused and parked,
+a union conflict resolved and pushed with a backup) and the scheduler's detached job. The record, with its limits, is
+`docs/launch/evidence/upkeep-hosted-run.md`. **Not covered:** a real-model resolver or reviewer, the chat door against a
+chat service, and branch rulesets or bypass actors (a private repository without a paid plan has none), so the bypass advice
+in section 13 is untested. One host limit was seen: branch names starting with `refs/` are rejected. The scale figures above
+are reasoned, not measured: nothing was run at tens of units.
 
 ### 13e. Config reference: the `upkeep` block
 
@@ -1666,6 +1676,10 @@ the rule text and the config it was given. What reaches an existing adopter, and
   scheduler and the backup commands, which stay closed until the block is on.
 - The `upkeep` block in `.sdlc/config.json` and any new text in `.sdlc/project.md` are never refreshed: copy the block by
   hand from the config template shipped in the installed plugin, and leave `enabled` false until you mean it.
+- The routing sentence ("rebase, catch up or land a unit: use the `sigma-rebase` skill, not a raw git command") is rule text,
+  so it reaches new adopters only, on every host. An existing adopter re-runs `/sigma-init --codex` (the managed block is
+  rewritten), deletes both Cursor rule files before `/sigma-init --cursor`, or pastes the sentence into `.sdlc/project.md`
+  by hand. Sigma never rewrites an adopter's own files silently.
 - The Codex managed block in `AGENTS.md` is rewritten in place when `/sigma-init --codex` is run again; other bytes are kept
   and nothing printed tells a refresh from a first write.
 - The two Cursor rule files are kept when present: delete both, then run `/sigma-init --cursor` again.

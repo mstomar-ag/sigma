@@ -147,6 +147,12 @@ EXTERNAL_CONTROLS = (
                   "run against the real command line, and cannot prove the resolver did not influence the reviewer. "
                   "It can only add a refusal; a block, a bad reply, a timeout or a moved tree all stop the push",
      "condition": "needs a validated model id; the shipped catalog holds only a placeholder, so the route stays closed"},
+    {"control": "Unit landing is user-requested", "kind": "python-gate", "hosts": "all",
+     "enabled_by": ("upkeep.enabled",), "settings": (),
+     "mechanism": "`feature_land.py` `land` and `feature_land_merge.py`: land a unit only on an explicit request, behind the "
+                  "upkeep project door, with the merge pinned to the head that was rehearsed. Landing is deliberately "
+                  "not in `gates.irreversible_actions`: it has its own gate and an explicit yes in `sigma-rebase`",
+     "condition": "closed refuses before any read; the chat door and a hosted ruleset were not covered by the hosted run"},
     {"control": "Irreversible actions park", "kind": "advice", "hosts": "all",
      "enabled_by": (), "settings": ("gates.irreversible_actions", "gates.on_block"),
      "mechanism": "the loop's instructions ask the agent to park rather than run a "

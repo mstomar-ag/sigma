@@ -32,6 +32,7 @@ where `python3` is absent). Note it here only for humans. -->
 - Only host branch protection prevents a direct commit — but protecting `feature/*` in the ordinary
   way also blocks the force-push upkeep needs, stopping upkeep entirely. Protect your integration
   branch; on `feature/*`, grant upkeep's actor a bypass.
+- To rebase, catch up or land a unit (a `feature/<name>` branch), use the `sigma-rebase` skill; do not run a raw rebase, force-push or merge by hand.
 
 ## North-star pointers
 <!-- docs that define direction (architecture, roadmap) the work must respect -->

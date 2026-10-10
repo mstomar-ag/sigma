@@ -106,6 +106,9 @@ Three scripts, one flow, each usable on its own:
 - **Not automatic merge.** Step 6 lands nothing without an explicit yes, every time — there is no
   flag or config that makes this unattended, matching `docs/branching-model.md` §13's "completion
   is human-only by default" and the Dossier's own `non_goals`.
+- **Landing is not on the irreversible-actions list, on purpose.** The loop parks deploy, delete, overwrite, spend and
+  migrate. Landing a unit is a different gesture: it needs this skill's explicit yes (step 6) and a head-pinned merge, so it
+  is a user-requested action with its own gate, not an unattended one. `docs/enforcement.md` has a row for it.
 - **Not automatic.** Nothing here runs unattended, on a schedule, or without the branch you name
   being the one you are actually sitting on.
 
