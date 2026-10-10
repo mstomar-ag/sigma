@@ -1429,6 +1429,7 @@ _NO_UNIT_NAME = {
     ("feature_frontier", "_load"),
     ("feature_labels", "_load"),
     ("feature_land_approval", "_load"),
+    ("feature_land", "_load"),                # #937: the sibling importer; no unit name reaches it
     ("feature_owner", "_load"),
     ("feature_propagate", "_load"),
     ("feature_rebase", "_load"),

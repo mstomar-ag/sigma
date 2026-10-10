@@ -9,6 +9,9 @@ All notable changes to Sigma are recorded here, newest first.
 - Upkeep part A, slice 8: user documentation and config reference for the scheduler, backups, restore and prune, the opt-in audit across every entry point, and one recorded local end-to-end run on a scratch bare remote (#924).
 - Upkeep part A, slice 7: the scheduler, the detached bounded job, outcome notes and the doctor rows (#923).
 - Upkeep part C, slice 5: read-back classifier and pending-landing record (#936).
+- Upkeep part C, slice 8: the landing engine's front half, `feature_land.py land <unit>`, ends in a rehearsal and never merges (#937).
+- Upkeep part C, slice 8: `feature_land_approval.peek` checks a unit approval without consuming it (#937).
+- Upkeep part C, slice 8: the PR-creating writer and the scratch-worktree removal are registered in the write surface (#937).
 - **Upkeep part B, slice 5: a changelog-only unit conflict is resolved by the heading-aware union (#947).** Behind the
   existing upkeep opt-in and `conflicts.resolve` set to `mechanical` or `agent` only, and with no model call. A unit rebase
   that stops on a conflict in the changelog alone is resolved, checked (no edit outside the file, no new marker or

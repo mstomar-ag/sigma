@@ -601,6 +601,22 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_land.py",
+      "function": "_pull_request",
+      "rule": "gh-api-write",
+      "count": 1,
+      "gate": "upkeep.enabled and the landing verb; creates one non-draft pull request for the verified head only after verify, the tip re-reads and the unattended approval check passed; never merges",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_land.py",
+      "function": "_scratch_verify",
+      "rule": "git-destructive",
+      "count": 1,
+      "gate": "upkeep.enabled and the landing verb; removes only the scratch worktree this call created in a private temporary directory",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_propagate.py",
       "function": "_store",
       "rule": "fs-write",
