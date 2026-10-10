@@ -537,6 +537,38 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_backup.py",
+      "function": "_atomic_leased_push",
+      "rule": "git-destructive",
+      "count": 1,
+      "gate": "upkeep.enabled; the caller that decides to back up holds the gate (the engine's gate query), and restore and prune query it themselves; no entry point is registered",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_backup.py",
+      "function": "_atomic_leased_push",
+      "rule": "git-push",
+      "count": 1,
+      "gate": "upkeep.enabled; the caller that decides to back up holds the gate (the engine's gate query), and restore and prune query it themselves; no entry point is registered",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_backup.py",
+      "function": "_delete_chunk",
+      "rule": "git-destructive",
+      "count": 1,
+      "gate": "upkeep.enabled; the caller that decides to back up holds the gate (the engine's gate query), and restore and prune query it themselves; no entry point is registered",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_backup.py",
+      "function": "_delete_chunk",
+      "rule": "git-push",
+      "count": 1,
+      "gate": "upkeep.enabled; the caller that decides to back up holds the gate (the engine's gate query), and restore and prune query it themselves; no entry point is registered",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_doc.py",
       "function": "_atomic_write_bytes",
       "rule": "fs-remove",

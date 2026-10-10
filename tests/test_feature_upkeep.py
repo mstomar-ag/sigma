@@ -35,8 +35,12 @@ EXPECTED_SCHEMA = {   # key -> (kind, lo, hi, min_items)
     "verify.timeout_minutes": ("int", 1, 1440, None),
     "backup.keep_days": ("int", 1, 3650, None),
     "backup.keep_last": ("int", 1, 1000, None),
+<<<<<<< HEAD
     "conflicts.resolve": ("enum", None, None, None),
     "conflicts.mechanical_without_verify": ("bool", None, None, None),
+=======
+    "backup.former_prefixes": ("name_list", None, None, 0),
+>>>>>>> 9876441 (wip: backup restore prune (#921) part 2)
 }
 DEFAULT_TABLE = {
     "enabled": False, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
@@ -44,7 +48,11 @@ DEFAULT_TABLE = {
     "triggers.dormant_every_hours": 72, "auto.window_days": 21, "auto.burst_window_hours": 24,
     "auto.target_hours": 12, "auto.floor": 3, "auto.ceiling": 40, "verify.clean_rebase": False,
     "verify.timeout_minutes": 60, "backup.keep_days": 14, "backup.keep_last": 5,
+<<<<<<< HEAD
     "conflicts.resolve": "off", "conflicts.mechanical_without_verify": False,
+=======
+    "backup.former_prefixes": [],
+>>>>>>> 9876441 (wip: backup restore prune (#921) part 2)
 }
 #: The acceptance matrix (None, True, 0, -1, 1.5, nan, inf, "", "x", [], [1], {}, {"x": 1}) plus the values that
 #: are real traps: False, 1, the text forms of a boolean, -inf, "auto", a name list, a 400-digit integer.
@@ -150,7 +158,11 @@ STRICT_MUTANTS = ["return bool(value)", "return value == True or value == False"
 # ------------------------------------------------------------------------------------------ schema and defaults
 
 def test_schema_is_locked():
+<<<<<<< HEAD
     """The schema is exactly the 19 keys the gate reads, with the documented kinds and bounds."""
+=======
+    """The schema is exactly the 18 keys part A reads, with the documented kinds and bounds."""
+>>>>>>> 9876441 (wip: backup restore prune (#921) part 2)
     g = support.gate()
     got = {k: (s["kind"], s.get("lo"), s.get("hi"), s.get("min_items")) for k, s in g.SCHEMA.items()}
     assert got == EXPECTED_SCHEMA

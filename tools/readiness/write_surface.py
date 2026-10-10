@@ -194,6 +194,8 @@ def _metadata(path, function, rule):
         gate = "discovery.source == github; board writes require project.enabled"
     elif path == "skills/sigma-rebase/scripts/verify_merge.py":
         gate = "human input() confirmation"
+    elif path == "skills/sigma-loop/scripts/feature_backup.py":
+        gate = "upkeep.enabled; the caller that decides to back up holds the gate (the engine's gate query), and restore and prune query it themselves; no entry point is registered"
     else:
         gate = "ungated"
     risk = RISK[rule]

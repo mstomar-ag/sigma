@@ -144,7 +144,8 @@ EXTERNAL_CONTROLS = (
      "enabled_by": (), "settings": ("gates.irreversible_actions", "gates.on_block"),
      "mechanism": "the loop's instructions ask the agent to park rather than run a "
                   "deploy/delete/overwrite/spend/migrate",
-     "condition": "no code reads these keys"},
+     "condition": "no code reads these keys; the code's own lease force-push of a unit branch and its prune of "
+                  "backup refs (once upkeep is enabled) are outside it, see docs/branching-model.md section 13b"},
     {"control": "Branch protection (required checks / reviews)", "kind": "git-host", "hosts": "all",
      "enabled_by": (), "settings": (),
      "mechanism": "GitHub refuses the merge; `work.auto_merge: \"protected\"` merges only where the "

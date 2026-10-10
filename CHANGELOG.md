@@ -26,6 +26,18 @@ All notable changes to Sigma are recorded here, newest first.
   closed nothing changes.
 - **GitHub write plumbing in gh_api (#931, upkeep part C, slice 2).** New REST-only helpers with no caller yet: a pinned merge that requires an explicit method, repository and 40-hex head pin, commit parents, branch rules, repository settings, a typed non-draft pull request create, and a bounded runner that keeps the exit code and failure class. The landing writer joins the receipt allowlist; the doctor row and the cloud-sessions page name the degraded features. Inert unless the upkeep gate is open.
 
+
+
+- **Backup refs for a rewritten unit tip: create, restore, prune (#921, upkeep part A, slice 5).** With
+  `upkeep.enabled` true, the pick-time rebase pass now keeps the old tip of a unit branch as
+  `refs/sigma/backup/<unit>/<UTC stamp>` in the same atomic push as the leased update (both refs land or neither; a
+  name collision is refused, and a unit name over 220 bytes is refused as `name-too-long` before the replay). With it
+  off the push is byte for byte what it was. New `feature_backup.py` also holds a `restore` command, leased on the tip
+  you state, and a `prune` command that keeps the newest 5 backups per unit and removes only those older than 14 days,
+  by exact prefix, with the `--delete` flag and one lease per ref; both are `feature_rebase.py` verbs behind the gate
+  (exit 3 while it is closed). `backup.former_prefixes` is a new key that ships empty. The never-delete guard pins the
+  two new sites, the write-surface inventory gains four rows, and the deletion rule (section 13b of the branching
+  model), the README and the enforcement table carry the exception. Nothing prunes by itself yet.
 - **Shared verify runner and unattended git runner (#920, upkeep part A, slice 4).** New bounded_run.py:
   a command run in a process group of its own under a wall-clock budget, the whole group stopped
   (SIGTERM, then SIGKILL) on overrun or when a stop file appears, a lifeline that stops the tree if the
