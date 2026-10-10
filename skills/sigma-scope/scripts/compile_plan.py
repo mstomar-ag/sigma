@@ -105,6 +105,8 @@ def _load_loop_script(name):
 
 sources = _load_loop_script("sources")
 handoff = _load_loop_script("handoff")   # PROPOSED_LABEL / proposed_label() only -- see module docstring
+file_triage = _load_loop_script("file_triage")   # #1006: arm or park a plan issue (rubric slice 17)
+qkind = _load_loop_script("qkind")               # #1006: the declared kind of a park at filing
 
 #: Default priority when a plan issue (or the epic) doesn't name one -- byte-identical default to
 #: `handoff.DEFAULT_PRIORITY`, so an unset priority means the same thing whichever layer created the
@@ -342,8 +344,33 @@ def _patch_epic_with_subs(source, epic_number, created_numbers, report):
             f"epic #{epic_number} created, but could not patch its body with its sub-issues: {exc}")
 
 
+def _triage_for(plan_item, priority, triage, config):
+    """#1006: the triage outcome for one plan issue -> `Decision(kind, priority, reason)`, or None when
+    triage is switched off (the legacy filing). A plan issue is a human-confirmed filing at its own plan
+    priority: the deny-list is the only thing that can stop it (it parks). `triage` is the injected
+    `decide(title, body, flags, config)` (default `file_triage.decide`). Never raises: any error parks."""
+    decide = triage if triage is not None else file_triage.decide
+    try:
+        d = decide(plan_item["title"], plan_item.get("body") or "",
+                   {"human_confirmed": True, "priority": priority}, config)
+        return None if d.kind == "queue" else d
+    except Exception:                                               # noqa: BLE001
+        return file_triage.Decision("park", None, "triage could not decide")
+
+
+def _park_child(source, number, reason, report, key):
+    """#1006: park a freshly filed plan issue with a declared question kind. Never raises."""
+    text = "Parked at filing: %s\n%s" % (reason, qkind.render_line("needs_decision"))
+    try:
+        source.park(str(number), text)
+    except Exception as exc:                                        # noqa: BLE001
+        report["warnings"].append(
+            f"could not park {key!r} (#{number}) at filing ({exc}): it carries no goal label and no "
+            "parked label until a human looks at it")
+
+
 def compile_plan(sdlc_dir, config, plan, *, source=None, goal_label=False,
-                 forbid_priority=False):
+                 forbid_priority=False, triage=None):
     """Turn a DECIDED plan into real tracked issues. Never raises for a runtime/`gh` failure (every
     such failure is caught and reported in the returned dict); DOES raise `ValueError` for a
     structurally invalid plan (see `_validate_and_order`), and only BEFORE any issue is created, so
@@ -389,6 +416,12 @@ def compile_plan(sdlc_dir, config, plan, *, source=None, goal_label=False,
     `sources.get_source(sdlc_dir, config)` when not given, matching that function's own degrade
     path: a source that fails to resolve, or one that can't open issues at all, means nothing is
     created and `report["warnings"]` says why -- never a raise.
+
+    `triage` (#1006, decision rubric slice 17): `decide(title, body, flags, config)` for each plan issue,
+    default `file_triage.decide`. With triage on (the default) a plan issue is armed at its own plan
+    priority (`sdlc:goal`, never the proposed label) unless the deny-list parks it, and the report gains
+    a `parked` mapping `{key: reason}`. With `ai_filed.triage.enabled` false nothing here runs and the
+    filing is exactly as before (no `parked` key).
 
     Returns a report dict, always fully populated:
         {"epic": <number> | None, "issues": {key: number, ...}, "failed": {key: error str, ...},
@@ -439,13 +472,18 @@ def compile_plan(sdlc_dir, config, plan, *, source=None, goal_label=False,
         body = _append_extra(item.get("body"), extra)
         priority = item.get("priority") or DEFAULT_PRIORITY
         labels = [f"priority:{priority}"]
-        if not goal_label:
+        decision = _triage_for(item, priority, triage, config)
+        child_goal_label = goal_label
+        if decision is not None:
+            report.setdefault("parked", {})
+            child_goal_label = decision.kind == "arm"
+        elif not goal_label:
             labels.append(handoff.proposed_label(config))
 
         report["order"].append(key)
         try:
             number = source.create_dependency(item["title"], body, None,
-                                               labels=labels, goal_label=goal_label)
+                                               labels=labels, goal_label=child_goal_label)
         except Exception as exc:                                    # noqa: BLE001
             report["failed"][key] = str(exc)
             continue
@@ -453,6 +491,9 @@ def compile_plan(sdlc_dir, config, plan, *, source=None, goal_label=False,
             report["failed"][key] = "gh returned no issue number"
             continue
         report["issues"][key] = number
+        if decision is not None and decision.kind != "arm":
+            report["parked"][key] = decision.reason
+            _park_child(source, number, decision.reason, report, key)
 
     if epic_number is not None:
         _patch_epic_with_subs(source, epic_number, list(report["issues"].values()), report)
@@ -477,7 +518,8 @@ def _json_report(report):
             "failed": {str(k): v for k, v in report["failed"].items()},
             "skipped": {str(k): v for k, v in report["skipped"].items()},
             "order": [str(k) for k in report["order"]],
-            "warnings": list(report["warnings"])}
+            "warnings": list(report["warnings"]),
+            **({"parked": {str(k): v for k, v in report["parked"].items()}} if "parked" in report else {})}
 
 
 def _is_dossier_plan(plan_path):
