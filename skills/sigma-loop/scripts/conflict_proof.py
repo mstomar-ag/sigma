@@ -48,6 +48,7 @@ TEST_LANGUAGE = "test-language-unsupported"
 TEST_UNREADABLE = "test-blob-unreadable"
 TEST_LOSS = "test-or-assertion-loss"
 TEST_SKIP = "test-skip-added"
+UNPARSEABLE_LOG = "unparseable-git-log"
 
 DEADLINE_SECONDS = 60
 
@@ -70,18 +71,19 @@ def read_commits(run, cwd, rng, patch_id_fn=None):
     `patch_id` comes from one batched `git patch-id --stable` over a default-context `git log -p` of the range (not a process per commit), or ""
     when `patch_id_fn` is None. RAISES whatever the runner raises."""
     text = str(run(cwd, ["git", "-c", "core.quotePath=false", "log", "--reverse", "-m", "-p", "-U0", "--no-renames",
-                         "--binary", "--full-index", "--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s", rng]) or "")
+                         "--binary", "--full-index", "--format=%x00%H%n%P%n%an%n%ae%n%at%n%s", rng]) or "")
     pids = {}
     if patch_id_fn:        # git's own skip test reads the default-context patch, so it gets its own one batched log
         pids = _patch_ids(patch_id_fn, str(run(cwd, ["git", "-c", "core.quotePath=false", "log", "--reverse", "-p",
                                                     "--no-renames", "--format=commit %H", rng]) or ""))
     commits, seen = [], collections.Counter()
-    for rec in text.split(_RECORD_SEP):
-        head, _, body = rec.partition("\n")
-        fields = head.split(_HEADER_SEP)
-        if len(fields) != 6:
+    for rec in text.split("\x00"):     # NUL cannot occur in a commit header or a text diff; control bytes 0x1e/0x1f can
+        if not rec:
             continue
-        sha, parents, name, email, stamp, subject = fields
+        fields = rec.split("\n", 6)
+        if len(fields) != 7:           # an unparseable chunk must never be dropped: both sides would shrink alike
+            raise ValueError("%s: git log chunk has %d fields, expected 7" % (UNPARSEABLE_LOG, len(fields)))
+        sha, parents, name, email, stamp, subject, body = fields
         nth = seen[sha]
         seen[sha] += 1
         diff = per_path_multisets(body, suffix="@%d" % nth if (nth or len(parents.split()) > 1) else "")
@@ -97,7 +99,7 @@ def read_commits(run, cwd, rng, patch_id_fn=None):
 def _patch_ids(patch_id_fn, log_text):
     """`{commit sha: stable patch-id}` from the output of the injected batch function (one process for the lot)."""
     out = {}
-    for line in str(patch_id_fn(log_text.replace(_RECORD_SEP, "")) or "").splitlines():
+    for line in str(patch_id_fn(log_text) or "").splitlines():
         fields = line.split()
         if len(fields) == 2:
             out[fields[1]] = fields[0]

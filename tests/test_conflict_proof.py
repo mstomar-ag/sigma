@@ -511,3 +511,23 @@ def test_the_library_reads_no_config_and_nothing_imports_it_yet():
     for path in SCRIPTS.glob("*.py"):
         if path.name != "conflict_proof.py":
             assert "conflict_proof" not in path.read_text(encoding="utf-8"), path.name
+
+
+def test_read_commits_survives_control_bytes_in_message_and_diff(tmp_path):
+    """A commit whose message and file text hold 0x1e/0x1f is read whole: never truncated, never dropped."""
+    repo = new_repo(tmp_path)
+    put(repo, "a.txt", "base\n")
+    commit(repo, "base")
+    put(repo, "a.txt", "base\nx\x1ey\x1fz\n")
+    commit(repo, "subj \x1f one\n\nbody \x1e two \x1f three")
+    put(repo, "b.txt", "after\n")
+    commit(repo, "next")
+    got = cp.read_commits(_run, repo, "HEAD~2..HEAD")
+    assert [c["subject"] for c in got] == ["subj \x1f one", "next"]
+    assert set(got[0]["diff"]) == {"a.txt"} and set(got[1]["diff"]) == {"b.txt"}
+    assert "x\\x1ey\\x1fz" in repr(got[0]["diff"]["a.txt"])    # the added line is whole, not cut at the control byte
+
+
+def test_read_commits_refuses_unparseable_chunk():
+    with pytest.raises(ValueError, match=cp.UNPARSEABLE_LOG):
+        cp.read_commits(lambda cwd, argv: "\x00only-one-line", ".", "x..y")
