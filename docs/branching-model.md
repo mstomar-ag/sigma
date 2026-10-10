@@ -1553,7 +1553,9 @@ each delete, skipping any that vanished or moved (`skipped_vanished`). A lookali
 that re-read and the push is a named residual window, not zero. A lookalike also keeps its backup out of the prune, so
 a stalled backup is cleared by removing the lookalike by hand.
 
-Nothing prunes by itself yet, so while upkeep is enabled run the prune now and then; each rewrite adds one ref.
+Nothing prunes by itself, and the scheduler of section 13d does not either, so while upkeep is enabled run the prune now and
+then; each rewrite adds one ref. The prune is the one sanctioned deletion in Sigma (section 13b): it removes only refs
+that parse as exactly the backup prefix, one unit and one stamp, and nothing else.
 
 A restore is not sticky. While upkeep is enabled the next pick of a goal in that unit brings the branch forward again,
 keeping the restored tip as a backup; set `work.rebase_upkeep` to `off` first to keep the restored branch where it is.
@@ -1576,6 +1578,97 @@ The first command prints the tip the branch has now (`<tip>`); the second lists 
 (`<backup sha>`) and its stamp. The lease makes git refuse if the branch moved since you read it. The same note about
 a restore not being sticky applies. Unlike the `restore` command, this route keeps no backup of the tip it replaces:
 record that tip first if you may want it back.
+
+### 13d. The upkeep scheduler (off by default, three opt-ins)
+
+Without the scheduler, a unit branch is brought forward only when a goal of that unit is picked. With it, the ledger
+watcher also decides, once per tick, whether one unit is due for a maintenance pass and starts that pass as a detached,
+bounded job. Nothing of it exists until all three opt-ins are on: `upkeep.enabled` is the boolean true in the project
+config, `ledger.enabled` is exactly true, and the environment variable `SIGMA_UPKEEP_JOB` is exactly the text `1` in the
+environment of the watcher. Any other spelling (the text `true`, the number 1) leaves it closed, and with it closed the
+watcher's tick, files and output are byte for byte what they were.
+
+What one open tick does, in order: it notes the outcome of a job that finished (as one unaddressed ledger note, written by
+the watcher itself); it stops there if a job is still alive; otherwise it lists the units in the registry that
+`upkeep.units` admits (an exclude always wins), skips those inside their cooldown without touching git, measures the rest
+within a time budget, and picks at most one due unit, the most behind first. It records the attempt before the work, then
+starts the job. A unit is due when it is behind its base by `triggers.drift_merges` arrivals (`auto` derives that
+number from recent history, between `auto.floor` and `auto.ceiling`), or when the last success is older than
+`triggers.every_hours` (`triggers.dormant_every_hours` for a unit with no arrival of its own for `triggers.dormant_days`).
+A unit that cannot be measured counts as behind for the backstop and never fires the drift trigger. A pass that failed
+or was parked restarts only the cooldown, `triggers.min_interval_minutes`.
+
+The job runs the same engine as the pick-time pass, so a rewrite keeps a backup ref (section 13c). It runs in its own
+session with an allowlisted environment, under a wall-clock cap derived from `verify.timeout_minutes` plus a stated
+margin, with a heartbeat; one job at a time. Windows is refused: the status file says so once and no job starts.
+
+Levers and signs of life, all under `.sdlc/state/`: the file `upkeep.stop` (create it to stop a running job and prevent
+the next; Sigma never deletes it), the watcher's own `watch.stop` (which also stops a running job), and the status file
+`upkeep/scheduler.json`, rewritten on every open tick, so its age is the tick's liveness. `/sigma-doctor` shows the
+scheduler rows only while the block is on: tick age, the job's heartbeat and the last outcome.
+
+**Ceiling.** One unit per tick is `86400 / interval` units a day: 96 at the 900 second default. A first enable on N units
+with no recorded state drains in N ticks, so N / 96 days.
+
+**One opted-in machine per set of units.** The scheduler has no cross-machine lock beyond the per-unit rebase lock the
+pass takes and the lease on the push. Two machines opted in for the same units would both start passes; the lease makes the
+second push refuse, but each wastes a fetch and a replay and each adds a ledger note. Opt in exactly one machine for any
+given set of units (use `upkeep.units.include` and `exclude` to split units between machines on purpose).
+
+**What is and is not proven.** The pass, the backup, the restore and the prune were run end to end on a bare remote in a
+temporary directory, offline, with the clock set: see `docs/launch/evidence/upkeep-local-run.md`. That is a local bare
+remote only. It has not been run against a hosting service, so nothing here is a claim about branch protection rulesets,
+bypass actors, ref-name or ref-count limits, authentication, rate limits or network cost there. Until that run is
+approved and recorded, treat the feature as unproven on a hosting service.
+
+### 13e. Config reference: the `upkeep` block
+
+Scaffolded as `"enabled": false` by `/sigma-init`. One invalid key, an unknown key, a section that is not an object or a pair
+of settings that contradicts itself closes the whole block, and `/sigma-doctor` names the key path.
+
+```
+| Key | Default | Range | What it does |
+| --- | --- | --- | --- |
+| enabled | false | boolean | project opt-in; only the boolean true opens it |
+| units.include | ["*"] | list of unit names, at least one | units the scheduler may pick (case-folded globs) |
+| units.exclude | [] | list of unit names | units it never picks; wins over include |
+| triggers.drift_merges | "auto" | "auto", a whole number 1 to 1000, or null | arrivals on the base that make a unit due; null turns the trigger off |
+| triggers.every_hours | 24 | 1 to 8760 | backstop: a pass at least this long after the last success |
+| triggers.min_interval_minutes | 120 | 1 to 10080 | cooldown after any attempt, failed or not |
+| triggers.dormant_days | 14 | 1 to 3650 | a unit with no arrival of its own for this long is dormant |
+| triggers.dormant_every_hours | 72 | 1 to 8760 | the longer backstop for a dormant unit |
+| auto.window_days | 21 | 1 to 365 | history the auto threshold reads |
+| auto.burst_window_hours | 24 | 1 to 720 | window that counts a burst of arrivals |
+| auto.target_hours | 12 | 1 to 720 | how stale the auto threshold aims to let a unit get |
+| auto.floor | 3 | 1 to 1000 | lowest auto threshold; must not exceed the ceiling |
+| auto.ceiling | 40 | 1 to 1000 | highest auto threshold |
+| verify.clean_rebase | false | boolean | validated now; not acted on by this part |
+| verify.timeout_minutes | 60 | 1 to 1440 | with a stated margin, the job's wall-clock cap |
+| backup.keep_days | 14 | 1 to 3650 | the prune removes only backups older than this |
+| backup.keep_last | 5 | 1 to 1000 | the newest backups of each unit are kept whatever their age |
+| backup.former_prefixes | [] | list of names | namespaces an earlier product wrote, pruned the same way |
+| conflicts.resolve | "off" | off, mechanical, agent | how far a unit conflict may be resolved |
+| conflicts.mechanical_without_verify | false | boolean | validated now; not acted on by this part |
+```
+
+The relation to the older switch: `work.rebase_upkeep` (on by default; an unrecognised value reads on) still decides the
+pick-time pass and still turns the project door off when it is `off`. The two have opposite typo rules: the older one
+fails open, the `upkeep` block fails closed.
+
+### 13f. How an existing adopter picks up rule edits and the new block
+
+Rule edits reach new adopters only. The scaffold never overwrites a file that exists, so a repository adopted earlier keeps
+the rule text and the config it was given. What reaches an existing adopter, and how:
+
+- Skills, docs, hooks and the scripts arrive with the plugin update (restart the session afterwards). That includes the
+  scheduler and the backup commands, which stay closed until the block is on.
+- The `upkeep` block in `.sdlc/config.json` and any new text in `.sdlc/project.md` are never refreshed: copy the block by
+  hand from the config template shipped in the installed plugin, and leave `enabled` false until you mean it.
+- The Codex managed block in `AGENTS.md` is rewritten in place when `/sigma-init --codex` is run again; other bytes are kept
+  and nothing printed tells a refresh from a first write.
+- The two Cursor rule files are kept when present: delete both, then run `/sigma-init --cursor` again.
+- `migrate.py` does not refresh a block already spelled for Sigma, and the doctor has no row for a stale copy, because the
+  copies carry no version. Staleness is invisible, so this is a limitation, not a promise of a refresh.
 
 ---
 

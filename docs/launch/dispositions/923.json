@@ -1,0 +1,42 @@
+[
+  {
+    "pattern": ".sdlc/state/upkeep/scheduler.json",
+    "issue": "#923",
+    "decision": "bounded by construction (one document, rewritten in place on every open tick; its age is the scheduler's liveness signal)",
+    "pruner_or_cap": "none needed: a single fixed-size document, measured 243 bytes with a 12-character unit name and a 100-unit tick; a crash between the temporary file and the rename can leave one dot-named .tmp file beside it (about the same size, one per crash, nothing prunes it); owner the project; lever: delete the file, which the next open tick recreates",
+    "evidence": "skills/sigma-loop/scripts/feature_upkeep_sched.py and feature_upkeep_job.py (the constants STATUS_REL, RECORD_REL, LOCK_REL, BEAT_REL, STOP_REL); the writers go through the shared atomic helper and symlink refusal in state.py, or a path touch, which the scan cannot attribute to these paths; docs/launch/dispositions/923.json",
+    "unscanned": true
+  },
+  {
+    "pattern": ".sdlc/state/upkeep/job.json",
+    "issue": "#923",
+    "decision": "bounded by construction (one document for the latest job only, rewritten in place; the previous job's record is replaced, not appended to)",
+    "pruner_or_cap": "none needed: measured 254 bytes; the outcome note it carries is written once to the ledger by the watcher process (one ledger file and one inbox-cursor key for that process in total, not one per run); owner the project; lever: delete the file",
+    "evidence": "skills/sigma-loop/scripts/feature_upkeep_sched.py and feature_upkeep_job.py (the constants STATUS_REL, RECORD_REL, LOCK_REL, BEAT_REL, STOP_REL); the writers go through the shared atomic helper and symlink refusal in state.py, or a path touch, which the scan cannot attribute to these paths; docs/launch/dispositions/923.json",
+    "unscanned": true
+  },
+  {
+    "pattern": ".sdlc/state/upkeep/job.heartbeat",
+    "issue": "#923",
+    "decision": "bounded by construction (an empty file whose modification time is touched from the job's poll loop)",
+    "pruner_or_cap": "none needed: zero bytes, one file; owner the project; lever: delete the file when no job is running",
+    "evidence": "skills/sigma-loop/scripts/feature_upkeep_sched.py and feature_upkeep_job.py (the constants STATUS_REL, RECORD_REL, LOCK_REL, BEAT_REL, STOP_REL); the writers go through the shared atomic helper and symlink refusal in state.py, or a path touch, which the scan cannot attribute to these paths; docs/launch/dispositions/923.json",
+    "unscanned": true
+  },
+  {
+    "pattern": ".sdlc/state/upkeep/job.lock",
+    "issue": "#923",
+    "decision": "bounded by construction (an empty file locked for the life of a job; the kernel frees the lock on any death)",
+    "pruner_or_cap": "none needed: zero bytes, one file; owner the project; lever: delete the file when no job is running",
+    "evidence": "skills/sigma-loop/scripts/feature_upkeep_sched.py and feature_upkeep_job.py (the constants STATUS_REL, RECORD_REL, LOCK_REL, BEAT_REL, STOP_REL); the writers go through the shared atomic helper and symlink refusal in state.py, or a path touch, which the scan cannot attribute to these paths; docs/launch/dispositions/923.json",
+    "unscanned": true
+  },
+  {
+    "pattern": ".sdlc/state/upkeep.stop",
+    "issue": "#923",
+    "decision": "the operator's lever, created and removed by a person; the job honours it and never deletes it",
+    "pruner_or_cap": "none needed: zero bytes, one file, absent by default; registered with the stop-file inventory so the doctor and session start report its age",
+    "evidence": "skills/sigma-loop/scripts/feature_upkeep_sched.py and feature_upkeep_job.py (the constants STATUS_REL, RECORD_REL, LOCK_REL, BEAT_REL, STOP_REL); the writers go through the shared atomic helper and symlink refusal in state.py, or a path touch, which the scan cannot attribute to these paths; docs/launch/dispositions/923.json",
+    "unscanned": true
+  }
+]

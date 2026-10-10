@@ -23,6 +23,8 @@ REGISTERED_CALLERS = (
     "skills/sigma-loop/scripts/feature_landed.py",
     "skills/sigma-loop/scripts/feature_upkeep_pass.py",
     "skills/sigma-loop/scripts/feature_upkeep_launcher.py",
+    "skills/sigma-loop/scripts/feature_upkeep_job.py",
+    "skills/sigma-loop/scripts/feature_upkeep_sched.py",
 )
 #: Registered callers that run only behind the upkeep gate: `feature_upkeep_prove.py` is loaded by `feature_rebase.py`
 #: only after `gate.enabled(config)` and the `conflicts.resolve` level check pass (see `_level1_inputs`), so with the
