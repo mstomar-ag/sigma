@@ -1650,14 +1650,33 @@ _REBASE_EXTRA_PROMPT = (
 )
 
 
+#: PROVISIONAL (owner call, D-23): appended to the prompt above ONLY while the upkeep gate is open. The sentence above stays
+#: true for this session -- it still never resolves -- and this adds the one fact that changed for a gated repository.
+GATED_REBASE_PROMPT_SUFFIX = (
+    " This repository has unit upkeep turned on: a unit conflict may be resolved by the upkeep engine in its own pass, "
+    "under its own caps and checks, never by this session. You still report and never resolve, and you must finish "
+    "promptly, because you hold the unit's lock and ordinary upkeep is refused while you do."
+)
+#: PROVISIONAL (owner call, D-23): the longest a gated `--rebase` session may hold the unit lock (the ungated bound is the
+#: drive default of two hours, left exactly as it was). Not measured.
+GATED_REBASE_TIMEOUT_SECONDS = 1800
+
+
 def _rebase_reply(sdlc_dir, config, name, run=None, run_drive=None, session_pid=None):
     """`--rebase <name>` (#2340): dispatches `name` through the shared claim/worktree/drive
     machinery (`dispatch`, #2338) with `_REBASE_EXTRA_PROMPT` as its command-specific instructions,
     then turns the returned `DispatchResult` into one honest Slack reply -- never a placeholder,
     never a bare exit code. `run`/`run_drive`/`session_pid` are DI, threaded straight through to
     `dispatch` (see `build_reply`'s own docstring)."""
-    result = dispatch(sdlc_dir, config, name, "--rebase", run_drive=run_drive, run=run,
-                       extra_prompt=_REBASE_EXTRA_PROMPT, session_pid=session_pid)
+    if feature_upkeep.enabled(config):
+        # D-23 (upkeep part B, slice 10), applied ONLY under the gate: the engine, not this session, is the one place a unit
+        # conflict may be resolved, so the session is told so; and the unit lock this session holds is bounded.
+        result = dispatch(sdlc_dir, config, name, "--rebase", run_drive=run_drive, run=run,
+                           extra_prompt=_REBASE_EXTRA_PROMPT + GATED_REBASE_PROMPT_SUFFIX, session_pid=session_pid,
+                           timeout=GATED_REBASE_TIMEOUT_SECONDS)
+    else:
+        result = dispatch(sdlc_dir, config, name, "--rebase", run_drive=run_drive, run=run,
+                           extra_prompt=_REBASE_EXTRA_PROMPT, session_pid=session_pid)
     if result.state == "busy":
         holder = (" -- already claimed by %s" % result.holder_actor if result.holder_actor
                   else " -- claimed by another process a moment ago")

@@ -464,7 +464,11 @@ def test_comment_refuses_wording_and_reports_a_failed_post():
 
 
 #: The only shipped files that reference the library; each is reached solely behind the upkeep gate.
-REGISTERED_IMPORTERS = ["feature_rebase.py", "feature_upkeep_prove.py"]
+REGISTERED_IMPORTERS = [
+    "feature_rebase.py",
+    "feature_upkeep_level2.py",
+    "feature_upkeep_prove.py",
+]
 
 
 def test_only_the_registered_importers_reference_the_library():
