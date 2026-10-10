@@ -564,6 +564,20 @@ def _read_acks(text):
     return [a for a in (acked or []) if isinstance(a, dict)]
 
 
+#: Where the upkeep pass writes its recomputed acks (the same string as `feature_upkeep_pass.ACKS_REL`; a test pins them equal).
+RUNTIME_ACKS_REL = "state/upkeep/acks.json"
+
+
+def _runtime_acks(sdlc_dir, unit):
+    """The acks the upkeep pass recomputed after its own rewrites (`state/upkeep/acks.json`, per machine, written only
+    under the upkeep opt-in). No file reads as nothing, so a project that never opted in is unchanged."""
+    try:
+        data = json.loads(pathlib.Path(sdlc_dir).joinpath(*RUNTIME_ACKS_REL.split("/")).read_text(encoding="utf-8"))
+        return [e for e in (data["units"].get(unit) or []) if isinstance(e, dict)]
+    except (OSError, ValueError, KeyError, AttributeError, TypeError):
+        return []
+
+
 def _acked(sdlc_dir, run, cwd, unit, integration_ref):
     """Every ack for `unit` -> `(patch_ids, shas)`: the local file UNION the copy on the remote
     integration branch. Never raises; anything unreadable contributes nothing, so a broken store
@@ -577,6 +591,7 @@ def _acked(sdlc_dir, run, cwd, unit, integration_ref):
         entries += _read_acks(path.read_text(encoding="utf-8"))
     except OSError:
         pass
+    entries += _runtime_acks(sdlc_dir, unit)
     try:
         rel = pathlib.Path(os.path.relpath(path.resolve(), pathlib.Path(cwd).resolve())).as_posix()
     except ValueError:                    # a different drive on Windows: no repo-relative path

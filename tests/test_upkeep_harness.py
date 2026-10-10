@@ -165,7 +165,7 @@ def test_the_pick_time_half_notices_an_added_call(tmp_path):
     base = docs._calls_for_one_started_goal(tmp_path / "base", True)
     assert len(base) == 17
     changed = docs._calls_for_one_started_goal(tmp_path / "changed", True, upkeep={"enabled": True}, hook=add_a_call)
-    assert "git fetch --extra" in changed and len(changed) == 18
+    assert "git fetch --extra" in changed and len(changed) == 19       # 17 + the injected call + the cut-tip read (goal 922, gate open only)
     assert len(docs._calls_for_one_started_goal(tmp_path / "off", True, upkeep={"enabled": False}, hook=add_a_call)) == 17
 
 

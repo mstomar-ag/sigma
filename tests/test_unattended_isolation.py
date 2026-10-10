@@ -21,6 +21,7 @@ OWN = ("skills/sigma-loop/scripts/bounded_run.py", "skills/sigma-loop/scripts/un
 #: and is itself a library with no caller until its gated callers ship.
 REGISTERED_CALLERS = (
     "skills/sigma-loop/scripts/feature_landed.py",
+    "skills/sigma-loop/scripts/feature_upkeep_pass.py",
 )
 ALLOWED_LOADS = {"shell_policy", "bounded_run"}
 #: Names of the one place a claim is armed and its helpers.

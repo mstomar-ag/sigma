@@ -136,9 +136,11 @@ def inert_failures(tmp):
     own = {p.resolve() for p in module_paths()}
     callers = [p.relative_to(S.ROOT).as_posix() for p in shipped_python() if p.resolve() not in own
                and any(stem in p.read_text(encoding="utf-8") for stem in (S.DRIFT, S.STATE))]
-    S.expect(bad, "callers of the new modules (the pass and the scheduler add theirs here, in the slices that write them)", callers, [])
+    S.expect(bad, "callers of the new modules (the pass and the scheduler add theirs here, in the slices that write them)", callers,
+             ["skills/sigma-loop/scripts/feature_upkeep_pass.py"])         # #922: the pass, the first live caller
     support = importlib.import_module("upkeep_support")
-    S.expect(bad, "no registered entry point", support.REGISTERED_ENTRY_POINTS, {})
+    S.expect(bad, "the registered entry points (#922: the pass, its acks file, its ledger note)", support.REGISTERED_ENTRY_POINTS,
+             {"feature_upkeep_pass": {"upkeep_pass", "ack_union", "ledger_note"}})
     ws = tool("write_surface")
     S.expect(bad, "the write-surface scanner sees no write site", ws.scan_paths(S.ROOT, module_paths()), [])
     for path in module_paths():

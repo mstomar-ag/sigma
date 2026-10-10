@@ -91,10 +91,9 @@ def template_cfg():
 
 # ------------------------------------------------------------------------------------------ the probe
 
-#: stem -> names of the functions shipped code has gated. EMPTY in this slice: nothing in shipped code is an entry
-#: point yet. A later slice that gates one adds it here AND adds a trap driver in `drivers()`; two tests make
+#: stem -> names of the functions shipped code has gated. One entry point so far (the upkeep pass). A later slice that gates one adds it here AND adds a trap driver in `drivers()`; two tests make
 #: forgetting either red.
-REGISTERED_ENTRY_POINTS = {}
+REGISTERED_ENTRY_POINTS = {"feature_upkeep_pass": {"upkeep_pass", "ack_union", "ledger_note"}}
 
 PROBE_SOURCE = '''
 import os
@@ -144,7 +143,13 @@ def drivers(gate_module):
     REGISTERED_ENTRY_POINTS)."""
     p = probe(gate_module)
     return {("upkeep_probe", "attempt_project"): lambda c, s, e: p.attempt_project(c, s),
-            ("upkeep_probe", "attempt_machine"): lambda c, s, e: p.attempt_machine(c, s, environ=e)}
+            ("upkeep_probe", "attempt_machine"): lambda c, s, e: p.attempt_machine(c, s, environ=e),
+            ("feature_upkeep_pass", "upkeep_pass"): lambda c, s, e: script("feature_upkeep_pass").upkeep_pass(
+                c, s, "u", "feature/u", "main", "main", 0),
+            ("feature_upkeep_pass", "ack_union"): lambda c, s, e: script("feature_upkeep_pass").ack_union(
+                c, s, "u", [{"sha": "a" * 40, "patch_id": "p"}]),
+            ("feature_upkeep_pass", "ledger_note"): lambda c, s, e: script("feature_upkeep_pass").ledger_note(
+                c, s, "u", "rebased", "a" * 12)}
 
 
 def run_case(tmp_path, monkeypatch, driver, config, environ=None):

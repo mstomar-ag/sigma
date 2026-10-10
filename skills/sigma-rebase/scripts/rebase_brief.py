@@ -519,7 +519,7 @@ def conflicted_files(run, cwd):
     return sorted({line.strip() for line in str(out or "").splitlines() if line.strip()})
 
 
-def push_branch(run, cwd, remote, branch, accepted=(), pre_head=None, base_ref=None):
+def push_branch(run, cwd, remote, branch, accepted=(), pre_head=None, base_ref=None, lease_sha=None):
     """`git push --force-with-lease <remote> HEAD:<branch>` -- the ONE force-with-lease push this
     skill performs, so there is exactly one call site to reason about rather than several that
     could quietly drift apart (#2319: `conflict_walk.walk_conflicts` reuses this directly for its
@@ -612,7 +612,10 @@ def push_branch(run, cwd, remote, branch, accepted=(), pre_head=None, base_ref=N
                        "deletion is ever let through without you), push it yourself with `git push "
                        "--force-with-lease %s HEAD:%s`" %(remote, branch, why, undo, recovery, remote, branch)}
     try:
-        run(cwd, ["git", "push", "--force-with-lease", remote, "HEAD:%s" % branch])
+        # `lease_sha` is given only under the upkeep opt-in: a lease on the exact tip read BEFORE the rebase, which no later
+        # fetch in the same repository can re-arm (a bare lease compares with whatever was fetched last). None: the legacy argv.
+        lease = "--force-with-lease" if lease_sha is None else "--force-with-lease=%s:%s" % (branch, lease_sha)
+        run(cwd, ["git", "push", lease, remote, "HEAD:%s" % branch])
     except Exception as exc:                    # noqa: BLE001 - a refused lease is an outcome, not a crash
         return {"ok": False, "why": _flat(exc)}
     return {"ok": True, "why": ""}
@@ -665,7 +668,7 @@ def _remote_tip(run, cwd, remote, branch):
     return ""
 
 
-def attempt_rebase(run, cwd, remote, branch, base):
+def attempt_rebase(run, cwd, remote, branch, base, lease=False):
     """Rebase `branch` onto `<remote>/<base>` in the CURRENT checkout (autostash always passed,
     matching `work.rebase()`'s own convention -- a no-op on a clean tree), then a lease-guarded
     push. Never raises, never calls `rebase --abort`: on a genuine conflict the tree is left
@@ -676,6 +679,7 @@ def attempt_rebase(run, cwd, remote, branch, base):
     if behind == "0":
         return {"outcome": CURRENT, "why": ""}
     pre_head = str(run(cwd, ["git", "rev-parse", "HEAD"]) or "").strip()
+    lease_sha = _remote_tip(run, cwd, remote, branch) if lease else None
     try:
         # `--rebase-merges` (#2756): a plain rebase flattens a merge-commit landing onto the
         # first-parent line, where upkeep's no-direct-commits check then refuses it forever.
@@ -700,12 +704,45 @@ def attempt_rebase(run, cwd, remote, branch, base):
     refused = _would_lose(run, cwd, pre_head, base_ref, branch)
     if refused is not None:
         return refused
-    push = push_branch(run, cwd, remote, branch, pre_head=pre_head, base_ref=base_ref)
+    push = push_branch(run, cwd, remote, branch, pre_head=pre_head, base_ref=base_ref, lease_sha=lease_sha)
     if not push["ok"]:
         if push.get("dropped"):
             return {"outcome": WOULD_DROP, "files": push["dropped"], "why": push["why"]}
         return {"outcome": FAILED, "files": [], "why": push["why"]}
     return {"outcome": REBASED, "why": ""}
+
+
+def attended_rebase(config, sdlc_dir, run, cwd, remote, branch, base, lock_timeout=None):
+    """The attended door's rebase. Gate closed: exactly `attempt_rebase(run, cwd, remote, branch, base)`, nothing else.
+
+    Under the upkeep opt-in the door takes the unit's rebase lock HERE, in the caller, and not inside `attempt_rebase`
+    (the chat door calls that while it already holds the same lock), and pushes with a lease on the exact remote tip read
+    before the rebase. Another holder of the lock is a refusal, never a wait without end. A branch that is not a unit branch
+    has no unit lock; it still gets the explicit lease."""
+    upkeep = _load("feature_upkeep")
+    if not upkeep.enabled(config):
+        return attempt_rebase(run, cwd, remote, branch, base)
+    prefix = feature_rebase.features.BRANCH_PREFIX
+    unit = branch[len(prefix):] if branch.startswith(prefix) else ""
+    fd = None
+    if unit:
+        try:
+            lock = feature_rebase.lock_path(sdlc_dir, unit)
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            fd = feature_rebase._acquire(lock, timeout=feature_rebase.LOCK_TIMEOUT if lock_timeout is None else lock_timeout)
+        except (OSError, ValueError) as exc:
+            return {"outcome": FAILED, "files": [], "why": "the unit lock could not be taken: %s" % _flat(exc)}
+        if fd is None and feature_rebase.sync.fcntl is None:
+            return {"outcome": FAILED, "files": [],
+                    "why": "locking is not supported on this platform, so the opt-in attended rebase is refused; nothing was changed"}
+        if fd is None:
+            return {"outcome": FAILED, "files": [],
+                    "why": "another rebase of %s holds the unit lock (or its lock directory is not writable); nothing was changed" % branch}
+    try:
+        return attempt_rebase(run, cwd, remote, branch, base, lease=True)
+    finally:
+        if fd is not None:
+            feature_rebase._release(fd)
 
 
 def _would_lose(run, cwd, pre_head, base_ref, branch=""):
@@ -811,7 +848,7 @@ def main(argv):
               % branch, file=sys.stderr)
         return 0
     print("")
-    report = attempt_rebase(run, cwd, remote, branch, base)
+    report = attended_rebase(config, sdlc_dir, run, cwd, remote, branch, base)
     if report["outcome"] == CURRENT:
         print("`%s` already carries everything on `%s` -- nothing to do." % (branch, base))
         return 0

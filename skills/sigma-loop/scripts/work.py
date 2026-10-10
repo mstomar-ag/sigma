@@ -1903,6 +1903,62 @@ def _feature_rebase():
     return _FEATURE_REBASE
 
 
+_FEATURE_UPKEEP = None
+_SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+
+def _feature_upkeep():
+    global _FEATURE_UPKEEP
+    if _FEATURE_UPKEEP is None:
+        _FEATURE_UPKEEP = _load("feature_upkeep")
+    return _FEATURE_UPKEEP
+
+
+def _cut_tip_fields(config, run, path, remote, base):
+    """The goal record's cut-from tip, as the extra keys to save: `{"cut_tip": <sha>}` or `{}`.
+
+    Only under the upkeep opt-in, and only for a goal cut from a unit branch. The gate is asked FIRST, so a closed gate
+    makes no call at all and the record is byte-identical to before. A tip that cannot be read records nothing (the goal
+    then replays the legacy way)."""
+    if not (isinstance(base, str) and base.startswith(features.BRANCH_PREFIX)):
+        return {}
+    if not _feature_upkeep().enabled(config):
+        return {}
+    try:
+        tip = str(run(path, ["git", "rev-parse", f"{remote}/{base}"]) or "").strip()
+    except Exception:                       # noqa: BLE001 - no record is the legacy path, never a failed pick
+        return {}
+    return {"cut_tip": tip} if _SHA_RE.match(tip) else {}
+
+
+def _rebase_argv(config, run, path, remote, base, rec):
+    """The `git rebase` argv `rebase()` runs. Legacy (replay on `<remote>/<base>`) unless the upkeep opt-in is open AND the
+    record holds the tip the goal was cut from AND that tip is still in the goal's history: then `--onto <new unit tip>
+    <cut tip>` replays only the goal's own commits, which a unit rewritten by the upkeep pass would otherwise conflict with."""
+    plain = ["git", "rebase", "--autostash", f"{remote}/{base}"]
+    cut = rec.get("cut_tip")
+    if not (isinstance(cut, str) and _SHA_RE.match(cut) and _feature_upkeep().enabled(config)):
+        return plain
+    try:
+        run(path, ["git", "merge-base", "--is-ancestor", cut, "HEAD"])
+    except Exception:                       # noqa: BLE001 - a stale or foreign tip: the legacy path
+        return plain
+    return ["git", "rebase", "--autostash", "--onto", f"{remote}/{base}", cut]
+
+
+def _rerecord_cut_tip(sdlc_dir, config, goal, rec, run, path, remote, base):
+    """After a goal rebase landed on `<remote>/<base>`: the goal now sits on that tip, so it is the new cut tip. Only for a
+    goal that has a record, only under the opt-in. Never raises."""
+    if not rec.get("cut_tip"):
+        return
+    fields = _cut_tip_fields(config, run, path, remote, base)
+    if fields:
+        try:
+            _save(sdlc_dir, goal, dict(rec, **fields))
+        except Exception:                   # noqa: BLE001 - a stale record only costs the legacy path next time
+            pass
+
+
 def _sync_registry(sdlc_dir, config, goal, unit, run, base_root, remote):
     """#1473: record this goal under its unit and reconcile `.sdlc/features/` against real branches.
 
@@ -2367,6 +2423,8 @@ def start(sdlc_dir, config, goal, run=None, session_pid=None):
     # which #1572 clears on reattach on purpose.
     saved = {"worktree": str(path), "branch": branch, "base": base,
              "base_resolved": base_resolved, "remote": s["remote"], "pr": ""}
+    if not reattached:                      # a reattached branch is not at its cut tip: record nothing, replay the legacy way
+        saved.update(_cut_tip_fields(config, run, path, s["remote"], base))
     carried = (rec or {}).get("stale_resume_releases")
     if carried is not None:
         saved["stale_resume_releases"] = carried
@@ -4033,7 +4091,7 @@ def rebase(sdlc_dir, config, goal, run=None):
     run(path, ["git", "fetch", remote, base])
     pre_rebase_head = run(path, ["git", "rev-parse", "HEAD"])
     try:
-        run(path, ["git", "rebase", "--autostash", f"{remote}/{base}"])
+        run(path, _rebase_argv(config, run, path, remote, base, rec))
     except Exception as exc:                # noqa: BLE001 - conflict is an outcome to report, not a crash
         # ONE narrow exception to "any failure aborts": a CHANGELOG.md conflict where BOTH sides
         # only inserted (see `_union_diff3`). That shape is mechanical and lossless, and it is the
@@ -4045,6 +4103,7 @@ def rebase(sdlc_dir, config, goal, run=None):
             if refused:
                 return refused
             run(path, ["git", "push", "--force-with-lease", remote, f"HEAD:{rec['branch']}"])
+            _rerecord_cut_tip(sdlc_dir, config, goal, rec, run, path, remote, base)
             return "rebased (CHANGELOG union-merged)"
         try:
             run(path, ["git", "rebase", "--abort"])
@@ -4098,6 +4157,7 @@ def rebase(sdlc_dir, config, goal, run=None):
     if refused:
         return refused
     run(path, ["git", "push", "--force-with-lease", remote, f"HEAD:{rec['branch']}"])
+    _rerecord_cut_tip(sdlc_dir, config, goal, rec, run, path, remote, base)
     return "rebased"
 
 
