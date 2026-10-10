@@ -81,13 +81,17 @@ LANDING HELPERS (#931): `merge_pr_pinned` and `create_pr_nondraft` are in the sc
 | skills/sigma-loop/scripts/feature_propagate.py | _store | fs-write | 2 | ungated | medium |
 | skills/sigma-loop/scripts/feature_propagate.py | _write_remote | gh-api-write | 1 | granted verdict | high |
 | skills/sigma-loop/scripts/feature_rebase.py | _clear_blocked | fs-remove | 1 | work.rebase_upkeep | high |
+| skills/sigma-loop/scripts/feature_rebase.py | _clear_parked | fs-remove | 1 | upkeep.enabled | high |
 | skills/sigma-loop/scripts/feature_rebase.py | _drop_worktree | fs-rmtree | 1 | work.rebase_upkeep | high |
 | skills/sigma-loop/scripts/feature_rebase.py | _drop_worktree | git-destructive | 1 | work.rebase_upkeep | high |
+| skills/sigma-loop/scripts/feature_rebase.py | _forget | fs-write | 1 | upkeep.enabled | medium |
 | skills/sigma-loop/scripts/feature_rebase.py | _mark_blocked | fs-write | 2 | work.rebase_upkeep | medium |
+| skills/sigma-loop/scripts/feature_rebase.py | _mark_parked | fs-write | 2 | upkeep.enabled | medium |
 | skills/sigma-loop/scripts/feature_rebase.py | _pushed | git-destructive | 1 | work.rebase_upkeep | high |
 | skills/sigma-loop/scripts/feature_rebase.py | _pushed | git-push | 1 | work.rebase_upkeep | high |
 | skills/sigma-loop/scripts/feature_rebase.py | _rebase_feature | fs-write | 1 | work.rebase_upkeep | medium |
 | skills/sigma-loop/scripts/feature_rebase.py | _remember | fs-write | 2 | work.rebase_upkeep | medium |
+| skills/sigma-loop/scripts/feature_rebase.py | _settle_parks | gh-api-write | 2 | upkeep.enabled | medium |
 | skills/sigma-loop/scripts/feature_rebase.py | _upkeep | fs-write | 1 | work.rebase_upkeep | medium |
 | skills/sigma-loop/scripts/feature_rebase.py | ack | fs-write | 2 | work.rebase_upkeep | medium |
 | skills/sigma-loop/scripts/feature_rebase.py | mark_push_refused | fs-write | 2 | work.rebase_upkeep | medium |

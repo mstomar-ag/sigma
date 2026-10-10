@@ -227,6 +227,15 @@ def test_prune_removes_a_stale_real_mkstemp_temp_and_keeps_a_fresh_one(tmp_path)
     assert not made[0].exists() and made[1].exists()
 
 
+def test_a_refused_record_does_not_block_a_retry_but_a_pending_one_does(tmp_path):
+    assert mod.begin(tmp_path, OPEN, "voice", 7, PRE, 100).ok
+    assert mod.begin(tmp_path, OPEN, "voice", 8, PRE, 110) == (False, "unsettled-record", None)
+    mod.finish(tmp_path, OPEN, "voice", mod.Verdict("refused", "status-405"), 120, pr=open_pr(), call=ERR)
+    assert mod.begin(tmp_path, OPEN, "voice", 8, PRE, 200).ok
+    doc = mod.read_record(tmp_path, "voice")
+    assert (doc["pr"], doc["outcome"]) == (8, "pending")
+
+
 def test_an_unsettled_record_is_not_overwritten_by_a_new_landing(tmp_path):
     mod.begin(tmp_path, OPEN, "voice", 7, PRE, 100)
     mod.finish(tmp_path, OPEN, "voice", mod.Verdict("unconfirmed", "lost"), 110, call=LOST)

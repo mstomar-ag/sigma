@@ -178,6 +178,7 @@ registry = _load("feature_registry")
 sync = _load("feature_sync")
 gate = _load("feature_upkeep")        # the upkeep gate: the only module that reads that config block
 conflict_state = _load("conflict_state")
+park = _load("feature_park")          # Level 3: conflict identity, the capped brief, the filed-store record, close rules
 
 #: `work` imports THIS module (lazily, for the same reason), so a module-level load here would be a
 #: cycle -- the shape `handoff._load_sibling` already uses for `blockers`. Cached after the first
@@ -320,9 +321,14 @@ WOULD_DROP = "would-drop"
 #: The upkeep gate is open and the unit's name is too long for a backup ref (a ref over 255 bytes). Refused BEFORE
 #: the replay, and nothing is pushed: upkeep never pushes a unit branch it could not back up.
 NAME_TOO_LONG = "name-too-long"
+#: Part B, level 3. UNDER THE UPKEEP GATE ONLY: a unit conflict nobody resolved. The unit stays where it is and the
+#: remote is untouched, exactly as for `CONFLICT`; what differs is that the stop was described BEFORE the scratch
+#: worktree was dropped (a capped brief), the finding is per conflict rather than per tip, and the doctor reads it from
+#: its own marker file. With the gate closed this outcome never occurs and the outcome stays `CONFLICT`.
+PARKED = "parked"
 OUTCOMES = (DISABLED, NO_UNIT, NOT_ADOPTED, NO_BASE, NO_BRANCH, OCCUPIED, REMOTE_UNREADABLE,
             CURRENT, BUSY, UNVERIFIABLE, DIRECT_COMMITS, CONFLICT, LEASE_REFUSED, REBASED, FAILED,
-            WOULD_DROP, NAME_TOO_LONG)
+            WOULD_DROP, NAME_TOO_LONG, PARKED)
 
 #: The outcomes worth a clause on `work.start()`'s own one-line result -- the ONLY channel any of
 #: this reaches a person through on a normal run.
@@ -337,7 +343,7 @@ OUTCOMES = (DISABLED, NO_UNIT, NOT_ADOPTED, NO_BASE, NO_BRANCH, OCCUPIED, REMOTE
 #: divergence from the SAME `live_branches` call on the SAME pick and puts it in ITS clause, so
 #: repeating it here would report one unreachable remote twice on one line.
 IN_CLAUSE = (BUSY, OCCUPIED, UNVERIFIABLE, DIRECT_COMMITS, CONFLICT, LEASE_REFUSED, REBASED, FAILED,
-             WOULD_DROP, NAME_TOO_LONG)
+             WOULD_DROP, NAME_TOO_LONG, PARKED)
 
 #: #144: how many removed paths `report["dropped"]` (and the filed issue, and the doctor marker)
 #: name. The COUNT is always exact (`dropped_count`); only the listing is capped, so a revert of a
@@ -1283,6 +1289,33 @@ def _drop_worktree(run, cwd, path):
         pass
 
 
+def _describe_stop(run, cwd, path, base_ref, report, unmerged):
+    """Under the gate, at a conflict stop and BEFORE the scratch worktree is dropped: name the conflict and write its
+    capped brief into `report["park"]`. Never raises; a stop that cannot be described is still a conflict, filed with
+    an identity derived from what could be read."""
+    try:
+        out = str(run(str(path), ["git", "log", "-1", "--format=%H%x1f%s", "REBASE_HEAD"]) or "")
+    except Exception:                     # noqa: BLE001
+        out = ""
+    sha, _, subject = out.partition("\x1f")
+    sha, subject = sha.strip(), subject.strip()
+    try:
+        position = str(run(str(path), ["git", "rev-list", "--count", "REBASE_HEAD"]) or "").strip()
+    except Exception:                     # noqa: BLE001
+        position = ""
+    pid = patch_id(run, str(path), sha) if sha else ""
+    cid = park.conflict_id(report["unit"], pid, subject, position, unmerged)
+
+    def read_text(name):
+        return (pathlib.Path(path) / name).read_text(encoding="utf-8", errors="replace")
+    try:
+        brief = park.build_brief(run, str(path), base_ref, report["unit"], report["branch"] or "",
+                                 {"sha": sha, "subject": subject}, unmerged, read_text)
+    except Exception:                     # noqa: BLE001 - a brief is best-effort
+        brief = ""
+    report["park"] = {"id": cid, "sha": sha, "subject": subject, "paths": list(unmerged), "brief": brief}
+
+
 def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, strict=False, backup=None):
     """Replay `sha` (the feature tip) onto `base_ref` in a throwaway detached worktree and push it.
 
@@ -1353,6 +1386,10 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
                 if not unmerged:
                     report["why"] = ("the rebase stopped with no unmerged path (%s)" % report.get("why", "")).strip()
                     return FAILED
+                try:
+                    _describe_stop(run, cwd, path, base_ref, report, unmerged)
+                except Exception:         # noqa: BLE001 - a stop that cannot be described is still a CONFLICT
+                    report.pop("park", None)
             return CONFLICT
         try:
             after = run(str(path), ["git", "rev-parse", "HEAD"]).strip()
@@ -1636,7 +1673,21 @@ def _told_before(sdlc_dir, unit, slot, fingerprint):
     THE TWO CONFLICT SLOTS ARE PREFIXED DISTINCTLY (`feature-conflict:` / `goal-conflict:`) rather
     than distinguished by the branch name alone: `branch_prefix` is configurable, so a project that
     set it to `feature/` could spell a goal branch and a unit branch identically."""
-    return _read_filed(sdlc_dir, unit).get(slot) == fingerprint
+    return park.fingerprint_of(_read_filed(sdlc_dir, unit).get(slot)) == fingerprint
+
+
+def _forget(sdlc_dir, unit, slots):
+    """Delete finished slots from the filed store. Never raises (a store that cannot be written only costs a retry)."""
+    seen = _read_filed(sdlc_dir, unit)
+    if not any(slot in seen for slot in slots):
+        return
+    for slot in slots:
+        seen.pop(slot, None)
+    try:
+        path = filed_path(sdlc_dir, unit)
+        path.write_text(json.dumps(seen, indent=2, sort_keys=True), encoding="utf-8")
+    except (OSError, ValueError):         # noqa: S110
+        pass
 
 
 def _remember(sdlc_dir, unit, slot, fingerprint):
@@ -1831,6 +1882,133 @@ def _would_drop_body(unit, branch, base, before, report):
            branch, base, branch, branch, unit))
 
 
+PARKED_SUFFIX = ".rebase-parked.json"
+_GH = "gh"                           # the program the gh_api runner adapter prepends
+
+
+def parked_path(sdlc_dir, name):
+    """`.sdlc/state/features/<unit>.rebase-parked.json` -- the park marker the doctor reads. NOT `.rebase-blocked.json`:
+    `_rebase_blocks` renders every such file as "would remove or roll back N tracked path(s)", which is false of a
+    park. Beside `blocked_path` for the same reasons (runtime state; folded after the guard); the suffix ends no
+    other store's or lock's name."""
+    if not (isinstance(name, str) and registry.is_unit_name(name)):
+        raise registry.InvalidUnitName("%r is not a unit name" % (name,))
+    return pathlib.Path(sdlc_dir) / "state" / sync.LOCK_DIRNAME / (name.lower() + PARKED_SUFFIX)
+
+
+def _mark_parked(sdlc_dir, unit, report):
+    """One small file per unit, overwritten in place (bounded), removed when a later pass settles the park."""
+    info = report.get("park") or {}
+    try:
+        path = parked_path(sdlc_dir, unit)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "unit": unit, "branch": report["branch"], "base": report["base"], "outcome": PARKED,
+            "conflict": info.get("id"), "files": len(info.get("paths") or []), "before": report["before"],
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, indent=2, sort_keys=True),
+            encoding="utf-8")
+    except (OSError, ValueError):         # noqa: S110 - bookkeeping must not cost the finding
+        pass
+
+
+def _clear_parked(sdlc_dir, unit):
+    try:
+        parked_path(sdlc_dir, unit).unlink()
+    except (OSError, ValueError):         # noqa: S110
+        pass
+
+
+def _park_body(unit, branch, base, info, left, tip):
+    return (
+        "`%s` could not be replayed onto `%s`, and nothing resolved the conflict, so the unit is parked: the remote "
+        "branch was not touched and the unit stays behind `%s` until a person resolves it.\n\n"
+        "%s\n%s\n"
+        "Reproduce and resolve:\n\n"
+        "```\ngit fetch origin %s %s\ngit switch %s\ngit rebase origin/%s\n```\n\n"
+        "Filed by Sigma's rebase upkeep for unit `%s`: one finding per conflict, closed when a later pass replays the "
+        "unit cleanly.\n"
+        % (park.neutralise(branch), park.neutralise(base), park.neutralise(base),
+           info.get("brief") or "(no brief could be built)\n", _aftermath(left, branch, tip, None),
+           base, branch, branch, base, unit))
+
+
+def _file_park(sdlc_dir, config, report, branch, base):
+    """File ONE finding for this conflict, through the no-goal path. Never raises.
+
+    `goal=None` and `target_unit=<unit>` (always passed, so the metered classifier is never reached), `dedup=False`
+    with the conflict id as the scoped idempotency key, `blocks_goal=False`, `immediately_actionable=False`. The
+    filing makes no note addressed to the filer or to the unit's owner: see `handoff.create_tracked_issue`."""
+    info = report.get("park") or {}
+    cid = info.get("id")
+    if not cid:
+        return
+    slot = park.slot_for(cid)
+    if _told_before(sdlc_dir, report["unit"], slot, cid):
+        _set_filing(report, ALREADY_FILED)
+        return
+    title = "Rebase parked: %s onto %s (conflict %s)" % (branch, base, cid[:8])
+    try:
+        result = _handoff().create_tracked_issue(
+            sdlc_dir, config, None, AREA, "%s could not be replayed onto %s (parked)" % (branch, base),
+            same_area=True, immediately_actionable=False, blocks_goal=False, title=title,
+            body=_park_body(report["unit"], branch, base, info, report["leftovers"], report["tip"]),
+            dedup=False, target_unit=report["unit"], idempotency_key=cid)
+    except Exception as exc:              # noqa: BLE001 - a filing must never break a pick
+        _set_filing(report, FILING_FAILED)
+        _note("sigma: rebase upkeep: %s was not filed as an issue (%s); it is attempted again on the next pick.\n"
+              % (title, _flat(exc)))
+        return
+    for warning in (result or {}).get("warnings") or []:
+        _note("sigma: rebase upkeep: %s\n" % warning)
+    issue = (result or {}).get("issue")
+    if not issue:
+        _set_filing(report, FILING_FAILED)
+        _note("sigma: rebase upkeep: %s could not be filed as an issue; it is attempted again on the next pick.\n"
+              % title)
+        return
+    duplicate = (result or {}).get("duplicate_of")
+    report["issues"].append(str(issue))
+    _set_filing(report, FILED)
+    number = int(issue) if str(issue).isdigit() else None
+    _remember(sdlc_dir, report["unit"], slot,
+              park.record(cid, number, bool(duplicate) and str(duplicate) == str(issue)))
+
+
+def _settle_parks(sdlc_dir, config, run, cwd, remote, report):
+    """A pass that replayed the unit cleanly (or found it current) has resolved every conflict it had parked.
+
+    UNDER THE GATE ONLY. The marker goes, and each park slot is closed through `gh_api` after a short record comment:
+    only when the slot names an issue, the issue was not a REUSED duplicate (it belongs to someone else's work), and no
+    other live slot still points at it. A close that fails keeps its slot, so the next pass retries. The store is per
+    machine, so another clone never closes it. Never raises."""
+    if not gate.enabled(config):
+        return
+    unit = report["unit"]
+    try:
+        _clear_parked(sdlc_dir, unit)
+        store = _read_filed(sdlc_dir, unit)
+        slots = [slot for slot in store if slot.startswith(park.SLOT_PREFIX)]
+        if not slots:
+            return
+        repo = sync.repo_slug(config, run, cwd, remote)
+        gone = [slot for slot in slots if slot not in dict(park.closable(store, slots))]
+        for slot, issue in park.closable(store, slots):
+            try:
+                _load("gh_api").comment_issue(lambda args: run(cwd, [_GH, *args]), issue,
+                                 "A later upkeep pass replayed this unit cleanly onto %s, so the parked conflict is "
+                                 "resolved. Closing this finding." % park.neutralise(report["base"] or "its base"),
+                                 repo=repo)
+                _load("gh_api").close_issue(lambda args: run(cwd, [_GH, *args]), issue, repo=repo, reason="completed")
+            except Exception as exc:      # noqa: BLE001 - keep the slot; the next pass retries
+                _note("sigma: rebase upkeep: could not close finding #%s (%s); it is retried on the next pass.\n"
+                      % (issue, _flat(exc)))
+                continue
+            gone.append(slot)
+        _forget(sdlc_dir, unit, gone)
+    except Exception as exc:              # noqa: BLE001 - settling must never cost the pass
+        _note("sigma: rebase upkeep: parked findings were not settled (%s).\n" % _flat(exc))
+
+
 BLOCKED_SUFFIX = ".rebase-blocked.json"
 
 
@@ -1904,6 +2082,8 @@ _WORDING = {
              "conflicted, %(skipped)d skipped)",
     #: #144. Loud on purpose, and never shaped like `REBASED`: the old line for this exact failure
     #: WAS the `REBASED` line, and it read as "nothing to do".
+    PARKED: ("%(branch)s conflicts with %(base)s and no resolution was applied: the unit is parked (nothing was "
+             "pushed, the remote is untouched, the unit stays behind %(base)s until a person resolves it)"),
     WOULD_DROP: ("%(branch)s was NOT rebased: bringing it forward onto %(base)s would remove or "
                  "roll back %(dropped)d tracked path(s) it has (%(named)s) -- the base most likely holds a "
                  "revert of the branch's own commits; the push was refused and the remote left "
@@ -2099,6 +2279,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
     if behind == "0":
         report["outcome"] = CURRENT
         _clear_blocked(sdlc_dir, unit)
+        _settle_parks(sdlc_dir, config, run, cwd, remote, report)
         return report
 
     if not _verifiable(config):
@@ -2133,8 +2314,10 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
     path = worktree_path(sdlc_dir, unit)
     outcome = _rebase_feature(run, cwd, path, branch, base_ref, before, remote, report,
                               strict=gate.enabled(config), backup=backup)
+    if outcome == CONFLICT and gate.enabled(config) and report.get("park"):
+        outcome = PARKED                  # the gate is open and the stop was described before the drop
     report["outcome"] = outcome
-    if outcome in (CONFLICT, FAILED, WOULD_DROP):
+    if outcome in (CONFLICT, FAILED, WOULD_DROP, PARKED):
         # MEASURED, not asserted. The body used to state "no half-applied rebase, no stranded
         # worktree" unconditionally, and a cleanup that refused produced an issue asserting the
         # opposite of what was on disk -- for a human to act on.
@@ -2148,6 +2331,10 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
                     why="%s could not be replayed onto %s" % (branch, base),
                     body=_feature_conflict_body(unit, branch, base, before, report["why"],
                                                 report["leftovers"], report["tip"]))
+        return report
+    if outcome == PARKED:
+        _mark_parked(sdlc_dir, unit, report)
+        _file_park(sdlc_dir, config, report, branch, base)
         return report
     if outcome == WOULD_DROP:
         _mark_blocked(sdlc_dir, unit, report)
@@ -2163,6 +2350,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
     if outcome != REBASED:
         return report
     _clear_blocked(sdlc_dir, unit)
+    _settle_parks(sdlc_dir, config, run, cwd, remote, report)
 
     entry = registry.read(registry.registry_dir(sdlc_dir)).get(unit) or {}
     repo = sync.repo_slug(config, run, cwd, remote)

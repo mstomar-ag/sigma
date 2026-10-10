@@ -190,12 +190,14 @@ def read_record(sdlc_dir, unit):
 
 
 def begin(sdlc_dir, config, unit, number, pre, now):
-    """Write the pending record BEFORE the merge call -> WriteResult. Closed gate: nothing is written."""
+    """Write the pending record BEFORE the merge call -> WriteResult. Closed gate: nothing is written.
+    A pending or unconfirmed record is refused; a settled one (refused, merged-with-warning) is overwritten in place."""
     if not _open(config):
         return WriteResult(False, "gate-closed", None)
     if type(number) is not int or type(now) is not int:
         return WriteResult(False, "bad-input", None)
-    if read_record(sdlc_dir, unit) is not None:
+    existing = read_record(sdlc_dir, unit)
+    if existing is not None and existing.get("outcome") in (PENDING, UNCONFIRMED):
         return WriteResult(False, "unsettled-record", None)
     return _write(sdlc_dir, unit, _document(unit, number, pre, None, now, PENDING, "call-in-flight"))
 

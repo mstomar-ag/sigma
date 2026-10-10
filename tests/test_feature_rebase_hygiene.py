@@ -149,7 +149,7 @@ def test_rerere_pinned_still_sees_the_conflict(tmp_path):
     _record_a_resolution(world)
     before = world.dirt()
     report = m.upkeep(str(world.sdlc), _cfg(OPEN), "7", base.UNIT)
-    assert report["outcome"] == m.CONFLICT, report
+    assert report["outcome"] == m.PARKED, report      # #946: under the gate a conflict is a park
     assert world.dirt() == before and len(filed) == 1
 
 

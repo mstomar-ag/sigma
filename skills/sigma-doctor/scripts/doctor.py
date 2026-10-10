@@ -2383,6 +2383,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
             "commits -- see docs/branching-model.md §3b for the resolution, or set "
             '`work.rebase_upkeep: "off"` while it stands.'))
 
+<<<<<<< HEAD
     # #936: a unit landing left pending (upkeep part C). Gated on the upkeep block and read-only: a closed gate
     # emits nothing, so a project without the block sees an unchanged check list.
     try:
@@ -2392,6 +2393,18 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
         landing_row = None
     if landing_row:
         out.append(_chk(landing_row["name"], landing_row["ok"], landing_row["fix"]))
+=======
+    # Part B, level 3: a unit whose rebase was PARKED on a conflict nobody resolved. Its own marker file and its own
+    # wording -- never the would-drop row above, which would call a park "N tracked paths removed". Emitted only when a
+    # park is on record (the marker exists only when the upkeep gate was open), so a project that never opted in sees
+    # nothing, and the row names how long it has been waiting: age is the tell, not an error state.
+    for branch, files, at, age in _rebase_parks(base, _block(cfg, "work")):
+        out.append(_chk(
+            f"rebase upkeep of {branch} not parked", False,
+            f"parked since {at} ({age}) on a conflict in {files} file(s); nothing was pushed and the unit stays behind "
+            "its base until a person resolves it -- the finding filed for it carries a brief. A later clean pass "
+            "clears this row and closes the finding."))
+>>>>>>> fork/feature/branch-upkeep
 
     # A shared site-packages holds one slot per import name. A local `pip install [-e] <path>` bakes
     # that path in permanently, so on a machine running several worktrees of the same repo (this
@@ -4491,6 +4504,47 @@ def _rebase_blocks(base, wk=None):
                           ", ".join((got.get("dropped") or [])[:3]), str(got.get("at") or "?")))
         except Exception:                 # noqa: BLE001 - a doctor row never crashes the doctor
             found.append((path.name, 0, "marker unreadable", "?"))
+    return found
+
+
+_REBASE_PARKED_SUFFIX = ".rebase-parked.json"
+
+
+def _age_text(at):
+    """`3d 4h` / `5h` / `12m` for an ISO UTC stamp, or `age unknown`. Total."""
+    import calendar
+    import time as _time
+    try:
+        seconds = max(0, int(_time.time() - calendar.timegm(_time.strptime(str(at), "%Y-%m-%dT%H:%M:%SZ"))))
+    except Exception:                     # noqa: BLE001
+        return "age unknown"
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    return (f"{days}d {hours}h" if days else f"{hours}h" if hours else f"{rest // 60}m")
+
+
+def _rebase_parks(base, wk=None):
+    """[(branch, files, at, age)] for every unit whose rebase is PARKED (part B, level 3) -- the markers
+    `feature_rebase` writes on a park and removes on the next clean pass. Same posture as `_rebase_blocks`: read-only,
+    total, nothing while `work.rebase_upkeep` is off, nothing for a closed or unregistered unit, an unreadable marker
+    still reported."""
+    found = []
+    if _upkeep_off(wk):
+        return found
+    try:
+        paths = sorted((pathlib.Path(base) / "state" / "features").glob("*" + _REBASE_PARKED_SUFFIX))
+    except OSError:
+        return found
+    for path in paths:
+        try:
+            got = json.loads(path.read_text(encoding="utf-8"))
+            unit = str(got.get("unit") or path.name[:-len(_REBASE_PARKED_SUFFIX)])
+            if not _unit_can_be_upkept(base, unit):
+                continue
+            at = str(got.get("at") or "?")
+            found.append((str(got.get("branch") or path.name), int(got.get("files") or 0), at, _age_text(at)))
+        except Exception:                 # noqa: BLE001 - a doctor row never crashes the doctor
+            found.append((path.name, 0, "?", "age unknown"))
     return found
 
 
