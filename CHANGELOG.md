@@ -4,12 +4,17 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- Upkeep part C, slice 10: chat `--unsafe-merge` routes through the landing engine and the unit approval when unit upkeep is on, records the requester and maps every engine outcome to a reply; closed gate unchanged; threat-model row TM-14 rewritten (#939).
 - **Upkeep part B, slice 9: the independent reviewer route (#950).** A new library, `feature_upkeep_review.py`, with no caller yet and off by default. It runs a second headless session through the resolver launcher with a brief of base, ours, theirs and resolved contents and no resolver transcript, refuses the inline and subagent mechanisms, accepts only a strict verdict object (anything else, an unreadable reply and a timeout are block), neutralises the reasons, runs the leak gate over the brief, writes a write-once manifest under its own unit-keyed store with a pruner, and rejects a verdict when the tree moved. It can only add a refusal. The route is labelled verified false; it was run only against a fake command, never the real one.
 - **Upkeep part B, slice 8: the resolver launcher (#949).** A new library, `feature_upkeep_launcher.py`, with no caller yet and off by default. It runs one capped headless session with an environment built from nothing, the prompt on stdin, only confirmed flags (the rest are labelled UNVERIFIED and refused), a group kill at the wall clock, a before-and-after hash of the directory, and charging: a normal run its metered cost, a killed or unmetered run the full per-run cap. Tested only against a fake executable; no real model call was made. `bounded_run.run_group` gains an optional `stdin_path`; the model SDK module joins the no-network list.
 - Upkeep part A, slice 6 wiring: the pass re-reads tips, uses the engine runner and hooks policy, writes acks, limits re-anchoring, skips deleted goal branches and writes the ledger note (#1016).
 - Upkeep part A, slice 8: user documentation and config reference for the scheduler, backups, restore and prune, the opt-in audit across every entry point, and one recorded local end-to-end run on a scratch bare remote (#924).
 - Upkeep part A, slice 7: the scheduler, the detached bounded job, outcome notes and the doctor rows (#923).
 - Upkeep part C, slice 5: read-back classifier and pending-landing record (#936).
+- Upkeep part C, slice 8: the landing engine's front half, `feature_land.py land <unit>`, ends in a rehearsal and never merges (#937).
+- Upkeep part C, slice 8: `feature_land_approval.peek` checks a unit approval without consuming it (#937).
+- Upkeep part C, slice 8: the PR-creating writer and the scratch-worktree removal are registered in the write surface (#937).
+- Upkeep part C, slice 9: the landing engine's back half, `feature_land_merge.py`, behind the upkeep gate and the explicit `--merge` flag: the guard as the last gate, a pending record before the call, a head-pinned merge, a read-back, record once and a branch-existence check; `verify_merge.py` maps engine outcomes only while the gate is open (#938).
 - **Upkeep part B, slice 5: a changelog-only unit conflict is resolved by the heading-aware union (#947).** Behind the
   existing upkeep opt-in and `conflicts.resolve` set to `mechanical` or `agent` only, and with no model call. A unit rebase
   that stops on a conflict in the changelog alone is resolved, checked (no edit outside the file, no new marker or

@@ -386,14 +386,14 @@ def test_owned_py_files_scans_a_meaningful_number_of_real_files():
 
 def test_every_delete_shaped_call_site_in_the_kit_is_one_of_the_known_reviewed_ones():
     """THE INVENTORY PIN. Every branch/ref-delete-shaped (or delete-capable) line in this repo's own
-    tracked `skills/`+`hooks/` tree, today, is one of exactly these eight -- two real deletes (both
+    tracked `skills/`+`hooks/` tree, today, is one of exactly these nine -- two real deletes (both
     scoped structurally to the GOAL's own throwaway `sdlc/<goal>` branch, never `feature/<name>`,
     proven behaviorally in Part 2 below), one label delete (`gh_api.remove_label`, a REST DELETE
     that touches an issue label and no ref), three colon-refspec BUILD sites, each independently
     proven safe (Part 2), and the two sites of `feature_backup.py`: the atomic push that creates a
     backup ref (a colon refspec whose sources are validated, never empty) and the prune, the one
     sanctioned automatic deletion, which uses the `--delete` flag form and names only refs that parse
-    as exactly `<prefix><unit>/<stamp>`. A ninth site appearing anywhere -- including one that
+    as exactly `<prefix><unit>/<stamp>`. A tenth site appearing anywhere -- including one that
     could delete a `feature/<name>` branch -- fails this test immediately, by file, function and
     kind, which is the whole point: it forces a conscious decision (update this pin AND
     docs/branching-model.md S13b) instead of a silent regression."""
@@ -408,6 +408,8 @@ def test_every_delete_shaped_call_site_in_the_kit_is_one_of_the_known_reviewed_o
         ("skills/sigma-loop/scripts/gh_api.py", "remove_label", "rest_delete"),
         ("skills/sigma-define/scripts/define.py", "_step_branch", "colon_refspec"),
         ("skills/sigma-loop/scripts/feature_rebase.py", "_pushed", "colon_refspec"),
+        # read-only: a `git fetch` refspec that downloads a remote ref into a local one, deletes nothing
+        ("skills/sigma-loop/scripts/feature_land.py", "_fetch", "colon_refspec"),
         ("skills/sigma-loop/scripts/release_manifest.py", "publish_to_ledger_branch", "colon_refspec"),
         ("skills/sigma-loop/scripts/feature_backup.py", "_atomic_leased_push", "colon_refspec"),
         ("skills/sigma-loop/scripts/feature_backup.py", "_delete_chunk", "push_delete"),

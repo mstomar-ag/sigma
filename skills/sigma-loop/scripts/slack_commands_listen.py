@@ -117,6 +117,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shlex
 import signal
 import subprocess
@@ -153,6 +154,7 @@ logroll = _load("logroll")              # #460: size-capped rotation for slack-c
 drift_watch = _load("drift_watch")
 unit_completion = _load("unit_completion")
 autowatch = _load("autowatch")          # #2338: _run_drive/_drive_cmd -- the headless drive primitive
+feature_upkeep = _load("feature_upkeep")  # #939: the gate, read only through this module
 feature_rebase = _load("feature_rebase")  # #2338: worktree cut/lock/teardown (Component I)
 sync = _load("sync")                    # #2338: the LEDGER's own ops-branch pull/publish (Component H,
                                          # BR-32) -- NOT feature_rebase's own `feature_sync` (aliased
@@ -200,7 +202,8 @@ HELP_TEXT = (
     "yourself)\n"
     "  --unsafe-merge <name>  runs the SAME verify check as --merge, then LANDS it immediately if "
     "it passes -- no confirmation, no review wait. Only the confirmation step is skipped; a "
-    "failing verify still blocks the merge, same as --merge. Run at your own discretion.\n"
+    "failing verify still blocks the merge, same as --merge. Run at your own discretion. With unit "
+    "upkeep on it goes through the landing engine instead and needs a local unit approval first.\n"
     "  --list [page]        list open feature units, 10 per page (default page 1)\n"
     "  --rebase <name>      rebase <name> onto its base; reports and stops on a real conflict\n"
     "  --help               show this message\n"
@@ -478,7 +481,7 @@ def _drift_reply(sdlc_dir, config, run=None):
 
 
 def build_reply(parsed, config=None, sdlc_dir=DEFAULT_SDLC_DIR, run=None, run_drive=None,
-                 session_pid=None):
+                 session_pid=None, requester=None):
     """The reply text for a CLEANLY parsed command. `--help`, `--drift`, `--list` (#2337), `--merge`
     (#2341), `--unsafe-merge` (#2359, an explicit operator follow-up to #2341) and `--rebase`
     (#2340) all get real replies now -- Epic #2335's whole command surface is wired up.
@@ -500,7 +503,8 @@ def build_reply(parsed, config=None, sdlc_dir=DEFAULT_SDLC_DIR, run=None, run_dr
     if parsed.command == "--merge":
         return _merge_reply(sdlc_dir, config or {}, parsed.name, run_drive=run_drive)
     if parsed.command == "--unsafe-merge":
-        return _unsafe_merge_reply(sdlc_dir, config or {}, parsed.name, run_drive=run_drive)
+        return _unsafe_merge_reply(sdlc_dir, config or {}, parsed.name, run_drive=run_drive,
+                                   requester=requester)
     if parsed.command == "--rebase":
         return _rebase_reply(sdlc_dir, config or {}, parsed.name, run=run, run_drive=run_drive,
                               session_pid=session_pid)
@@ -528,7 +532,7 @@ def handle_message_event(event, config, sdlc_dir=DEFAULT_SDLC_DIR, run=None, run
     except CommandError as exc:
         return True, exc.message, None
     return True, build_reply(parsed, config, sdlc_dir, run=run, run_drive=run_drive,
-                              session_pid=session_pid), parsed
+                              session_pid=session_pid, requester=event.get("user")), parsed
 
 
 def handle_app_mention_event(event, bot_user_id, config, sdlc_dir=DEFAULT_SDLC_DIR, run=None,
@@ -1510,12 +1514,83 @@ _UNSAFE_MERGE_WORKTREE_BUSY = ("%s's own rebase worktree is busy right now (an o
 _UNSAFE_MERGE_UNCLEAR = "`--unsafe-merge %s` ran but left no clear outcome -- check the repo directly."
 
 
-def _unsafe_merge_reply(sdlc_dir, config, name, run_drive=None):
+def _upkeep_gate_open(config):
+    """The unit-upkeep project door, read only through `feature_upkeep`. A gate that cannot answer is closed."""
+    try:
+        return bool(feature_upkeep.enabled(config))
+    except Exception:                       # noqa: BLE001 - closed on any doubt
+        return False
+
+
+_REQUESTER = re.compile(r"[UW][A-Z0-9]{2,20}\Z")
+
+
+def _requester_id(requester):
+    """The Slack user id of the message, or `unknown`: only the id shape is ever written to the ledger."""
+    return requester if isinstance(requester, str) and _REQUESTER.match(requester) else "unknown"
+
+
+def _engine_land():
+    return _load("feature_land")
+
+
+def _engine_reply(name, out, who):
+    """Engine outcome -> (ledger kind, chat reply). Every outcome the engine returns has a branch; an unknown one reads
+    as unclear, never as success and never as a bare failure."""
+    outcome = str(out.get("outcome") or "")
+    detail = out.get("detail") or ""
+    by = " (requested by %s)" % who
+    if outcome == "merged":
+        return "done", "`--unsafe-merge %s`: landed%s." % (name, by)
+    if outcome == "already-landed":
+        return "done", "`--unsafe-merge %s`: already landed%s -- nothing to do." % (name, by)
+    if outcome == "merged-with-warning":
+        return "done", "`--unsafe-merge %s`: landed with a warning%s -- %s Check the base branch." % (
+            name, by, detail or "the base moved while landing.")
+    if outcome == "armed":
+        return "done", "`--unsafe-merge %s`: auto-merge is armed%s; the host lands it when its checks pass." % (name, by)
+    if outcome.startswith("refused"):
+        hint = ""
+        if outcome in ("refused:guard", "refused:unattended-no-approval"):
+            hint = " Approve the unit locally first, then ask again."
+        return "failed", "`--unsafe-merge %s` was refused%s: %s%s%s" % (
+            name, by, outcome.partition(":")[2] or "no reason", (" -- " + detail) if detail else ".", hint)
+    if outcome.startswith("unconfirmed"):
+        return "failed", ("`--unsafe-merge %s` could not confirm the landing%s: %s. Nothing was retried; check the "
+                          "repository before asking again." % (name, by, outcome.partition(":")[2] or "unknown"))
+    return "failed", _UNSAFE_MERGE_UNCLEAR % name
+
+
+def _unsafe_merge_engine_reply(sdlc_dir, config, name, requester):
+    """Gate open: claim the unit (same arbitration), run the landing engine with NO consent flag and a driven
+    fingerprint so the unit approval is required, finish the claim, map the outcome. No chat worktree is cut: the engine
+    takes the unit's rebase lock itself and would find a held one busy."""
+    key = claim_key(name)
+    who = _requester_id(requester)
+    claim = try_claim(sdlc_dir, config, name)
+    if not claim.ok:
+        if claim.holder_actor:
+            return _UNSAFE_MERGE_BUSY_KNOWN % (name, claim.holder_actor)
+        return _UNSAFE_MERGE_BUSY_UNKNOWN % name
+    try:
+        engine = _engine_land()
+        fingerprint = engine._load("feature_land_approval").FINGERPRINTS[0]
+        out = engine.land(config, sdlc_dir, name, argv=(), environ={fingerprint: "chat"}, merge=True)
+        kind, reply = _engine_reply(name, out if isinstance(out, dict) else {}, who)
+    except Exception as exc:                # noqa: BLE001 - a crashed landing is a reported failure
+        kind, reply = "failed", "the landing engine crashed: %s" % exc
+    finish_claim(sdlc_dir, config, key, kind, why=reply)
+    return reply
+
+
+def _unsafe_merge_reply(sdlc_dir, config, name, run_drive=None, requester=None):
     """`--unsafe-merge <name>` (#2359): dispatches via #2338's shared `dispatch()` -- SAME claim
     arbitration (keyed on the unit NAME, so this correctly serialises against a concurrent
     `--rebase <name>`/`--merge <name>` on the SAME unit, not only a second copy of itself), the SAME
     isolated worktree `--rebase`/`--merge` use, this command's own deterministic `run_drive`
     (`_unsafe_merge_run_drive`, above) that ACTUALLY lands the branch, then teardown."""
+    if run_drive is None and _upkeep_gate_open(config):
+        return _unsafe_merge_engine_reply(sdlc_dir, config, name, requester)
     key = claim_key(name)
     drive = run_drive or _unsafe_merge_run_drive(sdlc_dir, config, name, key)
     result = dispatch(sdlc_dir, config, name, "--unsafe-merge", run_drive=drive)
