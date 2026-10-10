@@ -732,9 +732,12 @@ def attended_rebase(config, sdlc_dir, run, cwd, remote, branch, base, lock_timeo
             fd = feature_rebase._acquire(lock, timeout=feature_rebase.LOCK_TIMEOUT if lock_timeout is None else lock_timeout)
         except (OSError, ValueError) as exc:
             return {"outcome": FAILED, "files": [], "why": "the unit lock could not be taken: %s" % _flat(exc)}
+        if fd is None and feature_rebase.sync.fcntl is None:
+            return {"outcome": FAILED, "files": [],
+                    "why": "locking is not supported on this platform, so the opt-in attended rebase is refused; nothing was changed"}
         if fd is None:
             return {"outcome": FAILED, "files": [],
-                    "why": "another rebase of %s holds the unit lock; nothing was changed" % branch}
+                    "why": "another rebase of %s holds the unit lock (or its lock directory is not writable); nothing was changed" % branch}
     try:
         return attempt_rebase(run, cwd, remote, branch, base, lease=True)
     finally:

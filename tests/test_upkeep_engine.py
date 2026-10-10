@@ -411,6 +411,15 @@ def test_attended_door_refuses_when_another_holder_has_the_lock(world):
     assert out["outcome"] == b.FAILED and "lock" in out["why"] and called == []
 
 
+def test_attended_door_names_missing_lock_support_not_a_holder(world, monkeypatch):
+    b = brief()
+    monkeypatch.setattr(b.feature_rebase.sync, "fcntl", None)
+    called = []
+    b.attempt_rebase = lambda *a, **k: called.append(1)
+    out = b.attended_rebase(OPEN, str(world.sdlc), real_run, str(world.clone), "origin", "feature/u", "main", lock_timeout=0)
+    assert out["outcome"] == b.FAILED and "not supported" in out["why"] and "holds" not in out["why"] and called == []
+
+
 def test_push_branch_explicit_lease_never_bare(world):
     b = brief()
     run = Recorder()

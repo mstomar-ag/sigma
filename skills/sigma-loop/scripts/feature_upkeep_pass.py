@@ -69,32 +69,25 @@ def _tip(run, cwd, ref):
     return tip
 
 
-def _shared(run):
-    """The shared predicate's runner `(argv, cwd) -> (rc, out, err)` over this module's `(cwd, argv) -> stdout` runner; no
-    runner given means the shared bounded runner itself."""
+def _shared():
+    """The shared predicate's runner `(argv, cwd) -> (rc, out, err)`, built on the bounded group runner. It keeps the exit code
+    (an ancestry answer of "no" is exit 1, a normal answer), which the engine runner's raise-on-failure shape would lose."""
     shared = _sibling("feature_landed")
-    if run is None:
-        def default(argv, cwd):
-            bounded = _sibling("bounded_run")
-            result = bounded.run_group([str(a) for a in argv], str(cwd), GIT_TIMEOUT_SECONDS, env=bounded.unattended_env(),
-                                       merge=False)
-            if result.code is None:
-                return shared.RC_UNRUNNABLE, "", ""
-            return result.code, result.out or "", result.err or ""
-        return default
 
-    def adapted(argv, cwd):
-        try:
-            return 0, run(cwd, list(argv)[3:] if list(argv)[:2] == ["git", "-C"] else list(argv)), ""
-        except Exception:                                   # noqa: BLE001 - could not tell is never landed
+    def default(argv, cwd):
+        bounded = _sibling("bounded_run")
+        result = bounded.run_group([str(a) for a in argv], str(cwd), GIT_TIMEOUT_SECONDS, env=bounded.unattended_env(),
+                                   merge=False)
+        if result.code is None:
             return shared.RC_UNRUNNABLE, "", ""
-    return adapted
+        return result.code, result.out or "", result.err or ""
+    return default
 
 
 def landed(run, cwd, unit_ref, base_ref, base_name, landing_prs=None):
     """-> (verdict, unit_tip, base_tip): verdict is LANDED_CONTAINED, LANDED_PR, NOT_LANDED or UNREADABLE. The ancestry half is
     the shared predicate's (`feature_landed`); the merged-request half reads an injected source (no network here)."""
-    shared, runner = _sibling("feature_landed"), _shared(run)
+    shared, runner = _sibling("feature_landed"), _shared()
     try:
         unit_tip, base_tip = _tip(run or _git, cwd, unit_ref), _tip(run or _git, cwd, base_ref)
         answer, _, _ = shared._ancestry(runner, str(cwd), unit_tip, base_tip)

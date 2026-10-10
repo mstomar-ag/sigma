@@ -139,3 +139,16 @@ def test_control_unreadable_read_as_landed_is_caught(repo):
         raise RuntimeError("x")
     assert call(mutant, repo, run=broken)["result"] == "skipped"
     assert call(mod(), repo, run=broken)["result"] == "unreadable"
+
+
+def test_an_injected_raising_runner_does_not_turn_not_landed_into_unreadable(repo):
+    """The engine runner raises on any non-zero exit; ancestry "no" (exit 1) must still read as not landed."""
+    commit(repo, "feature/u", "c.txt")
+
+    def raising_on_failure(cwd, argv):
+        out = subprocess.run(["git", *argv], cwd=str(cwd), capture_output=True, text=True)
+        if out.returncode != 0:
+            raise RuntimeError("git failed")
+        return out.stdout
+    result = call(mod(), repo, run=raising_on_failure)
+    assert (result["result"], result["reason"]) == ("not-landed", "not-landed")
