@@ -342,3 +342,15 @@ def test_sdlc_implement_still_cites_the_north_star_inline_rather_than_reading_it
     assert "north_star.py" not in text, (
         "sigma-implement gained a resolver call; if it now READS the north-star it belongs in "
         "_GROUNDING, and this pin is the wrong guard for it")
+
+
+# --- #993 (decision rubric slice 3): per-document resolution -----------------------------------
+
+def test_resolve_doc_types_each_state_and_refuses_escape(tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "a.md").write_text("alpha\n", encoding="utf-8")
+    assert ns.resolve_doc(tmp_path, "docs/a.md")[0] == ns.PRESENT
+    assert ns.resolve_doc(tmp_path, "docs/none.md")[0] == ns.ABSENT
+    for bad in ("../outside.md", "/etc/hosts", "docs/../../x.md", "", "a\x00b"):
+        state, why = ns.resolve_doc(tmp_path, bad)
+        assert state == ns.UNREACHABLE and why, bad

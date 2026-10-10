@@ -137,6 +137,33 @@ def check(start="."):
     return PRESENT, str(path)
 
 
+def resolve_doc(root, rel):
+    """(state, detail) for ONE repo-relative reference document named in `context.documents` (#993).
+
+    Same three states as `check`. A path that is not a plain relative string, or that resolves
+    (parent steps, absolute, or a link) outside `root`, is UNREACHABLE with the reason and is never
+    read: containment is checked on the resolved path, not on the spelling."""
+    if not isinstance(rel, str) or not rel.strip() or "\x00" in rel:
+        return UNREACHABLE, "refused: not a usable path"
+    if os.path.isabs(rel) or rel.startswith(("~", "\\")):
+        return UNREACHABLE, "refused: %s is not repo-relative" % rel
+    try:
+        top = pathlib.Path(root).resolve()
+        path = (top / rel).resolve()
+        path.relative_to(top)
+    except ValueError:
+        return UNREACHABLE, "refused: %s leaves the repository" % rel
+    except OSError as exc:
+        return UNREACHABLE, "%s could not be resolved: %s" % (rel, exc)
+    try:
+        if not path.is_file():
+            return ABSENT, str(rel)
+        path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return UNREACHABLE, "%s exists but could not be read: %s" % (rel, exc)
+    return PRESENT, str(rel)
+
+
 USAGE = "usage: north_star.py [start_dir]"
 
 

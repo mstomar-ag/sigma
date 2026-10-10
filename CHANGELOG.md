@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Reference documents key for the reviewer brief: `context.documents` and `context.inline_max_bytes` (#993, decision rubric slice 3).** Extra repo-relative documents join the brief with a per-document present, absent or unreachable state, parent-escaping paths are refused with a reason, oversize bodies become pointers, and an explicit empty list says no documents were named. Absent key: brief byte-identical.
 - **Live regression entrypoint, slice 1: refusal ladder, NOT RUN rows, credential-safe logging (#884, refs #810).**
   New `evals/regression/live.py` (stdlib only). Run bare it exits 2 with one `live.py: REFUSED [no-credential]: ...`
   line on stderr, nothing on stdout, and one `sigma.regression-result/v1` NOT RUN row under

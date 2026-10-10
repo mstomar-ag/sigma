@@ -26,6 +26,7 @@ Fail-open: a missing file drops its line, never raises — a reviewer with a par
 one that crashed assembling the brief reviews nothing. ASCII-only output (a non-utf8 locale must not
 break it). Zero deps.
 """
+import collections
 import datetime
 import fnmatch
 import importlib.util
@@ -184,6 +185,57 @@ _NORTH_STAR_REL = _PROJECT_DOCS[0][0]
 _DOSSIER_PHASES = ("plan-review", "code-review", "pr-review")
 
 
+#: #993: `context.inline_max_bytes` default; a configured document larger than this is a pointer.
+_INLINE_MAX_DEFAULT = 16384
+
+
+class DocRef(collections.namedtuple("DocRef", "path state detail")):
+    """One configured reference document: repo-relative `path`, `state` in present / absent /
+    unreachable, and `detail` (the reason when unreachable)."""
+    __slots__ = ()
+
+
+def _context_block(config):
+    block = config.get("context") if isinstance(config, dict) else None
+    return block if isinstance(block, dict) else {}
+
+
+def documents(config, repo_root):
+    """`list[DocRef]` for `context.documents`, or None when the key is absent or not a list (closed:
+    the brief is then byte-identical to before this key existed). `[]` is a real answer."""
+    named = _context_block(config).get("documents")
+    if not isinstance(named, list):
+        return None
+    ns = _load("north_star")
+    refs = []
+    for rel in named:
+        state, detail = ns.resolve_doc(repo_root, rel)
+        refs.append(DocRef(rel if isinstance(rel, str) else repr(rel), state, detail))
+    return refs
+
+
+def inline_max_bytes(config):
+    value = _context_block(config).get("inline_max_bytes")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return _INLINE_MAX_DEFAULT
+    return value
+
+
+def render_doc(ref, max_bytes, repo_root="."):
+    """`("inline", text)` for a present document within the cap, else `("pointer", text)`."""
+    path = pathlib.Path(repo_root) / ref.path
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = max_bytes + 1
+    if size <= max_bytes:
+        body = _read(path)
+        if body:
+            return "inline", "## reference document: %s\n%s" % (ref.path, body)
+    return "pointer", ("## reference document: %s\nLarge (over %d bytes), so not inlined - read "
+                       "`%s` for it." % (ref.path, max_bytes, ref.path))
+
+
 def _read(path):
     """Fail-open read: an unreadable or absent file contributes nothing, never an exception — a partial
     brief is a working reviewer, a crash is a skipped review."""
@@ -269,6 +321,21 @@ def _project_context(sdlc_dir, repo_root):
             lines.append("## %s\n%s" % (label, body))
 
     root = pathlib.Path(repo_root)
+    try:
+        cfg = _load("state").load_config(sdlc_dir)
+    except Exception:                       # noqa: BLE001 - fail open: no config, no extra documents
+        cfg = {}
+    refs = documents(cfg, repo_root) if isinstance(cfg, dict) else None
+    for ref in refs or []:
+        if ref.state == "present":
+            lines.append(render_doc(ref, inline_max_bytes(cfg), repo_root)[1])
+        elif ref.state == "unreachable":
+            lines.append("## reference document: %s\nNOT READ - %s." % (ref.path, ref.detail))
+        else:
+            lines.append("## reference document: %s\nNOT FOUND - it is named in context.documents but "
+                         "absent from the repository." % ref.path)
+    if refs == []:
+        lines.append("## reference documents\nNo reference documents named in context.documents.")
     # The root check stays a plain stat, not a git query: a drop-in repo with no git still gets its
     # conventions. Discovery only ADDS the directory-scoped ones on top.
     conventions = []
