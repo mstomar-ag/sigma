@@ -111,9 +111,11 @@ def test_concurrent_consumers_smoke(tmp_path):
 def test_binding_unit_slug_head(tmp_path):
     mod = load()
     approve(mod, tmp_path)
+    d = tmp_path / "state" / "unit-approvals"
     assert mod.consume(OPEN, tmp_path, "voice", SLUG, OTHER, now=1001)["ok"] is False
     assert mod.consume(OPEN, tmp_path, "voice", "owner/other", HEAD, now=1001)["ok"] is False
     assert mod.consume(OPEN, tmp_path, "audio", SLUG, HEAD, now=1001)["ok"] is False
+    assert not list(d.glob("*.used")), "a denied consume must not burn it"
     assert mod.consume(OPEN, tmp_path, "VOICE", SLUG, HEAD, now=1001)["ok"] is True   # the unit fold
 
 
@@ -131,6 +133,72 @@ def test_malformed_records_deny(tmp_path):
     for body in ("", "[]", "{", '{"unit": "voice"}', '{"unit":"voice","slug":"owner/repo","head":"%s","expires_at":"soon"}' % HEAD):
         rec.write_text(body)
         assert mod.consume(OPEN, tmp_path, "voice", SLUG, HEAD, now=1001)["ok"] is False, body
+        assert not list(rec.parent.glob("*.used")), "a denied consume must not burn it"
+
+
+def test_mismatched_record_burns_nothing(tmp_path):
+    mod = load()
+    approve(mod, tmp_path)
+    rec = next((tmp_path / "state" / "unit-approvals").glob("*.json"))
+    rec.write_text('{"unit":"audio","slug":"owner/repo","head":"%s","expires_at":99999}' % HEAD)
+    out = mod.consume(OPEN, tmp_path, "voice", SLUG, HEAD, now=1001)
+    assert out["ok"] is False and "match" in out["reason"]
+    assert not list(rec.parent.glob("*.used"))
+
+
+def test_used_message_says_new_head_not_approve_again(tmp_path):
+    mod = load()
+    approve(mod, tmp_path)
+    assert mod.consume(OPEN, tmp_path, "voice", SLUG, HEAD, now=1001)["ok"] is True
+    msg = mod.consume(OPEN, tmp_path, "voice", SLUG, HEAD, now=1002)["reason"]
+    assert "already used" in msg and "new head" in msg and "approve verb" not in msg, msg
+
+
+def test_empty_fingerprint_value_is_unattended(tmp_path):
+    mod = load()
+    for name in ("SIGMA_RUN_ID", "SIGMA_AUTOWATCH_HOP", "SIGMA_SESSION_GENERATION"):
+        out = mod.authorize(OPEN, tmp_path, "voice", SLUG, HEAD, argv=FLAG, environ={name: ""}, now=1)
+        assert out["ok"] is False, name
+
+
+def _outside(tmp_path):
+    out = tmp_path / "outside"
+    out.mkdir()
+    return out
+
+
+def test_symlinked_state_dir_refused(tmp_path):
+    mod = load()
+    sdlc = tmp_path / "sdlc"; sdlc.mkdir()
+    out = _outside(tmp_path)
+    (sdlc / "state").symlink_to(out)
+    assert approve(mod, sdlc)["ok"] is False
+    assert mod.consume(OPEN, sdlc, "voice", SLUG, HEAD, now=1001)["ok"] is False
+    assert list(out.rglob("*")) == []
+
+
+def test_symlinked_approvals_dir_refused(tmp_path):
+    mod = load()
+    sdlc = tmp_path / "sdlc"; (sdlc / "state").mkdir(parents=True)
+    out = _outside(tmp_path)
+    (sdlc / "state" / "unit-approvals").symlink_to(out)
+    assert approve(mod, sdlc)["ok"] is False
+    assert mod.consume(OPEN, sdlc, "voice", SLUG, HEAD, now=1001)["ok"] is False
+    assert list(out.rglob("*")) == []
+
+
+def test_symlinked_record_path_refused(tmp_path):
+    mod = load()
+    sdlc = tmp_path / "sdlc"
+    out = _outside(tmp_path)
+    target = out / "victim.txt"; target.write_text("keep")
+    rec, _ = mod.approval_path(sdlc, SLUG, HEAD, "voice")
+    rec.parent.mkdir(parents=True)
+    rec.symlink_to(target)
+    assert approve(mod, sdlc)["ok"] is False
+    assert target.read_text() == "keep"
+    assert mod.consume(OPEN, sdlc, "voice", SLUG, HEAD, now=1001)["ok"] is False
+    assert not list(rec.parent.glob("*.used"))
 
 
 FLAG = ["--user-requested", "voice"]

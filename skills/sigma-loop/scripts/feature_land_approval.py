@@ -45,6 +45,7 @@ def _load(name):
 
 
 registry = _load("feature_registry")
+state = _load("state")
 upkeep = _load("feature_upkeep")
 
 
@@ -104,14 +105,14 @@ def approve(config, sdlc_dir, unit, slug, head, *, ttl_seconds=DEFAULT_TTL_SECON
     if not (isinstance(ttl_seconds, int) and not isinstance(ttl_seconds, bool) and 0 < ttl_seconds <= MAX_TTL_SECONDS):
         return _deny("ttl must be a whole number of seconds from 1 to %d" % MAX_TTL_SECONDS)
     record, _ = approval_path(sdlc_dir, slug, head, unit)
-    base = record.parent
-    if base.is_symlink():
-        return _deny("approval directory is a symlink; refusing")
-    base.mkdir(parents=True, exist_ok=True)
+    try:
+        state.refuse_symlinks(sdlc_dir, pathlib.Path(*STATE_PARTS, record.name), create_parents=True)
+    except OSError:
+        return _deny("approval path has a symlink component; refusing")
     created = _now(now)
     body = {"v": 1, "unit": registry.unit_key(unit), "slug": slug, "head": head,
             "created_at": created, "expires_at": created + ttl_seconds}
-    record.write_text(json.dumps(body, sort_keys=True), encoding="utf-8")
+    state.atomic_write_text(record, json.dumps(body, sort_keys=True))
     return {"ok": True, "expires_at": body["expires_at"]}
 
 
@@ -122,8 +123,11 @@ def consume(config, sdlc_dir, unit, slug, head, *, now=None):
     if why:
         return _deny(why)
     record, marker = approval_path(sdlc_dir, slug, head, unit)
-    if record.parent.is_symlink():
-        return _deny("approval directory is a symlink; refusing")
+    try:
+        state.refuse_symlinks(sdlc_dir, pathlib.Path(*STATE_PARTS, record.name))
+        state.refuse_symlinks(sdlc_dir, pathlib.Path(*STATE_PARTS, marker.name))
+    except OSError:
+        return _deny("approval path has a symlink component; refusing")
     try:
         data = json.loads(record.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -140,7 +144,7 @@ def consume(config, sdlc_dir, unit, slug, head, *, now=None):
     try:
         fd = os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
-        return _deny("approval already used (single use); run the approve verb again")
+        return _deny("approval for this head was already used (single use); a landing needs a new head")
     except OSError as exc:
         return _deny("could not take the single-use marker: %s" % type(exc).__name__)
     os.close(fd)
@@ -164,7 +168,7 @@ def native_review(config, *, pr_author, head, reviews):
 def _attended(argv, environ, unit):
     tokens = list(argv or ())
     consent = any(a == CONSENT_FLAG and b == unit for a, b in zip(tokens, tokens[1:]))
-    driven = any((environ or {}).get(name) for name in FINGERPRINTS)
+    driven = any(name in (environ or {}) for name in FINGERPRINTS)
     return consent and not driven
 
 
