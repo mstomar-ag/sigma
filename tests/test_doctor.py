@@ -7169,6 +7169,15 @@ def test_graphql_row_appears_in_cloud_env_as_advisory_ok_true(tmp_path, monkeypa
     assert row not in [c for c in checks if not c["ok"]]
 
 
+def test_graphql_row_names_the_landing_degradation(tmp_path, monkeypatch):
+    d = _doc()
+    monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
+    base = _sdlc(tmp_path, {"work": {"enabled": True}})
+    row = _by_name(d.check(base, run=_pf_fake()))[GQL_ROW]
+    for text in ("draft readiness (gh pr ready)", "Unit landing uses REST only"):
+        assert text in row["fix"], text
+
+
 def test_graphql_row_is_printed_by_the_check_command(tmp_path, monkeypatch, capsys):
     d = _doc()
     monkeypatch.setenv("CLAUDE_CODE_REMOTE", "1")

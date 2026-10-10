@@ -4,6 +4,11 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Upkeep part C, slice 7: cross-repo unit check (#934).** A unit-keyed sibling lookup
+  (`cross_repo.unit_sibling_check`) and its guard (`work.unit_sibling_guard`, registered in the
+  enforcement table). It refuses a landing while another repository's half of the unit has not landed,
+  and when the lookup cannot answer. Read-only, inert while the upkeep gate is closed, and nothing
+  calls it yet.
 - **Upkeep part A, slice 3: drift measure, per-unit state and the due rule (#919).** Two new
   library modules, `feature_upkeep_drift.py` and `feature_upkeep_state.py`. The first counts
   pull-request arrivals on a base branch and on a feature branch by author date over a bounded
@@ -25,6 +30,8 @@ All notable changes to Sigma are recorded here, newest first.
   separate head-aware merged-pull-request read (paged, bounded, truncation never read as "none"); anything it cannot
   prove is UNKNOWN. Also a repository-slug helper that checks the remote names the same repository. The drift watcher
   adds an optional landed field only while the upkeep gate is open; with the gate closed nothing changes.
+- **GitHub write plumbing in gh_api (#931, upkeep part C, slice 2).** New REST-only helpers with no caller yet: a pinned merge that requires an explicit method, repository and 40-hex head pin, commit parents, branch rules, repository settings, a typed non-draft pull request create, and a bounded runner that keeps the exit code and failure class. The landing writer joins the receipt allowlist; the doctor row and the cloud-sessions page name the degraded features. Inert unless the upkeep gate is open.
+
 - **Shared verify runner and unattended git runner (#920, upkeep part A, slice 4).** New bounded_run.py:
   a command run in a process group of its own under a wall-clock budget, the whole group stopped
   (SIGTERM, then SIGKILL) on overrun or when a stop file appears, a lifeline that stops the tree if the

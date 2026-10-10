@@ -717,7 +717,7 @@
       "function": "_default_run",
       "rule": "gh-api-write",
       "count": 1,
-      "gate": "the injected run is the only transport; write helpers (comment_issue, create_issue, add_labels, remove_label, close_issue, edit_issue, add_assignees) have callers since #895 slice 3a, each through GitHubSource._issue_* with the feature-label guard (create_issue/add_labels refuse feature:* unless it exists); a REST write falls back to GraphQL at most once, never on an ambiguous failure, never in a cloud session; the scanner sees only this gh invocation, not which helper called it",
+      "gate": "the injected run is the only transport; write helpers (comment_issue, create_issue, add_labels, remove_label, close_issue, edit_issue, add_assignees) have callers since #895 slice 3a, each through GitHubSource._issue_* with the feature-label guard (create_issue/add_labels refuse feature:* unless it exists); a REST write falls back to GraphQL at most once, never on an ambiguous failure, never in a cloud session; the scanner sees only this gh invocation, not which helper called it; landing helpers (#931): merge_pr_pinned (explicit merge method, repository and 40-hex head pin all required and validated before any call; no auto-merge, no admin flag, no branch-delete option) and create_pr_nondraft (typed draft false) have no caller yet, and bounded_runner binds a working directory and keeps the exit code; the scanner sees none of them until a caller exists",
       "risk": "low"
     },
     {

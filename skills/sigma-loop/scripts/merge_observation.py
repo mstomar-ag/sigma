@@ -27,7 +27,8 @@ _release_spec.loader.exec_module(release_manifest)
 
 _PARENT = ("schema_version", "ownership_key", "canonical_repository_id", "owner_kind", "owner_id",
            "goal", "head_ref", "base_ref", "pr_number", "pr_node_id", "creating_writer", "pr_created_at")
-_WRITERS = ("work.pr", "unit_completion._draft", "verify_merge.ensure_landing_pr")
+_WRITERS = ("work.pr", "unit_completion._draft", "verify_merge.ensure_landing_pr",
+            "verify_merge.land_unit")
 
 
 def canonical_json(value):
