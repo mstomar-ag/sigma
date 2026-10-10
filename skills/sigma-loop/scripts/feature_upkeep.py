@@ -291,8 +291,10 @@ def gated(door="project"):
     """Decorator for an entry point `fn(config, ...)`: the gate is its first action, and a closed gate returns
     {"closed": True, "door", "missing", "problems"} WITHOUT calling the body. Write it with parentheses and put it
     OUTERMOST (a static test enforces both). A machine-door entry point must declare `environ` as a keyword-only
-    parameter, which is where the gate reads it from; any other shape is refused when the function is decorated, so an
-    `environ` passed positionally can never be silently ignored."""
+    parameter, which is where the gate reads it from, and may not take a rest parameter (`*args`, which would swallow a
+    positional `environ` unseen); any other shape is refused when the function is decorated. A CLOSED gate answers
+    before the body is called, so it ignores any positional argument beyond the config; the refusal is what keeps
+    an open gate from doing the same."""
     if door not in DOORS:
         raise ValueError("unknown door %r; expected one of %s" % (door, DOORS))
 
@@ -301,6 +303,9 @@ def gated(door="project"):
             parameter = inspect.signature(fn).parameters.get("environ")
             if parameter is None or parameter.kind is not inspect.Parameter.KEYWORD_ONLY:
                 raise ValueError("a machine-door entry point must declare environ as a keyword-only parameter: "
+                                 + getattr(fn, "__name__", "?"))
+            if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in inspect.signature(fn).parameters.values()):
+                raise ValueError("a machine-door entry point may not take a rest parameter (*args): "
                                  + getattr(fn, "__name__", "?"))
 
         @functools.wraps(fn)

@@ -701,3 +701,34 @@ def test_one_reader():
              and isinstance(n.args[0], ast.Name) and n.args[0].id == "BLOCK"]
     assert len(reads) == 1, "the gate must read the upkeep block in exactly one place"
     assert support.readers_outside_the_gate() == [], "only feature_upkeep.py may read the upkeep block"
+
+
+def test_gated_rest_refused():
+    """#965: `*args` would swallow a positional `environ` unseen, so a machine-door signature with one is refused."""
+    g = support.gate()
+
+    def rest(config, *args, environ=None):
+        return 1
+
+    with pytest.raises(ValueError, match="rest parameter"):
+        g.gated("machine")(rest)
+    assert g.gated("project")(rest) is not None                                 # the project door never reads `environ`
+
+
+def test_gated_doc_wording():
+    """#965: the decorator does not claim a positional `environ` is never ignored; a closed gate does ignore it."""
+    g = support.gate()
+    assert "can never be silently ignored" not in g.gated.__doc__
+    assert "rest parameter" in g.gated.__doc__ and "CLOSED gate" in g.gated.__doc__
+
+    @g.gated("machine")
+    def tick(config, *, environ=None):
+        return "ran"
+    assert tick({}, {"SIGMA_UPKEEP_JOB": "1"})["closed"] is True                # the positional mapping is ignored
+
+
+def test_tmpl_note_unknown():
+    """#965: the template does not say every reason names the key; an unknown key far from a known one is positional."""
+    note = support.parse_template()["_upkeep"]
+    assert "the reason names the key." not in note
+    assert "unknown key" in note and "position" in note.split("THE GATE FAILS CLOSED")[1]
