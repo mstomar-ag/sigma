@@ -593,6 +593,30 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/drift_judge.py",
+      "function": "_acquire",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "off by default: runs only when decision_rubric.drift.enabled is true; writes only its own spend ledger and lock under the sigma state directory, atomically (tmp file then replace), pruned to a rolling window; never deletes user data",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/drift_judge.py",
+      "function": "_record",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "off by default: runs only when decision_rubric.drift.enabled is true; writes only its own spend ledger and lock under the sigma state directory, atomically (tmp file then replace), pruned to a rolling window; never deletes user data",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/drift_judge.py",
+      "function": "_record",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "off by default: runs only when decision_rubric.drift.enabled is true; writes only its own spend ledger and lock under the sigma state directory, atomically (tmp file then replace), pruned to a rolling window; never deletes user data",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/drift_watch.py",
       "function": "_stamp",
       "rule": "fs-write",
