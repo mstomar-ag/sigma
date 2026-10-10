@@ -16,7 +16,7 @@ from pathlib import Path
 
 RISK = {"gh-issue": "medium", "gh-pr": "medium", "gh-label": "medium",
         "gh-project": "medium", "gh-api-write": "medium", "graphql-mutation": "medium",
-        "git-push": "high", "git-destructive": "high", "fs-remove": "high",
+        "git-push": "high", "git-destructive": "high", "git-ref-write": "high", "fs-remove": "high",
         "fs-rmtree": "high", "fs-write": "medium", "network-post": "high"}
 _GH_ACTIONS = {"issue": {"close", "reopen", "edit", "comment", "create", "delete", "transfer", "lock"},
                "pr": {"create", "merge", "close", "comment", "review", "edit", "ready"},
@@ -230,8 +230,10 @@ def _shell_rules(line):
         if _push_destructive(words[2:]) or any(w.startswith((":", "+")) for w in words[2:]):
             return {"git-push", "git-destructive"}
         return {"git-push"}
-    if words[:2] == ["git", "update-ref"] and any(w in ("-d", "--delete") for w in words[2:]):
-        return {"git-destructive"}
+    if words[:2] == ["git", "update-ref"]:
+        if any(w in ("-d", "--delete") for w in words[2:]):
+            return {"git-destructive"}
+        return {"git-ref-write"}
     if words and words[0] == "git" and any(w in {"-D", "--hard", "remove", "rm", "tag"} for w in words[1:]):
         return {"git-destructive"}
     if words and words[0] == "rm" and any(w.startswith("-r") or w.startswith("-R") for w in words[1:]):
@@ -308,8 +310,11 @@ def _rules_for_call(node, values):
                 rules.add("git-destructive")
         if any(x in git for x in ("-d", "-D", "--hard", "remove", "rm", "tag", "--force", "--force-with-lease")) or any(x.startswith("--force-with-lease=") for x in git):
             rules.add("git-destructive")
-        if "update-ref" in git and any(x in ("-d", "--delete") for x in git):
-            rules.add("git-destructive")
+        if "update-ref" in git:
+            if any(x in ("-d", "--delete") for x in git):
+                rules.add("git-destructive")
+            else:
+                rules.add("git-ref-write")      # a plain update-ref creates or moves a ref (#960)
     if _is_gh_api_write_call(node.func):
         rules.add("gh-api-write")
     if name == "shutil.rmtree":

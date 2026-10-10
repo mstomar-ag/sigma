@@ -169,8 +169,6 @@ SCANNER_STAY_QUIET = [
      'run(cwd, ["git", "push", remote, name])'),
     ("fetch_plus_refspec_is_not_a_push", "prune", (),
      'run(cwd, ["git", "fetch", remote, "+refs/heads/*:refs/remotes/origin/*"])'),
-    ("update_ref_non_delete", "prune", (),
-     'run(cwd, ["update-ref", "refs/heads/x", "abc"])'),
     ("rest_method_equals_get", "prune", (),
      'run(cwd, ["gh", "api", "--method=GET", "x"])'),
     ("rest_attached_xget", "prune", (),
@@ -199,7 +197,7 @@ GH_API_KNOWN_LIMITS = [
 SHELL_STAY_QUIET = [
     ("sh_q_push_plain", "git push origin topic", {"git-push"}),
     ("sh_q_push_heads", "git push origin HEAD:refs/heads/x", {"git-push"}),
-    ("sh_q_update_ref_non_delete", "git update-ref refs/x abc", set()),
+    ("sh_q_update_ref_read_only_verify", "git rev-parse --verify refs/x", set()),
     ("sh_q_api_method_equals_get", "gh api --method=GET x", set()),
     ("sh_q_api_x_get", "gh api -X GET x", set()),
     ("sh_q_comment_line", "# git push origin --delete x", set()),
@@ -351,3 +349,52 @@ def test_gh_api_receiver_known_limits_are_pinned(tmp_path, lines):
     either gap is a conscious edit of this test, not a side effect: the case must be deleted or
     inverted here in the same change that closes it."""
     assert _findings(_module(), tmp_path, _land(*lines)) == []
+
+
+# =====================================================================================================
+# #960 -- a plain update-ref creates or moves a ref: it is a ref write, not a quiet lookalike
+# =====================================================================================================
+
+#: id, the one call; every id must give exactly the git-ref-write finding (nothing is held).
+UPDATE_REF_WRITES = [
+    ("plain_run", 'run(cwd, ["update-ref", "refs/heads/x", "abc"])'),
+    ("git_token", 'run(cwd, ["git", "update-ref", "refs/sigma/backup/x", "abc"])'),
+    ("runner", 'gitc(cwd, ["update-ref", "refs/sigma/backup/x", "abc"])'),
+    ("with_message", 'run(cwd, ["update-ref", "-m", "why", "refs/x", "abc"])'),
+    ("no_deref", 'run(cwd, ["update-ref", "--no-deref", "refs/x", "abc"])'),
+    ("create_only", 'run(cwd, ["update-ref", "refs/x", "abc", ""])'),
+]
+
+#: id, the one call; delete forms keep git-destructive and must NOT also be a ref write.
+UPDATE_REF_DELETES = [
+    ("short_d", 'run(cwd, ["update-ref", "-d", ref])'),
+    ("long_delete", 'gitc(cwd, ["git", "update-ref", "--delete", ref])'),
+]
+
+
+def test_plain_update_ref_is_a_ref_write(tmp_path):
+    module = _module()
+    misses = []
+    for case_id, call in UPDATE_REF_WRITES:
+        got = _findings(module, tmp_path, _prune(call))
+        if got != [NEW("prune", "git-ref-write")]:
+            misses.append((case_id, got))
+    assert not misses, misses
+
+
+def test_update_ref_deletes_are_not_also_ref_writes(tmp_path):
+    module = _module()
+    for case_id, call in UPDATE_REF_DELETES:
+        got = _findings(module, tmp_path, _prune(call))
+        assert got == [NEW("prune", "git-destructive")], (case_id, got)
+
+
+def test_shell_plain_update_ref_is_a_ref_write(tmp_path):
+    module = _module()
+    assert _shell_rules_of(module, tmp_path, "git update-ref refs/x abc") == {"git-ref-write"}
+    assert _shell_rules_of(module, tmp_path, "git update-ref -m why refs/x abc") == {"git-ref-write"}
+    assert _shell_rules_of(module, tmp_path, "git update-ref -d refs/x") == {"git-destructive"}
+
+
+def test_ref_write_has_a_risk_class():
+    assert _module().RISK["git-ref-write"] == "high"

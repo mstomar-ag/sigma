@@ -6,6 +6,7 @@ SCANNER BLIND SPOT (#895 slice 3a): the scan counts only literal `gh ...` argv. 
 
 | Path | Function | Rule | Count | Gate | Risk |
 |---|---|---|---:|---|---|
+| .sdlc/research/292-benchmark.py | main | git-ref-write | 1 | research benchmark script, run by hand against a temporary scratch repository it creates and removes; the update-ref only points a remote-tracking name inside that scratch repository | high |
 | evals/bench/arms/common.py | isolated_env | fs-write | 2 | operator-run harness only: refuses CI and background runs; touches only directories it created under an empty scratch root | medium |
 | evals/bench/arms/common.py | remove_tree | fs-rmtree | 2 | operator-run harness only: refuses CI and background runs; touches only directories it created under an empty scratch root; removes only a run, attempt or workdir child directory it was handed | high |
 | evals/bench/arms/matched.py | _replace_tree | fs-remove | 1 | operator-run harness only: refuses CI and background runs; touches only directories it created under an empty scratch root; replaces only the arm's own run workdir | high |

@@ -1,6 +1,14 @@
 {
   "entries": [
     {
+      "path": ".sdlc/research/292-benchmark.py",
+      "function": "main",
+      "rule": "git-ref-write",
+      "count": 1,
+      "gate": "research benchmark script, run by hand against a temporary scratch repository it creates and removes; the update-ref only points a remote-tracking name inside that scratch repository",
+      "risk": "high"
+    },
+    {
       "path": "evals/bench/arms/common.py",
       "function": "isolated_env",
       "rule": "fs-write",
