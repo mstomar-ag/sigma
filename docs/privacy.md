@@ -12,6 +12,7 @@ The checked-in evidence records scripted local and GitHub-mode onboarding captur
 | Configured webhook | notification payload | opt-in channel notification | `ledger.autowatch.channel_webhook_url` | not captured (opt-in; traced from `skills/sigma-loop/scripts/channel_notify.py:109`) |
 | SMTP server | configured notification | opt-in agent-death notification | `agent_watch.notify.email.enabled` | not captured (opt-in; traced from `skills/sigma-loop/scripts/agent_watch.py:94`) |
 | Model host process | prompt supplied by the host | explicitly invoked model session | host configuration | not captured (opt-in; traced from `skills/sigma-loop/scripts/autowatch.py:915`, `skills/sigma-loop/scripts/feature_judge.py:226`, and `skills/sigma-loop/scripts/reviewer.py:239`) |
+| Model host process (drift judge) | question and reference document text, only when the caller passes a model call | opt-in shadow-mode judgment | `decision_rubric.drift.enabled`, `drift.model`, `drift.spend_ceiling_usd_per_day` | not captured (off by default; no call without a model and a ceiling; see `skills/sigma-loop/scripts/drift_judge.py`) |
 
 ## What stays local
 
