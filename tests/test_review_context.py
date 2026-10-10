@@ -1403,3 +1403,58 @@ def test_an_unreadable_plan_on_disk_is_not_reported_as_no_plan():
             plan.chmod(0o644)
         assert "No plan for this goal" not in out
         assert "Full plan" in out and "0007-blue-button.md" in out
+
+
+# --- #993 (decision rubric slice 3): the `context.documents` key -------------------------------
+
+def _doc_brief(d, documents="__absent__", inline_max=None, files=None):
+    base, root = _repo(d)
+    for rel, body in (files or {}).items():
+        p = pathlib.Path(root) / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+    ctx = {}
+    if documents != "__absent__":
+        ctx["documents"] = documents
+    if inline_max is not None:
+        ctx["inline_max_bytes"] = inline_max
+    (pathlib.Path(base) / "config.json").write_text(json.dumps({"context": ctx} if ctx else {}),
+                                                    encoding="utf-8")
+    return _rc().brief(base, "a goal", "plan-review", repo_root=root)
+
+
+def test_absent_key_leaves_the_brief_identical():
+    with tempfile.TemporaryDirectory() as d:
+        plain = _doc_brief(d)
+    with tempfile.TemporaryDirectory() as d:
+        wrong_type = _doc_brief(d, documents="docs/x.md")      # not a list: ignored, as if absent
+    assert hashlib.sha256(plain.encode()).hexdigest() == hashlib.sha256(wrong_type.encode()).hexdigest()
+    assert "no documents" not in plain.lower() and "context.documents" not in plain
+    with tempfile.TemporaryDirectory() as d:
+        named = _doc_brief(d, documents=["docs/x.md"], files={"docs/x.md": "XBODY\n"})
+    assert named != plain                                       # red if the key is never read
+
+
+def test_path_escape_is_refused():
+    with tempfile.TemporaryDirectory() as d:
+        out = _doc_brief(d, documents=["../secret.md"])
+        assert "../secret.md" in out and "refused" in out.lower()
+
+
+def test_oversize_doc_becomes_a_pointer():
+    with tempfile.TemporaryDirectory() as d:
+        out = _doc_brief(d, documents=["docs/big.md"], inline_max=100,
+                         files={"docs/big.md": "BIGBODY " * 200})
+        assert "docs/big.md" in out and "BIGBODY" not in out and "read it" in out.lower()
+
+
+def test_third_doc_is_inlined():
+    with tempfile.TemporaryDirectory() as d:
+        out = _doc_brief(d, documents=["docs/third.md"], files={"docs/third.md": "THIRDBODY\n"})
+        assert "THIRDBODY" in out and "UI holds no business logic" in out   # both built-ins stay
+
+
+def test_no_documents_named_is_its_own_state():
+    with tempfile.TemporaryDirectory() as d:
+        out = _doc_brief(d, documents=[])
+        assert "no reference documents named" in out.lower()

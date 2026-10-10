@@ -102,6 +102,8 @@ You propose; the user owns the scope call.
   a lane-escalating signal. **`absent`** is a drop-in project — skip. **`unreachable`** is neither:
   record it in the dossier as an input you could not read, never as clear. The binding gate is still
   `sigma-plan-review` §4 — this is the early warning, not a second verdict.
+  Further reference documents a repo names under `context.documents` in its config also ride in the
+  reviewer brief; read those the brief points to.
 
 ## 5. Lane — size it from what you found
 Classify the goal, then **record the lane where this project's backlog actually lives**:
