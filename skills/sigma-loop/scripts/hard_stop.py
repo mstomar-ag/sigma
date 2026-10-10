@@ -210,7 +210,6 @@ def is_hardstop_kind(qkind, record, config):
 
 _FLAG_VALUE = re.compile(r"(?i)(?<!\S)(--?(?:token|password|passwd|secret|api[-_]?key|auth\w*|key|p)(?:[= ]|\s+))\S+")
 _ENV_PREFIX = re.compile(r"(?<!\S)([A-Za-z_][A-Za-z0-9_]*=)\S+")
-_FLAG_VALUE = re.compile(r"(?i)(--?(?:token|password|passwd|secret|api[-_]?key|auth\w*|key)(?:[= ]|\s+))\S+")
 _OPAQUE = re.compile(r"\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{16,}\b")
 
 
@@ -264,9 +263,6 @@ def _own_push(text, context, registry, config):
         except ValueError:
             return False
     return True
-    if not branch:
-            branch = _push_target(shlex.split(text))
-    return is_own(branch, registry, config)
 
 
 def classify(action_text, context, config):
@@ -316,8 +312,6 @@ def _classify(text, context, config):
         return Result(CANNOT_TELL, "detector-error", "")
     if own_result is not None:
         return own_result
-        if name == "rewrite_history" and _own_push(text, context, registry, config):
-            return Result(None, OWN_PATTERN_ID, _scrub_quote(span))
     try:
         shlex.split(text)
     except ValueError:

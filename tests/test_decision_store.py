@@ -89,7 +89,6 @@ def test_public_removes_free_text(tmp_path):
     text = (tmp_path / "decisions" / (rid + ".json")).read_text()
     assert "free text" not in text and "option a" not in text
     got = ds.get(tmp_path, rid, _cfg())
-    got = ds.get(tmp_path, rid)
     assert got["qkind"] == "scope" and got["how"] == "human" and "reason" not in got
 
 
@@ -97,7 +96,6 @@ def test_private_keeps_free_text(tmp_path):
     ds = _ds()
     rid = ds.append(tmp_path, _rec(), _cfg("private"), now=NOW)
     got = ds.get(tmp_path, rid, _cfg())
-    got = ds.get(tmp_path, rid)
     assert got["reason"] == "because of the free text" and got["choice"] == "option a"
 
 
@@ -123,9 +121,6 @@ def test_list_by_filters_and_survives_a_stale_index(tmp_path):
     assert len(ds.list_by(tmp_path, _cfg(), area="docs")) == 2
     assert len(ds.list_by(tmp_path, _cfg(), qkind="merge")) == 1
     assert len(ds.list_by(tmp_path, _cfg())) == 3
-    assert len(ds.list_by(tmp_path, area="docs")) == 2
-    assert len(ds.list_by(tmp_path, qkind="merge")) == 1
-    assert len(ds.list_by(tmp_path)) == 3
 
 
 def test_archive_folds_old_records(tmp_path):
@@ -138,8 +133,6 @@ def test_archive_folds_old_records(tmp_path):
     for rid in ids:
         assert ds.get(tmp_path, rid, _cfg())["qkind"] == "scope"
     assert len(ds.list_by(tmp_path, _cfg())) == 3
-        assert ds.get(tmp_path, rid)["qkind"] == "scope"
-    assert len(ds.list_by(tmp_path)) == 3
     assert ds.archive(tmp_path, 180, _cfg(), now=NOW) == 0
 
 

@@ -148,7 +148,6 @@ def _record_names(store):
     try:
         return sorted(n for n in os.listdir(store)
                       if n.endswith(".json") and not n.startswith("_") and not n.startswith(ARCHIVE_PREFIX))
-                      if n.endswith(".json") and not n.startswith("_") and not n.startswith("archive-"))
     except OSError:
         return []
 
@@ -156,7 +155,6 @@ def _record_names(store):
 def _archives(store):
     try:
         return sorted(n for n in os.listdir(store) if n.startswith(ARCHIVE_PREFIX) and n.endswith(".json"))
-        return sorted(n for n in os.listdir(store) if n.startswith("archive-") and n.endswith(".json"))
     except OSError:
         return []
 
@@ -177,8 +175,6 @@ def _all(sdlc_dir, config):
 def get(sdlc_dir, rid, config):
     """One record by id, or None; None as well when the part is closed."""
     if not enabled(config) or not isinstance(rid, str) or not _SAFE.match(rid):
-def get(sdlc_dir, rid, config=None):
-    if not isinstance(rid, str) or not _SAFE.match(rid):
         return None
     store = _store(sdlc_dir, config)
     rec = _read(os.path.join(store, rid + ".json"))
@@ -195,8 +191,6 @@ def list_by(sdlc_dir, config, qkind=None, area=None):
     """Records matching the filters. Uses the index when it names exactly the files on disk; else scans. Empty when the part is closed."""
     if not enabled(config):
         return []
-def list_by(sdlc_dir, qkind=None, area=None, config=None):
-    """Records matching the filters. Uses the index when it names exactly the files on disk; else scans."""
     store = _store(sdlc_dir, config)
     idx = _read(os.path.join(store, _INDEX))
     recs = None
@@ -252,8 +246,6 @@ def _publish(path, text):
 def reindex(sdlc_dir, config):
     """Rebuild the uncommitted index; {"indexed": n} or {"skipped": reason}. Writes nothing when closed."""
     if not enabled(config):
-def reindex(sdlc_dir, config=None):
-    if config is not None and not enabled(config):
         return {"skipped": "closed"}
     store = _store(sdlc_dir, config)
     if not os.path.isdir(store):
@@ -306,10 +298,6 @@ def archive(sdlc_dir, older_than_days, config, now=None):
                 stem = n[:-5]
                 kept[stem] = dict(rec, id=stem)
             _publish(path, json.dumps({"records": [kept[k] for k in sorted(kept, key=str)]}, sort_keys=True, indent=1) + "\n")
-            path = os.path.join(store, "archive-%d.json" % year)
-            for _, rec in items:
-                kept[rec.get("id")] = rec
-            _publish(path, json.dumps({"records": [kept[k] for k in sorted(kept)]}, sort_keys=True, indent=1) + "\n")
             for n, _ in items:
                 os.unlink(os.path.join(store, n))
                 folded += 1
