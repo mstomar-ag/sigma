@@ -84,7 +84,7 @@ LIBRARY_ONLY = {
     "feature_upkeep_level2",
     "feature_upkeep_sched",
     "hard_stop",
-    "ledger_pointer", "autonomy",
+    "ledger_pointer", "autonomy", "rulebook",
 }
 
 

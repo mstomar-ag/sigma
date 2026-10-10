@@ -3327,6 +3327,22 @@
       "count": 1,
       "gate": "decision_rubric.autonomy.enabled is exactly true; removes only watch files in the autonomy folder older than autonomy.watch.retention_days by embedded time; vetoes and links are never touched",
       "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/rulebook.py",
+      "function": "_write",
+      "rule": "fs-remove",
+      "count": 2,
+      "gate": "rulebook part enabled; removes only the temp file this call created beside the rulebook file after a failed write",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/rulebook.py",
+      "function": "_write",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "decision_rubric.rulebook.enabled is exactly true; writes the rulebook file by temp file and atomic replace; propose adds a proposed rule and approve (owner only) seals one; a link folder is refused",
+      "risk": "medium"
     }
   ]
 }
