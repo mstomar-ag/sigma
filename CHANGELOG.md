@@ -9,6 +9,11 @@ All notable changes to Sigma are recorded here, newest first.
   enforcement table). It refuses a landing while another repository's half of the unit has not landed,
   and when the lookup cannot answer. Read-only, inert while the upkeep gate is closed, and nothing
   calls it yet.
+- **Upkeep part B, slice 3: the proof gate's checks (#944).** A new library, `conflict_proof.py`, holds the checks that
+  decide whether a machine-resolved unit rebase can be trusted, as pure functions that each return named refusals:
+  a scoped conflict-marker and whitespace scan, a stage-0 baseline and per-path line-multiset comparison, commit
+  pairing by stop record and authorship key that parks on ambiguity, and a fail-closed Python test counter. Nothing
+  calls it yet, so nothing changes while the upkeep gate is closed.
 - **Upkeep part A, slice 3: drift measure, per-unit state and the due rule (#919).** Two new
   library modules, `feature_upkeep_drift.py` and `feature_upkeep_state.py`. The first counts
   pull-request arrivals on a base branch and on a feature branch by author date over a bounded

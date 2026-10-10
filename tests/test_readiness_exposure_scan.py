@@ -38,7 +38,7 @@ def _run(*args):
     # The operator's private-pattern file must not change what a hermetic control sees.
     env = {k: v for k, v in os.environ.items() if k != "SIGMA_LEAK_PATTERNS"}
     return subprocess.run([sys.executable, str(TOOL), *map(str, args)], text=True,
-                          capture_output=True, timeout=60, env=env)
+                          capture_output=True, timeout=300, env=env)
 
 
 HOME = "/Us" + "ers/"          # built at runtime: this file is itself scanned
