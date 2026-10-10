@@ -230,7 +230,7 @@ LANDING HELPERS (#931): `merge_pr_pinned` and `create_pr_nondraft` are in the sc
 | skills/sigma-loop/scripts/work.py | _delete_remote_branch | gh-api-write | 1 | work.enabled; merged PR cleanup; non-empty goal prefix; never base/default branch | high |
 | skills/sigma-loop/scripts/work.py | _repair_review_post_effects | fs-write | 1 | ungated | medium |
 | skills/sigma-loop/scripts/work.py | _save | fs-write | 2 | ungated | medium |
-| skills/sigma-loop/scripts/work.py | _try_union_changelog | fs-write | 1 | ungated | medium |
+| skills/sigma-loop/scripts/work.py | _try_union_changelog | fs-write | 1 | CHANGELOG-only provably lossless conflicts; the heading-aware placement runs only under upkeep.enabled with conflicts.resolve mechanical or agent, else the legacy union | medium |
 | skills/sigma-loop/scripts/work.py | _write_merge_delivery | fs-remove | 2 | ungated | high |
 | skills/sigma-loop/scripts/work.py | _write_merge_delivery | fs-write | 1 | ungated | medium |
 | skills/sigma-loop/scripts/work.py | close_design | gh-pr | 1 | ungated | high |

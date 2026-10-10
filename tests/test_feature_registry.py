@@ -1385,6 +1385,7 @@ _FOLDS = {
     ("feature_rebase", "worktree_path"),      # #1673 — the throwaway upkeep checkout
     ("feature_doc", "doc_path"),              # #1673 — the `<name>.md` page a person opens
     ("feature_upkeep_state", "unit_state_path"),    # #919 — the per-unit upkeep state file
+    ("feature_upkeep_resolution", "store_path"),            # #945 — the per-resolution record, unit folded after the name guard
 }
 
 #: Derived keys that do NOT fold — A RECORD OF OPEN DEFECTS, never a design decision. When one is
@@ -1431,6 +1432,8 @@ _NO_UNIT_NAME = {
     ("feature_sync", "_load"),
     ("feature_upkeep_drift", "_load"),        # #919: the sibling importer, once per module
     ("feature_upkeep_state", "_load"),        # #919: the sibling importer, once per module
+    ("feature_upkeep_resolution", "_load"),           # #945: the sibling importer, once per module
+    ("feature_upkeep_resolution", "prune"),   # #945: a directory sweep keyed by age; no unit name reaches it
     ("feature_propagate", "record_path"),     # keyed by GOAL, not by unit
     ("feature_rebase", "rebase_stopped"),     # takes a path that is already built
     # #278: keyed by a git BRANCH name (which may be a goal's `sdlc/<n>`), never a unit name; its
@@ -1637,7 +1640,7 @@ def test_every_classified_unit_address_still_folds_the_way_it_is_recorded(tmp_pa
     builders = _address_builders()
     root = str(tmp_path / ".sdlc")
     (tmp_path / ".sdlc" / "features").mkdir(parents=True)
-    first = {"features_dir": pathlib.Path(root) / "features", "sdlc_dir": root}
+    first = {"features_dir": pathlib.Path(root) / "features", "sdlc_dir": root, "run_id": "0123456789ab"}
 
     def address(fn, unit):
         params = list(inspect.signature(fn).parameters)

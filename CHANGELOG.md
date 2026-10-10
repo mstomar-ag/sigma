@@ -14,6 +14,23 @@ All notable changes to Sigma are recorded here, newest first.
   a scoped conflict-marker and whitespace scan, a stage-0 baseline and per-path line-multiset comparison, commit
   pairing by stop record and authorship key that parks on ambiguity, and a fail-closed Python test counter. Nothing
   calls it yet, so nothing changes while the upkeep gate is closed.
+- **Upkeep part B, slice 4: the stamp and the resolution record (#945).** A new library,
+  `feature_upkeep_resolution.py`, with no caller yet. The stamp is one lowercase body trailer
+  (`sigma-resolution: <level> <run id>`) built after a blank line so the pull-request arrival
+  classifier still reads the title, and it carries no number, no closing keyword and no registered
+  marker. The stamping commit is made at the stop with the original author name, email and date
+  kept (a plain commit loses them; an authorship comparison refuses it), and `rebase --continue`
+  keeps it unchanged. Measured: the continuation runs only two commit hooks and never signs, and
+  the engine commit runs the same two. The record store is atomic, refuses symlinks and is pruned
+  by age; one unaddressed ledger note and an optional finding comment follow. Off by default.
+- **Upkeep part B, slice 2: a heading-aware CHANGELOG union, off by default (#943).** `work.py` gains
+  `_union_headed`, a sibling of `_union_diff3` (left byte-identical): on a conflict where both sides
+  only inserted, an entry added under `## Unreleased` stays under it when the base side cut a version
+  heading at the same point, instead of landing under the version just cut. Every other shape (a
+  bracketed or unknown heading, a link footer, a heading on the unit's side) parks as before.
+  `work.rebase` reads the upkeep gate and passes the sibling to `_union_rescue` only while
+  `upkeep.enabled` is true and `conflicts.resolve` is `mechanical` or `agent`; with the gate closed the
+  in-pass goal replay, `ensure_fresh` and the merge gate's BEHIND remedy behave exactly as before.
 - **Upkeep part A, slice 3: drift measure, per-unit state and the due rule (#919).** Two new
   library modules, `feature_upkeep_drift.py` and `feature_upkeep_state.py`. The first counts
   pull-request arrivals on a base branch and on a feature branch by author date over a bounded
@@ -29,6 +46,12 @@ All notable changes to Sigma are recorded here, newest first.
   unit-completion observer keys a landing by the branch like the rebase landing helper, so one landing
   is recorded once; a landing already recorded under the bare unit key keeps that key. With the gate
   closed nothing changes.
+- **Shared "landed" predicate (#930, upkeep part C, slice 1).** New feature_landed.py: one function that says whether a
+  unit's tip is landed on a base, as a structured verdict (LANDED, NOT_LANDED or UNKNOWN, with how, the base sha, the
+  pull request and the merged head). Ancestry is checked first through an exit-code-preserving bounded runner, then a
+  separate head-aware merged-pull-request read (paged, bounded, truncation never read as "none"); anything it cannot
+  prove is UNKNOWN. Also a repository-slug helper that checks the remote names the same repository. The drift watcher
+  adds an optional landed field only while the upkeep gate is open; with the gate closed nothing changes.
 - **GitHub write plumbing in gh_api (#931, upkeep part C, slice 2).** New REST-only helpers with no caller yet: a pinned merge that requires an explicit method, repository and 40-hex head pin, commit parents, branch rules, repository settings, a typed non-draft pull request create, and a bounded runner that keeps the exit code and failure class. The landing writer joins the receipt allowlist; the doctor row and the cloud-sessions page name the degraded features. Inert unless the upkeep gate is open.
 
 

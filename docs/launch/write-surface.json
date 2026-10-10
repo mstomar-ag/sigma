@@ -745,6 +745,22 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_resolution.py",
+      "function": "post_comment",
+      "rule": "gh-api-write",
+      "count": 1,
+      "gate": "upkeep.enabled and a finding the engine filed; integer finding id and explicit owner/name repository; text passes the wording check; one comment, never edited or closed here",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_resolution.py",
+      "function": "prune",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "upkeep.enabled caller passes keep_days; removes only record-shaped files in the engine's own resolutions store, never a symlink, never outside it",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/gh_api.py",
       "function": "_default_run",
       "rule": "gh-api-write",
@@ -1917,7 +1933,7 @@
       "function": "_try_union_changelog",
       "rule": "fs-write",
       "count": 1,
-      "gate": "ungated",
+      "gate": "CHANGELOG-only provably lossless conflicts; the heading-aware placement runs only under upkeep.enabled with conflicts.resolve mechanical or agent, else the legacy union",
       "risk": "medium"
     },
     {

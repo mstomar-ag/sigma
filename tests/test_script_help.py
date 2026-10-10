@@ -63,6 +63,7 @@ LIBRARY_ONLY = {
     "flake_check", "frontmatter", "gh_api", "gh_session", "goal_size", "mutation",
     "scrub", "sources", "state", "tamper_scan", "timing_store", "watch_classify", "witness",
     "bounded_run",
+    "feature_landed",
     "conflict_state",
     "conflict_proof",
     "unattended_git",
@@ -70,6 +71,7 @@ LIBRARY_ONLY = {
     "codex_runtime",
     "feature_upkeep_drift",
     "feature_upkeep_state",
+    "feature_upkeep_resolution",
 }
 
 
