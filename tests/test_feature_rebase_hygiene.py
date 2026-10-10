@@ -366,6 +366,14 @@ def test_template_carries_the_conflicts_keys_and_a_note():
     assert json.dumps(cfg["upkeep"]).count("resolve") == 1
 
 
+def test_upkeep_note_describes_what_runs_today():
+    note = support.template_cfg()["_upkeep"]
+    assert "NOTHING ELSE RUNS" not in note and "no schedule or resolver exists" not in note
+    assert "will be needed" not in note and "a later release adds" not in note
+    assert "feature_upkeep_sched.py" in note and "once per ledger-watcher tick" in note
+    assert "_upkeep_conflicts" in note and "SIGMA_UPKEEP_JOB" in note and "no credential route or cap exists yet" in note
+
+
 def test_no_new_entry_point_launches_anything_while_closed(tmp_path):
     """The recording trap over the new read-only entry points under a closed gate: the gate-reading functions launch
     no process, touch no network and write no file."""
