@@ -387,7 +387,8 @@ _NOT_MARKERS = ("sigma-doctor", "sigma-doctor:", "sigma-init", "sigma-init:", "s
                 "sigma-receipt-snapshot-",
                 "sigma:spend-approved", "sigma:spend-approval-used",   # new with #722: no legacy spelling
                 "sigma-resolution",   # new with #945: a commit-body trailer key, lowercase, no legacy spelling
-                "sigma-claim:")   # new with #858: no legacy spelling
+                "sigma-claim:",   # new with #858: no legacy spelling
+                "sigma-upkeep-")   # new with #1085: a tempfile prefix for the replay worktree parent, not a marker
 
 
 def test_every_marker_literal_is_registered_with_the_helper(legacy):
