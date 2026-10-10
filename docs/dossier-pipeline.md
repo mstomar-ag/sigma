@@ -830,7 +830,7 @@ compile_plan.py .sdlc --plan .sdlc/state/goal-review/<n>.plan.json --actionable 
 ```
 
 `--actionable` because slices from a CONFIRMED design should be immediately pickable (`sdlc:goal`,
-not `sdlc:needs-confirmation`). **`--json` because every step downstream is written against
+not the legacy `sdlc:needs-confirmation`). **`--json` because every step downstream is written against
 `report["epic"]` and `report["issues"]`, and without it this CLI emits neither**: stdout carries
 prose in dependency-topological rather than plan order. With it, stdout is exactly one JSON object,
 so reading it **by key** makes the ordering irrelevant. The flag does not change stderr — **read the
@@ -960,7 +960,7 @@ test, a *blocking* item is one where a named slice cannot be correctly scoped or
 scope — not its schedule — is what is undecided. Two consequences follow, and both are mechanical:
 
 - **Anything §7d-iii compiles is immediately pickable.** `--actionable` files children as
-  `sdlc:goal`, not `sdlc:needs-confirmation`, so a slice whose boundary is still a guess is picked
+  `sdlc:goal`, not the legacy `sdlc:needs-confirmation`, so a slice whose boundary is still a guess is picked
   and implemented before the guess is settled. Withdrawing that costs a closed ticket, a reverted
   branch and a board card; withdrawing a comment costs nothing.
 - **There is no shape in which the plan could carry the item forward.** A `blocked_by` key names a

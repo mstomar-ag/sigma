@@ -301,7 +301,7 @@ unit costs **3 gh calls** without the directory and **15** with it.
 - **`declare` needs a source with a label surface.** `LocalSource` has none — there is no label index
   over goal files — so in local-goals mode it degrades to `not-supported` and says so. The body
   marker still landed, which is the half that matters locally.
-- **Issues are armed or parked at filing.** (Triage off: `sdlc:needs-confirmation`.) Step 9 decides the rest.
+- **Issues are armed or parked at filing.** (Triage off: the legacy `sdlc:needs-confirmation`.) Step 9 decides the rest.
 - **One unit per run.** Opening a second unit is a second run; the flow deliberately has no batch
   mode, because every step of it is a decision a person is making.
 - **This skill does not merge anything.** Nothing merges a feature branch (§15) — landing the unit is

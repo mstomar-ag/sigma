@@ -159,7 +159,7 @@ about whether the sentence falls past the cap.
       > .sdlc/state/goal-review/<n>.report.json
   ```
   `--actionable` because these slices came out of a CONFIRMED design and should be immediately
-  pickable (`sdlc:goal`, not `sdlc:needs-confirmation`). `--json` because every step below is
+  pickable (`sdlc:goal`, not the legacy `sdlc:needs-confirmation`). `--json` because every step below is
   written against `report["epic"]` and `report["issues"]`, and without it this CLI emits neither:
   stdout carries prose (`epic: #2`, `created 's1' as #3`) in dependency-topological rather than plan
   order, and the warnings go to stderr interleaved with `FAILED`/`SKIPPED` lines. With `--json`,

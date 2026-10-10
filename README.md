@@ -413,7 +413,7 @@ Every option Sigma provides, at a glance. Rows that name a control link to [docs
 | **Velocity calibration** | Size work from real git throughput, not "this feels like weeks" | `/sigma-velocity` |
 | **Proactive research scout** | Sweep the backlog for new SOTA, dedup, write a ranked digest (dry-run) | `/sigma-radar` |
 | **Campaign planner & drain coordinator** | Triage the backlog, detect blockers, compile a dependency-sequenced drain plan, and enact it — then start the loop now or schedule later | `/sigma-triage` |
-| **Human approval gate, in one transition** | Approve an AI-filed issue with one atomic label swap (and the board card with it) instead of two UI edits that can half-land; lists what is already stuck — awaiting approval, half-promoted, or blocking other work while pickable by nothing | `/sigma-promote` |
+| **Approve a stuck issue in one transition** | Approve an issue with one atomic label swap (and the board card with it) instead of two UI edits that can half-land; moves leftovers of the retired confirmation queue off it; lists what is already stuck — legacy-labelled, half-promoted, or blocking other work while pickable by nothing | `/sigma-promote` |
 | **Guided unparking** | A park is a question nobody answered. Asks it in plain language, records the answers **on the issue** (body and comment, fenced so they can't read as a new blocker), then unparks or keeps it parked with the reasoning attached | `/sigma-unpark` |
 | **Model auto-selection** | Predict the tier a goal deserves (haiku/sonnet/opus/fable); Claude accepts these as model aliases, while Codex resolves them to an available host model and reasoning effort | `/sigma-model`, `model_selection: auto` |
 | **Quality-drift gate** | A behavioral corpus scored on every change; the build fails if a discipline signal regresses | `evals/run.py` · [enforcement](docs/enforcement.md) |
@@ -555,8 +555,9 @@ the same thing as the matched issue.
 6. **Plan** — draft each issue (title, a body grounded in step 2's real file/module names, a
    `P0`–`P4` priority, `blocked_by` edges between siblings), decide whether an epic wrapper is
    warranted, show you the draft, and — once you confirm — compile it into real issues (or real
-   local goal files in local-goals mode). Every issue files as `sdlc:needs-confirmation` at this step:
-   queued and queryable, but not yet something the loop will auto-pick.
+   local goal files in local-goals mode). Triage then decides each issue at this step: it is
+   armed (`sdlc:goal` at its plan priority) or parked with a declared question kind. With
+   `ai_filed.triage.enabled` false the legacy `sdlc:needs-confirmation` label is written instead.
 7. **Resolve assignment and the execution path** — who owns this, and does it start now or wait?
 
 **Dedup, and what counts as a genuine question.** Every backlog hit is banded by score: below the
@@ -588,7 +589,7 @@ plan unassigned.
 now" step already uses:
 
 - **File-and-stop** — apply the assignment decision (if any), record it, stop. The issues stay
-  exactly as step 6 left them (`sdlc:needs-confirmation`) — nothing else happens.
+  exactly as step 6 left them (armed or parked; the legacy `sdlc:needs-confirmation` only when triage is off) — nothing else happens.
 - **Start now, handed off** — promotes every issue to `sdlc:goal`, computes the dependency-ordered
   wave schedule, and posts a comment on the plan's anchor issue (the epic, or the first issue in
   dependency order) marking the hand-off starting point.
@@ -799,7 +800,7 @@ confusing. Each kind answers a different question, and only the first decides wh
 
 | Kind | Labels | Answers |
 |---|---|---|
-| **Membership** — at most one at a time, decides eligibility | `sdlc:goal` (in the world), `sdlc:parked` (a human's exit), `sdlc:needs-confirmation` (not admitted yet) | *is this Sigma's, and can it be picked?* |
+| **Membership** — at most one at a time, decides eligibility | `sdlc:goal` (in the world), `sdlc:parked` (a human's exit); the legacy `sdlc:needs-confirmation` (retired, inert) is never written unless triage is off | *is this Sigma's, and can it be picked?* |
 | **Overlay** — orthogonal, additive, rides *alongside* `sdlc:goal` | `sdlc:in-progress`, `sdlc:blocked`, `sdlc:blocking` | *what is happening to it right now?* |
 | **Annotation** — descriptive, never affects picking | `sdlc:followup`, `sdlc:blocking`, `sdlc:dependency` | *where did this come from, what does it hold up?* |
 
@@ -810,7 +811,7 @@ The rule in one line: **anything waiting to be *picked* carries `sdlc:goal`; any
    waiting to be PICKED                    waiting for a HUMAN
    ────────────────────                    ───────────────────
    sdlc:goal                               sdlc:parked              (alone)
-   sdlc:goal + sdlc:in-progress            sdlc:needs-confirmation  (alone)
+   sdlc:goal + sdlc:in-progress
    sdlc:goal + sdlc:blocked
    sdlc:goal + sdlc:blocking
 ```
@@ -845,7 +846,7 @@ Three things worth knowing, because each of them surprises somebody:
   and are surfaced for a person, never adopted.
 - **`sdlc:followup` is provenance, not a status.** It is stamped on every issue Sigma files
   itself and never removed, so it answers "did a person ask for this, or did the loop find it?"
-  after `sdlc:needs-confirmation` is long gone. Most goals on a mature board carry it — treating it
+  after the legacy `sdlc:needs-confirmation` is long gone. Most goals on a mature board carry it — treating it
   as "needs review" would freeze the backlog. Its one machine use is the reconciler's census, which
   needs anchors like this to enumerate managed issues at all (a query can never return an issue
   whose defect *is* a missing label).
@@ -857,11 +858,12 @@ transition rather than two edits in the GitHub UI that can half-land:
 
 | You want to… | Run | What it does |
 |---|---|---|
-| approve an AI-filed issue | **`/sigma-promote`** | removes `sdlc:needs-confirmation`, adds `sdlc:goal`, moves the card to `Ready` — one swap |
+| approve a stuck issue, or migrate leftovers of the retired queue | **`/sigma-promote`** | adds `sdlc:goal`, removes any legacy `sdlc:needs-confirmation`, moves the card to `Ready` — one swap |
 | get a parked goal moving again | **`/sigma-unpark`** | asks what is actually blocking, records the answers **on the issue**, then unparks or keeps it parked with the reasoning attached |
 
-**The approval gesture is removing `sdlc:needs-confirmation`**, not adding `sdlc:goal`. Doing the
-intuitive thing by hand leaves an issue carrying both, which is not a state the model names —
+There is no confirmation queue: triage arms or parks at filing, and a leftover legacy label is moved
+off by `/sigma-promote migrate-confirmation`. Adding `sdlc:goal` by hand beside such a label leaves
+an issue carrying both, which is not a state the model names —
 `/sigma-promote list` has a `drift` bucket that finds any issue already in it, and a `deadlocked`
 bucket for the unreachable blockers described above.
 
@@ -880,16 +882,16 @@ each named blocker is classified and acted on:
 | The blocker is… | What happens |
 |---|---|
 | already `sdlc:goal` | nothing — it is in the queue, and `blocking_priority_override` sorts it first |
-| **Sigma's own** unapproved follow-up (`sdlc:followup` + `sdlc:needs-confirmation`) | **promoted** — it gets `sdlc:goal` and a comment naming the goal it unblocks |
+| **Sigma's own** legacy-held follow-up (`sdlc:followup` + the legacy `sdlc:needs-confirmation`) | **promoted** — it gets `sdlc:goal` and a comment naming the goal it unblocks |
 | assigned to someone else | **routed** — granted membership and recorded in the ledger for its owner |
 | a proposal a **human** filed | left alone — that is a real decision; `/sigma-promote` is the route |
 | parked | left alone — a park is human-owned; `/sigma-unpark` is the route |
 | a plain third-party issue | surfaced, never adopted — it was never Sigma's to work |
 
-Promoting Sigma's own follow-up is **not** bypassing the approval gate. That gate exists to stop
-*speculative* AI-filed work from consuming the backlog; an issue that real, already-approved work is
-stalled behind is by definition not speculative. And the label pair is decisive: `sdlc:followup`
-means Sigma filed it, `sdlc:needs-confirmation` means **no human has ever ruled on it**. When a
+Promoting Sigma's own follow-up does not bypass triage: the deny-list still applies, and an issue
+that real, already-approved work is stalled behind is by definition not speculative. The label pair
+is decisive: `sdlc:followup` means Sigma filed it, the legacy `sdlc:needs-confirmation` means **no
+human has ever ruled on it**. When a
 person filed the proposal themselves, `sdlc:followup` is absent and it is left alone.
 
 The comment that follows names each blocker and what happened to it, so a block is never a bare
@@ -1018,16 +1020,16 @@ to match an existing board).
 - **`"status"`** (the default, once the board has a `Ready` option) — **labels decide ELIGIBILITY,
   the board decides ORDER.** A card is picked only if it is in `Ready` *and* its issue carries
   `goal_label` *and* carries no not-eligible label (`sdlc:parked`, `sdlc:blocked`,
-  `sdlc:needs-confirmation`). Among the cards that qualify, board position still sets the order, so
+  the legacy `sdlc:needs-confirmation`). Among the cards that qualify, board position still sets the order, so
   drag-to-prioritise works exactly as it always has. A card anywhere other than `Ready` — `In
   Progress`, `QC`, `Done`, `Blocked` — is *structurally* un-pickable, not merely unlikely.
   A `Ready` card that is skipped for ineligibility says so on stderr, naming the issue and the
   reason, so a silent no-pick never has to be diagnosed by guesswork.
   > Before the label model was reworked (under the plugin's previous name), this lane decided eligibility entirely on its own, which meant the label model was
   > not merely bypassed on a board — it was *inverted*: a `Ready` card carrying `sdlc:parked`, or
-  > `sdlc:needs-confirmation`, or **no labels at all**, was picked, while a correctly-labelled
-  > `sdlc:goal` card sitting in `Blocked` was not. `sdlc:needs-confirmation` — the whole
-  > AI-filed-awaits-a-human gate — was decoration on any board-backed repo.
+  > the old `sdlc:needs-confirmation`, or **no labels at all**, was picked, while a correctly-labelled
+  > `sdlc:goal` card sitting in `Blocked` was not. That old label — then the AI-filed-awaits-a-human
+  > gate — was decoration on any board-backed repo.
   > **Upgrade note:** dragging a card into `Ready` is no longer sufficient on its own; the issue
   > must also carry `goal_label`.
 - **`"label"`** (also what a repo silently runs on if its board has no `Ready` option, or
@@ -1035,7 +1037,7 @@ to match an existing board).
   to `Blocked` looks exactly like a guard; it is not one. Only the label queue's own exclusions —
   `parked_label` (default `sdlc:parked`), `in_progress_label` (default `sdlc:in-progress`),
   `sdlc:blocked` (the always-on state `mark_blocked` writes — no config needed),
-  `sdlc:needs-confirmation` (the approval gate, excluded here so both queue paths
+  the legacy `sdlc:needs-confirmation` (still excluded here so both queue paths
   agree), and the optional human-set `blocked_label` (unset by default — see
   `discovery.github.blocked_label`) — keep an issue out of this queue; a board column's name plays
   no part in it. The `sdlc:blocked` entry is load-bearing: a blocked goal KEEPS
@@ -1468,13 +1470,12 @@ Every axis is a **required** value flag — `--queue actionable|queued`, `--assi
 same-area|cross-area`, `--blocks yes|no` — so a caller can never silently get the wrong routing; a
 missing or misspelled value is a hard usage error, nothing written.
 
-**On an autonomous or overnight run, `--queue actionable` is the default posture.** It files the
-issue assigned *and* labelled `sdlc:goal`, so it joins the backlog the moment it is filed — the loop
-drains it later in the same run, in dependency order (that is what `--blocks` decides), or the
-assignee or a blocked teammate picks it up straight away. Keep `--queue queued` for findings that
-genuinely need a human decision first: a queued issue has no `sdlc:goal` label, so `next_pending`
-cannot see it. File a whole night's findings as `queued` and you wake up to a pile nothing can act
-on. `--blocks yes` writes the same
+**On an autonomous or overnight run, `--queue queued` is the default posture:** triage decides, arming the
+issue at a low bucket priority (`sdlc:goal`, always below a human-filed P1) or parking it with a declared
+question kind. Use `--queue actionable` only for a genuine blocking dependency (`--blocks yes`) or work a human
+asked for by name in this session: it still runs the deny-list, but arms at most as urgent as the bucket.
+With `ai_filed.triage.enabled` false the old rule returns and `queued` withholds `sdlc:goal`, so
+`next_pending` cannot see it. `--blocks yes` writes the same
 machine-readable `**Blocked by:** #N` marker `handoff.py open` does; `--blocks no` files and links
 the issue without parking anything — a related finding should never auto-park unrelated work.
 `handoff.py open` is a thin wrapper over this same machinery (`--assignee cross-area --blocks yes`,

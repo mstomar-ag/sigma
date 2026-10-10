@@ -27,7 +27,8 @@ labels — the only ones Sigma creates. For `priority:*`, `model:*` and your own
 │  MEMBERSHIP  — at most ONE of these. Decides whether it can be picked.   │
 │                                                                          │
 │    sdlc:goal                 in Sigma's world; eligible              │
-│    sdlc:needs-confirmation   AI-filed; not admitted until a human says   │
+│    sdlc:needs-confirmation   LEGACY: retired queue; written only when    │
+│                              triage is off                               │
 │    sdlc:parked               the EXIT — a human's permanent hold         │
 └─────────────────────────────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -51,7 +52,7 @@ labels — the only ones Sigma creates. For `priority:*`, `model:*` and your own
      IN SIGMA'S WORLD (carries membership)      OUT OF IT (stands alone)
      ─────────────────────────────────────────      ────────────────────────
      sdlc:goal                                      sdlc:parked
-     sdlc:goal + sdlc:in-progress                   sdlc:needs-confirmation
+     sdlc:goal + sdlc:in-progress                   (legacy: sdlc:needs-confirmation)
      sdlc:goal + sdlc:blocked
      sdlc:goal + sdlc:needs-label
      sdlc:goal + sdlc:needs-unit
@@ -71,8 +72,9 @@ overlay decides that it is not pickable *yet*. It keeps membership because the l
 automatically the moment the label exists — nobody has to remember it, and no human gesture undoes
 it. **Do not "tidy" it into standing alone**: dropping `sdlc:goal` would make it findable only by
 whichever query happens to ask for the overlay, which is exactly the orphan class §4a is about.
-`sdlc:parked` and `sdlc:needs-confirmation` stand alone precisely because the opposite is true of
-them — nothing automatic ever brings them back, so they belong in a person's review queue instead.
+`sdlc:parked` stands alone precisely because the opposite is true of it — nothing automatic ever
+brings it back, so it belongs in a person's review queue instead. The retired `sdlc:needs-confirmation`
+stood alone the same way; it is legacy now, and a leftover is moved off by `/sigma-promote`. A leftover that also carries `sdlc:goal` is routed by `blockers.classify` so the label is stripped and the issue enters the queue.
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  ANNOTATIONS — descriptive only. Never affect what gets picked.          │
 │                                                                          │
@@ -196,9 +198,9 @@ And it gets worse, because the two halves interlock:
                         deadlock — neither side moves
 ```
 
-The commonest way in is completely ordinary: Sigma files a follow-up as *not immediately
-actionable*, so it carries `sdlc:needs-confirmation` and deliberately no `sdlc:goal` — and later,
-something declares itself blocked by it.
+The commonest way in is old state: a follow-up filed under the retired confirmation queue still carries
+the legacy `sdlc:needs-confirmation` and no `sdlc:goal` — and later, something declares itself blocked
+by it. Triage now arms or parks at filing, so new ones do not arrive this way.
 
 **What we do about it: resolve it, not just report it.** When a block is recorded — whether
 Sigma filed the blocker or a human typed `Blocked by #N` — every named blocker is classified and
@@ -208,8 +210,8 @@ acted on:
    the blocker is…                             what happens
    ───────────────────────────────────────     ─────────────────────────────────────────
    already sdlc:goal                       →   nothing; it is already in the queue
-   Sigma's OWN unapproved follow-up     →   PROMOTED — gets sdlc:goal, comment says why
-     (sdlc:followup + sdlc:needs-confirm)
+   Sigma's OWN legacy-held follow-up    →   PROMOTED — gets sdlc:goal, comment says why
+     (sdlc:followup + legacy needs-confirm)
    assigned to someone else                 →   ROUTED — membership + a ledger entry for them
    a proposal a HUMAN filed                 →   sdlc:blocking only — that is a real decision
    parked                                   →   sdlc:blocking only — a park is human domain
@@ -221,11 +223,11 @@ recorded, and the sweep that derives `sdlc:blocking` from live "Blocked by #N" r
 that label goes on, membership goes with it — except in the three rows above, where the issue is
 waiting on a person and Sigma must not put it in the queue behind their back.
 
-**Is promoting Sigma's own follow-up cheating the approval gate?** No — and the reasoning is
-worth having ready, because it is the obvious objection. The gate exists to stop *speculative*
+**Is promoting Sigma's own follow-up skipping a ruling?** No — and the reasoning is
+worth having ready, because it is the obvious objection. The old queue existed to stop *speculative*
 AI-filed work from consuming the backlog. An issue that real, already-approved work is now stalled
 behind is by definition not speculative. And the labels answer it exactly: `sdlc:followup` means
-Sigma filed it, `sdlc:needs-confirmation` means **no human has ever ruled on it**. There is no
+Sigma filed it, the legacy `sdlc:needs-confirmation` means **no human has ever ruled on it**. There is no
 decision to override. When a person filed the proposal themselves, `sdlc:followup` is absent, and it
 is left alone.
 
@@ -277,63 +279,44 @@ approved. Create the label (and the branch), and the goal moves on its own.
 
 ---
 
-## 2b-ii. The second producer of `sdlc:needs-confirmation` — a unit's scope
+## 2b-ii. Scope holds — a park with the kind `scope_hold`
 
-Added in the branching model (#1477), and the **first** of two cases where Sigma writes
-`sdlc:needs-confirmation` onto a goal that **already carried `sdlc:goal`** — §2b-iii below is the
-other, and it is the only other one. Everywhere else that label is *filed on*: Sigma proposes
-work, and it stays inert until a person admits it. This is the reverse direction, so it is written
-down here rather than left to be inferred.
+Added in the branching model (#1477), and rewritten when the confirmation queue was retired. A goal
+that already carried `sdlc:goal` can be set aside by a pick gate; since the queue is gone, the gate
+parks it: `sdlc:parked`, `sdlc:goal` given up, and the machine line `sigma-qkind: scope_hold` in the
+park comment. (With `ai_filed.triage.enabled` false the gate still writes the legacy
+`sdlc:needs-confirmation` instead, and nothing else about this section changes.)
 
 The branching model's registry (`.sdlc/features/`) records, per unit of work, which repos that unit
 spans. Discovery flows **one way** — registry → repos, never repo → registry. A goal declaring a
 unit from a repo the unit's own `repos` block does **not** list is asking to widen that unit into a
-codebase its owner never agreed to touch, through the one field the registry exists to be
-authoritative about. So the goal is held:
+codebase its owner never agreed to touch. So the goal is held:
 
 ```
-   sdlc:needs-confirmation           (stands alone — sdlc:goal is given up)
+   sdlc:parked + kind scope_hold     (stands alone — sdlc:goal is given up)
         │
         │   the registry is NOT edited: `repos` is unchanged
         │   a ledger entry goes to the UNIT's owner, naming the goal and the repo
         │   one comment lands on the issue itself, saying the same thing
         │
-        └── the owner accepts, adds the repo to `repos`, and runs /sigma-promote
+        └── the owner adds the repo to `repos`, then runs /sigma-unpark
 ```
 
-**Why this label and not `sdlc:needs-label`'s overlay shape.** A missing label self-heals — somebody
-creates it and the next pick clears the overlay unattended, so membership is worth keeping. A scope
-expansion needs a **decision**, and there is no observation that could resolve it on its own.
-`sdlc:needs-confirmation` is exactly this tool's existing state for "inert until its owner rules on
-it", and `/sigma-promote` is exactly the gesture that ends it.
+**Why a park and not `sdlc:needs-label`'s overlay shape.** A missing label self-heals, so membership
+is worth keeping. A scope expansion needs a **decision**, and nothing a machine can observe resolves
+it. `/sigma-unpark` refuses while the registry still holds the goal, and the auto-unpark sweep skips
+this kind, so a release can never send the goal back for exactly one more pick.
 
-**The one place this bends §2b's reasoning.** That section justifies auto-promoting a blocker
-carrying `sdlc:followup` + `sdlc:needs-confirmation` on the grounds that the pair means *no human has
-ever ruled on it*. A goal held here **has** been ruled on — just not on this question. The promoter
-is `blockers.classify`'s `proposed_label` arm, acted on by `blockers._act` (and reached from
-`auto_unpark`); it is **not** `sources._promote_blockers`, which is the *priority* promotion and
-never writes a lifecycle label.
-
-The path is real rather than theoretical: a `{followup, needs-confirmation}` issue is not pickable,
-so this check can only produce that shape *after* a human promoted such an issue, it was picked, and
-this check restored `needs-confirmation` beside the permanent `sdlc:followup`. Something then naming
-it as a blocker re-promotes it. It is **bounded** — the promotion fires on a blocker event, not on
-every pick, so the worst case is one promote/refuse pair per event, and the goal ends each cycle
-inert. Closing it needs a signal `classify` can see, and `classify` reads labels only; the choice
-belongs to whoever owns that row. It is named in `feature_propagate.gate_at_pick`'s docstring too.
-
-**Who clears it:** a human, through `/sigma-promote`, after adding the repo to the unit. No sweep
-clears this one, deliberately — nothing the machine can observe answers a question about scope.
+**Who clears it:** a human, through `/sigma-unpark`, after adding the repo to the unit.
 
 ---
 
-## 2b-iii. The third producer of `sdlc:needs-confirmation` — who may file against a unit
+## 2b-iii. Ownership holds — a park with the kind `owner_hold`
 
 Added in the branching model (#1479). §2b-ii asks whether a unit may touch this **repo**; this one
-asks whether the person who opened the issue was entitled to put work on this **board** at all. Two
-different questions with the same answer, so they share the label — and, because they share it, they
-are deliberately short-circuited against each other: a goal already held for scope is never also held
-for ownership, so one pick can only ever produce one comment and one ledger entry.
+asks whether the person who opened the issue was entitled to put work on this **board** at all. They
+are short-circuited against each other: a goal already held for scope is never also held for
+ownership, so one pick produces one comment and one ledger entry.
 
 An entry records **two** owners, and they are accountable for different things:
 
@@ -344,54 +327,38 @@ An entry records **two** owners, and they are accountable for different things:
 
 **The rule.** An issue carrying `feature:<name>` may be created **directly** only by the unit owner
 or by the owner of the repo it is being created in. **Where the two disagree, the board owner wins,
-and the more restrictive gate applies** — board ownership is authority over what becomes work in
-somebody's *queue*, and a pickable issue on somebody's board is work an agent may start executing
-before they have seen it.
+and the more restrictive gate applies.**
 
 **Nobody is ever blocked from raising it.** Only the path changes:
 
 ```
-   sdlc:needs-confirmation           (stands alone — sdlc:goal is withheld, or given up)
+   sdlc:parked + kind owner_hold     (stands alone — sdlc:goal is withheld, or given up)
         │
         │   the registry is NOT edited: no grant is ever written by a machine
         │   a ledger entry goes to the BOARD owner (the unit owner where there is no board owner)
         │   one comment lands on the issue itself, saying the same thing
         │
-        ├── the owner promotes this one issue with /sigma-promote, OR
+        ├── the owner authorizes the author and runs /sigma-unpark, OR
         └── the owner sets `repos.<repo>.authorized = true` once, and every issue under that
             unit is filed directly from then on — follow-ups included
 ```
 
 **Two gates, because they are reached by different callers.** `handoff.create_tracked_issue` files
-the issue as a proposal instead of a goal — that covers every issue *Sigma* opens, including the
-follow-ups it files itself, and it is asked about the unit the issue **will declare** rather than the
-one it inherited (a `--label feature:<name>` passed on the command line counts). `feature_owner.gate_at_pick` holds an issue *somebody else* opened, at
-the pick, reading the issue's **author** and never its assignee or its picker: the rule is about who
-may create the work, so a stranger picking up the owner's issue proceeds, and the owner picking up a
-stranger's issue does not.
+the issue held instead of armed — that covers every issue *Sigma* opens, and it is asked about the
+unit the issue **will declare** (a `--label feature:<name>` on the command line counts).
+`feature_owner.gate_at_pick` holds an issue *somebody else* opened, at the pick, reading the issue's
+**author** and never its assignee or its picker.
 
-**The grant is per unit, not per issue.** Per-issue approval was considered and rejected: on a
-boundary unit it means promoting essentially every goal forever, which converts a real guarantee into
-a rubber stamp — and a gate that is always said yes to stops being read. **Absent means false**, and
-only a real boolean `true` grants. Revoking stops *future* issues; it never retroactively
-un-approves what is already filed.
+**The grant is per unit, not per issue.** Per-issue approval would mean promoting essentially every
+goal on a boundary unit forever. **Absent means false**, and only a real boolean `true` grants.
+Revoking stops *future* issues; it never retroactively un-approves what is already filed.
 
 **Ownership is set once.** Declared in the registry; failing that, the unit is named from the login
-that opened the first goal picked onto it — the only inference in the model — and it is changed
-thereafter only by editing the registry. No reassignment on inactivity: an owner reassignable by
-whoever picks up work next is a lease, not an owner.
+that opened the first goal picked onto it, and it is changed thereafter only by editing the registry.
 
-**Who clears it:** a human, through `/sigma-promote`, or once and for all through the registry grant.
-No sweep clears this one, for §2b-ii's reason — nothing a machine can observe answers a question
-about authority.
-
-**It inherits §2b-ii's residue and does not widen it.** `blockers.classify` still promotes a
-`{followup, needs-confirmation}` blocker, so a goal held here can be promoted back out by something
-naming it as a blocker; it is bounded identically (the promotion fires on a blocker event, and the
-goal ends each cycle inert). Closing it needs a signal `classify` can *see* — it reads labels alone,
-and neither gate's flag comment is one. A new `sdlc:*` label is a change every adopter's board would
-have to learn, taken on behalf of a path that ends inert either way, so it was deliberately not
-added here. It is named in `feature_owner.gate_at_pick`'s docstring too.
+**Who clears it:** a human, through `/sigma-unpark`, or once and for all through the registry grant.
+Leftover holds from before the queue was retired are classified by `migrate-confirmation` from their
+flag comment and parked with these same kinds.
 
 ---
 
@@ -504,12 +471,12 @@ Yes, though it is the least load-bearing of the three annotations. The three ans
 questions and have different lifetimes:
 
 ```
-   sdlc:needs-confirmation   a STATE      removed the moment a human approves
+   needs-confirmation (legacy) a STATE    retired; a leftover is migrated away
    sdlc:blocking             DERIVED      comes and goes with live references
    sdlc:followup             PROVENANCE   permanent, never removed
 ```
 
-Once an issue is approved, `sdlc:needs-confirmation` is gone — and nothing else on the issue records
+Once an issue is armed, any legacy `sdlc:needs-confirmation` is gone — and nothing else on the issue records
 that a machine found it rather than a person asking for it. That is `sdlc:followup`'s whole job.
 
 It has exactly **one** machine use, and it is the one that matters: the census uses it to enumerate
@@ -561,8 +528,8 @@ census goes blind to precisely the orphans it exists to find.
 
 Three rules worth remembering:
 
-- **Removing `sdlc:needs-confirmation` is how you promote an AI-filed issue.** That is the whole
-  approval gesture.
+- **There is no confirmation queue.** Triage arms or parks at filing; a leftover legacy
+  `sdlc:needs-confirmation` is moved off by `/sigma-promote migrate-confirmation`.
 - **`sdlc:blocked` resolves itself.** It rides *alongside* `sdlc:goal` — the goal stays in
   Sigma's world, just unpickable — and when the blocking issue closes, a sweep drops the overlay
   and the goal returns to the queue.
@@ -664,7 +631,7 @@ This is the one that will matter most to anyone using the board UI.
    │ ───────────│
    │ #1 goal    │  ✓ picked
    │ #2 parked  │  ✓ picked   ← should NOT have been
-   │ #3 needs-  │  ✓ picked   ← the approval gate did nothing
+   │ #3 needs-  │  ✓ picked   ← the old hold label did nothing
    │    confirm │
    │ #4 (no     │  ✓ picked   ← not even a goal!
    │    labels) │
@@ -717,12 +684,12 @@ So there is now a reconciler with **three tiers**, and the tiering is the import
   │    off-by-default gates:                                           │
   │      a) a CLOSED issue still carrying a stale label — an ACTIVITY  │
   │         overlay, or `sdlc:goal`.        NEVER `sdlc:parked` or    │
-  │         `sdlc:needs-confirmation`: those are a human's decision.   │
+  │         the legacy needs-confirmation: a human's decision.         │
   │         Safe because a closed issue can never be picked, has no    │
   │         worker, and waking nothing up. `reconcile.mode`.           │
   │      b) an OPEN issue whose MULTI_LABEL/ZERO_LABEL correction the  │
   │         timeline oracle resolves decisively TO `sdlc:goal` — full  │
-  │         stop, never to `sdlc:parked`/`sdlc:needs-confirmation`,    │
+  │         stop, never to `sdlc:parked` or the legacy hold label,     │
   │         and never touching an overlay (structurally impossible —   │
   │         see below). Re-checked fresh, a second time, immediately   │
   │         before the write, because a human can act on the same      │
@@ -886,12 +853,16 @@ Two labels are a human's to move, and each now has a command — because doing i
 edits against an API with no transactions, and getting one of them wrong is exactly how the states
 in §4a happen.
 
-### Approving an AI-filed issue — `/sigma-promote`
+### Approving a stuck issue — `/sigma-promote`
+
+Sigma no longer queues what it files for confirmation: triage arms it or parks it. What is left for
+this command is an issue still carrying the legacy `sdlc:needs-confirmation` (a leftover, or a repo
+running with triage off) and anything blocking other work.
 
 ```
    THE GESTURE PEOPLE EXPECT          THE GESTURE THAT IS CORRECT
    ─────────────────────────          ───────────────────────────
-   + add sdlc:goal                    − remove sdlc:needs-confirmation
+   + add sdlc:goal                    swap: add goal, remove the legacy label
         ↓                                     ↓
    {goal, needs-confirmation}         {goal}
         ↓                                     ↓
@@ -904,7 +875,7 @@ leaves an audit comment. `/sigma-promote list` shows three buckets:
 ```
    ┌──────────────────────────────────────────────────────────────────┐
    │ deadlocked  blocking other work, pickable by nothing  ← do first │
-   │ awaiting    the ordinary approval queue                          │
+   │ awaiting    a leftover legacy needs-confirmation label           │
    │ drift       already carrying BOTH labels  ← one removal fixes it │
    └──────────────────────────────────────────────────────────────────┘
 ```
@@ -1018,7 +989,7 @@ that has no such option — so nothing changes for a board that predates it.
 | If you… | Then… |
 |---|---|
 | want the loop to pick something up | give it `sdlc:goal` (a board card alone is not enough) |
-| want to approve an AI-filed issue | **`/sigma-promote`** — or remove `sdlc:needs-confirmation` by hand |
+| want to approve a stuck issue or clear a leftover legacy label | **`/sigma-promote`** — or swap the legacy `sdlc:needs-confirmation` for `sdlc:goal` by hand |
 | want a parked goal moving again | **`/sigma-unpark`** — it asks what is blocking before it flips anything |
 | want to stop the loop touching something | give it `sdlc:parked` — nothing automatic will undo it |
 | use the board to prioritise | keep doing it; card order still decides order among eligible issues |
@@ -1034,21 +1005,21 @@ Most days you will not touch a label directly — `/sigma-promote` and `/sigma-u
 not have to. But when you do, these are the gestures that are *correct*, and the ones that quietly
 create the drift this release spent its life removing.
 
-### Approving something the loop filed (`sdlc:needs-confirmation` → workable)
+### Approving a stuck issue (legacy `sdlc:needs-confirmation` → workable)
 
 ```bash
-/sigma-promote                 # lists what is waiting; approve from there
+/sigma-promote                 # lists what is stuck; approve from there
 ```
 
-Doing it by hand: **remove `sdlc:needs-confirmation`, then add `sdlc:goal`.**
+Doing it by hand: **remove the legacy `sdlc:needs-confirmation`, then add `sdlc:goal`.** For many
+leftovers, run `/sigma-promote migrate-confirmation` once.
 
 > ⚠️ **Adding `sdlc:goal` on its own does nothing.** The issue then carries *both* labels, and both
 > queue paths refuse it — so it looks approved and is picked by nothing. That is the single most
 > common way to create drift, and it is the intuitive gesture, which is why the command exists.
 > `/sigma-promote list` has a `drift` bucket that finds anything already in this state.
 
-Not ready to approve it? Leave it alone. `sdlc:needs-confirmation` is a perfectly good resting
-state — it means "filed, nobody has ruled on it", which is often the truth.
+Not ready to approve it? Leave it alone: the legacy label is inert, and the loop never picks it.
 
 ### Getting a parked goal moving again (`sdlc:parked` → workable)
 
@@ -1084,8 +1055,8 @@ cleaned by the reconciler on its next sweep (it deliberately waits 24h after a c
 anything, so it can never catch an issue mid-transition). Strip the label yourself if you want it
 tidy immediately.
 
-**`sdlc:parked` and `sdlc:needs-confirmation` are NOT stripped, closed or not** — they record a
-human's decision (a park, a withheld approval), and nothing automatic undoes those. Provenance
+**`sdlc:parked` and the legacy `sdlc:needs-confirmation` are NOT stripped, closed or not** — they
+record a human's decision (a park, a withheld approval), and nothing automatic undoes those. Provenance
 labels (`sdlc:followup`, `sdlc:dependency`) stay too: they are history, and the reconciler's census
 uses them to find issues that have lost their lifecycle label.
 
@@ -1127,7 +1098,7 @@ contract once one is; it is not yet a claim about what happens on a real board.
 
 | you want | do this | do NOT do this |
 |---|---|---|
-| approve a proposal | remove `needs-confirmation`, add `goal` | add `goal` and leave `needs-confirmation` |
+| clear a leftover legacy hold | swap legacy `needs-confirmation` for `goal`, or `/sigma-promote migrate-confirmation` | add `goal` and leave the legacy label |
 | resume a park | `/sigma-unpark`, or remove `parked` + add `goal` | add `goal` and leave `parked` |
 | park something | add `parked`, remove `goal` + any overlay | add `parked` and leave `goal` |
 | hand work to the loop | add `goal` | drag a board card and stop there |

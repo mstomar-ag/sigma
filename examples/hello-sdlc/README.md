@@ -25,7 +25,7 @@ Pulls the backlog and runs each pending goal unattended, parking anything that n
 /sigma-status
 ```
 ```
-backlog: 0 proposed, 0 pending, 0 in-progress, 1 done, 0 parked, 0 failed | iteration 1 | review-queue: empty
+backlog: 0 pending, 0 in-progress, 1 done, 0 parked, 0 failed | iteration 1 | review-queue: empty
 ```
 (Recorded from `status.py` on a fresh copy of this directory after its one goal was recorded `done`.
 Before the run the same line reads `0 proposed, 1 pending, ... 0 done ... | iteration 0`.)
