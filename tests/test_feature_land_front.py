@@ -42,7 +42,7 @@ class World:
         self.sdlc.mkdir(exist_ok=True)
         self.tips = [TIP]                      # successive answers for the unit branch; the last repeats
         self.ancestor_rc = 1
-        self.remote_url = "git@github.com:owner/repo.git"
+        self.remote_url = "https://github.com/owner/repo.git"
         self.rules, self.prs = [], []
         self.settings = {"allow_merge_commit": True, "delete_branch_on_merge": False}
         self.pr_list_rc = 0
@@ -157,7 +157,7 @@ def test_verify_not_configured(tmp_path):
 
 
 def test_slug_mismatch(tmp_path):
-    w = World(tmp_path, remote_url="git@github.com:other/thing.git")
+    w = World(tmp_path, remote_url="https://github.com/other/thing.git")
     assert reason(w.land()) == "refused:slug-mismatch"
     assert w.passes == [] and w.gh_calls == []
 
@@ -368,5 +368,5 @@ def test_engine_names_no_merge_operation():
 def test_cli_verb_closed_gate_exits_4(tmp_path, capsys):
     (tmp_path / ".sdlc").mkdir()
     (tmp_path / ".sdlc" / "config.json").write_text("{}")
-    assert load().main(["land", "voice", "--sdlc-dir", str(tmp_path / ".sdlc"), "--rehearse"]) == 4
+    assert load().main(["land", "voice", "--state-dir", str(tmp_path / ".sdlc"), "--rehearse"]) == 4
     assert "gate is closed" in capsys.readouterr().err

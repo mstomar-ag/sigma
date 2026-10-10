@@ -272,19 +272,19 @@ def main(argv=None):
                                      "runs, the merge is never called).")
     parser.add_argument("verb", choices=["land"])
     parser.add_argument("unit")
-    parser.add_argument("--sdlc-dir", default=".sdlc")
+    parser.add_argument("--state-dir", default=".sdlc")
     parser.add_argument("--user-requested", "--requested-by-user", dest="user_requested", metavar="UNIT",
                         help="consent flag: must name this unit exactly")
     parser.add_argument("--rehearse", action="store_true", help="accepted; this release always stops at the rehearsal")
     args = parser.parse_args(argv)
     state = _load("state")
     try:
-        config = state.load_config(args.sdlc_dir)
+        config = state.load_config(args.state_dir)
     except Exception as exc:                      # noqa: BLE001
         print("refused: %s" % exc.__class__.__name__, file=sys.stderr)
         return 2
     tokens = ["--user-requested", args.user_requested] if args.user_requested else []
-    out = land(config, args.sdlc_dir, args.unit, argv=tokens, environ=os.environ)
+    out = land(config, args.state_dir, args.unit, argv=tokens, environ=os.environ)
     if out.get("closed"):
         print("refused: the upkeep gate is closed", file=sys.stderr)
         return 4
