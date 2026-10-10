@@ -590,3 +590,54 @@ def test_engine_child_cannot_read_planted_secrets(tmp_path):
     seen = json.loads(out.read_text())
     assert not set(PLANTED) & set(seen), sorted(seen)
     assert seen["GH_TOKEN"] == "t" and seen["SIGMA_UPKEEP_JOB"] == "1"
+
+
+# ------------------------------------------------------------------------------------------ goal 1101: one owner per run
+def test_a_unit_the_older_pass_rebased_is_not_rewritten_again_by_the_unit_pass(tmp_path, capsys):
+    j, sdlc, seen = job(), project(tmp_path), []
+    entry = lambda *a, **k: seen.append(a) or {"result": "rewritten"}
+    line = j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, unit_pass=entry,
+                        upkeep=lambda *a, **k: {"outcome": "rebased", "after": H40})
+    assert seen == [] and line == {"outcome": "rebased", "unit_tip": H40, "unit_pass": "skipped"}
+    for word in ("current", "conflict", "lease-refused", "no-branch", "failed", "busy"):   # nothing moved: the unit pass still runs
+        assert j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, unit_pass=entry,
+                            upkeep=lambda *a, w=word, **k: {"outcome": w})["unit_pass"] == "rewritten"
+    assert len(seen) == 6
+    capsys.readouterr()
+
+
+def _git(cwd, *argv):
+    import subprocess
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"] + list(argv),
+                          cwd=str(cwd), check=True, capture_output=True, text=True).stdout.strip()
+
+
+def test_on_a_local_bare_remote_only_one_path_moves_the_unit_in_a_run(tmp_path, capsys):
+    """Real engine pair on a real bare remote: the older pass rebases the behind unit, the unit pass then does nothing to it."""
+    bare, work = tmp_path / "bare.git", tmp_path / "w"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(bare))
+    _git(tmp_path, "clone", str(bare), str(work))
+    _git(work, "checkout", "-b", "main")
+    (work / "a").write_text("1")
+    _git(work, "add", "a"); _git(work, "commit", "-m", "base"); _git(work, "push", "origin", "main")
+    _git(work, "checkout", "-b", "feature/voice")
+    (work / "f").write_text("f")
+    _git(work, "add", "f"); _git(work, "commit", "-m", "unit"); _git(work, "push", "origin", "feature/voice")
+    _git(work, "checkout", "main")
+    (work / "a").write_text("2")
+    _git(work, "commit", "-am", "main moves"); _git(work, "push", "origin", "main")
+    _git(work, "fetch", "origin")
+    before = _git(bare, "rev-parse", "refs/heads/feature/voice")
+    j, calls = job(), []
+
+    def older(sdlc_dir, config, goal, unit, **kw):
+        _git(work, "checkout", "-B", "feature/voice", "origin/feature/voice")
+        _git(work, "rebase", "origin/main")
+        _git(work, "push", "--force", "origin", "feature/voice")
+        calls.append("older")
+        return {"outcome": "rebased", "after": _git(work, "rev-parse", "HEAD")}
+    entry = lambda *a, **k: calls.append("unit") or {"result": "rewritten"}
+    line = j.run_engine(open_config(), project(tmp_path), str(work), "voice", environ=ENV, upkeep=older, unit_pass=entry)
+    after = _git(bare, "rev-parse", "refs/heads/feature/voice")
+    assert calls == ["older"] and line["unit_pass"] == "skipped" and after != before and after == line["unit_tip"]
+    capsys.readouterr()

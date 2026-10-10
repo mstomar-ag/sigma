@@ -130,3 +130,26 @@ def test_the_push_is_a_lease_not_a_plain_force(wired):
     push(spy, tips)
     pushes = [a for a in seen if a[:2] == ["git", "push"]]
     assert len(pushes) == 1 and pushes[0][2].startswith("--force-with-lease=refs/heads/feature/u:") and "--force" not in pushes[0]
+
+
+# ------------------------------------------------------------------------------------------ goal 1101: valid_ref vs git
+_NAMES = ["main", "feature/x", "a/b/c", "a.b", "a-b_c", "x@y", "feat/v1.2", "A/B", "-lead", "/lead", "trail/", "trail.", "a..b",
+          "a b", "a~b", "a^b", "a:b", "a?b", "a*b", "a[b", "a\\b", "a@{b", "@", "a//b", ".hidden", "a/.hidden", "x.lock",
+          "a/x.lock/b", "", "a\tb", "a\x7fb", "héllo", "a/b.", "@{", "refs/heads/ok", "a.lock.b"]
+
+
+def test_valid_ref_is_never_looser_than_git_check_ref_format(tmp_path):
+    import subprocess
+    vr = mod().valid_ref
+    stricter = []
+    for name in _NAMES:
+        git_ok = bool(name) and not name.startswith("-") and subprocess.run(
+            ["git", "check-ref-format", "refs/heads/" + name], capture_output=True).returncode == 0
+        if name and not name.startswith("-"):
+            branch_ok = subprocess.run(["git", "check-ref-format", "--branch", name], capture_output=True).returncode == 0
+            git_ok = git_ok and branch_ok if name != "@" else False
+        if vr(name):
+            assert git_ok, "valid_ref accepts %r but git refuses it" % name
+        elif git_ok:
+            stricter.append(name)
+    assert vr("main") and vr("feature/x") and not vr("")        # the table is not vacuous

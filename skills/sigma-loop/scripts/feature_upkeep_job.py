@@ -145,6 +145,9 @@ def run_job(config, sdlc_dir, root, unit, run_id, cap, *, environ=None, command=
     return {"outcome": outcome, "unit_tip": tip}
 
 
+SKIPPED_AFTER = "rebased"     # the older pass's outcome word for "I moved the unit": the new unit pass then stays out of the run
+
+
 def _unit_pass(config, sdlc_dir, root, unit, unit_pass=None):
     """The pass entry point (`run_unit_pass`) for the unit, against the remote-tracking refs of its remote. -> {"unit_pass":
     the pass's result word}, or {} when no base is configured. Never raises: a failure reads `failed`, the line is still printed."""
@@ -172,7 +175,10 @@ def run_engine(config, sdlc_dir, root, unit, *, environ=None, upkeep=None, unit_
     report = report if isinstance(report, dict) else {}
     tip = report.get("tip") or report.get("after") or report.get("unit_tip")
     line = {"outcome": report.get("outcome") or "failed", "unit_tip": tip if isinstance(tip, str) else None}
-    line.update(_unit_pass(config, sdlc_dir, root, unit, unit_pass))
+    if line["outcome"] == SKIPPED_AFTER:                  # the older pass already rewrote this unit in this run: ONE path owns it
+        line["unit_pass"] = "skipped"
+    else:
+        line.update(_unit_pass(config, sdlc_dir, root, unit, unit_pass))
     print(json.dumps(line, sort_keys=True), flush=True)
     return line
 
