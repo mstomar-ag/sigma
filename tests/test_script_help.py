@@ -63,6 +63,7 @@ LIBRARY_ONLY = {
     "scrub", "sources", "state", "tamper_scan", "timing_store", "watch_classify", "witness",
     "bounded_run",
     "conflict_state",
+    "feature_park",
     "unattended_git",
     "merge_queue", "tier_escalation", "board_spec", "red_green", "shell_policy", "logroll",
     "codex_runtime",

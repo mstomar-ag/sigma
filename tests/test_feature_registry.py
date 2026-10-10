@@ -1380,6 +1380,7 @@ _FOLDS = {
     ("feature_rebase", "lock_path"),          # #1577 — the upkeep lock
     ("feature_rebase", "filed_path"),         # #1577 — the "already filed this conflict" marker
     ("feature_rebase", "blocked_path"),       # #144 — the "upkeep is refusing" marker the doctor reads
+    ("feature_rebase", "parked_path"),        # #946 — the "upkeep parked this unit's conflict" marker the doctor reads
     ("feature_rebase", "ack_path"),           # #2756 — the sanctioned-exit ack file
     ("feature_propagate", "sibling_path"),    # #1672 — a shard path in ANOTHER repo
     ("feature_rebase", "worktree_path"),      # #1673 — the throwaway upkeep checkout
@@ -1425,6 +1426,9 @@ _NO_UNIT_NAME = {
     ("feature_owner", "_load"),
     ("feature_propagate", "_load"),
     ("feature_rebase", "_load"),
+    ("feature_rebase", "_describe_stop"),     # #946: joins the throwaway worktree path and a conflicted file; no unit name
+    ("feature_rebase", "read_text"),          # #946: the nested reader inside it
+    ("feature_park", "_load"),                # #946: the sibling importer
     ("feature_registry", "_load"),
     ("feature_stamp", "_load"),
     ("feature_sync", "_load"),

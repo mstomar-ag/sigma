@@ -26,8 +26,10 @@ preserving wrapper around it — a formal hand-off is exactly its
 `same_area=False, immediately_actionable=True, blocks_goal=True` special case. The `track` CLI verb
 is the same-area/non-blocking sibling of `open`, for a finding that doesn't need a human decision.
 """
+import hashlib
 import importlib.util
 import pathlib
+import re
 import sys
 
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -428,7 +430,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                           same_area, immediately_actionable, blocks_goal,
                           priority=DEFAULT_PRIORITY, title=None, body=None,
                           extra_labels=(), source=None, run=None, dedup=True,
-                          upstream_run=None, target_unit=None):
+                          upstream_run=None, target_unit=None, idempotency_key=None):
     """Open a tracked issue, address it, record it. The one real place the kit ever opens an issue on
     its own behalf — `hand_off()` below is a thin wrapper around this. Generalizes what used to be
     hand-off-only discipline (owner resolution, labels, the `gh` call, the ledger write, the dual
@@ -478,7 +480,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         never distinguished, so nothing downstream is tempted to special-case "closed" into a
         weaker, still-permitted retarget — and the filing proceeds with whatever `goal`'s own
         inheritance produced instead, with a warning naming why. THIS IS AN OPERATOR/CLI-LEVEL
-        MECHANISM ONLY: nothing in `skills/sigma-loop/SKILL.md`'s own autonomous-filing guidance
+        MECHANISM ONLY (apart from the rebase upkeep's own per-conflict findings, which pass it
+        with `goal=None`; see the no-goal path below): nothing in `skills/sigma-loop/SKILL.md`'s own autonomous-filing guidance
         passes this parameter, and this issue does not change that — deciding a discovered issue
         "clearly belongs" to a different unit stays a human (or an explicit, separately-designed
         trigger) supplying the name, never a similarity judgment this function makes for itself.
@@ -609,7 +612,24 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
     issue's id, or a freshly-created one's), so it never trips the `issue_attempted and not issue`
     failure check regardless. Only a genuine failure to create OR reuse an issue leaves both
     `issue_attempted` True and `issue` falsy."""
-    report = {"goal": str(goal), "area": area, "owner": None, "issue": None,
+    # THE NO-GOAL PATH (part B, level 3): `goal=None` means a finding the engine files about a UNIT, with no goal to
+    # inherit a unit from, no goal issue to comment on and no goal to block. It differs from the ordinary path in
+    # exactly these ways and no others: no `unit_of` lookup; no metered auto-classification (an unnamed unit stays
+    # unnamed); no ownership verdict, so no note is written to a unit owner (a finding must not be addressed to
+    # whoever filed it, or autowatch can start a paid run from it); no comment or body marker on a goal; the ledger
+    # row and the upstream router are keyed on a SCOPED key rather than a goal; the fuzzy duplicate search is OFF
+    # (`idempotency_key` replaces it) and the key rides in the body as an inert line. A caller passing a goal gets
+    # the code below byte for byte as before.
+    nogoal = goal is None
+    if nogoal:
+        dedup = False
+        scope = idempotency_key or hashlib.sha256(("%s\0%s" % (title, why)).encode("utf-8", "replace")).hexdigest()[:16]
+        key_goal = "upkeep-" + re.sub(r"[^A-Za-z0-9_-]", "-", str(scope))[:40]
+        if idempotency_key and body is not None:
+            body = "%s\n\nconflict-id: %s\n" % (body.rstrip("\n"), idempotency_key)
+    else:
+        key_goal = goal
+    report = {"goal": "" if nogoal else str(goal), "area": area, "owner": None, "issue": None,
               "entry": None, "warnings": [], "duplicate_of": None, "issue_attempted": False,
               "unit": None, "routing": None}
 
@@ -639,7 +659,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
     # own boilerplate. `route` writes nothing and says nothing on the overwhelmingly common
     # `project` answer, so an ordinary filing is byte-identical to what it was before this existed;
     # see upstream.py for the routing and for why the failing direction is towards filing locally.
-    routing = _upstream().route(sdlc_dir, config, goal, title, why, body,
+    routing = _upstream().route(sdlc_dir, config, key_goal, title, why, body,
                              run=_upstream_runner(upstream_run, run))
     report["routing"] = routing
 
@@ -660,7 +680,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         # unit a caller has to remember to pass is an inherited unit that goes missing. Resolving it
         # is all that happens at this point -- neither half is WRITTEN until there is an issue this
         # call actually opened to write it onto (see the two sites below).
-        unit, unit_warnings = feature_stamp.unit_of(source, goal)
+        unit, unit_warnings = (None, []) if nogoal else feature_stamp.unit_of(source, goal)
         report["warnings"] += unit_warnings
         # #1820: an EXPLICIT `target_unit` overrides the inherited one outright -- the whole point
         # of a caller naming a different unit is that the discovered issue does NOT belong to the
@@ -682,7 +702,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                     "registry (.sdlc/features/index.json) -- filing without it (a closed unit is "
                     "never retargeted, explicitly or automatically, and an unknown one cannot be "
                     "invented)" % target_unit)
-        elif not unit:
+        elif not unit and not nogoal:
             # #2363: automatic classification -- ONLY when no explicit `--target-unit` was given
             # (an explicit human target always wins outright, hence the `elif`) AND nothing was
             # inherited from the filing goal above (`unit` still falsy). Config-gated the same way
@@ -727,7 +747,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         # THE WARNING AND THE LEDGER NOTE ARE BOTH DEFERRED to the branch that actually files (see
         # below): on the duplicate-reuse path nothing is opened and nothing is stamped, so saying
         # "filed as a proposal" there would describe a filing that did not happen.
-        ownership, ownership_unit = _ownership_verdict(
+        ownership, ownership_unit = (None, None) if nogoal else _ownership_verdict(
             sdlc_dir, config, goal, feature_stamp.declared_units(labels, unit), run)
         if ownership is not None:
             immediately_actionable = False
@@ -969,7 +989,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
             priority=priority, why=why, state="open")
     else:
         report["entry"] = ledger.safe_append(
-            sdlc_dir, "note", goal, config=config, to=report["owner"], area=area,
+            sdlc_dir, "note", key_goal, config=config, to=None if nogoal else report["owner"], area=area,
             issue=int(report["issue"]) if str(report["issue"] or "").isdigit() else None,
             priority=priority, why=why)
 
@@ -980,7 +1000,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
     # create_dependency with no append_to_body -- LocalSource's own shape before #726 -- sailed
     # straight through a guard that only ever checked report["issue"]).
     marker_written = False
-    if report["issue"] and source is not None:
+    if report["issue"] and source is not None and not nogoal:
         # two channels, two audiences (#376): a human-visible narrative comment, AND (blocks_goal
         # only) a machine-readable body marker so a future precheck() run can auto-skip the CURRENT
         # goal without a human re-stating what already happened. "Blocked by #N" is the exact phrase
