@@ -235,6 +235,25 @@ def test_real_git_drift_commits_match_by_multiset_and_an_edit_is_refused(tmp_pat
     assert [r["path"] for r in got] == ["a1.txt"]
 
 
+def test_real_git_binary_content_change_outside_conflicted_set_is_refused(tmp_path):
+    """A binary file differing in the replay yields the same `Binary files differ` text; the blob ids must differ."""
+    repo = new_repo(tmp_path)
+    (repo / "a.bin").write_bytes(b"\0base\0")
+    commit(repo, "base")
+    git(repo, "checkout", "-q", "-b", "unit")
+    (repo / "a.bin").write_bytes(b"\0one\0")
+    commit(repo, "unit")
+    orig = cp.read_commits(_run, repo, "main..unit")
+    git(repo, "checkout", "-q", "--detach", "main")
+    (repo / "a.bin").write_bytes(b"\0TWO\0")
+    commit(repo, "replay")
+    replayed = cp.read_commits(_run, repo, "main..HEAD")
+    got = cp.multiset_differences(orig[0]["diff"], replayed[0]["diff"], [])
+    assert [r["path"] for r in got] == ["a.bin"]
+    same = cp.multiset_differences(orig[0]["diff"], orig[0]["diff"], [])
+    assert same == []
+
+
 # --------------------------------------------------------------------------- E: the test counter
 BASE_T = "def test_a():\n    assert 1\n"
 OURS_T = BASE_T + "def test_b():\n    assert 2\n"

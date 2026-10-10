@@ -70,7 +70,7 @@ def read_commits(run, cwd, rng, patch_id_fn=None):
     `patch_id` comes from one batched `git patch-id --stable` over a default-context `git log -p` of the range (not a process per commit), or ""
     when `patch_id_fn` is None. RAISES whatever the runner raises."""
     text = str(run(cwd, ["git", "-c", "core.quotePath=false", "log", "--reverse", "-m", "-p", "-U0", "--no-renames",
-                         "--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s", rng]) or "")
+                         "--binary", "--full-index", "--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s", rng]) or "")
     pids = {}
     if patch_id_fn:        # git's own skip test reads the default-context patch, so it gets its own one batched log
         pids = _patch_ids(patch_id_fn, str(run(cwd, ["git", "-c", "core.quotePath=false", "log", "--reverse", "-p",
@@ -204,13 +204,15 @@ _PSEUDO = ("old mode ", "new mode ", "new file mode ", "deleted file mode ")
 def per_path_multisets(diff_text, suffix=""):
     """`{path+suffix: (Counter of added lines, Counter of removed lines)}` from a `-U0 --no-renames` patch. Hunk
     headers, context and placement are ignored by construction, so a base edit near a hunk cannot change it. A mode
-    change and a binary change are recorded as pseudo lines (the binary's new blob id), so they compare too."""
-    out, path, added, removed, in_hunk = {}, None, None, None, False
+    change and a binary change are recorded as pseudo lines (the `index <old>..<new>` full blob ids of a binary path,
+    taken from the log's `--binary --full-index` output, so differing binary content differs); a text path's index
+    line is skipped."""
+    out, path, added, removed, in_hunk, index = {}, None, None, None, False, ""
     for line in str(diff_text or "").split("\n"):
         if line.startswith("diff --git "):
             path = line.rsplit(" b/", 1)[-1] + suffix
             added, removed = out.setdefault(path, (collections.Counter(), collections.Counter()))
-            in_hunk = False
+            in_hunk, index = False, ""
         elif path is None:
             continue
         elif line.startswith("@@"):
@@ -222,9 +224,10 @@ def per_path_multisets(diff_text, suffix=""):
         elif not in_hunk and line.startswith(_PSEUDO):
             added["\0" + line] += 1
         elif not in_hunk and line.startswith("index ") and "\0" not in line:
-            continue
-        elif not in_hunk and line.startswith("Binary files"):
+            index = line
+        elif not in_hunk and line.startswith(("Binary files", "GIT binary patch")):
             added["\0" + line] += 1
+            added["\0" + index] += 1
     return out
 
 
