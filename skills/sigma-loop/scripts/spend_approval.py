@@ -79,6 +79,8 @@ hourly budget. The one write is `source.note`, which already falls back to REST 
 import datetime
 import hashlib
 import importlib.util
+import json
+import os
 import pathlib
 import re
 import sys
@@ -91,16 +93,25 @@ MARKER = "sigma:spend-approved="
 USED_MARKER = "sigma:spend-approval-used="
 
 _LABEL = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
-_MARK = "(" + re.escape(MARKER) + "(" + _LABEL + "))"
+_MARK = "(" + re.escape(MARKER) + "(" + _LABEL + ")(?::([0-9a-f]{12}))?)"
 _BARE = re.compile(_MARK)
 _WRAPPED = re.compile(r"<!--[ \t]*" + _MARK + r"[ \t]*-->")
 _ACTION_MAX = 200
 
 EXIT_APPROVED, EXIT_DENIED, EXIT_OFF = 0, 3, 4
 
+#: The one class this permission may clear (slice 7, PROVISIONAL). The marker is forgeable under a
+#: shared login (see (c) below), so a class that is not spend is refused loudly until a human-only
+#: signal exists. `spend_approval.classes` (default this tuple) can only NARROW it, never widen it.
+#: Extension point: a later release adds a class here once that signal exists.
+HONOURED_CLASSES = ("spend",)
+#: Per-machine use counter, in the gitignored state directory; survives a deleted audit comment.
+COUNTER_FILE = "spend-approval-used.json"
 
-def parse_marker(body):
-    """-> (status, label, line). status: "ok" | "none" | "malformed".
+
+def parse_marker(body, full=False):
+    """-> (status, label, line). status: "ok" | "none" | "malformed". An optional `:<12 hex>` digest
+    suffix is accepted by `_parse_full`; this function keeps the three-field shape.
 
     FIRST BODY LINE ONLY, exactly like `design_goal.DESIGN_OF_MARKER` / `goal_size`'s markers (a
     deliberate declaration, not a substring found somewhere). This is a security decision, not a
@@ -120,15 +131,57 @@ def parse_marker(body):
     text = (body or "").replace("\r\n", "\n").replace("\r", "\n")
     first = text.split("\n", 1)[0]
     if "sigma:spend-approved" not in first:
-        return ("none", None, None)
+        return ("none", None, None) if not full else ("none", None, None, None)
     lead = first[:len(first) - len(first.lstrip(" \t"))]
     if "\t" in lead or len(lead) > 3:         # 0-3 leading spaces only: a tab (even after spaces)
-        return ("malformed", None, None)     # expands to column 4+ = an indented code block
+        return _bad(full)                    # expands to column 4+ = an indented code block
     line = first.strip(" \t")
     mm = _BARE.fullmatch(line) or _WRAPPED.fullmatch(line)
     if not mm:
-        return ("malformed", None, None)
-    return ("ok", mm.group(2), mm.group(1))
+        return _bad(full)
+    return ("ok", mm.group(2), mm.group(1)) if not full else ("ok", mm.group(2), mm.group(1),
+                                                                mm.group(3))
+
+
+def _bad(full):
+    return ("malformed", None, None, None) if full else ("malformed", None, None)
+
+
+def scrub_marker(body):
+    """-> (body, changed). A body whose FIRST line carries the permission marker would, filed as-is,
+    read as a permission; the line becomes a code span (backticks removed first) so it is quoted
+    text. Nothing else is touched; a marker on a later line is already inert."""
+    text = body if isinstance(body, str) else ""
+    first, sep, rest = text.partition("\n")
+    if "sigma:spend-approved" not in first:
+        return text, False
+    return "`" + first.replace("`", "").strip() + "`" + sep + rest, True
+
+
+def _action_digest(action):
+    return hashlib.sha256(" ".join(str(action).split()).encode("utf-8")).hexdigest()[:12]
+
+
+def _counter_path(sdlc_dir):
+    return pathlib.Path(str(sdlc_dir)) / "state" / COUNTER_FILE
+
+
+def _counter_read(sdlc_dir):
+    p = _counter_path(sdlc_dir)
+    if not p.exists():
+        return {}
+    data = json.loads(p.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("counter is not an object")
+    return data
+
+
+def _counter_write(sdlc_dir, data):
+    p = _counter_path(sdlc_dir)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".%d.tmp" % os.getpid())
+    tmp.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, p)
 
 
 def _used_count(comments, label):
@@ -159,20 +212,31 @@ def _approvers(config):
     return [a.strip().lower() for a in raw], True
 
 
-def check(sdlc_dir, goal, action, config, source):
+def check(sdlc_dir, goal, action, config, source, hardstop_class=None):
     """The verb's brain. Returns one line whose FIRST WORD is the contract: `APPROVED <label>`,
     `DENIED <reason>` or `OFF`. Never raises -- an unexpected error is DENIED, because the only safe
     answer to "may I run the irreversible step?" when something broke is no."""
     try:
-        return _check(sdlc_dir, goal, action, config, source)
+        return _check(sdlc_dir, goal, action, config, source, hardstop_class)
     except Exception as exc:                                      # noqa: BLE001 - fail closed
         return f"DENIED unexpected {type(exc).__name__} -- failing closed (park as before)"
 
 
-def _check(sdlc_dir, goal, action, config, source):
+def _classes(config):
+    raw = config["spend_approval"].get("classes", list(HONOURED_CLASSES))
+    if not isinstance(raw, list) or not all(isinstance(c, str) for c in raw):
+        return []
+    return [c for c in raw if c in HONOURED_CLASSES]
+
+
+def _check(sdlc_dir, goal, action, config, source, hardstop_class=None):
     approvers, enabled = _approvers(config)
     if not enabled:
         return "OFF"
+    if hardstop_class is not None and hardstop_class not in _classes(config):
+        return (f"DENIED class {hardstop_class!r} cannot be cleared by a recorded permission "
+                f"(only {', '.join(HONOURED_CLASSES)}, and only when listed in "
+                "spend_approval.classes) -- park as before")
     if not approvers:
         return ("DENIED spend_approval.approvers is empty or malformed -- nobody can authorise; "
                 "park as before")
@@ -187,7 +251,7 @@ def _check(sdlc_dir, goal, action, config, source):
     issue = source.fetch_issue_for_approval(goal)
     if not isinstance(issue, dict) or not isinstance(issue.get("body"), str):
         return "DENIED could not read the issue body -- park as before"
-    status, label, line = parse_marker(issue["body"])
+    status, label, line, want = parse_marker(issue["body"], full=True)
     if status == "none":
         return "DENIED no sigma:spend-approved=<label> marker on the FIRST line of this goal's body"
     if status == "malformed":
@@ -208,6 +272,13 @@ def _check(sdlc_dir, goal, action, config, source):
                 f"{', '.join(trusted)} -- a spend approval is an authorization and is honoured "
                 "only from a trusted author")
 
+    if want is not None and want != _action_digest(action):
+        return (f"DENIED the action text does not match the digest bound to marker {label!r} "
+                "-- the permission was written for a different step")
+    key = f"{goal}:{label}"
+    if key in _counter_read(sdlc_dir):
+        return (f"DENIED marker {label!r} was already used for this goal (single use, recorded "
+                "locally) -- write a new label to authorise again")
     if _used_count(source.fetch_comment_bodies(goal), label):
         return (f"DENIED marker {label!r} was already used for this goal (single use) -- write a "
                 "new label to authorise again")
@@ -227,6 +298,14 @@ def _check(sdlc_dir, goal, action, config, source):
     except Exception as exc:                                      # noqa: BLE001
         return (f"DENIED the audit comment could not be posted ({type(exc).__name__}) -- no "
                 "unaudited grant")
+
+    try:
+        counter = _counter_read(sdlc_dir)
+        counter[key] = {"at": stamp, "class": hardstop_class or "spend"}
+        _counter_write(sdlc_dir, counter)
+    except Exception as exc:                                      # noqa: BLE001
+        return (f"DENIED the use counter could not be recorded ({type(exc).__name__}) -- no "
+                "grant without a durable single-use record")
 
     if _used_count(source.fetch_comment_bodies(goal), label) != 1:
         # >1: two callers raced (or `note`'s own retry double-posted: the label is burned, which is
@@ -253,11 +332,14 @@ def _load(name):
 def run_verb(sdlc_dir, goal, rest, config, source):
     """`loop.py spend-approval <dir> <goal> --action "<text>"` -> (stdout line, exit code)."""
     action = None
+    hardstop_class = None
+    if len(rest) >= 4 and rest[2] == "--class":
+        hardstop_class = rest[3]
     if len(rest) >= 2 and rest[0] == "--action":
         # `--action -` reads the step text from stdin (a quoted heredoc): the step derives from the
         # issue, so it must never be interpolated into a shell command line (#713/#717).
         action = sys.stdin.read(4 * _ACTION_MAX) if rest[1] == "-" else rest[1]
-    out = check(sdlc_dir, goal, action, config, source)
+    out = check(sdlc_dir, goal, action, config, source, hardstop_class)
     word = out.split(None, 1)[0] if out else "DENIED"
     return out, {"APPROVED": EXIT_APPROVED, "OFF": EXIT_OFF}.get(word, EXIT_DENIED)
 
