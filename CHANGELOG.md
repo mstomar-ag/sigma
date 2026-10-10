@@ -19,6 +19,12 @@ All notable changes to Sigma are recorded here, newest first.
   unit-completion observer keys a landing by the branch like the rebase landing helper, so one landing
   is recorded once; a landing already recorded under the bare unit key keeps that key. With the gate
   closed nothing changes.
+- **Shared "landed" predicate (#930, upkeep part C, slice 1).** New feature_landed.py: one function that says whether a
+  unit's tip is landed on a base, as a structured verdict (LANDED, NOT_LANDED or UNKNOWN, with how, the base sha, the
+  pull request and the merged head). Ancestry is checked first through an exit-code-preserving bounded runner, then a
+  separate head-aware merged-pull-request read (paged, bounded, truncation never read as "none"); anything it cannot
+  prove is UNKNOWN. Also a repository-slug helper that checks the remote names the same repository. The drift watcher
+  adds an optional landed field only while the upkeep gate is open; with the gate closed nothing changes.
 - **Shared verify runner and unattended git runner (#920, upkeep part A, slice 4).** New bounded_run.py:
   a command run in a process group of its own under a wall-clock budget, the whole group stopped
   (SIGTERM, then SIGKILL) on overrun or when a stop file appears, a lifeline that stops the tree if the

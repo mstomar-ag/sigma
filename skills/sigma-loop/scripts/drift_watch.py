@@ -227,6 +227,22 @@ def _merged_pr_ref(pr):
     return None
 
 
+def _landed_field(config, landed_run, cwd, remote, base, branch):
+    """-> the optional `landed` field for one drifted unit, or None. ONLY called with the upkeep gate open (the
+    caller checks `feature_upkeep.enabled` first), so with the gate closed none of this runs and the report is
+    byte-identical to before. One shared predicate (`feature_landed.landed`), never a second copy of the rule."""
+    landed_mod = _load("feature_landed")
+    runner = landed_run or landed_mod.make_runner()
+    slug, why = landed_mod.resolve_slug(config, runner, cwd, remote)
+    rc, tip, _err = runner(["git", "-C", cwd, "rev-parse", "--verify", "--quiet", "%s/%s" % (remote, branch)], cwd)
+    if rc != 0:
+        return landed_mod.verdict_dict(landed_mod.Verdict(landed_mod.UNKNOWN, reason="the unit tip cannot be resolved"))
+    verdict = landed_mod.landed(tip.strip(), "%s/%s" % (remote, base), branch, slug, runner, cwd, base_name=base)
+    if slug is None and not verdict.reason:
+        verdict = verdict._replace(reason=why)
+    return landed_mod.verdict_dict(verdict)
+
+
 def _summarize_unit(r):
     """One Slack-formatted block for a single drifted unit (issue #2344's fix direction):
 
@@ -257,6 +273,8 @@ def _summarize_unit(r):
         head = "*%s*: %d commit(s) behind — landing PR %s" % (name, count, pr)
 
     lines = [head]
+    if isinstance(r.get("landed"), dict):          # present only when the upkeep gate was open
+        lines.append("  _(landed check: %s)_" % r["landed"].get("verdict"))
     lines.extend("  - %s" % subject for subject in subjects)
     if count > len(subjects):
         lines.append("  _(showing %d of %d commits)_" % (len(subjects), count))
@@ -311,7 +329,7 @@ def _already_posted(sdlc_dir, ref):
 # --------------------------------------------------------------------------- the sweep
 
 
-def sweep(sdlc_dir, config=None, run=None, now=None, post=None):
+def sweep(sdlc_dir, config=None, run=None, now=None, post=None, landed_run=None):
     """The whole tick's real logic (`drift_tick.py` is the thin wrapper threaded into `watch_daemon.py`).
 
     -> a one-line summary for `watch_daemon.py`'s own log, or `""` when the gate is closed, the sweep is
@@ -343,6 +361,7 @@ def sweep(sdlc_dir, config=None, run=None, now=None, post=None):
     _fetch(run, cwd, remote, [base] + [branch for _, branch in units])
 
     repo_ref = owner_ref = None
+    upkeep_open = _load("feature_upkeep").enabled(config)   # the gate module is the only reader of `upkeep`
     reports = []
     for name, branch in units:
         delta = _commit_delta(run, cwd, remote, base, branch)
@@ -351,7 +370,10 @@ def sweep(sdlc_dir, config=None, run=None, now=None, post=None):
         if repo_ref is None:
             repo_ref, owner_ref = unit_completion._repo_ref(config, run, cwd, remote)
         pr = _pr_status(run, cwd, repo_ref, owner_ref, branch)
-        reports.append({"unit": name, "branch": branch, "delta": delta, "pr": pr})
+        report = {"unit": name, "branch": branch, "delta": delta, "pr": pr}
+        if upkeep_open:
+            report["landed"] = _landed_field(config, landed_run, cwd, remote, base, branch)
+        reports.append(report)
 
     # BR-6's shape: stamp regardless of what follows, so a persistently unreachable Slack endpoint
     # (or simply nothing having drifted) costs one sweep per TTL window, never a retry on every
