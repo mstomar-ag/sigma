@@ -2109,7 +2109,52 @@ def _park_body(unit, branch, base, info, left, tip):
            base, branch, branch, base, unit))
 
 
-def _file_park(sdlc_dir, config, report, branch, base):
+#: #1104: a parked finding noted again at most once per this many seconds (a counter and the time, no new issue).
+PARK_NOTICE_SECONDS = 24 * 3600
+_now = time.time                      # the clock the once-a-day rule reads; a test replaces it
+_PARK_TITLE = "Rebase parked: %s onto "
+
+
+def _open_issues(run, cwd, config, remote):
+    """-> `(repo, [open issue dicts])`, ONE bounded read (newest first, at most 100), or `(None, [])` when this checkout
+    names no repository (a local-path remote) or the read failed. Never raises: a lookup that cannot be made only means
+    the pass files as it did before."""
+    if run is None:
+        return None, []
+    try:
+        repo = sync.repo_slug(config, run, cwd, remote)
+        if not repo:
+            return None, []
+        src = _load("sources")
+        rows = _load("gh_api").list_issues(
+            lambda args: run(cwd, [_GH, *args]), repo, cap=100,
+            fetch=lambda r, rp, lb, cap, state="open": src.fetch_issues_rest(r, rp, lb, cap, state=state,
+                                                                          direction="desc"))
+        return repo, [r for r in rows if isinstance(r, dict) and isinstance(r.get("number"), int)]
+    except Exception as exc:          # noqa: BLE001 - a lookup must never break a pick
+        _note("sigma: rebase upkeep: open parked findings could not be looked up (%s).\n" % _flat(exc))
+        return None, []
+
+
+def _notice(sdlc_dir, report, slot, value, run, cwd, repo):
+    """Comment on the open issue this conflict already has: a counter and the time, at most once per day. The slot
+    keeps the count and the time of the last comment, and a comment that failed leaves both unchanged."""
+    number = park.issue_of(value)
+    seen, last = int(value.get("count", 1)), float(value.get("last") or 0)
+    if number is None or not repo or _now() - last < PARK_NOTICE_SECONDS:
+        return
+    try:
+        _load("gh_api").comment_issue(
+            lambda args: run(cwd, [_GH, *args]), number,
+            "Still parked on this conflict: seen again by upkeep (pass %d, %s). No new issue is filed for it."
+            % (seen + 1, time.strftime("%Y-%m-%dT%H:%MZ", time.gmtime(_now()))), repo=repo)
+    except Exception as exc:          # noqa: BLE001
+        _note("sigma: rebase upkeep: could not note finding #%s again (%s).\n" % (number, _flat(exc)))
+        return
+    _remember(sdlc_dir, report["unit"], slot, dict(value, count=seen + 1, last=_now()))
+
+
+def _file_park(sdlc_dir, config, report, branch, base, run=None, cwd=None, remote=None):
     """File ONE finding for this conflict, through the no-goal path. Never raises.
 
     `goal=None` and `target_unit=<unit>` (always passed, so the metered classifier is never reached), `dedup=False`
@@ -2120,15 +2165,35 @@ def _file_park(sdlc_dir, config, report, branch, base):
     if not cid:
         return
     slot = park.slot_for(cid)
+    stored = _read_filed(sdlc_dir, report["unit"]).get(slot)
     if _told_before(sdlc_dir, report["unit"], slot, cid):
+        if isinstance(stored, dict) and stored.get("found") and run is not None:
+            _notice(sdlc_dir, report, slot, stored, run, cwd, sync.repo_slug(config, run, cwd, remote))
         _set_filing(report, ALREADY_FILED)
         return
+    repo, open_rows = _open_issues(run, cwd, config, remote)
+    tag = "(conflict %s)" % cid[:8]
+    same = [r for r in open_rows if tag in str(r.get("title") or "")
+            and str(r.get("title") or "").startswith("Rebase parked:")]
+    if same:
+        number = max(r["number"] for r in same)
+        report["issues"].append(str(number))
+        _set_filing(report, ALREADY_FILED)
+        value = dict(park.record(cid, number, True), found=True, count=0, last=0)
+        _notice(sdlc_dir, report, slot, value, run, cwd, repo)
+        if not _read_filed(sdlc_dir, report["unit"]).get(slot):
+            _remember(sdlc_dir, report["unit"], slot, dict(value, count=1))
+        return
+    older = [r for r in open_rows if str(r.get("title") or "").startswith(_PARK_TITLE % branch)]
+    supersedes = max(older, key=lambda r: r["number"]) if older else None
     title = "Rebase parked: %s onto %s (conflict %s)" % (branch, base, cid[:8])
     try:
         result = _handoff().create_tracked_issue(
             sdlc_dir, config, None, AREA, "%s could not be replayed onto %s (parked)" % (branch, base),
             same_area=True, immediately_actionable=False, blocks_goal=False, title=title,
-            body=_park_body(report["unit"], branch, base, info, report["leftovers"], report["tip"]),
+            body=_park_body(report["unit"], branch, base, info, report["leftovers"], report["tip"])
+            + ("\nThis supersedes the earlier finding #%d, which named a different conflict for this unit; that one is "
+               "left open for a person to close.\n" % supersedes["number"] if supersedes else ""),
             dedup=False, target_unit=report["unit"], idempotency_key=cid)
     except Exception as exc:              # noqa: BLE001 - a filing must never break a pick
         _set_filing(report, FILING_FAILED)
@@ -2169,6 +2234,20 @@ def _settle_parks(sdlc_dir, config, run, cwd, remote, report):
             return
         repo = sync.repo_slug(config, run, cwd, remote)
         gone = [slot for slot in slots if slot not in dict(park.closable(store, slots))]
+        for slot in [x for x in gone if isinstance(store.get(x), dict) and store[x].get("found")]:
+            # #1104: an issue found open (filed by another clone or before the store was lost) is only commented on.
+            number = park.issue_of(store[slot])
+            try:
+                if number is not None:
+                    _load("gh_api").comment_issue(
+                        lambda args: run(cwd, [_GH, *args]), number,
+                        "A later upkeep pass replayed this unit cleanly onto %s, so the parked conflict is resolved. "
+                        "This finding is left open for a person to close." % park.neutralise(report["base"] or "its base"),
+                        repo=repo)
+            except Exception as exc:  # noqa: BLE001 - keep the slot; the next pass retries
+                _note("sigma: rebase upkeep: could not note finding #%s as resolved (%s); retried on the next pass.\n"
+                      % (number, _flat(exc)))
+                gone.remove(slot)
         for slot, issue in park.closable(store, slots):
             try:
                 _load("gh_api").comment_issue(lambda args: run(cwd, [_GH, *args]), issue,
@@ -2591,7 +2670,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
         return report
     if outcome == PARKED:
         _mark_parked(sdlc_dir, unit, report)
-        _file_park(sdlc_dir, config, report, branch, base)
+        _file_park(sdlc_dir, config, report, branch, base, run, cwd, remote)
         return report
     if outcome == WOULD_DROP:
         _mark_blocked(sdlc_dir, unit, report)

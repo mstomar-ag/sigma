@@ -381,3 +381,93 @@ def test_the_doctor_reads_parks_from_their_own_marker_and_stays_silent_otherwise
     assert doctor._rebase_blocks(sdlc, {}) == [], "a park is never rendered as a would-drop block"
     assert doctor._rebase_parks(sdlc, {"rebase_upkeep": "off"}) == []
     assert doctor._age_text("garbage") == "age unknown"
+
+
+# --------------------------------------------------------------------------- #1104: one issue per parked conflict id
+
+REPO_CFG = {"discovery": {"github": {"repo": "acme/widgets"}}}
+DAY = 24 * 3600
+
+
+class _Board:
+    """A fake `gh`: serves the open-issue list and records every comment/close."""
+
+    def __init__(self, m, rows=()):
+        self.m, self.rows, self.comments, self.closed, self.lists = m, list(rows), [], [], 0
+
+    def __call__(self, cwd, argv):
+        if not argv or argv[0] != "gh":
+            return self.m._run(cwd, argv)
+        args = argv[1:]
+        if "--method" in args and "GET" in args and args[1].endswith("/issues"):
+            self.lists += 1
+            return json.dumps(self.rows if "page=1" in " ".join(args) else [])
+        if "POST" in args and args[1].endswith("/comments"):
+            self.comments.append((args[1], [a for a in args if a.startswith("body=")][0]))
+        if "state=closed" in args:
+            self.closed.append(args[1])
+        return "{}"
+
+
+def _opened(m, tmp_path, clock):
+    m._now = lambda: clock[0]
+    filed = base._filer(m)
+    return filed, _conflicted_world(tmp_path)
+
+
+def _forget_store(world, m):
+    m.filed_path(str(world.sdlc), base.UNIT).unlink()
+
+
+def test_second_pass_against_an_open_issue_of_the_same_conflict_files_nothing_and_comments_once_a_day(tmp_path):
+    m, clock = base._mod(), [1_000_000.0]
+    filed, world = _opened(m, tmp_path, clock)
+    cfg = _cfg(dict(OPEN, **REPO_CFG))
+    board = _Board(m)
+    assert _upkeep(m, world, cfg, run=board)["outcome"] == m.PARKED and len(filed) == 1
+    cid = filed[0]["idempotency_key"]
+    board.rows = [{"number": 999, "title": filed[0]["title"]}]
+    _forget_store(world, m)                       # another clone, or a lost store: only GitHub remembers
+    second = _upkeep(m, world, cfg, run=board)
+    assert len(filed) == 1 and second["filing"] == m.ALREADY_FILED, "exactly one issue after the second run"
+    assert len(board.comments) == 1 and "issues/999/comments" in board.comments[0][0]
+    assert "pass 1" in board.comments[0][1] and "#" not in board.comments[0][1]
+    _upkeep(m, world, cfg, run=board)             # same day: silent
+    assert len(board.comments) == 1 and board.lists == 2, "one bounded read per lookup"
+    clock[0] += DAY + 5
+    _upkeep(m, world, cfg, run=board)             # a day later: one comment, with the counter
+    assert len(board.comments) == 2 and "pass 2" in board.comments[1][1]
+    assert cid in json.dumps(json.loads(m.filed_path(str(world.sdlc), base.UNIT).read_text()))
+
+
+def test_a_changed_conflict_id_files_a_new_issue_naming_the_one_it_supersedes(tmp_path):
+    m, clock = base._mod(), [1_000_000.0]
+    filed, world = _opened(m, tmp_path, clock)
+    board = _Board(m, [{"number": 41, "title": "Rebase parked: %s onto main (conflict deadbeef)" % base.FEATURE}])
+    _upkeep(m, world, _cfg(dict(OPEN, **REPO_CFG)), run=board)
+    assert len(filed) == 1 and "supersedes the earlier finding #41" in filed[0]["body"]
+    assert board.comments == [] and board.closed == [], "the old issue is neither commented on nor closed"
+
+
+def test_a_later_clean_pass_comments_on_the_found_open_issue_and_never_closes_it(tmp_path):
+    m, clock = base._mod(), [1_000_000.0]
+    filed, world = _opened(m, tmp_path, clock)
+    cfg = _cfg(dict(OPEN, **REPO_CFG))
+    board = _Board(m)
+    _upkeep(m, world, cfg, run=board)
+    board.rows = [{"number": 999, "title": filed[0]["title"]}]
+    _forget_store(world, m)
+    _upkeep(m, world, cfg, run=board)
+    board.comments.clear()
+    _resolve_by_hand(world)
+    assert _upkeep(m, world, cfg, run=board)["outcome"] == m.CURRENT
+    assert len(board.comments) == 1 and "resolved" in board.comments[0][1] and board.closed == []
+    assert json.loads(m.filed_path(str(world.sdlc), base.UNIT).read_text()) == {}
+
+
+def test_closed_gate_never_looks_up_open_issues(tmp_path):
+    m, clock = base._mod(), [1_000_000.0]
+    filed, world = _opened(m, tmp_path, clock)
+    board = _Board(m, [{"number": 5, "title": "Rebase parked: x onto y (conflict 00000000)"}])
+    assert _upkeep(m, world, _cfg(REPO_CFG), run=board)["outcome"] == m.CONFLICT
+    assert board.lists == 0 and board.comments == [] and len(filed) == 1
