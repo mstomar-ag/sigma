@@ -4739,6 +4739,27 @@ def _model_max_tier(cfg):
     return tier if tier in ("haiku", "sonnet", "opus", "fable") else "opus"
 
 
+def _decision_rubric_state(cfg):
+    """Decision-rubric readout for the features dashboard (informational, read-only, no network).
+    The public signal is the public-repository profile being applied (ledger and auto-merge both off);
+    it is a heuristic, so the warning says so."""
+    try:
+        mod = _load_loop_script("decision_rubric_cfg")
+        rub = mod.load(cfg)
+        reason = rub.closed_reason()
+        if reason:
+            return "closed (%s)" % reason
+        on = [p for p in mod.PARTS if rub.part_enabled(p)]
+        state = ("on: " + ", ".join(on)) if on else "off (default)"
+        led = (cfg.get("ledger") or {}).get("enabled") if isinstance(cfg, dict) else None
+        wk = cfg.get("work") if isinstance(cfg, dict) else None
+        auto = wk.get("auto_merge") if isinstance(wk, dict) else None
+        warn = mod.public_repo_warning(cfg, True if (led is False and auto == "off") else None)
+        return state + ("; " + warn if warn else "")
+    except Exception as exc:  # a readout never fails the dashboard
+        return "unreadable (%s)" % type(exc).__name__
+
+
 _LEGACY_MODULE = []
 
 
@@ -5010,6 +5031,8 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
         "run: python3 skills/sigma-doctor/scripts/migrate.py .sdlc (dry run), then --apply; "
         "and rename the environment variable it names to match",
     ))
+    rows.append(("decision rubric (OFF by default)", _decision_rubric_state(cfg),
+                 'config: "decision_rubric": {"records": {"enabled": true, "repo_visibility": "private"}}'))
     return rows
 
 
