@@ -39,6 +39,7 @@ KNOWN_READERS = {
     "skills/sigma-loop/scripts/feature_land_merge.py": "landing engine back half, checks the project door first; closed returns before any read or call",
     "skills/sigma-loop/scripts/slack_commands_listen.py": "chat --unsafe-merge routes through the landing engine only when the project door is open; closed runs the old path unchanged",
     "skills/sigma-rebase/scripts/verify_merge.py": "routes a unit branch to the landing engine only when the project door is open; closed runs the old path unchanged",
+    "skills/sigma-doctor/scripts/doctor.py": "resolver and reviewer readiness rows: asks the project door itself, closed omits the rows",
     "skills/sigma-loop/scripts/feature_upkeep_review.py": "independent reviewer route, checks the project door and the resolve level itself; closed returns before any read",
 }
 

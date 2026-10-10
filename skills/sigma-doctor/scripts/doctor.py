@@ -3,7 +3,7 @@
 -> gh auth + project scope; KG enabled -> the builder; vision-first -> the north-star; always -> the
 .sdlc layer — and report each check with the exact one-line fix. The command runner is injectable so
 the logic is hermetically testable. Zero-dep."""
-import sys, json, os, pathlib, re, shutil, subprocess, importlib.util, importlib.metadata
+import sys, json, math, time, os, pathlib, re, shutil, subprocess, importlib.util, importlib.metadata
 
 try:                    # portable output: force UTF-8 so the plugin's own non-ASCII (arrows, em-dashes)
     sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")   # doesn't garble to '?' or
@@ -1205,6 +1205,71 @@ def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
         return rows
     except Exception:                       # noqa: BLE001 - a row that cannot be built says so; it is never an all-clear
         return [_chk("upkeep scheduler rows could not be built", False, "run /sigma-doctor again; see the loop scripts")]
+
+
+RESOLVER_PROBE_SECONDS = 5.0          # PROVISIONAL: a version probe on a healthy binary answers in well under a second
+
+
+def _resolver_rows(base, cfg, which, cheap_only, now=None):
+    """Resolver and reviewer readiness rows for the bounded conflict resolver (upkeep part B). EMPTY unless the upkeep
+    gate (read through its one reader, never the raw block) is open and `conflicts.resolve` is `agent`: a closed gate
+    leaves the doctor output byte-identical. Probes are bounded (`_bounded_run`, a short limit) and skipped under
+    `cheap_only`; no model is ever run. UNVERIFIED: the resolver CLI's `--version` flag was not run against a real
+    binary. The plugin-list calls elsewhere in this file stay unbounded and are NOT extended (D-25). Never raises."""
+    try:
+        gate = _load_loop_script("feature_upkeep")
+        reading = gate.read(cfg)
+        if not reading.enabled or reading.problems or reading.settings.get("conflicts.resolve") != "agent":
+            return []
+        launcher = _load_loop_script("feature_upkeep_launcher")
+        review = _load_loop_script("feature_upkeep_review")
+        resolution = _load_loop_script("feature_upkeep_resolution")
+        settings = reading.settings
+        now = int(time.time() if now is None else now)
+        rows = []
+        binary = (which or shutil.which)("claude")
+        if not binary:
+            rows.append(_chk("resolver cli: not found on PATH", False, "install the host CLI the resolver launches"))
+        elif cheap_only:
+            rows.append(_chk("resolver cli: present (not probed under cheap_only)", True, ""))
+        else:
+            res = _bounded_run([binary, "--version"], timeout=RESOLVER_PROBE_SECONDS)
+            rows.append(_chk("resolver cli: " + ("answers a version probe" if res else "did not answer a bounded version probe"),
+                             bool(res), "check the CLI runs by hand; the probe is limited to %gs" % RESOLVER_PROBE_SECONDS))
+        unverified = list(getattr(launcher, "UNVERIFIED_FLAGS", ()))
+        rows.append(_chk("resolver flags: %d design flags UNVERIFIED (refused until probed)" % len(unverified) if unverified
+                         else "resolver flags: all design flags confirmed", not unverified,
+                         "the resolver stays closed until the launch flags are probed against the real CLI"))
+        placeholder = launcher.PLACEHOLDER_MODEL
+        models = set(launcher.CATALOG.values())
+        rows.append(_chk("resolver model: " + ("catalog holds only the placeholder id" if models <= {placeholder}
+                                              else "a non-placeholder id is in the catalog"),
+                         not models <= {placeholder}, "supply a validated model id override"))
+        caps = [k for k in gate.SCHEMA if ("usd" in k or "spend" in k)]
+        finite = bool(caps) and all(isinstance(settings.get(k), (int, float)) and not isinstance(settings.get(k), bool)
+                                    and math.isfinite(settings[k]) and settings[k] > 0 for k in caps)
+        rows.append(_chk("resolver spend: " + ("finite caps configured" if finite else "no finite spend cap in the upkeep settings"),
+                         finite, "the launcher refuses a launch without finite per-run, per-machine and team caps"))
+        store = pathlib.Path(base).joinpath(*review.STORE_REL.split("/"))
+        shape_ok = not os.path.lexists(store) or (store.is_dir() and not store.is_symlink())
+        rows.append(_chk("reviewer store: " + ("usable" if shape_ok else "exists but is not a plain directory"), shape_ok,
+                         "remove the stray file at the reviewer store path so it can be created"))
+        records = []
+        rstore = pathlib.Path(base).joinpath(*resolution.STORE_REL.split("/"))
+        try:
+            records = [e.stat().st_mtime for e in os.scandir(rstore) if e.name.endswith(resolution.SUFFIX) and e.is_file()]
+        except OSError:
+            records = []
+        if records:
+            oldest = max(0, int(now - min(records)))
+            horizon = int(settings.get("backup.keep_days", 14)) * 86400   # PROVISIONAL: the prune horizon
+            ok = oldest <= horizon
+            rows.append(_chk("resolution age: %d record(s), oldest %ds old" % (len(records), oldest) + ("" if ok else
+                             " (older than the prune horizon: the prune may not be running)"), ok,
+                             "review the open resolution records; the prune is not removing them"))
+        return rows
+    except Exception:                       # noqa: BLE001 - a row that cannot be built says so; it is never an all-clear
+        return [_chk("resolver readiness rows could not be built", False, "run /sigma-doctor again; see the loop scripts")]
 
 
 def _preflight_rows(base, cfg, run, which, injected, cheap_only):
@@ -2459,6 +2524,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
         out.extend(_preflight_rows(base, cfg, run, which, injected, cheap_only))
         out.extend(_graphql_capability_rows(base, cfg))     # #801: advisory, detection only
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
+    out.extend(_resolver_rows(base, cfg, which, cheap_only))
     if disc.get("source") == "github":
         gh_disc = _block(disc, "github")
         if _block(gh_disc, "project").get("enabled"):

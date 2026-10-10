@@ -134,6 +134,7 @@ unreadable or malformed, the row is **omitted entirely** rather than shown green
 "we did not look" must never read as an all-clear.
 
 Old-plugin-id install row: [pre-launch id](references/pre-launch-id.md).
+Resolver and reviewer readiness rows: [resolver readiness](references/resolver-readiness.md).
 
 ## What this check-up covers
 
