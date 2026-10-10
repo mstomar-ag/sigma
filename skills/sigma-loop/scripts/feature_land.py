@@ -201,7 +201,7 @@ def _pull_request(env, slug, branch, base, tip, title):
 
 @_gate_first
 def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None, rebase_pass=None, verify=None,
-         now=None, merge=False, record=None):
+         now=None, merge=False, record=None, landed=None):
     """Land `unit`: steps 1 to 7, ending in `rehearsal`. With `merge=True` (explicit, never a default) the verified
     head is handed to the back half (`feature_land_merge`), which owns the guard, the pending record and the call.
     -> a result dict with `outcome`."""
@@ -268,7 +268,7 @@ def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None
         done = _load("feature_land_merge").complete(
             config, sdlc_dir, unit, slug=slug, branch=branch, base=base, head=candidate, base_tip=base_before,
             number=number, argv=tokens, environ=environ, gh_run=env.gh_run, now=now,
-            read_tip=lambda name: _remote_tip(env, name), record=record or _default_record(env, branch))
+            read_tip=lambda name: _remote_tip(env, name), record=record or _default_record(env, branch), landed=landed)
         done["attempts"] = attempt
         return done
     return {"outcome": REHEARSAL, "pr": number, "head": candidate, "base_tip": base_before, "slug": slug,
