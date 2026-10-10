@@ -35,6 +35,8 @@ EXPECTED_SCHEMA = {   # key -> (kind, lo, hi, min_items)
     "verify.timeout_minutes": ("int", 1, 1440, None),
     "backup.keep_days": ("int", 1, 3650, None),
     "backup.keep_last": ("int", 1, 1000, None),
+    "conflicts.resolve": ("enum", None, None, None),
+    "conflicts.mechanical_without_verify": ("bool", None, None, None),
 }
 DEFAULT_TABLE = {
     "enabled": False, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
@@ -42,17 +44,20 @@ DEFAULT_TABLE = {
     "triggers.dormant_every_hours": 72, "auto.window_days": 21, "auto.burst_window_hours": 24,
     "auto.target_hours": 12, "auto.floor": 3, "auto.ceiling": 40, "verify.clean_rebase": False,
     "verify.timeout_minutes": 60, "backup.keep_days": 14, "backup.keep_last": 5,
+    "conflicts.resolve": "off", "conflicts.mechanical_without_verify": False,
 }
 #: The acceptance matrix (None, True, 0, -1, 1.5, nan, inf, "", "x", [], [1], {}, {"x": 1}) plus the values that
 #: are real traps: False, 1, the text forms of a boolean, -inf, "auto", a name list, a 400-digit integer.
 BAD_VALUES = [None, True, False, 0, 1, -1, 1.5, float("nan"), float("inf"), float("-inf"), "", "x", "true",
               "yes", "auto", [], [1], ["a"], ["*"], {}, {"x": 1}, 10 ** 400]
-SECTIONS = ("units", "triggers", "auto", "verify", "backup")
+SECTIONS = ("units", "triggers", "auto", "verify", "backup", "conflicts")
 
 
 def valid_value(kind, lo, hi, min_items, v):          # the oracle, independent of the module
     if kind == "bool":
         return type(v) is bool
+    if kind == "enum":
+        return type(v) is str and v in ("off", "mechanical", "agent")
     if kind == "name_list":
         return type(v) is list and len(v) >= min_items and all(type(x) is str and x for x in v)
     if kind == "auto_int_null" and (v is None or (type(v) is str and v == "auto")):
@@ -145,7 +150,7 @@ STRICT_MUTANTS = ["return bool(value)", "return value == True or value == False"
 # ------------------------------------------------------------------------------------------ schema and defaults
 
 def test_schema_is_locked():
-    """The schema is exactly the 17 keys part A reads, with the documented kinds and bounds."""
+    """The schema is exactly the 19 keys the gate reads, with the documented kinds and bounds."""
     g = support.gate()
     got = {k: (s["kind"], s.get("lo"), s.get("hi"), s.get("min_items")) for k, s in g.SCHEMA.items()}
     assert got == EXPECTED_SCHEMA

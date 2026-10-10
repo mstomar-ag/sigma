@@ -81,6 +81,7 @@ def _load(name, directory=None):
 
 
 feature_rebase = _load("feature_rebase", _LOOP_SCRIPTS)
+conflict_state = _load("conflict_state", _LOOP_SCRIPTS)
 rebase_brief = _load("rebase_brief", _HERE)
 state = _load("state", _LOOP_SCRIPTS)
 
@@ -341,35 +342,10 @@ def apply_option(run, cwd, path, option, candidate=None):
 
 
 def _empty_commit_about_to_land(run, cwd):
-    """Whether `git rebase --continue`, called right now, would silently DROP the commit currently
-    being replayed (#2318): every conflict is resolved (nothing pending) but the staged result is
-    byte-identical to HEAD -- the new parent -- so there is nothing left for git to commit. This is
-    exactly the test git's own sequencer uses internally to decide a commit has become empty
-    (`is_index_unchanged` in `sequencer.c`): `git diff --cached HEAD --name-only` with no path in
-    its output.
-
-    VERIFIED AGAINST REAL GIT (2.49, the built-in sequencer backend a plain non-interactive `git
-    rebase` now runs even without `-i`): a commit that becomes empty this way is dropped under
-    git's own default (`--empty=drop`) with NO message on either stdout or stderr and exit 0 --
-    `--empty=ask`/`--empty=stop` do not change this, because that flag governs a commit that was
-    ALREADY empty before any conflict, never one that becomes empty from a manual resolution. So
-    this has to be caught BEFORE calling `--continue`; there is nothing left to catch once it has
-    run -- the commit is simply gone, the branch already advanced past it.
-
-    Returns `None` when continuing right now is safe. Otherwise `{"sha", "subject"}` naming the
-    at-risk commit, read from git's own `REBASE_HEAD` pseudo-ref (valid for as long as the rebase
-    stays stopped) -- best-effort: an unreadable `REBASE_HEAD` still returns `{"sha": "", "subject":
-    ""}` rather than `None`, because "would be empty" is the finding that matters and a caller must
-    not mistake "couldn't name it" for "safe to proceed"."""
-    staged = run(cwd, ["git", "diff", "--cached", "HEAD", "--name-only"])
-    if str(staged or "").strip():
-        return None
-    try:
-        out = run(cwd, ["git", "log", "-1", "--format=%H%x1f%s", "REBASE_HEAD"])
-    except Exception:                          # noqa: BLE001 - unnamed is still "would be empty"
-        out = ""
-    sha, _, subject = str(out or "").partition("\x1f")
-    return {"sha": sha.strip(), "subject": subject.strip()}
+    """Whether `git rebase --continue` would silently DROP the commit being replayed (#2318). The body moved to
+    sigma-loop's `conflict_state.empty_commit_about_to_land` (the engine needs it too, and importing it from this
+    module would reverse the dependency); this name stays so every caller and test here is unchanged."""
+    return conflict_state.empty_commit_about_to_land(run, cwd)
 
 
 def _rebase_just_concluded_locally(run, cwd):
