@@ -1462,14 +1462,15 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
                              "path(s) it has" % (base_ref, len(dropped)))
             return WOULD_DROP
         if resolved is not None:
-            refused = _prove_level1(run, cwd, path, base_ref, sha, after, report, level1, resolved)
-            if refused:
-                return CONFLICT
             # NOTHING RESOLVED IS EVER PUSHED WITHOUT A BACKUP REF. The legacy push has none, so a missing descriptor
-            # is a refusal here, not a fall-back.
+            # is a refusal here, not a fall-back. It is checked BEFORE the proof (#1071): the proof can run the
+            # project's verify command, and a replay that can never be pushed is not worth that run.
             if backup is None:
                 return _park_resolved(report, _prove().refusal(_prove().NO_BACKUP,
                                                                "no backup descriptor, so a resolved replay is not pushed"))
+            refused = _prove_level1(run, cwd, path, base_ref, sha, after, report, level1, resolved)
+            if refused:
+                return CONFLICT
         outcome = _pushed(run, cwd, path, branch, sha, remote, report, backup=backup)
         if outcome == REBASED:
             report["after"] = after
@@ -2452,19 +2453,30 @@ def _level1_options(config):
         return None
 
 
+def _acks_well_formed(text):
+    """True when `text` is a whole ack document; a write cut short reads False (`_read_acks` reads it as no acks)."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False
+    return isinstance(data, dict) and isinstance(data.get("acked"), list)
+
+
 def _write_runtime_acks(sdlc_dir, run, cwd, unit, report):
     """After a resolved push only: for each (original, replayed) pair whose original was acked, ack the replayed sha and
     its patch-id in the RUNTIME file. The tracked store is not touched and the stamp is not read."""
     acked = {str(d.get("sha")) for d in (report.get("acked") or []) if isinstance(d, dict)}
     fresh = [{"sha": new, "patch_id": patch_id(run, cwd, new), "subject": "resolved replay of " + old[:12]}
              for old, new in report["resolved"]["pairs"] if old in acked]
-    if not fresh:
-        return
     path = runtime_ack_path(sdlc_dir, unit)
     try:
-        entries = _read_acks(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        entries = _read_acks(text)
+        damaged = not _acks_well_formed(text)
     except OSError:
-        entries = []
+        entries, damaged = [], False
+    if not fresh and not damaged:         # #1071: a file cut short is rewritten whole, even with nothing new to add
+        return
     have = {e.get("sha") for e in entries}
     entries += [e for e in fresh if e["sha"] not in have]
     path.parent.mkdir(parents=True, exist_ok=True)
