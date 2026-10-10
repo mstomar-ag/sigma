@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Tests pin `update-ref --stdin` and the bare delete flag in the write-surface scanner (#1066).** Test-only; seen red against a broken classifier.
 - **Live regression entrypoint, slice 1: refusal ladder, NOT RUN rows, credential-safe logging (#884, refs #810).**
   New `evals/regression/live.py` (stdlib only). Run bare it exits 2 with one `live.py: REFUSED [no-credential]: ...`
   line on stderr, nothing on stdout, and one `sigma.regression-result/v1` NOT RUN row under
