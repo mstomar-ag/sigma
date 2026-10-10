@@ -77,7 +77,8 @@ work = _load("work")
 
 
 def settings(config):
-    return (config or {}).get("action_log") or {}
+    block = config.get("action_log") if isinstance(config, dict) else None
+    return block if isinstance(block, dict) else {}
 
 
 def enabled(config):

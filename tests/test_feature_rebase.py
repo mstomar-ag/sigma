@@ -500,6 +500,17 @@ def test_a_rebase_merge_repo_cannot_be_checked_so_the_branch_is_not_touched(tmp_
     assert world.dirt() == before
 
 
+def test_an_unset_integration_branch_says_so_in_the_report(tmp_path):
+    """#1062: `no-base` from an empty `work.base` must say how to set it; the same-branch case stays silent."""
+    m = _mod()
+    world = World(tmp_path).build()
+    report = _upkeep(m, world, config=_cfg(base=""))
+    assert report["outcome"] == m.NO_BASE and "work.base" in report["why"], report
+    (tmp_path / "b").mkdir()
+    same = _upkeep(m, World(tmp_path / "b").build(), config=_cfg(base=FEATURE))
+    assert same["outcome"] == m.NO_BASE and same["why"] == "", same
+
+
 def test_an_integration_branch_that_is_this_very_branch_is_a_no_op(tmp_path):
     """What a repo running its own epic looks like: `work.base` pointed at the epic's feature
     branch, so `base` and the unit's branch are one string. A branch cannot be brought forward onto

@@ -398,3 +398,52 @@ def test_shell_plain_update_ref_is_a_ref_write(tmp_path):
 
 def test_ref_write_has_a_risk_class():
     assert _module().RISK["git-ref-write"] == "high"
+
+
+# =====================================================================================================
+# #1066 -- the stdin form and the bare delete flag of update-ref, pinned on their own
+# =====================================================================================================
+
+#: id, the one call; --stdin takes its ref updates from input, so it is a ref write like the plain form.
+UPDATE_REF_STDIN = [
+    ("plain_run", 'run(cwd, ["update-ref", "--stdin"])'),
+    ("git_token", 'run(cwd, ["git", "update-ref", "--stdin"])'),
+    ("runner", 'gitc(cwd, ["update-ref", "--stdin"])'),
+    ("nul_terminated", 'run(cwd, ["update-ref", "--stdin", "-z"])'),
+]
+
+#: id, the one call; a bare -d / --delete with no ref operand is still a delete, never a ref write.
+UPDATE_REF_BARE_DELETE = [
+    ("plain_short", 'run(cwd, ["update-ref", "-d"])'),
+    ("plain_long", 'run(cwd, ["update-ref", "--delete"])'),
+    ("git_token_short", 'run(cwd, ["git", "update-ref", "-d"])'),
+    ("runner_short", 'gitc(cwd, ["update-ref", "-d"])'),
+]
+
+
+def test_update_ref_stdin_is_a_ref_write(tmp_path):
+    module = _module()
+    misses = []
+    for case_id, call in UPDATE_REF_STDIN:
+        got = _findings(module, tmp_path, _prune(call))
+        if got != [NEW("prune", "git-ref-write")]:
+            misses.append((case_id, got))
+    assert not misses, misses
+
+
+def test_update_ref_bare_delete_flag_is_destructive_only(tmp_path):
+    module = _module()
+    misses = []
+    for case_id, call in UPDATE_REF_BARE_DELETE:
+        got = _findings(module, tmp_path, _prune(call))
+        if got != [NEW("prune", "git-destructive")]:
+            misses.append((case_id, got))
+    assert not misses, misses
+
+
+def test_shell_update_ref_stdin_and_bare_delete(tmp_path):
+    module = _module()
+    assert _shell_rules_of(module, tmp_path, "git update-ref --stdin") == {"git-ref-write"}
+    assert _shell_rules_of(module, tmp_path, "git update-ref --stdin -z") == {"git-ref-write"}
+    assert _shell_rules_of(module, tmp_path, "git update-ref -d") == {"git-destructive"}
+    assert _shell_rules_of(module, tmp_path, "git update-ref --delete") == {"git-destructive"}

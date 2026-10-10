@@ -5,6 +5,7 @@ Offline: real git in scratch repositories (a bare remote and a checkout), a reco
 runner, and a stand-in for the issue filer. No model call and no network call. The gate-closed tests assert the new code
 adds nothing to a closed pass."""
 import copy
+import json
 import os
 import pathlib
 import subprocess
@@ -356,3 +357,49 @@ def test_the_continuation_survives_signing_and_runs_no_repository_hook(tmp_path,
     assert report["outcome"] == m.REBASED, report.get("why")
     assert ran.read_text().count("x") == 1                         # only the stamping commit's own post-commit hook
     base._git(w.local, "config", "--unset", "commit.gpgsign")
+
+
+# --------------------------------------------------------------------------- follow-ups (#1071)
+
+
+def test_1071_the_descriptor_is_checked_before_the_proof_runs(tmp_path, monkeypatch):
+    m = mod()
+    w = world(tmp_path)
+    verify_ok(m, monkeypatch)
+    base._git(w.local, "fetch", "-q", "origin")
+    sha = w.tip(FEATURE)
+    order = []
+    real = m._prove_level1
+    monkeypatch.setattr(m, "_prove_level1", lambda *a, **k: order.append("proof") or real(*a, **k))
+    spy = Spy(m)
+    report = base_report(m)
+    out = m._rebase_feature(spy, str(w.local), m.worktree_path(str(w.sdlc), UNIT), FEATURE, "origin/" + MAIN, sha,
+                            "origin", report, strict=True, backup=None, level1=m._level1_options(cfg()))
+    assert out == m.CONFLICT and "no-backup-descriptor" in report["why"]
+    assert order == [] and not spy.pushes()
+
+
+def _resolved_report(m, pairs, acked):
+    return {"unit": UNIT, "resolved": {"pairs": pairs}, "acked": acked}
+
+
+def test_1071_a_partly_written_runtime_ack_file_is_repaired_on_the_next_pass(tmp_path):
+    m = mod()
+    sdlc = tmp_path / ".sdlc"
+    path = pathlib.Path(m.runtime_ack_path(str(sdlc), UNIT))
+    path.parent.mkdir(parents=True)
+    path.write_text('{"unit": "x", "acked": [{"sha": "ab', encoding="utf-8")      # a write cut short
+    m._write_runtime_acks(str(sdlc), None, None, UNIT, _resolved_report(m, [], []))
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc == {"unit": UNIT, "acked": []}
+
+
+def test_1071_a_healthy_runtime_ack_file_is_not_rewritten_when_nothing_is_new(tmp_path):
+    m = mod()
+    sdlc = tmp_path / ".sdlc"
+    path = pathlib.Path(m.runtime_ack_path(str(sdlc), UNIT))
+    path.parent.mkdir(parents=True)
+    text = '{"acked":[{"sha":"aa","patch_id":"bb"}],"unit":"%s"}' % UNIT
+    path.write_text(text, encoding="utf-8")
+    m._write_runtime_acks(str(sdlc), None, None, UNIT, _resolved_report(m, [], []))
+    assert path.read_text(encoding="utf-8") == text

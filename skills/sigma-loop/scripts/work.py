@@ -1153,7 +1153,8 @@ _TRUSTED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
 
 def settings(config):
     s = dict(DEFAULTS)
-    s.update(config.get("work") or {})
+    block = config.get("work") if isinstance(config, dict) else None
+    s.update(block if isinstance(block, dict) else {})
     for key, label in (("remote", "work.remote"), ("base", "work.base"),
                        ("branch_prefix", "work.branch_prefix")):
         s[key] = state.safe_ref(label, s.get(key))      # #710: option injection into git
@@ -4167,6 +4168,7 @@ def rebase(sdlc_dir, config, goal, run=None):
                 return refused
             run(path, ["git", "push", "--force-with-lease", remote, f"HEAD:{rec['branch']}"])
             _rerecord_cut_tip(sdlc_dir, config, goal, rec, run, path, remote, base)
+            _reanchor_after_rebase(sdlc_dir, config, goal)
             return "rebased (CHANGELOG union-merged)"
         try:
             run(path, ["git", "rebase", "--abort"])
@@ -4221,7 +4223,19 @@ def rebase(sdlc_dir, config, goal, run=None):
         return refused
     run(path, ["git", "push", "--force-with-lease", remote, f"HEAD:{rec['branch']}"])
     _rerecord_cut_tip(sdlc_dir, config, goal, rec, run, path, remote, base)
+    _reanchor_after_rebase(sdlc_dir, config, goal)
     return "rebased"
+
+
+def _reanchor_after_rebase(sdlc_dir, config, goal):
+    """#1017: under the upkeep opt-in, a successful goal rebase re-records the content fingerprint, as the BEHIND path does
+    (`_reconcile_behind`) and the pass's own replay does. Gate closed: nothing runs, so every legacy path is unchanged.
+    Never raises -- the rebase has already pushed, and a bookkeeping miss must not turn it into a failure."""
+    try:
+        if _feature_upkeep().enabled(config):
+            state.reanchor_content(sdlc_dir, goal)
+    except Exception:                       # noqa: BLE001 - bookkeeping after a landed push is never fatal
+        pass
 
 
 def _replay_would_lose(path, run, pre, base_ref, branch=""):

@@ -6,6 +6,11 @@ by the C implementation, so independent of the Python-level name a caller used. 
 a real command or leaves the machine. File mutations are recorded, not vetoed, so a control can show a file
 really appears.
 
+SCOPE. Network: a lookup, a connect, a send and a socket BIND are seen; there is no `socket.listen` audit event in
+CPython, so a listen is covered only through the bind that must precede it. Mutation: create, rename, remove,
+link, copy, move, truncate, chmod, chown and utime are seen. Not seen: a write through an already-open file
+descriptor (os.write, mmap) and a write made from another thread or process.
+
 Listens ONLY on the thread that opened it: a pytest-xdist worker has other threads whose I/O is none of this
 trap's business. An audit hook cannot be removed; it is installed once and returns at once while no trap is open
 (same cost as path_recorder). Python 3.11, 3.13 and 3.14 were measured; CI covers 3.10 to 3.13, and the enabled
@@ -24,10 +29,11 @@ import threading
 
 PROCESS_EVENTS = frozenset({"subprocess.Popen", "os.system", "os.exec", "os.posix_spawn", "os.spawn", "os.fork", "os.forkpty"})
 NETWORK_EVENTS = frozenset({"socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyaddr", "socket.getnameinfo",
-                            "socket.connect", "socket.sendto", "socket.sendmsg", "http.client.connect", "urllib.Request",
+                            "socket.bind", "socket.connect", "socket.sendto", "socket.sendmsg", "http.client.connect", "urllib.Request",
                             "smtplib.connect", "ftplib.connect"})
 MUTATION_EVENTS = frozenset({"os.mkdir", "os.rename", "os.remove", "os.rmdir", "os.link", "os.symlink", "shutil.copyfile",
-                             "shutil.copytree", "shutil.move", "shutil.rmtree"})
+                             "shutil.copytree", "shutil.move", "shutil.rmtree", "os.truncate", "os.chmod", "os.utime",
+                             "os.chown"})
 MODEL_PROGRAMS = frozenset({"claude", "codex", "cursor-agent"})
 SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC

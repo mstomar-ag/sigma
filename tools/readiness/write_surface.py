@@ -270,17 +270,39 @@ def _strings(node, values):
     return found
 
 
-def _values(tree):
-    values = {}
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            if node.value is None:
-                continue
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                if isinstance(target, ast.Name):
-                    values[target.id] = _strings(node.value, values)
-    return values
+_FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _own_nodes(scope):
+    """Nodes of one scope in walk order, not descending into nested function definitions."""
+    queue = list(ast.iter_child_nodes(scope))
+    found = []
+    while queue:
+        node = queue.pop(0)
+        found.append(node)
+        if not isinstance(node, _FUNCS):
+            queue.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def _scoped_calls(tree):
+    """Yield (call, values) with values resolved per function: own assignments over the enclosing scopes'."""
+    stack = [(tree, {})]
+    while stack:
+        scope, outer = stack.pop()
+        values = dict(outer)
+        nodes = _own_nodes(scope)
+        for node in nodes:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        values[target.id] = _strings(node.value, values)
+        for node in nodes:
+            if isinstance(node, _FUNCS):
+                stack.append((node, values))
+            elif isinstance(node, ast.Call):
+                yield node, values
 
 
 def _rules_for_call(node, values):
@@ -364,10 +386,7 @@ def scan_paths(root, paths):
                     groups[key] = groups.get(key, 0) + 1
         else:
             tree = ast.parse(text, filename=str(path))
-            values = _values(tree)
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
+            for node, values in _scoped_calls(tree):
                 matching = [(start, name) for start, end, name in owners if start <= node.lineno <= end]
                 function = max(matching, default=(0, "<module>"))[1]
                 rules = _rules_for_call(node, values)
