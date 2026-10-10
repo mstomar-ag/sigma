@@ -1551,8 +1551,11 @@ earlier product wrote can be listed there, in the form `refs/<name>/backup/`, to
 Git resolves a short ref name by tail-matching, so `git push --delete` of a backup name could take a branch, tag or
 other ref carrying the same name when the backup itself is gone. The prune therefore keeps (and reports as
 `skipped_ambiguous`) any candidate that has such a lookalike in the listing, and re-reads the exact refs just before
-each delete, skipping any that vanished or moved (`skipped_vanished`). A lookalike that appears in the instant between
-that re-read and the push is a named residual window, not zero. A lookalike also keeps its backup out of the prune, so
+each delete, skipping any that vanished or moved (`skipped_vanished`). The re-read asks for each backup name and for its `<name>/HEAD` form, because a tail pattern of the name cannot
+return a remote-tracking head (its last component is `HEAD`); one that appears after the first listing is caught there.
+A lookalike that appears in the instant between that re-read and the push is a named residual window, not zero: the
+window is one `ls-remote` round trip plus the process start of the push, **unmeasured** (no timing was taken on a
+hosting service or on a local remote), so no bound is claimed beyond "one network round trip per chunk". A lookalike also keeps its backup out of the prune, so
 a stalled backup is cleared by removing the lookalike by hand.
 
 Nothing prunes by itself, and the scheduler of section 13d does not either, so while upkeep is enabled run the prune now and

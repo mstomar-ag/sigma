@@ -4,6 +4,10 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Backup prune re-read now sees a late remote-tracking head (#1064).** The pre-delete re-read also asks for each
+  backup's `<name>/HEAD` form, which a tail pattern of the name cannot return, so a `refs/remotes/<name>/HEAD` that
+  appears after the first listing keeps its backup out of the prune. The residual window between that re-read and the
+  delete push is stated in `docs/branching-model.md` as unmeasured. Gate closed: unchanged.
 - **Live regression entrypoint, slice 1: refusal ladder, NOT RUN rows, credential-safe logging (#884, refs #810).**
   New `evals/regression/live.py` (stdlib only). Run bare it exits 2 with one `live.py: REFUSED [no-credential]: ...`
   line on stderr, nothing on stdout, and one `sigma.regression-result/v1` NOT RUN row under

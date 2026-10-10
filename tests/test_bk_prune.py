@@ -407,3 +407,27 @@ def test_fake_remote_matches_real_git(tmp_path):
     except RuntimeError:
         fake_raised = True
     assert raised and fake_raised and set(world.refs()) == set(fake.refs), (raised, fake_raised)
+
+
+def test_recheck_sees_a_late_remote_tracking_head(tmp_path):
+    """Planted ref: `refs/remotes/<backup>/HEAD` appears after the first listing. A tail pattern of the backup name
+    cannot return it (its last component is HEAD), so the re-read must ask for the `<backup>/HEAD` form too; the
+    backup is then kept (`skipped_ambiguous`) and nothing is deleted for it."""
+    fb = bk.module()
+    victim, other = _name(fb, "u", 30), _name(fb, "u", 31)
+    refs = {_name(fb, "u", d): _sha(d) for d in range(20, 26)}
+    refs.update({victim: _sha(30), other: _sha(31)})
+    listings, late = [], "refs/remotes/%s/HEAD" % victim
+
+    def plant(argv, fake):
+        if argv[:2] == ["git", "ls-remote"]:
+            listings.append(argv)
+            if len(listings) == 2:                  # the re-read: the ref appears between listing and re-read
+                fake.refs[late] = _sha(30)
+    fake = bk.FakeRemote(refs, before=plant)
+    out = fb.prune_backups(bk.OPEN, "x/.sdlc", remote="origin", run=fake, cwd=".", clock=bk.CLOCK)
+    assert len(listings) >= 2, listings
+    assert victim in fake.refs and late in fake.refs, "a backup with a late remote-tracking HEAD must survive"
+    assert other not in fake.refs, "the unaffected old backup is still pruned"
+    assert out["skipped_ambiguous"] == 1 and out["deleted"] >= 1, out
+    assert all(victim not in c for c in fake.deletes()), fake.deletes()
