@@ -3311,6 +3311,22 @@
       "count": 1,
       "gate": "ungated",
       "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/autonomy.py",
+      "function": "_write_new",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "decision_rubric.autonomy.enabled is exactly true; exclusive create of one new id-named watch or veto file in the autonomy folder; never overwrites; a link folder is refused",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/autonomy.py",
+      "function": "prune_watch",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "decision_rubric.autonomy.enabled is exactly true; removes only watch files in the autonomy folder older than autonomy.watch.retention_days by embedded time; vetoes and links are never touched",
+      "risk": "high"
     }
   ]
 }
