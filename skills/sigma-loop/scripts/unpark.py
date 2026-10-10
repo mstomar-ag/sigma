@@ -56,6 +56,7 @@ backlog_check = _load("backlog_check")
 legacy = _load("legacy")          # #239: a Q&A block written under the previous name
 decision_tier = _load("decision_tier")
 qkind = _load("qkind")            # #994: a kind declared on the park comment
+decision_record = _load("decision_record")   # slice 8: store record + attributed comment
 loop = _load("loop")
 
 #: The fixed heading of the recorded block, in the body and in the comment alike. Deliberately free
@@ -426,18 +427,19 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         # reimplemented, and not approximated by pasting its marker. A human deciding "leave it
         # parked" here is making exactly the decision that comment exists to record, so the
         # automatic sweep must see it in the form it already knows how to read.
-        _comment(source, n, block + "\n\n"
-                 + auto_unpark.keep_parked_comment(_one_line(_substantive_reason(answers))))
+        err = _comment_decision(sdlc_dir, config, source, n, block + "\n\n"
+                                + auto_unpark.keep_parked_comment(_one_line(_substantive_reason(answers))),
+                                "keep-parked", answers, data)
         _append_block(source, n, data.get("body") or "", block)
         return {"number": n, "decision": decision, "outcome": "kept-parked",
-                "detail": "answers recorded; the automatic sweep will leave it alone"}
+                "detail": "answers recorded; the automatic sweep will leave it alone" + err}
 
     if not add and not remove:
         # Nothing to swap -- but the answers are still worth recording, and this is not a failure.
-        _comment(source, n, block)
+        err = _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data)
         _append_block(source, n, data.get("body") or "", block)
         return {"number": n, "decision": decision, "outcome": "unparked",
-                "detail": "#%s was already pickable — answers recorded" % n}
+                "detail": "#%s was already pickable — answers recorded" % n + err}
     try:
         source._swap_labels(n, add=add, remove=remove)
     except Exception as exc:                            # noqa: BLE001 - reported, never raised
@@ -448,18 +450,40 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         # the same five questions because GitHub returned a 502 is the one cost here that cannot be
         # automated away. Recording first also makes the retry cheap: `brief` reads the block back,
         # so the second attempt has nothing left to ask.
-        _comment(source, n, block)
+        err = _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data)
         _append_block(source, n, data.get("body") or "", block)
         return {"number": n, "decision": decision, "outcome": "failed",
                 "detail": "label write did not land: %s — the answers were recorded, so re-running "
-                          "this will not ask them again" % exc}
+                          "this will not ask them again" % exc + err}
     detail = triage._swap_detail(add, remove)
     if not source._set_board_status(n, source.col["ready"]) and source.project_enabled:
         detail += ("; the label landed but the board card did not move to %r — move it by hand if "
                    "this repo picks from the board" % source.col["ready"])
-    _comment(source, n, block)
+    detail += _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data)
     _append_block(source, n, data.get("body") or "", block)
     return {"number": n, "decision": decision, "outcome": "unparked", "detail": detail}
+
+
+def _declared_kind(data):
+    """The kind a park comment declared (the last one wins), else `unknown`."""
+    found = None
+    for c in (data.get("comments") or []):
+        found = qkind.parse_line(c.get("body") or "") or found
+    return found or "unknown"
+
+
+def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, data):
+    """Post `text`. With the records part open it is posted WITH the decision record's id and the
+    record is stored; closed, this is exactly `_comment` (byte-identical). Returns "" or a
+    "; <error>" suffix for the caller's detail."""
+    if not decision_record.enabled(config):
+        _comment(source, number, text)
+        return ""
+    choice = (answers or {}).get(CLOSING_QUESTION["id"]) or gesture
+    rec = decision_record.build(gesture, number, _declared_kind(data), choice,
+                                _substantive_reason(answers), decision_record.how_for(gesture))
+    out = decision_record.write_all(sdlc_dir, rec, config, source, text=text)
+    return "; " + out["error"] if out["error"] else ""
 
 
 def _comment(source, number, text):
