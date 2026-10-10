@@ -78,12 +78,9 @@ SCHEMA = {   # dotted key -> spec; the lo/hi are guard rails against typos, not 
     "verify.timeout_minutes": {"kind": "int", "lo": 1, "hi": 1440},
     "backup.keep_days": {"kind": "int", "lo": 1, "hi": 3650},
     "backup.keep_last": {"kind": "int", "lo": 1, "hi": 1000},
-<<<<<<< HEAD
     "conflicts.resolve": {"kind": "enum", "values": ("off", "mechanical", "agent")},
     "conflicts.mechanical_without_verify": {"kind": "bool"},
-=======
     "backup.former_prefixes": {"kind": "name_list", "min_items": 0},
->>>>>>> 9876441 (wip: backup restore prune (#921) part 2)
 }
 DEFAULTS = {   # the one place the defaults live; the shipped template must equal this
     "enabled": False, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
@@ -91,11 +88,8 @@ DEFAULTS = {   # the one place the defaults live; the shipped template must equa
     "triggers.dormant_every_hours": 72, "auto.window_days": 21, "auto.burst_window_hours": 24,
     "auto.target_hours": 12, "auto.floor": 3, "auto.ceiling": 40, "verify.clean_rebase": False,
     "verify.timeout_minutes": 60, "backup.keep_days": 14, "backup.keep_last": 5,
-<<<<<<< HEAD
     "conflicts.resolve": "off", "conflicts.mechanical_without_verify": False,
-=======
     "backup.former_prefixes": [],
->>>>>>> 9876441 (wip: backup restore prune (#921) part 2)
 }
 CROSS_CHECKS = (   # run only after every per-key check, and only when the keys involved passed theirs
     (("auto.floor", "auto.ceiling"), lambda floor, ceiling: floor <= ceiling,

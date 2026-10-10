@@ -1283,11 +1283,7 @@ def _drop_worktree(run, cwd, path):
         pass
 
 
-<<<<<<< HEAD
-def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, strict=False):
-=======
-def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, backup=None):
->>>>>>> 9876441 (wip: backup restore prune (#921) part 2)
+def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, strict=False, backup=None):
     """Replay `sha` (the feature tip) onto `base_ref` in a throwaway detached worktree and push it.
 
     Returns the outcome. The `finally` is the point of the whole function: whatever happens -- a
@@ -2135,12 +2131,8 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
             return report
         backup = {"unit": unit, "clock": _WALL}
     path = worktree_path(sdlc_dir, unit)
-<<<<<<< HEAD
     outcome = _rebase_feature(run, cwd, path, branch, base_ref, before, remote, report,
-                              strict=gate.enabled(config))
-=======
-    outcome = _rebase_feature(run, cwd, path, branch, base_ref, before, remote, report, backup=backup)
->>>>>>> 9876441 (wip: backup restore prune (#921) part 2)
+                              strict=gate.enabled(config), backup=backup)
     report["outcome"] = outcome
     if outcome in (CONFLICT, FAILED, WOULD_DROP):
         # MEASURED, not asserted. The body used to state "no half-applied rebase, no stranded
