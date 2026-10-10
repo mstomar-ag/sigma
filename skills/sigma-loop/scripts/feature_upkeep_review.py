@@ -181,6 +181,27 @@ def build_brief(files, pr_descriptions):
     return prompt, blocks
 
 
+def truncation(files, pr_descriptions):
+    """-> reasons the brief would be incomplete: a cap that cuts or drops input. A reviewer shown part of the material cannot
+    approve the whole, so the entry point blocks on any reason here rather than launching on a partial brief."""
+    files, prs, why, used = list(files or ()), list(pr_descriptions or ()), [], 0
+    if len(files) > MAX_FILES:
+        why.append("the brief was truncated: %d files exceed the %d-file cap" % (len(files), MAX_FILES))
+    for item in files[:MAX_FILES]:
+        for text in item[1:5]:
+            size = len("" if text is None else str(text))
+            if size > MAX_FILE_CHARS:
+                why.append("the brief was truncated: a file side exceeds %d characters" % MAX_FILE_CHARS)
+            used += min(size, MAX_FILE_CHARS) + (len("\n[truncated]") if size > MAX_FILE_CHARS else 0)
+    if used > MAX_BRIEF_CHARS:
+        why.append("the brief was truncated: file content exceeds the %d-character brief budget" % MAX_BRIEF_CHARS)
+    if len(prs) > MAX_PR_COUNT:
+        why.append("the brief was truncated: %d PR descriptions exceed the %d cap" % (len(prs), MAX_PR_COUNT))
+    if any(len("" if t is None else str(t)) > MAX_PR_CHARS for t in prs[:MAX_PR_COUNT]):
+        why.append("the brief was truncated: a PR description exceeds %d characters" % MAX_PR_CHARS)
+    return list(dict.fromkeys(why))
+
+
 def _label_safe(path):
     return re.sub(r"[^A-Za-z0-9_-]", "_", str(path))[:40]
 
@@ -212,8 +233,10 @@ def store_dir(sdlc_dir, unit):
     return pathlib.Path(sdlc_dir).joinpath(*STORE_REL.split("/"), registry.unit_key(unit))
 
 
-def make_manifest(unit, generation, base_sha, head_sha, tree_sha, files, prompt, blocks):
-    return {"schema": SCHEMA_ID, "unit": unit, "generation": generation, "base": base_sha, "head": head_sha,
+def make_manifest(unit, base_sha, head_sha, tree_sha, files, prompt, blocks):
+    """The generation is not an input: `write_manifest` assigns it under the store's own listing, so the builder carries no
+    placeholder that could be mistaken for the real number."""
+    return {"schema": SCHEMA_ID, "unit": unit, "base": base_sha, "head": head_sha,
             "tree": tree_sha, "paths": {str(f[0]): sha256_text(f[4]) for f in files or ()},
             "brief_sha256": brief_hash(prompt, blocks)}
 
@@ -315,13 +338,16 @@ def review(request, environ=None):
         return Review(REFUSED, ("the reviewer needs its own per-run cap, smaller than the resolver's",), VERIFIED)
     launcher = _sibling("feature_upkeep_launcher")
     model = pick_model(req.catalog, req.resolver_model, req.model)
+    cut = truncation(req.files, req.pr_descriptions)
+    if cut:
+        return _blocked(cut)
     prompt, blocks = build_brief(req.files, req.pr_descriptions)
     ok, findings = _sibling("reviewer")._check_brief_text(brief_text(prompt, blocks), ())
     if not ok:
         return _blocked(["the brief failed the leak gate: " + "; ".join(findings)])
     sdlc_dir = req.launch["sdlc_dir"]
     path, doc = write_manifest(sdlc_dir, req.unit, make_manifest(
-        req.unit, 0, req.base_sha, req.head_sha, req.tree_sha, req.files, prompt, blocks))
+        req.unit, req.base_sha, req.head_sha, req.tree_sha, req.files, prompt, blocks))
     if path is None:
         return _blocked([doc])
     fields = dict(req.launch, config=req.config, prompt=prompt, blocks=blocks, conflicted=(), cap_usd=req.cap_usd,

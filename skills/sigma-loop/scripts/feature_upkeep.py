@@ -28,7 +28,7 @@ Settings are a flat dict keyed by dotted path (for example "auto.floor"), the sa
 
 THREE OPT-INS, all off by default. (1) The project: `upkeep.enabled` is the boolean true. (2) The machine: the
 environment variable SIGMA_UPKEEP_JOB is exactly the text 1, and `ledger.enabled` is exactly true (restated here
-because the ledger module's own reader raises on a truthy non-object block, and a gate must not). (3) Spend: not
+so the gate stays free of the ledger module; the two are pinned equal, and both are total on a truthy non-object block). (3) Spend: not
 yet. The "project" door needs (1); the "machine" door needs all of (1) and (2).
 
 PRECEDENCE WITH THE OLDER SWITCH `work.rebase_upkeep` (ON by default; an unrecognised value reads ON)
@@ -247,8 +247,8 @@ def enabled(config):
 
 
 def _ledger_on(config):
-    """`ledger.enabled` is exactly true. Restated here because the ledger module's own reader raises on a truthy
-    non-object block, and a gate must not (it is pinned equal on well-formed input)."""
+    """`ledger.enabled` is exactly true. Restated here so the gate imports nothing; pinned equal to
+    `ledger.enabled`, which is also total on a truthy non-object block."""
     ledger = config.get("ledger") if isinstance(config, dict) else None
     return isinstance(ledger, dict) and ledger.get("enabled") is True
 
