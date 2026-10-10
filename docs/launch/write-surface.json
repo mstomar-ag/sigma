@@ -791,6 +791,20 @@
       "count": 1,
       "gate": "upkeep.enabled caller passes keep_days; removes only record-shaped and temp-shaped files older than the age limit in the pending-landing store, never a symlink, never outside it",
       "risk": "high"
+      "path": "skills/sigma-loop/scripts/feature_upkeep_pass.py",
+      "function": "ack_union",
+      "rule": "fs-remove",
+      "count": 2,
+      "gate": "upkeep.enabled (project door); unlinks only its own temp file beside the acks file after a failed write",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_pass.py",
+      "function": "ack_union",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "upkeep.enabled (project door, the decorator is the first action); writes only the one runtime acks file under state/upkeep, atomically (temp file beside it, then replace)",
+      "risk": "medium"
     },
     {
       "path": "skills/sigma-loop/scripts/feature_upkeep_resolution.py",
@@ -2215,6 +2229,14 @@
       "count": 1,
       "gate": "ungated",
       "risk": "high"
+    },
+    {
+      "path": "skills/sigma-rebase/scripts/rebase_brief.py",
+      "function": "attended_rebase",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "upkeep.enabled (the legacy call is untouched while closed); creates only the unit's rebase-lock directory under state, then holds the per-unit lock for the one attempt",
+      "risk": "medium"
     },
     {
       "path": "skills/sigma-rebase/scripts/rebase_brief.py",

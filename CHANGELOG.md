@@ -16,6 +16,15 @@ All notable changes to Sigma are recorded here, newest first.
   With the opt-in closed every existing path is unchanged.
 
 - Upkeep part C, slice 3: test substrate for REST merges (#935).
+- **Upkeep part A, slice 6: the pass under the opt-in (#922).** Behind `upkeep.enabled` only; closed means
+  every path is unchanged. The pass module gains the engine runner settings (no prompt, no editor, no ref
+  updates by rebase, no signing, per-verb timeouts), the hooks policy (off for replays and clean pushes, on
+  after a resolved conflict), the tip re-read with at most two restarts, the per-machine acks file, the
+  re-anchor limit, the skip reason for a goal branch deleted after its pull request merged, and unaddressed
+  ledger notes written in-process. A goal cut from a unit branch records the tip it was cut from, and a goal
+  rebase replays with `--onto` from that tip (goals without a record replay the old way). The attended
+  rebase door takes the unit lock in its caller and pushes with a lease on the exact tip it saw. With the
+  gate open, picking such a goal makes one extra read.
 - **Upkeep part C, slice 7: cross-repo unit check (#934).** A unit-keyed sibling lookup
   (`cross_repo.unit_sibling_check`) and its guard (`work.unit_sibling_guard`, registered in the
   enforcement table). It refuses a landing while another repository's half of the unit has not landed,
