@@ -173,6 +173,29 @@ python3 evals/skill_structure.py            # report + gate (exit 1 on a finding
 python3 evals/skill_structure.py --table    # the measurement table only, never fails
 ```
 
+## Per-skill smoke runner — every skill directory has a card (`evals/skills/smoke.py`)
+
+Slice 1 of #1043: the runner and the card schema, proven on fixture trees only
+(`tests/test_skill_smoke.py`). It lists every child directory of the skills directory itself and
+compares it with `<cards-dir>/*.json` in both directions: a directory with no card, a card with no
+directory, and a directory with no `SKILL.md` are each a named finding. A card gives `kind`
+(`exercised`, `pinned` or `described`), `gates` (strings that must lie in the kept prefix of
+`SKILL.md`, the part Claude Code re-attaches after compaction), `scripts` (each on-disk `*.py` /
+`*.sh` directly under `scripts/` appears in exactly one entry, role `gesture` or `library`) and
+`artifacts` (each `producer` is an existing repo path, or the literal `agent`). A script `fixture` is a
+shell-free argv list run from the repo root; it passes on exit 0 and, if the card gives `expect`, that
+text in stdout. `--fixture-timeout` (seconds, default 60) bounds it; a timeout is a finding.
+`exercised` with no passing fixture is a finding: label it `described` instead. Paths in a card are
+relative to the repo root and may not be absolute or contain `..`. Exit 1 on any finding.
+
+```bash
+python3 evals/skills/smoke.py --root <skills> --cards-dir <cards>
+```
+
+The bare form with no flags reads the real `skills/` and the real `evals/skills/cards/`. No real
+cards exist yet, so it stays red until slice 3 writes them, and the runner is deliberately NOT part of
+the `pytest tests/` gate until then. Not measured: behaviour on the real tree.
+
 ## Phase context budget — instruction bill by agent
 
 `phase_context_budget.py` measures the files each phase is told to load, plus the real review

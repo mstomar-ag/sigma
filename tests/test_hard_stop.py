@@ -151,3 +151,29 @@ def test_extra_patterns_only_raise():
     assert H.classify("nuke-it now", {}, cfg).cls == "destroy"
     bad = {"hard_stops": {"enabled": True, "extra_patterns": {"destroy": ["(unclosed"]}}}
     assert H.classify("ls", {}, bad).cls == "cannot-tell"
+
+
+def test_own_push_does_not_hide_another_class():
+    own = "git push --force-with-lease origin sdlc/1"
+    assert H.classify(own + " && rm -rf /x", {}, ON).cls == "destroy"
+    assert H.classify(own + " && git reset --hard HEAD~3", {}, ON).cls == "rewrite_history"
+    assert H.classify(own + "; cat ~/.ssh/id_ed25519", {}, ON).cls == "access_secrets"
+    assert H.classify(own + "; git push --force origin main", {}, ON).cls == "rewrite_history"
+    assert H.classify(own, {}, ON).pattern_id == "own-branch"
+
+
+def test_destructive_shapes():
+    for cmd in ("rm -r -f /x", "rm -f -r /x", "rm -r --force /x", "git push origin :topic",
+                "git push origin --delete topic", "git push -d origin topic", "git branch -D topic",
+                "find . -name x -delete"):
+        assert H.classify(cmd, {}, ON).cls == "destroy", cmd
+    for cmd in ("rm -f x", "git branch -d topic", "git push origin topic", "find . -name x"):
+        assert H.classify(cmd, {}, ON).cls is None, cmd
+
+
+def test_quote_scrubs_env_prefix_and_short_flag():
+    val = "s3" + "cr3t"
+    for cmd in ("DB" + "=" + val + " rm -rf /x", f"rm -rf /x -p {val}", "API_" + "KEY" + "=" + val + " X=1 rm -rf /x"):
+        r = H.classify(cmd, {}, ON)
+        assert r.cls == "destroy"
+        assert val not in r.quote, r.quote

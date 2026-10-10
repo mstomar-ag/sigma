@@ -189,6 +189,8 @@ LANDING HELPERS (#931): `merge_pr_pinned` and `create_pr_nondraft` are in the sc
 | skills/sigma-loop/scripts/sources.py | note | fs-write | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | note | gh-api-write | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | note | gh-issue | 1 | discovery.source == github; board writes require project.enabled | medium |
+| skills/sigma-loop/scripts/spend_approval.py | _counter_write | fs-remove | 1 | opt-in (spend_approval.enabled); writes only the one per-machine use counter file under the local state directory (atomic temp then replace); never deletes another writer's file; a failed write denies the grant | medium |
+| skills/sigma-loop/scripts/spend_approval.py | _counter_write | fs-write | 2 | opt-in (spend_approval.enabled); writes only the one per-machine use counter file under the local state directory (atomic temp then replace); never deletes another writer's file; a failed write denies the grant | medium |
 | skills/sigma-loop/scripts/state.py | _patch_cursor | fs-remove | 1 | ungated | high |
 | skills/sigma-loop/scripts/state.py | _queue | fs-write | 1 | ungated | medium |
 | skills/sigma-loop/scripts/state.py | _state_file | fs-write | 1 | ungated | medium |
