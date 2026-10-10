@@ -22,6 +22,8 @@ import types
 
 import pytest
 
+import rest_merge_support
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 S = ROOT / "skills" / "sigma-loop" / "scripts"
 
@@ -1920,18 +1922,7 @@ def test_merge_check_never_calls_any_landing_or_merge_function(tmp_path, monkeyp
     never merely "no exception was raised", which would be trivially true of a function that did
     nothing at all."""
     local, d = _repo(tmp_path)
-    calls = []
-
-    def _spy(name):
-        def fn(*a, **k):
-            calls.append(name)
-            return {"outcome": "created", "number": 1, "why": "stub -- must never be reached"}
-        return fn
-
-    monkeypatch.setattr(sc.verify_merge, "ensure_landing_pr", _spy("ensure_landing_pr"))
-    monkeypatch.setattr(sc.verify_merge, "merge_pr", _spy("merge_pr"))
-    monkeypatch.setattr(sc.verify_merge, "verify_and_offer_merge", _spy("verify_and_offer_merge"))
-    monkeypatch.setattr(sc.verify_merge, "_interactive_decide", _spy("_interactive_decide"))
+    calls = rest_merge_support.spy_landing(monkeypatch, sc.verify_merge)   # #935: also sees a REST merge
     monkeypatch.setattr(sc.feature_rebase, "rebase_stopped", lambda run, cwd: False)
 
     for cmd in ("exit 0", "exit 1"):
