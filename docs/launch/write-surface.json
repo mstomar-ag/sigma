@@ -601,6 +601,14 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_land_approval.py",
+      "function": "approve",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "project-gated (upkeep.enabled true); writes one small JSON approval record under state/unit-approvals named by a digest; refuses a symlinked directory; no delete, network or process",
+      "risk": "medium"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_propagate.py",
       "function": "_store",
       "rule": "fs-write",
