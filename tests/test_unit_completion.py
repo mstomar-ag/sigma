@@ -17,6 +17,7 @@ import importlib.util
 import json
 import pathlib
 
+import rest_merge_support
 from journal_events import journal_events
 
 _SCRIPTS = pathlib.Path(__file__).resolve().parent.parent / "skills" / "sigma-loop" / "scripts"
@@ -218,7 +219,7 @@ def _pr_creates(calls):
 
 
 def _merges(calls):
-    return [c for c in calls if "pr merge" in c or c.startswith("git merge")]
+    return rest_merge_support.rest_merges(calls)                 # CLI, git, and REST `PUT pulls/<n>/merge` (#935)
 
 
 # --- the mode itself -----------------------------------------------------------------------------
