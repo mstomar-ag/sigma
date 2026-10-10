@@ -359,9 +359,19 @@ def test_template_carries_the_conflicts_keys_and_a_note():
     assert cfg["upkeep"]["conflicts"] == {"resolve": "off", "mechanical_without_verify": False}
     note = cfg["_upkeep_conflicts"]
     assert isinstance(note, str) and "upkeep.enabled" in note and '"off"' in note
+    assert "later release" not in note and "later releases" not in note and "neither changes what runs" not in note
+    assert "Level 1" in note and "verify command" in note and "mechanical_without_verify" in note
     missing, extra = support.key_gaps(cfg["upkeep"], support.gate().SCHEMA)
     assert missing == [] and extra == []
     assert json.dumps(cfg["upkeep"]).count("resolve") == 1
+
+
+def test_upkeep_note_describes_what_runs_today():
+    note = support.template_cfg()["_upkeep"]
+    assert "NOTHING ELSE RUNS" not in note and "no schedule or resolver exists" not in note
+    assert "will be needed" not in note and "a later release adds" not in note
+    assert "feature_upkeep_sched.py" in note and "once per ledger-watcher tick" in note
+    assert "_upkeep_conflicts" in note and "SIGMA_UPKEEP_JOB" in note and "no credential route or cap exists yet" in note
 
 
 def test_no_new_entry_point_launches_anything_while_closed(tmp_path):
