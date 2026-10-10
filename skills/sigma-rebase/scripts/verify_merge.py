@@ -479,6 +479,39 @@ def _interactive_decide():
 
 USAGE = "usage: verify_merge.py land <sdlc_dir> [branch]"
 
+UNIT_BRANCH_PREFIX = "feature/"
+
+
+def engine_exit_code(outcome):
+    """The exit code for a landing-engine outcome (upkeep gate open only): landed or already landed 0, a refusal 1, an
+    unconfirmed landing (the pending record stays; the next run settles it) 3."""
+    outcome = str(outcome)
+    if outcome in ("merged", "merged-with-warning", "already-landed", "rehearsal", "armed"):
+        return 0
+    return 3 if outcome.startswith("unconfirmed") else 1
+
+
+def _engine_route(config, sdlc_dir, branch, decide):
+    """-> an exit code when the upkeep gate is open and `branch` is a unit branch (the engine ran), else None and the
+    closed path below runs unchanged. The gate is read through `feature_upkeep` only; nothing is loaded while closed."""
+    try:
+        if not _load("feature_upkeep", _LOOP_SCRIPTS).enabled(config):
+            return None
+    except Exception:  # noqa: BLE001 - a gate that cannot answer is closed
+        return None
+    if not branch.startswith(UNIT_BRANCH_PREFIX):
+        return None
+    unit = branch[len(UNIT_BRANCH_PREFIX):]
+    if not decide():
+        print("\nnot merging -- the tree is left exactly as it is.")
+        return 0
+    engine = _load("feature_land", _LOOP_SCRIPTS)
+    out = engine.land(config, sdlc_dir, unit, argv=["--user-requested", unit], environ=os.environ, merge=True)
+    if out.get("closed"):
+        return None
+    print(out["outcome"] + (" (%s)" % out["detail"] if out.get("detail") else ""))
+    return engine_exit_code(out["outcome"])
+
 
 def main(argv):
     """`verify_merge.py land <sdlc_dir> [branch]` -- run `verify.command` against the current
@@ -508,6 +541,9 @@ def main(argv):
         print("a rebase is still stopped in this tree -- resolve it first (see `conflict_walk.py "
               "walk`) before verifying.", file=sys.stderr)
         return 1
+    routed = _engine_route(config, sdlc_dir, branch, _interactive_decide)
+    if routed is not None:
+        return routed
     report = verify_and_offer_merge(run, cwd, sdlc_dir, config, branch, base, _interactive_decide)
     verify_result = report.get("verify")
     if report["outcome"] == NO_COMMAND:

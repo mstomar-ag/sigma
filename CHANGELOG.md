@@ -12,6 +12,7 @@ All notable changes to Sigma are recorded here, newest first.
 - Upkeep part C, slice 8: the landing engine's front half, `feature_land.py land <unit>`, ends in a rehearsal and never merges (#937).
 - Upkeep part C, slice 8: `feature_land_approval.peek` checks a unit approval without consuming it (#937).
 - Upkeep part C, slice 8: the PR-creating writer and the scratch-worktree removal are registered in the write surface (#937).
+- Upkeep part C, slice 9: the landing engine's back half, `feature_land_merge.py`, behind the upkeep gate and the explicit `--merge` flag: the guard as the last gate, a pending record before the call, a head-pinned merge, a read-back, record once and a branch-existence check; `verify_merge.py` maps engine outcomes only while the gate is open (#938).
 - **Upkeep part B, slice 5: a changelog-only unit conflict is resolved by the heading-aware union (#947).** Behind the
   existing upkeep opt-in and `conflicts.resolve` set to `mechanical` or `agent` only, and with no model call. A unit rebase
   that stops on a conflict in the changelog alone is resolved, checked (no edit outside the file, no new marker or

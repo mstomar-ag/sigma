@@ -201,8 +201,10 @@ def _pull_request(env, slug, branch, base, tip, title):
 
 @_gate_first
 def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None, rebase_pass=None, verify=None,
-         now=None):
-    """Land `unit`: steps 1 to 7, ending in `rehearsal`. Never merges. -> a result dict with `outcome`."""
+         now=None, merge=False, record=None):
+    """Land `unit`: steps 1 to 7, ending in `rehearsal`. With `merge=True` (explicit, never a default) the verified
+    head is handed to the back half (`feature_land_merge`), which owns the guard, the pending record and the call.
+    -> a result dict with `outcome`."""
     environ = os.environ if environ is None else environ
     if not (isinstance(unit, str) and registry.is_unit_name(unit)):
         return refuse("bad-unit", "not a unit name")
@@ -262,8 +264,28 @@ def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None
     bad, number = _pull_request(env, slug, branch, base, candidate, "Land %s" % unit)
     if bad:
         return bad
+    if merge:
+        done = _load("feature_land_merge").complete(
+            config, sdlc_dir, unit, slug=slug, branch=branch, base=base, head=candidate, base_tip=base_before,
+            number=number, argv=tokens, environ=environ, gh_run=env.gh_run, now=now,
+            read_tip=lambda name: _remote_tip(env, name), record=record or _default_record(env, branch))
+        done["attempts"] = attempt
+        return done
     return {"outcome": REHEARSAL, "pr": number, "head": candidate, "base_tip": base_before, "slug": slug,
             "attempts": attempt}
+
+
+def _default_record(env, branch):
+    """The observation writer: the rebase skill's allowlisted `record_merge`, loaded lazily. Best effort: it records
+    nothing when its own canonical facts are incomplete, and a failure never turns a landing into a failure."""
+    def record(number):
+        path = _HERE.parent.parent / "sigma-rebase" / "scripts" / "verify_merge.py"
+        spec = importlib.util.spec_from_file_location("verify_merge_for_land", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.record_merge(env.sdlc_dir, env.config, branch, number, "landed by the engine",
+                            run=env.rebase._run, cwd=env.cwd)
+    return record
 
 
 def main(argv=None):
@@ -275,7 +297,9 @@ def main(argv=None):
     parser.add_argument("--state-dir", default=".sdlc")
     parser.add_argument("--user-requested", "--requested-by-user", dest="user_requested", metavar="UNIT",
                         help="consent flag: must name this unit exactly")
-    parser.add_argument("--rehearse", action="store_true", help="accepted; this release always stops at the rehearsal")
+    parser.add_argument("--rehearse", action="store_true", help="stop at the rehearsal (the default)")
+    parser.add_argument("--merge", action="store_true", help="after every check, merge the verified head (guarded, "
+                        "head-pinned); without this flag nothing is merged")
     args = parser.parse_args(argv)
     state = _load("state")
     try:
@@ -284,12 +308,13 @@ def main(argv=None):
         print("refused: %s" % exc.__class__.__name__, file=sys.stderr)
         return 2
     tokens = ["--user-requested", args.user_requested] if args.user_requested else []
-    out = land(config, args.state_dir, args.unit, argv=tokens, environ=os.environ)
+    out = land(config, args.state_dir, args.unit, argv=tokens, environ=os.environ,
+               merge=bool(args.merge and not args.rehearse))
     if out.get("closed"):
         print("refused: the upkeep gate is closed", file=sys.stderr)
         return 4
     line = out["outcome"] + (" (%s)" % out["detail"] if out.get("detail") else "")
-    if out["outcome"] in (REHEARSAL, ALREADY_LANDED):
+    if out["outcome"] in (REHEARSAL, ALREADY_LANDED, "merged", "merged-with-warning"):
         print(line)
         return 0
     print(line, file=sys.stderr)

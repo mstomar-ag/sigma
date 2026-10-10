@@ -617,6 +617,14 @@
       "risk": "high"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_land_merge.py",
+      "function": "do_merge",
+      "rule": "gh-api-write",
+      "count": 1,
+      "gate": "upkeep.enabled and an explicit merge flag; explicit land; attended, or one unconsumed unit approval bound to PR head SHA; verify green; head-pinned; pending record written first; explicit merge method; no auto-merge, no admin flag, no branch-delete flag",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_propagate.py",
       "function": "_store",
       "rule": "fs-write",

@@ -1430,6 +1430,9 @@ _NO_UNIT_NAME = {
     ("feature_labels", "_load"),
     ("feature_land_approval", "_load"),
     ("feature_land", "_load"),                # #937: the sibling importer; no unit name reaches it
+    ("feature_land", "_default_record"),      # #938: builds the sibling script path; the unit is not an argument
+    ("feature_land", "record"),               # #938: the same path, inside the closure
+    ("feature_land_merge", "_load"),          # #938: the sibling importer; no unit name reaches it
     ("feature_owner", "_load"),
     ("feature_propagate", "_load"),
     ("feature_rebase", "_load"),

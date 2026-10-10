@@ -64,6 +64,7 @@ LIBRARY_ONLY = {
     "scrub", "sources", "state", "tamper_scan", "timing_store", "watch_classify", "witness",
     "bounded_run",
     "feature_landed",
+    "feature_land_merge",
     "conflict_state",
     "feature_park",
     "feature_upkeep_prove",
