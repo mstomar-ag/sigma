@@ -592,10 +592,13 @@ def _runtime_acks(sdlc_dir, unit):
         return []
 
 
-def _acked(sdlc_dir, run, cwd, unit, integration_ref):
+def _acked(sdlc_dir, run, cwd, unit, integration_ref, config=None):
     """Every ack for `unit` -> `(patch_ids, shas)`: the local file UNION the copy on the remote
     integration branch. Never raises; anything unreadable contributes nothing, so a broken store
-    fails towards REFUSING, which costs a pass and never data."""
+    fails towards REFUSING, which costs a pass and never data.
+
+    #1017: the runtime file (written only under the upkeep opt-in) is read only while that gate is open when a `config`
+    is given, so a file left behind after the gate was closed again is ignored. `config=None` keeps the old reading."""
     entries = []
     try:
         path = ack_path(sdlc_dir, unit)
@@ -605,7 +608,8 @@ def _acked(sdlc_dir, run, cwd, unit, integration_ref):
         entries += _read_acks(path.read_text(encoding="utf-8"))
     except OSError:
         pass
-    entries += _runtime_acks(sdlc_dir, unit)
+    if config is None or _gate().enabled(config):
+        entries += _runtime_acks(sdlc_dir, unit)
     try:
         entries += _read_acks(runtime_ack_path(sdlc_dir, unit).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -623,11 +627,11 @@ def _acked(sdlc_dir, run, cwd, unit, integration_ref):
             {str(e.get("sha")) for e in entries if e.get("sha")})
 
 
-def _unacked(sdlc_dir, run, cwd, unit, integration_ref, found):
+def _unacked(sdlc_dir, run, cwd, unit, integration_ref, found, config=None):
     """`found` minus every commit a human has acked -> `(still_direct, acked)`."""
     if not found:
         return found, []
-    pids, shas = _acked(sdlc_dir, run, cwd, unit, integration_ref)
+    pids, shas = _acked(sdlc_dir, run, cwd, unit, integration_ref, config)
     if not pids and not shas:
         return found, []
     still, acked = [], []
@@ -664,7 +668,7 @@ def ack(sdlc_dir, config, unit, shas, all_=False, run=None, cwd=None, remote=Non
         run(cwd, ["git", "fetch", remote, base, branch])
         base_ref, feature_ref = "%s/%s" % (remote, base), "%s/%s" % (remote, branch)
         found, _ = _unacked(sdlc_dir, run, cwd, unit, base_ref,
-                            direct_commits(run, cwd, base_ref, feature_ref))
+                            direct_commits(run, cwd, base_ref, feature_ref), config)
     except Exception as exc:              # noqa: BLE001
         result["why"] = _flat(exc)
         return result
@@ -2524,7 +2528,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
         report["outcome"] = UNVERIFIABLE
         return report
     found, acked = _unacked(sdlc_dir, run, cwd, unit, base_ref,
-                            direct_commits(run, cwd, base_ref, feature_ref))
+                            direct_commits(run, cwd, base_ref, feature_ref), config)
     report["direct"] = found
     report["acked"] = acked
     if found:
