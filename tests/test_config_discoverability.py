@@ -11,7 +11,7 @@ in /sigma-decide, and absent from the one file every adopter opens.
 This is the same bug family as `lane: auto` (scaffolded, nothing read it) and the plan file
 (`hard_plan_gate` gated on a path the Plan phase was never told to write). The halves are built by
 different changes at different times and nothing checks they meet."""
-import pathlib, re
+import importlib, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TMPL = (ROOT / "skills" / "sigma-init" / "templates" / "config.json.tmpl").read_text(encoding="utf-8")
@@ -159,3 +159,33 @@ def test_no_shipped_prose_renders_the_board_title_with_an_ascii_hyphen():
                       for m in wrong.finditer(text)]
     assert not offenders, (
         f"board title written with an ASCII hyphen instead of the generated em-dash: {offenders}")
+
+
+# --- #966: the pin reaches beyond `gates` to the config blocks the shared readers parse ----------
+
+_BLOCK_READERS = (("ledger", "ledger", "settings"), ("work", "work", "settings"),
+                  ("drift_watch", "drift_watch", "settings"), ("action_log", "actionlog", "settings"))
+
+
+def test_blocks_read_by_the_shared_readers_are_in_the_scaffolded_config():
+    """Each top-level block a shared `settings` reader parses appears in the template as an object."""
+    import json
+    cfg = json.loads(TMPL)
+    missing = [key for key, _mod, _fn in _BLOCK_READERS if not isinstance(cfg.get(key), dict)]
+    assert not missing, f"blocks read by shared settings readers but not scaffolded as objects: {missing}"
+
+
+def test_shared_settings_readers_are_total_on_a_truthy_non_object_block():
+    """A hand-edited `"ledger": true` reads as absent instead of raising (#966)."""
+    import importlib.util, sys
+    scripts = ROOT / "skills" / "sigma-loop" / "scripts"
+    sys.path.insert(0, str(scripts))
+    try:
+        for key, mod, fn in _BLOCK_READERS:
+            reader = getattr(importlib.import_module(mod), fn)
+            for bad in (True, "x", 1, [1], ["a"]):
+                got = reader({key: bad})
+                assert isinstance(got, dict) and (key == "work" or got == {}), (key, bad, got)
+            assert isinstance(reader(None), dict) and isinstance(reader([]), dict), key
+    finally:
+        sys.path.remove(str(scripts))

@@ -4,15 +4,15 @@
     "issue": "#945",
     "decision": "directory rollup of the per-resolution record files below it",
     "pruner_or_cap": "directory rollup, no writer of its own: the sum of the record files below it, each written once and never rewritten; the prune below bounds it",
-    "evidence": "skills/sigma-loop/scripts/upkeep_resolution.py (STORE_REL, prune); the writer reaches the path through the shared atomic helper and symlink refusal in state.py, which the scan cannot attribute to this path",
+    "evidence": "skills/sigma-loop/scripts/feature_upkeep_resolution.py (STORE_REL, prune); the writer reaches the path through the shared atomic helper and symlink refusal in state.py, which the scan cannot attribute to this path",
     "unscanned": true
   },
   {
     "pattern": ".sdlc/state/upkeep/resolutions/<unit>-<run>.json",
     "issue": "#945",
     "decision": "bounded by age: one small document per engine resolution, written once, removed by the age prune",
-    "pruner_or_cap": "prune(sdlc_dir, keep_days) in upkeep_resolution.py removes record-shaped files and crash leftovers older than the caller's keep_days (the gate module owns the setting; the caller is a later slice and, until it runs the prune, nothing removes them because nothing writes them); each document is capped at 65536 characters on write and on read, and holds at most 200 files; the prune scans at most 100000 directory entries per call; owner the project; lever: delete a record file or the directory, which loses only the local copy of a record whose ledger note and finding comment stand",
-    "evidence": "tests/test_upkeep_resolution.py (test_prune_removes_only_old_record_shaped_files, test_prune_keeps_a_young_record); writer is upkeep_resolution.py write_record through state.atomic_write_text",
+    "pruner_or_cap": "prune(sdlc_dir, keep_days) in feature_upkeep_resolution.py removes record-shaped files and crash leftovers older than the caller's keep_days (the gate module owns the setting; the caller is a later slice and, until it runs the prune, nothing removes them because nothing writes them); each document is capped at 65536 characters on write and on read, and holds at most 200 files; the prune scans at most 100000 directory entries per call; owner the project; lever: delete a record file or the directory, which loses only the local copy of a record whose ledger note and finding comment stand",
+    "evidence": "tests/test_upkeep_resolution.py (test_prune_removes_only_old_record_shaped_files, test_prune_keeps_a_young_record); writer is feature_upkeep_resolution.py write_record through state.atomic_write_text",
     "unscanned": true
   }
 ]

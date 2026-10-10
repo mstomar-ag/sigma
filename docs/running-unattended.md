@@ -42,3 +42,18 @@ UNVERIFIED and refused. Also UNVERIFIED: the variable that moves the configurati
 the session transcript. The ledger guard keeps 10,000 entry files as its ceiling of record; the working limit is derived
 from a timed sample against a time budget. Measured on one warm local disk: 0.2 s at 1,000 files, 0.5 to 1.8 s at 10,000;
 cold and network disks were not measured.
+
+## The upkeep job lock window and killed jobs
+
+The scheduler (`skills/sigma-loop/scripts/feature_upkeep_sched.py`) decides whether a job is alive by briefly taking the same
+exclusive lock the job holds (`state/upkeep/job.lock`), then releasing it at once. Window: if a job starts in the instant the
+watcher holds that probe lock, the job sees the lock taken, records nothing and exits as `busy`. The window is one lock and
+unlock pair per tick, no more than once per watcher tick (900 s by default); its duration was not measured, only reasoned
+from the two calls. Cost of losing it: that unit spent its cooldown without a pass, and the next due tick retries it. Nothing
+is lost or corrupted.
+
+A job killed outright (its own process, not just its child) cannot write its final record. On the next tick the watcher finds
+the record still `running` with the lock free, closes it as a `failed` outcome, counts it against the unit and writes the usual
+one unaddressed note. A job stopped by the wall-clock cap or a stop file already records its own outcome and is noted the same
+way. The tick's time budget is checked before each git read inside a unit's measurement as well as between units; a unit
+whose measurement is cut short is retried first on the next tick.

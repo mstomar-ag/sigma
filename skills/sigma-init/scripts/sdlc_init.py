@@ -299,6 +299,8 @@ the rule held. Sigma cannot stop a direct commit; only branch protection on the 
 protecting `feature/*` in the ordinary way blocks the force-push upkeep itself needs, which stops
 upkeep entirely. Protect the integration branch; on `feature/*`, grant upkeep's actor a bypass.
 
+To rebase, catch up or land a unit (a `feature/<name>` branch), use the `sigma-rebase` skill; do not run a raw rebase, force-push or merge by hand. Landing is never automatic: the skill asks for an explicit yes first.
+
 **Executors (portable):** this host has no `superpowers` / `code-review` companion, so each phase runs
 via Sigma's portable executor - the disciplines in `skills/sigma-*/SKILL.md` (`sigma-brainstorm` ->
 Goal, `sigma-plan` -> Plan, `sigma-implement` -> Implement, `sigma-review` + `sigma-verify` -> Review).
@@ -422,6 +424,7 @@ Use the `sdlc/<goal-id>` branch for a goal, then a pull request into `feature/<n
 check runs only on a pick when that branch is behind its base; silence is not evidence it ran.
 Only branch protection can prevent a direct commit. If protecting `feature/*`, grant upkeep's actor
 a bypass for its force-push.
+To rebase, catch up or land a unit (a `feature/<name>` branch), use the `sigma-rebase` skill; do not run a raw rebase, force-push or merge by hand.
 <!-- sigma:codex:end -->
 """
 

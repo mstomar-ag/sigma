@@ -322,6 +322,62 @@ def test_a_note_that_cannot_be_written_is_tried_a_bounded_number_of_times(tmp_pa
     assert len(calls) == m.NOTE_ATTEMPTS, calls
 
 
+def running_record(m, sdlc):
+    doc = {"schema": m.RECORD_SCHEMA, "state": "running", "unit": "Voice", "run_id": "1-2", "noted": False, "started_at": 5}
+    assert m.write_json(sdlc, m.RECORD_REL, doc)
+
+
+def test_a_job_killed_before_its_final_record_gets_a_failed_note_on_the_next_tick(tmp_path):
+    m, sdlc, calls = sched(), project(tmp_path), []
+    running_record(m, sdlc)                                    # the job process died: record stuck at running, lock free
+    append = lambda sdlc_dir, kind, goal, config=None, **f: calls.append((kind, goal, f)) or {"id": "x"}
+    assert m.collect(open_config(), sdlc, 10 ** 10, append) == "noted"
+    assert calls == [("note", "upkeep-voice", {"ref": "upkeep:failed:none"})], calls
+    record = json.loads(pathlib.Path(sdlc, m.RECORD_REL).read_text())
+    assert record["state"] == "done" and record["outcome"] == "failed" and record["noted"] is True, record
+    assert m.collect(open_config(), sdlc, 10 ** 10, append) == "none" and len(calls) == 1      # once
+
+
+def test_a_running_record_with_the_lock_held_is_a_live_job_not_a_killed_one(tmp_path):
+    m, sdlc, calls = sched(), project(tmp_path), []
+    running_record(m, sdlc)
+    lock = pathlib.Path(sdlc, m.LOCK_REL)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    pathlib.Path(sdlc, m.BEAT_REL).touch()
+    with open(lock, "a") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        got = m.collect(open_config(), sdlc, int(pathlib.Path(sdlc, m.BEAT_REL).stat().st_mtime),
+                        lambda *a, **k: calls.append(1))
+    assert got == "running" and not calls, (got, calls)
+
+
+def test_the_budget_is_checked_inside_the_unit_not_only_between_units(tmp_path):
+    m, sdlc = sched(), project(tmp_path)
+    seen = []
+
+    def measure(name, _doc):
+        seen.append(name)
+        if name == "b":
+            raise m.OutOfTime()                                # the unit's own measurement found the budget spent
+        return drift_of(m, 0)
+
+    deps = {"list_units": lambda _s: ["a", "b", "c"], "measure": measure, "spawn": lambda *a: None}
+    out = m.scheduler_tick(open_config(), sdlc, environ=ENV, now=1_000_000, deps=deps)
+    assert seen == ["a", "b"] and out["out_of_time"] is True, (seen, out)
+    assert json.loads(pathlib.Path(sdlc, m.STATUS_REL).read_text())["cursor"] == "a"           # b is retried first next tick
+
+
+def test_make_measure_stops_before_the_git_reads_when_the_deadline_has_passed(tmp_path):
+    m, sdlc = sched(), project(tmp_path)
+    cfg = open_config()
+    measure = m.make_measure(cfg, m.feature_upkeep.read(cfg).settings, sdlc, str(tmp_path), 1_000_000, expired=lambda: True)
+    try:
+        measure("Voice", None)
+    except m.OutOfTime:
+        return
+    raise AssertionError("measure ran past an expired budget")
+
+
 # ------------------------------------------------------------------------------------------ the doctor's rows
 
 def test_health_rows_show_liveness_and_readiness_only_when_the_block_is_on(tmp_path):
@@ -335,6 +391,32 @@ def test_health_rows_show_liveness_and_readiness_only_when_the_block_is_on(tmp_p
     fresh = dict((l, o) for l, o, _ in m.health(open_config(), sdlc, mtime + 10))
     stale = dict((l, o) for l, o, _ in m.health(open_config(), sdlc, mtime + 10 ** 6))
     assert fresh["upkeep scheduler liveness"] is True and stale["upkeep scheduler liveness"] is False
+
+
+def test_health_names_an_unset_base_only_when_upkeep_is_on(tmp_path):
+    """#1062: with upkeep on and `work.base` empty the pass ends `no-base` and does nothing; the doctor row says so."""
+    m, sdlc = sched(), project(tmp_path)
+    unset = open_config()
+    unset["work"]["base"] = ""
+    rows = dict((label, (ok, detail)) for label, ok, detail in m.health(unset, sdlc, 1_000_000))
+    ok, detail = rows["upkeep integration branch"]
+    assert ok is False and "work.base" in detail and "no-base" in detail
+    assert "upkeep integration branch" not in dict((l, o) for l, o, _ in m.health(open_config(), sdlc, 1_000_000))
+    off = copy.deepcopy(S.template_cfg())
+    assert m.health(off, sdlc, 1_000_000) == []
+
+
+def test_a_fresh_init_with_upkeep_turned_on_shows_the_unset_base_row(tmp_path):
+    """The fresh-repository path end to end: scaffold, read the written config, turn upkeep on, ask the doctor's reader."""
+    sys.path.insert(0, str(S.SCRIPTS.parent.parent / "sigma-init" / "scripts"))
+    import sdlc_init
+    sdlc_init.scaffold(tmp_path)
+    cfg = json.loads((tmp_path / ".sdlc" / "config.json").read_text(encoding="utf-8"))
+    assert cfg["work"]["base"] == ""
+    cfg["upkeep"]["enabled"] = True
+    cfg.setdefault("ledger", {})["enabled"] = True
+    labels = [label for label, _, _ in sched().health(cfg, str(tmp_path / ".sdlc"), 1_000_000)]
+    assert "upkeep integration branch" in labels
 
 
 def test_a_hung_job_reads_as_hung_and_a_dead_one_as_idle(tmp_path):
@@ -459,3 +541,25 @@ def test_the_doctor_shows_scheduler_rows_with_the_git_floor_only_when_the_block_
     assert again["git version floor"] is True
     cheap = doctor._upkeep_rows(sdlc, open_config(), run, lambda _n: "/bin/git", True, True)
     assert not any(r["name"].startswith("git version floor") for r in cheap)
+
+
+PLANTED = {"AWS_SECRET_ACCESS_KEY": "s1", "ANTHROPIC_API_KEY": "s2", "GH_PLANTED_SECRET": "s3", "GITHUB_PLANTED_SECRET": "s4",
+           "MY_PASSWORD": "s5"}
+KEPT = {"PATH": os.environ.get("PATH", "/usr/bin"), "HOME": "/h", "GH_TOKEN": "t", "SIGMA_UPKEEP_JOB": "1"}
+
+
+def test_job_env_carries_only_named_variables():
+    m = sched()
+    env = m.job_env(open_config(), m.feature_upkeep.read(open_config()).settings, dict(KEPT, **PLANTED))
+    assert not set(PLANTED) & set(env), sorted(env)
+    assert env["GH_TOKEN"] == "t" and env["HOME"] == "/h"
+
+
+def test_engine_child_cannot_read_planted_secrets(tmp_path):
+    j, sdlc, out = job(), project(tmp_path), tmp_path / "seen.json"
+    code = "import json,os,sys;json.dump(dict(os.environ),open(sys.argv[1],'w'))"
+    j.run_job(open_config(), sdlc, str(tmp_path / "proj"), "voice", "r1", 30,
+              environ=dict(KEPT, **PLANTED), command=[sys.executable, "-c", code, str(out)])
+    seen = json.loads(out.read_text())
+    assert not set(PLANTED) & set(seen), sorted(seen)
+    assert seen["GH_TOKEN"] == "t" and seen["SIGMA_UPKEEP_JOB"] == "1"

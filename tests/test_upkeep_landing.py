@@ -157,6 +157,32 @@ def test_record_is_written_before_the_call_and_a_crash_leaves_it(tmp_path):
     assert mod.read_record(tmp_path, "voice")["outcome"] == "unconfirmed"
 
 
+def test_retry_after_a_crash_between_begin_and_merge_reads_the_pr_back_and_lands(tmp_path):
+    """Crash injection at the exact window: the record is written, the process dies before any call (no call recorded)."""
+    assert mod.begin(tmp_path, OPEN, "voice", 7, PRE, 100).ok
+    assert mod.read_record(tmp_path, "voice")["call"] is None
+    reads, called = [], []
+    got = mod.run_landing(tmp_path, OPEN, "voice", 7, PRE, lambda: called.append(1) or OK,
+                          lambda n: reads.append(n) or (open_pr() if not called else merged_pr()), lambda s: [B, T], 200)
+    assert reads[0] == 7 and called == [1]
+    assert (got.called, got.outcome) == (True, "merged")
+    assert mod.read_record(tmp_path, "voice") is None
+
+
+def test_settle_classifies_a_never_called_record_with_an_open_pr_as_settled_not_unconfirmed(tmp_path):
+    mod.begin(tmp_path, OPEN, "voice", 7, PRE, 100)
+    got = mod.settle(tmp_path, OPEN, "voice", lambda n: open_pr(), lambda s: None, 150)
+    assert (got.outcome, got.reason) == ("refused", "crash-before-merge")
+    assert mod.begin(tmp_path, OPEN, "voice", 7, PRE, 160).ok
+
+
+def test_a_stale_unconfirmed_record_with_a_recorded_lost_call_still_blocks_on_an_open_pr(tmp_path):
+    mod.begin(tmp_path, OPEN, "voice", 7, PRE, 100)
+    mod.finish(tmp_path, OPEN, "voice", mod.Verdict("unconfirmed", "lost"), 110, call=LOST)
+    got = mod.settle(tmp_path, OPEN, "voice", lambda n: open_pr(), lambda s: None, 150)
+    assert got.outcome == "unconfirmed"
+
+
 def test_unwritable_record_means_the_call_is_never_made(tmp_path):
     (tmp_path / "state").write_text("a file where the directory must go")
     called = []

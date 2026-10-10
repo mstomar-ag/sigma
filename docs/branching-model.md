@@ -1551,8 +1551,11 @@ earlier product wrote can be listed there, in the form `refs/<name>/backup/`, to
 Git resolves a short ref name by tail-matching, so `git push --delete` of a backup name could take a branch, tag or
 other ref carrying the same name when the backup itself is gone. The prune therefore keeps (and reports as
 `skipped_ambiguous`) any candidate that has such a lookalike in the listing, and re-reads the exact refs just before
-each delete, skipping any that vanished or moved (`skipped_vanished`). A lookalike that appears in the instant between
-that re-read and the push is a named residual window, not zero. A lookalike also keeps its backup out of the prune, so
+each delete, skipping any that vanished or moved (`skipped_vanished`). The re-read asks for each backup name and for its `<name>/HEAD` form, because a tail pattern of the name cannot
+return a remote-tracking head (its last component is `HEAD`); one that appears after the first listing is caught there.
+A lookalike that appears in the instant between that re-read and the push is a named residual window, not zero: the
+window is one `ls-remote` round trip plus the process start of the push, **unmeasured** (no timing was taken on a
+hosting service or on a local remote), so no bound is claimed beyond "one network round trip per chunk". A lookalike also keeps its backup out of the prune, so
 a stalled backup is cleared by removing the lookalike by hand.
 
 Nothing prunes by itself, and the scheduler of section 13d does not either, so while upkeep is enabled run the prune now and
@@ -1601,8 +1604,15 @@ A unit that cannot be measured counts as behind for the backstop and never fires
 or was parked restarts only the cooldown, `triggers.min_interval_minutes`.
 
 The job runs the same engine as the pick-time pass, so a rewrite keeps a backup ref (section 13c). It runs in its own
-session with an allowlisted environment, under a wall-clock cap derived from `verify.timeout_minutes` plus a stated
+session with an allowlisted environment (exactly the list below), under a wall-clock cap derived from `verify.timeout_minutes` plus a stated
 margin, with a heartbeat; one job at a time. Windows is refused: the status file says so once and no job starts.
+
+**What the job and the engine child receive.** Both get only these names, taken from the watcher's environment when set:
+`PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL`, any name starting `LC_`, `TMPDIR`, `SSH_AUTH_SOCK`, `SSH_AGENT_PID`,
+`XDG_CONFIG_HOME`, `GIT_SSH_COMMAND`, `GIT_SSH`, and the credential names `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`,
+`GITHUB_ENTERPRISE_TOKEN`, `GH_HOST`. Sigma adds `SIGMA_UPKEEP_JOB=1`, `SIGMA_WATCH_CALL_TIMEOUT` and git's no-prompt pins.
+Every other variable is dropped, including any other name that starts `GH_` or `GITHUB_`, cloud keys and model keys; a test
+plants such variables and fails if either child can read them.
 
 Levers and signs of life, all under `.sdlc/state/`: the file `upkeep.stop` (create it to stop a running job and prevent
 the next; Sigma never deletes it), the watcher's own `watch.stop` (which also stops a running job), and the status file
@@ -1620,8 +1630,18 @@ given set of units (use `upkeep.units.include` and `exclude` to split units betw
 **What is and is not proven.** The pass, the backup, the restore and the prune were run end to end on a bare remote in a
 temporary directory, offline, with the clock set: see `docs/launch/evidence/upkeep-local-run.md`. That is a local bare
 remote only. It has not been run against a hosting service, so nothing here is a claim about branch protection rulesets,
-bypass actors, ref-name or ref-count limits, authentication, rate limits or network cost there. Until that run is
-approved and recorded, treat the feature as unproven on a hosting service.
+bypass actors, ref-name or ref-count limits, authentication, rate limits or network cost there. The hosted run described next is a single
+sanitized record, and a gap list.
+
+**Hosted run (2026-10-10, one private throwaway repository).** The real scripts passed init with a board, a unit with two
+goals through pull requests, the pass with an atomic backup ref the host accepted, restore (and a refused restore on a
+wrong expected tip), a restore that is not sticky, a prune of exactly the old backups, a guarded head-pinned landing
+(rehearsal, merge, then `already-landed` on replay), the mechanical conflict level (a non-union conflict refused and parked,
+a union conflict resolved and pushed with a backup) and the scheduler's detached job. The record, with its limits, is
+`docs/launch/evidence/upkeep-hosted-run.md`. **Not covered:** a real-model resolver or reviewer, the chat door against a
+chat service, and branch rulesets or bypass actors (a private repository without a paid plan has none), so the bypass advice
+in section 13 is untested. One host limit was seen: branch names starting with `refs/` are rejected. The scale figures above
+are reasoned, not measured: nothing was run at tens of units.
 
 ### 13e. Config reference: the `upkeep` block
 
@@ -1650,7 +1670,7 @@ of settings that contradicts itself closes the whole block, and `/sigma-doctor` 
 | backup.keep_last | 5 | 1 to 1000 | the newest backups of each unit are kept whatever their age |
 | backup.former_prefixes | [] | list of names | namespaces an earlier product wrote, pruned the same way |
 | conflicts.resolve | "off" | off, mechanical, agent | how far a unit conflict may be resolved |
-| conflicts.mechanical_without_verify | false | boolean | validated now; not acted on by this part |
+| conflicts.mechanical_without_verify | false | boolean | lets Level 1 resolve a changelog conflict when no verify command is set; see `docs/upkeep-part-b.md` |
 ```
 
 The relation to the older switch: `work.rebase_upkeep` (on by default; an unrecognised value reads on) still decides the
@@ -1666,6 +1686,10 @@ the rule text and the config it was given. What reaches an existing adopter, and
   scheduler and the backup commands, which stay closed until the block is on.
 - The `upkeep` block in `.sdlc/config.json` and any new text in `.sdlc/project.md` are never refreshed: copy the block by
   hand from the config template shipped in the installed plugin, and leave `enabled` false until you mean it.
+- The routing sentence ("rebase, catch up or land a unit: use the `sigma-rebase` skill, not a raw git command") is rule text,
+  so it reaches new adopters only, on every host. An existing adopter re-runs `/sigma-init --codex` (the managed block is
+  rewritten), deletes both Cursor rule files before `/sigma-init --cursor`, or pastes the sentence into `.sdlc/project.md`
+  by hand. Sigma never rewrites an adopter's own files silently.
 - The Codex managed block in `AGENTS.md` is rewritten in place when `/sigma-init --codex` is run again; other bytes are kept
   and nothing printed tells a refresh from a first write.
 - The two Cursor rule files are kept when present: delete both, then run `/sigma-init --cursor` again.

@@ -1004,7 +1004,8 @@ def merge_pr(run, number, merge_method="squash", sha=None, repo=None):
 # on an enqueue and cannot return the reply `sha`.
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
-_REPO_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
+# Neither segment may be dots only (`.`, `..`): they are path steps, not names.
+_REPO_RE = re.compile(r"(?!\.+/)[A-Za-z0-9_.-]+/(?!\.+\Z)[A-Za-z0-9_.-]+\Z")
 _MERGE_METHODS = ("merge", "squash", "rebase")
 
 
@@ -1064,8 +1065,8 @@ def merge_pr_pinned(run, repo, number, sha, *, merge_method):
     """PUT /pulls/{n}/merge with an EXPLICIT method (keyword-only, no default: `merge_pr` defaults to squash), the
     repository required, and the head pin REQUIRED and validated as 40 lowercase hex (`merge_pr` silently drops an
     empty one). GitHub refuses the merge (409) if the head moved. No auto-merge, no admin flag, no branch-delete
-    option. Returns the reply dict; read its commit with `merge_reply_sha`. A non-dict reply or a reply `sha` that is
-    not 40-hex raises."""
+    option. Returns the reply dict; read its commit with `merge_reply_sha`. A non-dict reply, or a reply whose `sha` is
+    missing or not 40-hex, raises: a merge that names no commit is not reported as merged."""
     _need_repo(repo)
     _need_number(number)
     _need_sha(sha, "the head pin")
@@ -1076,8 +1077,8 @@ def merge_pr_pinned(run, repo, number, sha, *, merge_method):
     if not isinstance(reply, dict):
         raise GhApiError("malformed merge reply for #%d (%s)" % (number, type(reply).__name__))
     got = reply.get("sha")
-    if got is not None and not (isinstance(got, str) and _SHA_RE.match(got)):
-        raise GhApiError("malformed merge reply for #%d: sha is not a full hex sha" % number)
+    if not (isinstance(got, str) and _SHA_RE.match(got)):
+        raise GhApiError("malformed merge reply for #%d: no full hex sha" % number)
     return reply
 
 

@@ -700,7 +700,13 @@ def attempt_rebase(run, cwd, remote, branch, base, lease=False):
     if behind == "0":
         return {"outcome": CURRENT, "why": ""}
     pre_head = str(run(cwd, ["git", "rev-parse", "HEAD"]) or "").strip()
-    lease_sha = _remote_tip(run, cwd, remote, branch) if lease else None
+    lease_sha = None
+    if lease:
+        try:
+            lease_sha = _remote_tip(run, cwd, remote, branch)
+        except Exception as exc:                # noqa: BLE001 - #1017: an unreadable tip is an outcome, never a raise
+            return {"outcome": FAILED, "why": "could not read %s/%s for the push lease: %s"
+                                              % (remote, branch, _flat(exc)), "files": []}
     try:
         # `--rebase-merges` (#2756): a plain rebase flattens a merge-commit landing onto the
         # first-parent line, where upkeep's no-direct-commits check then refuses it forever.

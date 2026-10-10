@@ -2,8 +2,8 @@
 
 The `check` command ratchets tracked Python and shell write sites. Control: in a temporary tracked shell file add `gh label delete legacy`, run `python3 tools/readiness/write_surface.py check . docs/launch/write-surface.json`, and see it fail as a new `gh-label` site; remove the line before the green run.
 
-SCANNER BLIND SPOT (#895 slice 3a): the scan counts only literal `gh ...` argv. An issue write migrated onto `skills/sigma-loop/scripts/gh_api.py` (comment, create, edit body, close, add/remove label, add assignee over `gh api`) leaves its old row and shows up only as a call to a `gh_api` helper, so a NEW REST write added through a helper is not seen by `check`. The only recorded REST-write row is gh_api.py `_default_run`, whose gate names the write helpers that now have callers. Rows for the 17 migrated sites were removed from this table; `sources.py` `create_dependency` keeps its `gh-label` and `fs-write` rows (the `label create` step stays). `tests/test_issue_creation_boundary.py` additionally pins the callers of the create helper.
-LANDING HELPERS (#931): `merge_pr_pinned` and `create_pr_nondraft` are in the scanner's `gh_api` write-helper set, so the first caller gets its own row; until then the `_default_run` row's gate text names them (explicit merge method, repository and 40-hex head pin validated before any call; no auto-merge, no admin flag, no branch-delete option; no caller yet), and `tests/test_write_surface.py` pins those words because the ratchet checks presence, not text.
+SCANNER BLIND SPOT (#895 slice 3a): the scan counts only literal `gh ...` argv. An issue write migrated onto `skills/sigma-loop/scripts/gh_api.py` (comment, create, edit body, close, add/remove label, add assignee over `gh api`) leaves its old row and shows up only as a call to a `gh_api` helper, so a NEW REST write added through a helper is not seen by `check`. `gh_api.py` `_default_run` has no row: it is a generic runner whose argument list the scanner cannot see, and since #926 the scanner no longer borrows another function's list for it. The write helpers that now have callers are listed in the landing note below and each caller gets its own row. Rows for the 17 migrated sites were removed from this table; `sources.py` `create_dependency` keeps its `gh-label` and `fs-write` rows (the `label create` step stays). `tests/test_issue_creation_boundary.py` additionally pins the callers of the create helper.
+LANDING HELPERS (#931): `merge_pr_pinned` and `create_pr_nondraft` are in the scanner's `gh_api` write-helper set, so the first caller gets its own row; until then this note names them (explicit merge method, repository and 40-hex head pin validated before any call; no auto-merge, no admin flag, no branch-delete option; no caller yet), and `tests/test_write_surface.py` pins those words in this file because the ratchet checks presence, not text.
 
 | Path | Function | Rule | Count | Gate | Risk |
 |---|---|---|---:|---|---|
@@ -105,7 +105,6 @@ LANDING HELPERS (#931): `merge_pr_pinned` and `create_pr_nondraft` are in the sc
 | skills/sigma-loop/scripts/feature_registry.py | _atomic_write_text | fs-write | 1 | ungated | medium |
 | skills/sigma-loop/scripts/feature_sync.py | _acquire | fs-write | 1 | ungated | medium |
 | skills/sigma-loop/scripts/feature_sync.py | recover | fs-remove | 1 | explicit `feature_sync.py recover --discard`; renames Sigma's own recovery copy of the registry sheet aside, never deletes it | medium |
-| skills/sigma-loop/scripts/gh_api.py | _default_run | gh-api-write | 1 | the injected run is the only transport; write helpers (comment_issue, create_issue, add_labels, remove_label, close_issue, edit_issue, add_assignees) have callers since #895 slice 3a, each through GitHubSource._issue_* with the feature-label guard (create_issue/add_labels refuse feature:* unless it exists); a REST write falls back to GraphQL at most once, never on an ambiguous failure, never in a cloud session; the scanner sees only this gh invocation, not which helper called it | low |
 | skills/sigma-loop/scripts/gh_api.py | _write_cache | fs-remove | 2 | probe cache (cache_dir injected, unwired) and the read breaker / shared bounded fallback log (reads and writes, cap 200, no text/argv/body) under .sdlc/state, written only with an sdlc_dir, after state.refuse_symlinks vets the file and its .tmp (#708, #895) | low |
 | skills/sigma-loop/scripts/gh_api.py | _write_cache | fs-write | 2 | probe cache (cache_dir injected, unwired) and the read breaker / shared bounded fallback log (reads and writes, cap 200, no text/argv/body) under .sdlc/state, written only with an sdlc_dir, after state.refuse_symlinks vets the file and its .tmp (#708, #895) | low |
 | skills/sigma-loop/scripts/goal_state_prune.py | sweep | fs-remove | 4 | goal is terminal (newest action-log internal row is recorded done), nothing of it younger than 7 days, no work record, no live agent marker; regular non-symlink files directly under owned state dirs only; run_stop markers by 30-day age (#458) | medium |
@@ -174,9 +173,6 @@ LANDING HELPERS (#931): `merge_pr_pinned` and `create_pr_nondraft` are in the sc
 | skills/sigma-loop/scripts/sources.py | _ensure_labels | gh-label | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | _ensure_priority_field | gh-project | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | _ensure_status_field | gh-project | 1 | discovery.source == github; board writes require project.enabled | medium |
-| skills/sigma-loop/scripts/sources.py | _gh_json | gh-label | 1 | discovery.source == github; board writes require project.enabled | medium |
-| skills/sigma-loop/scripts/sources.py | _graphql | graphql-mutation | 1 | discovery.source == github; board writes require project.enabled | medium |
-| skills/sigma-loop/scripts/sources.py | _run_gh | gh-label | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | _set_board_status | gh-project | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | _swap_labels | graphql-mutation | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | _sync_backlog | gh-project | 1 | discovery.source == github; board writes require project.enabled | medium |
@@ -185,7 +181,6 @@ LANDING HELPERS (#931): `merge_pr_pinned` and `create_pr_nondraft` are in the sc
 | skills/sigma-loop/scripts/sources.py | create_dependency | fs-write | 2 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | create_dependency | gh-label | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | ensure_labels_report | gh-label | 1 | discovery.source == github; board writes require project.enabled | medium |
-| skills/sigma-loop/scripts/sources.py | fetch_issues_rest | gh-label | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | note | fs-write | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | note | gh-api-write | 1 | discovery.source == github; board writes require project.enabled | medium |
 | skills/sigma-loop/scripts/sources.py | note | gh-issue | 1 | discovery.source == github; board writes require project.enabled | medium |
@@ -250,8 +245,7 @@ LANDING HELPERS (#931): `merge_pr_pinned` and `create_pr_nondraft` are in the sc
 | skills/sigma-loop/scripts/work.py | close_design | gh-pr | 1 | ungated | high |
 | skills/sigma-loop/scripts/work.py | finish | fs-remove | 2 | ungated | high |
 | skills/sigma-loop/scripts/work.py | finish | fs-rmtree | 1 | ungated | high |
-| skills/sigma-loop/scripts/work.py | finish | gh-pr | 1 | work.enabled; confirmed merged PR | high |
-| skills/sigma-loop/scripts/work.py | finish | git-destructive | 1 | ungated | high |
+| skills/sigma-loop/scripts/work.py | finish | git-destructive | 2 | ungated | high |
 | skills/sigma-loop/scripts/work.py | merge | gh-pr | 2 | work.enabled; work.auto_merge != off; merge rights; fresh verify evidence and CLEAN PR | high |
 | skills/sigma-loop/scripts/work.py | merge_design | gh-pr | 1 | work.enabled; work.auto_merge != off | high |
 | skills/sigma-loop/scripts/work.py | post_review | gh-pr | 1 | ungated | medium |

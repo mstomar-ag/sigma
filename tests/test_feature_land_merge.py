@@ -195,6 +195,21 @@ def test_moved_head_at_the_host_is_refused_and_still_open(tmp_path):
     assert pending(w)["outcome"] == "refused" and w.recorded == []
 
 
+def test_landing_reply_without_sha_is_not_merged(tmp_path):
+    w = MWorld(tmp_path)
+    orig = w.gh
+
+    def gh(args):
+        out = orig(args)
+        if "--method PUT" not in " ".join(args):
+            return out
+        w.merged = False                      # the host did not merge; the reply just carries no sha
+        return json.dumps({"merged": True})
+    w.gh = gh
+    out = w.merge()
+    assert not out["outcome"].startswith("merged")
+
+
 def test_lost_acknowledgment_with_merged_readback_is_merged(tmp_path):
     w = MWorld(tmp_path, mode="lost")
     assert w.merge()["outcome"] == "merged"

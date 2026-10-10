@@ -284,3 +284,45 @@ def test_host_command_table_untouched_and_resolve_never_called():
     reviewer_calls = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                       and "reviewer" in ast.dump(n.func.value)}
     assert reviewer_calls == {"_check_brief_text"}
+
+
+# ------------------------------------------------------------------------------------------ #1072
+
+def _launches_nothing(rig, result):
+    assert result.outcome == "block" and "truncated" in result.reasons[0]
+    assert rig.marker() is None and rig.store() == []
+
+
+def test_truncated_file_blocks_the_review(rig):
+    big = "x" * (rig.mod.MAX_FILE_CHARS + 1)
+    _launches_nothing(rig, rig.mod.review(rig.request(files=[("a.txt", "b", "o", "t", big)])))
+
+
+def test_dropped_files_block_the_review(rig):
+    many = [("f%d.txt" % i, "b", "o", "t", "r") for i in range(rig.mod.MAX_FILES + 1)]
+    _launches_nothing(rig, rig.mod.review(rig.request(files=many)))
+
+
+def test_dropped_or_cut_pr_descriptions_block_the_review(rig):
+    _launches_nothing(rig, rig.mod.review(rig.request(pr_descriptions=["p"] * (rig.mod.MAX_PR_COUNT + 1))))
+    _launches_nothing(rig, rig.mod.review(rig.request(pr_descriptions=["p" * (rig.mod.MAX_PR_CHARS + 1)])))
+
+
+def test_brief_budget_overflow_blocks_the_review(rig):
+    chunk = "y" * rig.mod.MAX_FILE_CHARS
+    files = [("f%d.txt" % i, chunk, chunk, chunk, chunk) for i in range(2 + rig.mod.MAX_BRIEF_CHARS // (4 * len(chunk)))]
+    _launches_nothing(rig, rig.mod.review(rig.request(files=files)))
+
+
+def test_untruncated_brief_still_reviews(rig):
+    assert rig.mod.review(rig.request()).outcome == "approve"
+
+
+def test_manifest_generation_is_assigned_by_the_store_not_the_builder(rig):
+    import inspect
+    assert "generation" not in inspect.signature(rig.mod.make_manifest).parameters
+    prompt, blocks = rig.mod.build_brief(rig.files(), [])
+    built = rig.mod.make_manifest("voice", "b" * 40, "h" * 40, "t1", rig.files(), prompt, blocks)
+    assert "generation" not in built                    # no placeholder that could be mistaken for the real one
+    result = rig.mod.review(rig.request())
+    assert result.manifest["generation"] == 1 and rig.store()[0].name == "1.json"
