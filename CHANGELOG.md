@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Decision rubric, slice 6: hard-stop classifier core, pure and unwired (#995, story #988).** New library `skills/sigma-loop/scripts/hard_stop.py`: closed classes with per-class toggles, a class registry (`register_class`), raise-only `raise_to`, `cannot-tell` on any error, own-branch carve-out (`is_own`), `is_hardstop_kind`, and scrubbed quotes. Off unless `hard_stops.enabled` is true; nothing calls it yet.
 - **Live regression entrypoint, slice 1: refusal ladder, NOT RUN rows, credential-safe logging (#884, refs #810).**
   New `evals/regression/live.py` (stdlib only). Run bare it exits 2 with one `live.py: REFUSED [no-credential]: ...`
   line on stderr, nothing on stdout, and one `sigma.regression-result/v1` NOT RUN row under
