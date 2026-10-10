@@ -15,6 +15,11 @@ exactly as before: the unit branch is left untouched, nothing is pushed, and an 
 | mechanical | Level 1: a conflict confined to the changelog is resolved by the heading-aware union, proved, stamped and pushed once through the atomic backup push; anything else parks |
 | agent | Level 2: a source conflict goes to a capped, headless resolver; a second, independent session reviews the result; a failed proof or a blocking verdict parks and pushes nothing |
 
+Level 1 also covers the release-heading case: when the base moved the old Unreleased entries under a new dated
+version heading, the unit's new entries are filed under Unreleased above that release section, the base's sections stay
+as they are, and an entry the base already has is dropped by its text; an edit to an existing line, a link footer or an
+unknown heading still parks.
+
 Level 1 needs a verify command. With none set the pass parks, unless `upkeep.conflicts.mechanical_without_verify` is the
 boolean true. That key IS acted on by Level 1 (the config table in `docs/branching-model.md` still says it is validated
 only; this page is the correction). `upkeep.verify.clean_rebase` is validated and not acted on.
