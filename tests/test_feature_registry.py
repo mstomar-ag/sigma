@@ -1449,6 +1449,14 @@ _NO_UNIT_NAME = {
     ("feature_upkeep_landing", "_load"),      # #936: the sibling importer, once per module
     ("feature_upkeep_landing", "prune"),      # #936: a directory sweep keyed by age; no unit name reaches it
     ("feature_upkeep_landing", "pending"),    # #936: a read-only listing of the whole store; no unit name reaches it
+    ("feature_upkeep_launcher", "_acquire_lock"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
+    ("feature_upkeep_launcher", "_run"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
+    ("feature_upkeep_launcher", "_sibling"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
+    ("feature_upkeep_launcher", "_spend_path"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
+    ("feature_upkeep_launcher", "build_env"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
+    ("feature_upkeep_launcher", "entry_limit"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
+    ("feature_upkeep_launcher", "make_scratch"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
+    ("feature_upkeep_launcher", "refuse_ancestors"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
     ("feature_propagate", "record_path"),     # keyed by GOAL, not by unit
     ("feature_rebase", "rebase_stopped"),     # takes a path that is already built
     # #278: keyed by a git BRANCH name (which may be a goal's `sdlc/<n>`), never a unit name; its

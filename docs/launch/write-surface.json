@@ -801,6 +801,46 @@
       "risk": "high"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_launcher.py",
+      "function": "_acquire_lock",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "opt-in; conflicts.resolve agent; creates only the empty lock file beside the per-machine spend store under the local state directory",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_launcher.py",
+      "function": "_save_records",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "opt-in; conflicts.resolve agent; atomic replace of the one per-machine spend file under the local state directory, flock-guarded, pruned to 24 hours",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_launcher.py",
+      "function": "_save_records",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "opt-in; one JSON file under the local state directory, flock-guarded, pruned to 24 hours",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_launcher.py",
+      "function": "make_scratch",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "opt-in upkeep, conflicts.resolve agent, machine opt-in; writes only under a scratch root it created; never inside the repository or home",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_launcher.py",
+      "function": "remove_scratch",
+      "rule": "fs-rmtree",
+      "count": 1,
+      "gate": "removes only the run directory it created, checked by realpath under its own scratch root",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_upkeep_pass.py",
       "function": "ack_union",
       "rule": "fs-remove",

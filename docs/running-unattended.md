@@ -28,3 +28,17 @@ In the drill, 3 of 5 loop runs worked around it and 2 stopped with nothing done.
 
 Defaulting the process id so no shell expansion is needed, and a test that no documented command needs one,
 are open in #721. Until then the literal-pid form above is the workaround.
+
+## The conflict resolver session
+
+Separate from the permission setup above: with `conflicts.resolve: agent` the upkeep job may start one headless
+`claude -p` session to resolve a unit conflict (`skills/sigma-loop/scripts/feature_upkeep_launcher.py`). It is off by default,
+so the kit starts no unattended model session unless that setting is on. The shipped model catalog holds only a placeholder id,
+so the resolver stays closed until a validated override is supplied. The launcher passes only `-p`, `--output-format` and
+`--model` (alias form), flags already used in the tree and not probed by this change; every other design flag
+(`--max-budget-usd`, `--permission-mode`, `--allowedTools`, `--disallowedTools`, `--tools`, `--settings`,
+`--setting-sources`, `--strict-mcp-config`, `--no-session-persistence`, `--add-dir`, `--bare`, `--append-system-prompt`) is
+UNVERIFIED and refused. Also UNVERIFIED: the variable that moves the configuration directory and the place and shape of
+the session transcript. The ledger guard keeps 10,000 entry files as its ceiling of record; the working limit is derived
+from a timed sample against a time budget. Measured on one warm local disk: 0.2 s at 1,000 files, 0.5 to 1.8 s at 10,000;
+cold and network disks were not measured.
