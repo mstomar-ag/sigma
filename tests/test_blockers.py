@@ -389,13 +389,18 @@ def test_the_withheld_membership_decision_survives_a_second_pass():
 # --- cloud-review findings (bug_001, bug_002, bug_004) -------------------------------------------
 
 
-def test_the_legacy_drift_shape_is_left_to_promote():
-    """Slice 18. `{goal, needs-confirmation}` has no classification row any more: it reads as
-    PICKABLE like any goal-labelled issue, and `/sigma-promote`'s `drift` bucket is the one repair
-    route for a leftover (it stays legacy-inert in `not_eligible_labels`)."""
+def test_the_legacy_drift_shape_is_routed_so_the_leftover_is_stripped():
+    """Slice 18 (review bug_004). `{goal, needs-confirmation}` is refused by the queue's
+    `not_eligible_labels`, so reading it PICKABLE deadlocked it: never worked, never stripped. It is
+    ROUTED, and `_act` strips the leftover through the remove-only swap."""
     b = _mod("blockers")
-    assert _classify(_st("sdlc:goal", "sdlc:needs-confirmation", "sdlc:followup")) == b.PICKABLE
-    assert _classify(_st("sdlc:goal", "sdlc:needs-confirmation")) == b.PICKABLE
+    assert _classify(_st("sdlc:goal", "sdlc:needs-confirmation", "sdlc:followup")) == b.ROUTED
+    assert _classify(_st("sdlc:goal", "sdlc:needs-confirmation")) == b.ROUTED
+    run = _runner(views={"7": _view("sdlc:goal", "sdlc:needs-confirmation")})
+    result = b.resolve(".sdlc", _config(), _source(b, run), "42", ["7"], run=run)
+    assert result["results"][0]["verdict"] == b.ROUTED
+    doc = next(a for c in run.gql for a in c if str(a).startswith("query=mutation"))
+    assert "removeLabelsFromLabelable" in doc
 
 
 def test_granting_membership_still_strips_a_leftover_label():

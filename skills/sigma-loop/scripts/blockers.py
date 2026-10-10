@@ -108,6 +108,8 @@ def classify(state, goal_label, proposed_label, parked_label, followup_label, me
     # classified by its OTHER labels (provenance -> ROUTED, which grants membership and, in `_act`,
     # strips the leftover). `proposed_label` stays a parameter only so callers keep one signature.
     if goal_label in names:
+        if proposed_label in names:
+            return ROUTED                    # {goal, leftover}: the queue refuses it; `_act` strips it
         return PICKABLE
     if _other_assignees(state, me):
         return ROUTED
