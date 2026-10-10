@@ -4,7 +4,6 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-- **Upkeep gate follow-ups (#965).** The decorator now refuses a machine-door signature with a rest parameter at decoration, its docstring no longer overclaims about a positional environment mapping (a closed gate ignores it), the config template note says an unknown key far from a known one is described by position, type and length, and the test attempt trap also records socket bind, truncate, chmod, chown and utime, with its scope stated.
 - **Drift measure: `--end-of-options` before the refs in its history read (#1063).** The `git log` in `feature_upkeep_drift.walk` now passes the marker before the included and excluded refs, so a ref name is never parsed as an option even if the existing dash and whitespace refusal were bypassed. The `rev-parse` call takes no ref and is unchanged. The argv test asserts the marker precedes the ref, and a mutant that drops it is seen red.
 - **Live regression entrypoint, slice 1: refusal ladder, NOT RUN rows, credential-safe logging (#884, refs #810).**
   New `evals/regression/live.py` (stdlib only). Run bare it exits 2 with one `live.py: REFUSED [no-credential]: ...`
