@@ -349,17 +349,20 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
                               "result": None, "error": None})
             if not all(s["result"] == "done" for s in triage.apply_actions(source, steps, True)):
                 return "failed"
-        rid = None
+        # Status first (#1106): a failed write returns failed before any record or comment, so the
+        # retry repeats only the idempotent gesture and never a duplicate record or comment.
+        ask.update(state="applied", applied_at=now.isoformat(), rid=None, rule_id=action["rule_id"],
+                   silent=bool(action["silent"]))
+        _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
         try:
             rec = {"how": "autonomous", "qkind": action["qkind"], "area": action.get("area", ""),
                    "choice": action["option"], "reason": "applied after the window by rule " + action["rule_id"],
                    "rule_id": action["rule_id"], "issue": issue}
-            rid = _load("decision_store").append(sdlc_dir, rec, config, now=now)
+            ask["rid"] = _load("decision_store").append(sdlc_dir, rec, config, now=now)
+            if ask["rid"] is not None:
+                _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
         except Exception:
-            rid = None
-        ask.update(state="applied", applied_at=now.isoformat(), rid=rid, rule_id=action["rule_id"],
-                   silent=bool(action["silent"]))
-        _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
+            pass  # applied stays recorded; a missing record id is accepted by the veto path
         if action["text"]:
             try:
                 source.note(issue, action["text"])

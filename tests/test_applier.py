@@ -101,6 +101,36 @@ def test_elapsed_window_applies_and_comments_rule_id(tmp_path):
     assert AP.tick(sd, cfg, T0 + 62 * MIN, source=src) == []  # applied once only
 
 
+def test_failed_status_write_does_not_duplicate_comment_or_record(tmp_path, monkeypatch):
+    sd, cfg, rid = _setup(tmp_path)
+    _ask(sd, cfg)
+    src = Src()
+    real = AP._write_atomic
+    state = {"fail": True}
+
+    def flaky(path, body):
+        if state["fail"] and isinstance(body, dict) and body.get("state") == "applied":
+            raise OSError("disk full")
+        return real(path, body)
+
+    monkeypatch.setattr(AP, "_write_atomic", flaky)
+    def auto():
+        store = DS._store(sd, cfg)
+        recs = [json.load(open(os.path.join(store, n))) for n in os.listdir(store) if n.endswith(".json")]
+        return [r for r in recs if r.get("how") == "autonomous"]
+
+    acts = AP.tick(sd, cfg, T0 + 61 * MIN, source=src)
+    assert [a["result"] for a in acts] == ["failed"]
+    assert src.notes == []
+    assert auto() == []
+    state["fail"] = False
+    acts = AP.tick(sd, cfg, T0 + 62 * MIN, source=src)
+    assert [a["result"] for a in acts] == ["done"]
+    assert len(src.notes) == 1
+    assert len(auto()) == 1
+    assert AP.tick(sd, cfg, T0 + 63 * MIN, source=src) == []
+
+
 def test_answer_inside_window_wins(tmp_path):
     sd, cfg, _ = _setup(tmp_path)
     aid = _ask(sd, cfg)
