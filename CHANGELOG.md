@@ -5,6 +5,7 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - Upkeep part A, slice 6 wiring: the pass re-reads tips, uses the engine runner and hooks policy, writes acks, limits re-anchoring, skips deleted goal branches and writes the ledger note (#1016).
+- Upkeep part A, slice 7: the scheduler, the detached bounded job, outcome notes and the doctor rows (#923).
 - Upkeep part C, slice 5: read-back classifier and pending-landing record (#936).
 - **Upkeep part B, slice 5: a changelog-only unit conflict is resolved by the heading-aware union (#947).** Behind the
   existing upkeep opt-in and `conflicts.resolve` set to `mechanical` or `agent` only, and with no model call. A unit rebase

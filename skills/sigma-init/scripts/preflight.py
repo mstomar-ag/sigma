@@ -371,6 +371,42 @@ def check_git(repo, runner, which, timeout):
     return _chk("git", name, True, "a git work tree with at least one commit")
 
 
+#: The oldest git the background upkeep job runs on, and the exact releases it refuses. The reason 2.35.0 is refused is not
+#: recorded anywhere this repository holds (design D-30); the refusal is kept as designed and says so.
+GIT_FLOOR = (2, 34, 0)
+GIT_REFUSED = ((2, 35, 0),)
+_GIT_VERSION = re.compile(r"git version (\d+)\.(\d+)(?:\.(\d+))?")
+
+
+def parse_git_version(text):
+    """`git --version` output -> (major, minor, patch), or None. Vendor suffixes are ignored and a missing patch reads 0:
+    `git version 2.39.5 (Apple Git-154)`, `2.43.0.windows.1`, `2.40.1.vfs.0.0`, `2.45.0-rc1` all parse."""
+    found = _GIT_VERSION.search(text or "")
+    if not found:
+        return None
+    return int(found.group(1)), int(found.group(2)), int(found.group(3) or 0)
+
+
+def check_git_floor(runner, which, timeout):
+    """The background upkeep job's git floor: refuse below GIT_FLOOR and exactly the GIT_REFUSED releases. Runs only when
+    the caller asks for it (`preflight(git_floor=True)`), so a config without that opt-in keeps its exact check list."""
+    name = "git version floor"
+    if not which("git"):
+        return _skipped("git-floor", name, "git is not installed")
+    rc, out = runner(["git", "--version"], None, timeout)
+    found = parse_git_version(out) if rc == 0 else None
+    shown = ".".join(str(n) for n in GIT_FLOOR)
+    if found is None:
+        return _chk("git-floor", name, False, "could not read the git version (git --version)",
+                    meanwhile="the background upkeep job needs git %s or newer." % shown)
+    text = ".".join(str(n) for n in found)
+    if found < GIT_FLOOR or found in GIT_REFUSED:
+        return _chk("git-floor", name, False, "git %s is not supported by the background upkeep job (needs %s or newer, "
+                    "and not %s)" % (text, shown, ", ".join(".".join(str(n) for n in r) for r in GIT_REFUSED)),
+                    meanwhile="the job will not start on this machine until git is updated.")
+    return _chk("git-floor", name, True, "git %s" % text)
+
+
 def check_remote(repo, want, runner, timeout):
     """-> (check, remotes, url)."""
     name = f"git remote '{want}'"
@@ -592,13 +628,14 @@ def _scope_meanwhile(missing):
 _NOT_HERE = "not checked here (a network call); run /sigma-doctor"
 
 
-def preflight(repo, config=None, runner=None, which=None, timeout=None, network=True, deep=True):
+def preflight(repo, config=None, runner=None, which=None, timeout=None, network=True, deep=True, git_floor=False):
     """All checks this config makes relevant, in order, for the repository at `repo`. `network=False`
     runs only the local checks (git, remote, gh installed) and marks the rest skipped -- for a
     caller that has not been asked to spend a network round-trip (doctor's `cheap_only`).
     `deep=False` keeps `gh auth status` but never runs `git ls-remote` or the owner lookup (`gh api
     users/<owner>`): the SessionStart wizard's github-mode path. Network calls are bounded by
-    `network_timeout()`, local ones by `timeout` (default `call_timeout()`)."""
+    `network_timeout()`, local ones by `timeout` (default `call_timeout()`). `git_floor=True` adds the background job's git
+    version check after the git check."""
     runner = runner or real_runner
     which = which or shutil.which
     timeout = call_timeout() if timeout is None else timeout
@@ -606,6 +643,8 @@ def preflight(repo, config=None, runner=None, which=None, timeout=None, network=
     req = requirements(config or {})
     repo = str(repo)
     out = [check_git(repo, runner, which, timeout)]
+    if git_floor:                         # asked for by the upkeep opt-in only; the default list is unchanged
+        out.append(check_git_floor(runner, which, timeout))
     if not (req["work"] or req["github"]):
         return out
     # a fresh `git init` (no commit yet) IS a work tree: its remote is checked like any other --

@@ -24,6 +24,7 @@ STOP_FILES = (
     ("watch.stop", "ledger watcher", lambda p: p.is_file()),
     ("supervisor.stop", "loop supervisor", lambda p: p.exists()),
     ("slack-commands.stop", "slack-commands listener", lambda p: p.exists()),
+    ("upkeep.stop", "upkeep job", lambda p: p.exists()),
 )
 
 

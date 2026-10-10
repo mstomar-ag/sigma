@@ -1181,6 +1181,32 @@ def _preflight_fix(check):
     return head + (f" ({tail})" if tail else "")
 
 
+def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
+    """The background upkeep scheduler's liveness and readiness rows (never a pass for something that did not run). Silent
+    unless the opt-in block is on or invalid, decided by the gate's own reader, not by looking for the block here. The git
+    floor goes through the init preflight (gated by `git_floor=True`) and is skipped under `cheap_only`, as every probe is."""
+    try:
+        sched = _load_loop_script("feature_upkeep_sched")
+        if not sched.project_open(cfg):
+            return []
+        rows = [_chk(f"{label}: {detail}", ok, "see docs/branching-model.md for the opt-in and the stop file")
+                for label, ok, detail in sched.health(cfg, base, now)]
+        if not cheap_only:
+            pf = _load_init_script("preflight")
+            runner = None
+            if injected:
+                def runner(argv, cwd=None, timeout=None):
+                    res = run(list(argv))
+                    return (0, str(res)) if res else (1, _failure_text(res))
+            checks = pf.preflight(str(base.parent), cfg, runner=runner, which=which, network=False, deep=False, git_floor=True)
+            for c in checks:
+                if c["id"] == "git-floor" and c["ok"] is not None:
+                    rows.append(_chk(f"{c['name']}: {c.get('detail') or ''}", c["ok"] is True, _preflight_fix(c)))
+        return rows
+    except Exception:                       # noqa: BLE001 - a row that cannot be built says so; it is never an all-clear
+        return [_chk("upkeep scheduler rows could not be built", False, "run /sigma-doctor again; see the loop scripts")]
+
+
 def _preflight_rows(base, cfg, run, which, injected, cheap_only):
     """#229: the init preflight's checks as doctor rows -- git repository, git remote, base branch,
     gh installed, gh auth, gh token scopes, and (board on) gh project scope. Skipped checks (their
@@ -2432,6 +2458,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     if _block(cfg, "work").get("enabled") or disc.get("source") == "github":
         out.extend(_preflight_rows(base, cfg, run, which, injected, cheap_only))
         out.extend(_graphql_capability_rows(base, cfg))     # #801: advisory, detection only
+    out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
     if disc.get("source") == "github":
         gh_disc = _block(disc, "github")
         if _block(gh_disc, "project").get("enabled"):

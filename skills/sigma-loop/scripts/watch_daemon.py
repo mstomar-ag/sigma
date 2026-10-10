@@ -614,6 +614,30 @@ def _coexist_notice(sdlc_dir):
     return buf.getvalue().rstrip("\n")
 
 
+_SCHEDULER = []
+
+
+def _scheduler():
+    """The upkeep scheduler module, loaded once and only when a tick first needs it: it loads the opt-in gate, and a
+    module-scope load here would exit before `main` on a load failure (BR-23)."""
+    if not _SCHEDULER:
+        _SCHEDULER.append(_load("feature_upkeep_sched"))
+    return _SCHEDULER[0]
+
+
+def scheduler_step(p, sdlc_dir, call_timeout):
+    """The machine-level upkeep decision, AFTER the eight calls and in its own guard, so a failure here can never skip them.
+    The config is read fresh each tick (the machine variable is still the one the watcher started with). The module's gate is
+    the first action: closed, this logs nothing, touches no heartbeat and writes nothing. -> the decision dict or None."""
+    try:
+        config = read_config(sdlc_dir)
+        budget = int(call_timeout) // 4 or 1
+        return _scheduler().scheduler_tick(config, sdlc_dir, budget=budget)
+    except Exception as exc:                         # noqa: BLE001 - never abort the tick, never skip the rest of it
+        log_line(p, f"watch: scheduler step failed (non-fatal): {type(exc).__name__}")
+        return None
+
+
 def cleanup(p, my_pid):
     """B-28/B-29. Registered ONLY on the takeover path, after the mutex is released -- a process
     that exits as a sibling or as "already running" removes nothing.
@@ -796,6 +820,7 @@ def tick(p, sdlc_dir, call_timeout, n, config=None):
             summary = run_call(p, sdlc_dir, call_timeout, script, subcmd, mode)
             if mode == "summary" and summary:        # B-34: an empty summary produces NO line
                 tee(p, f"watch: {summary}")
+        scheduler_step(p, sdlc_dir, call_timeout)
     except Exception as exc:                         # noqa: BLE001 - B-1/B-36: absorb, never abort
         log_line(p, f"watch: tick failed (non-fatal): {type(exc).__name__}")
         print(traceback.format_exc(), file=sys.stderr, flush=True)
