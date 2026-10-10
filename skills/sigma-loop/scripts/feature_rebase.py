@@ -173,6 +173,7 @@ def _load(name):
 
 
 features = _load("features")
+hsg = _load("hard_stop_guard")      # decision rubric slice 10: a no-op until hard_stops.enabled is true
 _safe_ref = state_safe_ref = _load("state").safe_ref     # #710: ONE validator for config-supplied git names
 registry = _load("feature_registry")
 sync = _load("feature_sync")
@@ -2549,6 +2550,18 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
             report["why"] = problem[1]
             return report
         backup = {"unit": unit, "clock": _WALL}
+    if hsg.enabled(config):
+        # Slice 10: the lease push of a registered unit branch is Sigma's own (register rule); anything else is not.
+        try:
+            registry_now = registry.read(registry.registry_dir(sdlc_dir))
+        except Exception:             # noqa: BLE001 - an unreadable registry reads as not-own
+            registry_now = None
+        verdict = hsg.guard("git push --force-with-lease %s HEAD:refs/heads/%s" % (remote, branch),
+                            {"branch": branch, "registry": registry_now}, config)
+        if verdict.blocked:
+            report["outcome"] = FAILED
+            report["why"] = verdict.reason
+            return report
     path = worktree_path(sdlc_dir, unit)
     outcome = _rebase_feature(run, cwd, path, branch, base_ref, before, remote, report,
                               strict=gate.enabled(config), backup=backup, level1=_level1_options(config))
