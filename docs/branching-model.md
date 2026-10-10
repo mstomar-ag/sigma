@@ -1601,8 +1601,15 @@ A unit that cannot be measured counts as behind for the backstop and never fires
 or was parked restarts only the cooldown, `triggers.min_interval_minutes`.
 
 The job runs the same engine as the pick-time pass, so a rewrite keeps a backup ref (section 13c). It runs in its own
-session with an allowlisted environment, under a wall-clock cap derived from `verify.timeout_minutes` plus a stated
+session with an allowlisted environment (exactly the list below), under a wall-clock cap derived from `verify.timeout_minutes` plus a stated
 margin, with a heartbeat; one job at a time. Windows is refused: the status file says so once and no job starts.
+
+**What the job and the engine child receive.** Both get only these names, taken from the watcher's environment when set:
+`PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL`, any name starting `LC_`, `TMPDIR`, `SSH_AUTH_SOCK`, `SSH_AGENT_PID`,
+`XDG_CONFIG_HOME`, `GIT_SSH_COMMAND`, `GIT_SSH`, and the credential names `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`,
+`GITHUB_ENTERPRISE_TOKEN`, `GH_HOST`. Sigma adds `SIGMA_UPKEEP_JOB=1`, `SIGMA_WATCH_CALL_TIMEOUT` and git's no-prompt pins.
+Every other variable is dropped, including any other name that starts `GH_` or `GITHUB_`, cloud keys and model keys; a test
+plants such variables and fails if either child can read them.
 
 Levers and signs of life, all under `.sdlc/state/`: the file `upkeep.stop` (create it to stop a running job and prevent
 the next; Sigma never deletes it), the watcher's own `watch.stop` (which also stops a running job), and the status file

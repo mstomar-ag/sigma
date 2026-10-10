@@ -131,7 +131,9 @@ def run_job(config, sdlc_dir, root, unit, run_id, cap, *, environ=None, command=
                                "--root", str(root), "--unit", unit,
                                "--run-id", str(run_id), "--cap", str(cap)]
             stop = EitherStop(sched.path_of(sdlc_dir, sched.STOP_REL), sched.path_of(sdlc_dir, sched.WATCH_STOP_REL))
-            result = bounded.run_group(argv, root, cap, env=bounded.unattended_env(environ), stop_path=stop, merge=False,
+            result = bounded.run_group(argv, root, cap, env=bounded.unattended_env(sched.allowed_env(
+                                           os.environ if environ is None else environ, (sched.CALL_TIMEOUT_ENV, feature_upkeep.ENV_MACHINE))),
+                                       stop_path=stop, merge=False,
                                        clock=beat or BeatingClock(lambda: _touch(beat_path), base=clock))
             outcome, tip = _outcome_of(result, bounded)
         finally:

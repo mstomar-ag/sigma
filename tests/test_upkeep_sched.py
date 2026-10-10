@@ -459,3 +459,25 @@ def test_the_doctor_shows_scheduler_rows_with_the_git_floor_only_when_the_block_
     assert again["git version floor"] is True
     cheap = doctor._upkeep_rows(sdlc, open_config(), run, lambda _n: "/bin/git", True, True)
     assert not any(r["name"].startswith("git version floor") for r in cheap)
+
+
+PLANTED = {"AWS_SECRET_ACCESS_KEY": "s1", "ANTHROPIC_API_KEY": "s2", "GH_PLANTED_SECRET": "s3", "GITHUB_PLANTED_SECRET": "s4",
+           "MY_PASSWORD": "s5"}
+KEPT = {"PATH": os.environ.get("PATH", "/usr/bin"), "HOME": "/h", "GH_TOKEN": "t", "SIGMA_UPKEEP_JOB": "1"}
+
+
+def test_job_env_carries_only_named_variables():
+    m = sched()
+    env = m.job_env(open_config(), m.feature_upkeep.read(open_config()).settings, dict(KEPT, **PLANTED))
+    assert not set(PLANTED) & set(env), sorted(env)
+    assert env["GH_TOKEN"] == "t" and env["HOME"] == "/h"
+
+
+def test_engine_child_cannot_read_planted_secrets(tmp_path):
+    j, sdlc, out = job(), project(tmp_path), tmp_path / "seen.json"
+    code = "import json,os,sys;json.dump(dict(os.environ),open(sys.argv[1],'w'))"
+    j.run_job(open_config(), sdlc, str(tmp_path / "proj"), "voice", "r1", 30,
+              environ=dict(KEPT, **PLANTED), command=[sys.executable, "-c", code, str(out)])
+    seen = json.loads(out.read_text())
+    assert not set(PLANTED) & set(seen), sorted(seen)
+    assert seen["GH_TOKEN"] == "t" and seen["SIGMA_UPKEEP_JOB"] == "1"

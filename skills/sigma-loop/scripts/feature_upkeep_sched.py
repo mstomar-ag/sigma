@@ -63,7 +63,7 @@ NOTE_ATTEMPTS = 3
 WINDOWS = "windows"
 ENV_ALLOW = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SSH_AUTH_SOCK", "SSH_AGENT_PID", "XDG_CONFIG_HOME",
              "GIT_SSH_COMMAND", "GIT_SSH")
-ENV_ALLOW_PREFIXES = ("GH_", "GITHUB_")
+CREDENTIAL_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_HOST")
 CALL_TIMEOUT_ENV = "SIGMA_WATCH_CALL_TIMEOUT"
 _JOBS = []                                      # Popen handles of jobs this process started; polled so none stays a zombie
 
@@ -190,13 +190,18 @@ def make_measure(config, settings, sdlc_dir, root, now):
 
 # ------------------------------------------------------------------------------------------ the job
 
+def allowed_env(source, extra=()):
+    """-> the variables of `source` the job and its engine child may see: the named allowlist, the locale family, the named
+    credential variables and `extra`. Nothing else, whatever its name looks like."""
+    return {k: v for k, v in source.items()
+            if k in ENV_ALLOW or k in CREDENTIAL_ENV or k in extra or k.startswith("LC_")}
+
+
 def job_env(config, settings, environ=None):
     """The detached job's environment: an allowlist (not the watcher's whole environment), the machine variable, an explicit
     call timeout for the push guard instead of the inherited one, and the prompt pins. No run id is set: the job is not a
     supervised run."""
-    source = os.environ if environ is None else environ
-    env = {k: v for k, v in source.items()
-           if k in ENV_ALLOW or k.startswith(ENV_ALLOW_PREFIXES) or k.startswith("LC_")}
+    env = allowed_env(os.environ if environ is None else environ)
     env[feature_upkeep.ENV_MACHINE] = "1"
     env[CALL_TIMEOUT_ENV] = str(cap_seconds(settings))
     return _sibling("bounded_run").unattended_env(env)
