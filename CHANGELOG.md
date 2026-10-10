@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Reviewer route: a truncated brief blocks, manifest generation is explicit (#1072).** `feature_upkeep_review.review` now returns `block` (nothing launched, no manifest) when any brief cap would cut or drop input; `make_manifest` no longer takes a placeholder generation, the store assigns it.
 - **Live regression entrypoint, slice 1: refusal ladder, NOT RUN rows, credential-safe logging (#884, refs #810).**
   New `evals/regression/live.py` (stdlib only). Run bare it exits 2 with one `live.py: REFUSED [no-credential]: ...`
   line on stderr, nothing on stdout, and one `sigma.regression-result/v1` NOT RUN row under
