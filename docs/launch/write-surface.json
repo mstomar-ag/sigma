@@ -1761,6 +1761,22 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/spend_approval.py",
+      "function": "_counter_write",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "opt-in (spend_approval.enabled); writes only the one per-machine use counter file under the local state directory (atomic temp then replace); never deletes another writer's file; a failed write denies the grant",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/spend_approval.py",
+      "function": "_counter_write",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "opt-in (spend_approval.enabled); writes only the one per-machine use counter file under the local state directory (atomic temp then replace); never deletes another writer's file; a failed write denies the grant",
+      "risk": "medium"
+    },
+    {
       "path": "skills/sigma-loop/scripts/state.py",
       "function": "_patch_cursor",
       "rule": "fs-remove",
