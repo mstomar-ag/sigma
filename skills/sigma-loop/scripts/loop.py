@@ -6418,6 +6418,14 @@ def _dispatch(argv):
         # passing evidence from `loop.py verify` — the sigma-verify prose gate, enforced.
         # _enforce_enabled (not a strict `is True`): F17/#342 — `enforce: 1` / `"true"` must not
         # silently skip this gate just because they aren't the literal bool `True`.
+        if argv[4] == "done" and _load("hard_stop_guard").enabled(config):
+            # decision rubric slice 10: the downstream net. A logged action that matches a hard-stop class and has
+            # no recorded permission-use or park is refused. Closed (the default), this block is never entered.
+            unrecorded = _load("hard_stop_guard").record_done_net(_load("actionlog").read_goal(argv[2], argv[3]), config)
+            if unrecorded:
+                print("REFUSED: hard-stop action(s) in the log with no recorded permission or park: "
+                      + "; ".join(unrecorded[:3]), file=sys.stderr)
+                return 4
         if argv[4] == "done" and _enforce_enabled(config.get("verify") or {}):
             # unsafe goal -> ValueError from _evidence_path (see state.unsafe_goal_reason);
             # caught here (exit 2, matching verify_goal's own unsafe-goal convention) instead of
