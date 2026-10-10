@@ -4177,8 +4177,10 @@ def _reconcile_one(sdlc_dir, config, source, goal, run, now, results):
 
 
 def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transition="park",
-            merged_pr=False, retry_close=False, housekeeping=True):
-    """`housekeeping` (#465): False only from the merge-reconcile pass, which holds
+            merged_pr=False, retry_close=False, housekeeping=True, qkind=None):
+    """`qkind` (#994): a declared question kind; appends one machine line to the text handed to
+    `source.park` (and only there). None keeps the comment byte-identical.
+    `housekeeping` (#465): False only from the merge-reconcile pass, which holds
     `merge-reconcile.lock`, so the worktree sweep is not run under it. NOT `merged_pr`: every ordinary
     `record done` on a PR-bearing goal sets that too.
     `merged_pr` (#255 (1)): the caller confirmed the goal's PR merged by a REST read just now;
@@ -4263,10 +4265,13 @@ def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transit
         # `inspect.signature` mirrors the same capability-check spirit as `hasattr(source, "fail")`
         # one line up -- ask what the source can actually do before calling it that way, the same
         # discipline this function already applies to `fail()`.
+        park_text = detail or result
+        if qkind is not None:                      # #994: the declared kind rides inside the text
+            park_text = park_text + "\n" + _load("qkind").render_line(qkind)
         if tier is not None and "tier" in inspect.signature(source.park).parameters:
-            source.park(goal, detail or result, tier=tier)
+            source.park(goal, park_text, tier=tier)
         else:
-            source.park(goal, detail or result)
+            source.park(goal, park_text)
     # Single atomic patch (#531) -- the old load_cursor-then-save_cursor pair spanned two calls,
     # so two concurrent _record()s could each read the same pre-increment cursor and lose one.
     state.advance_cursor(sdlc_dir, f"last: {pathlib.Path(goal).name} -> {result}")
@@ -5875,6 +5880,7 @@ USAGE = ("usage: loop.py start <dir> [--session-pid PID] | start-run <dir> | "
          "mark-designed <dir> <goal> | feature-frontier <dir> <unit> | "
          "note <dir> <goal> <text> | "
          "record <dir> <goal> done|review|parked|failed [reason] | reconcile-merges <dir> | "
+         "record <dir> <goal> parked \"<text>\" --qkind <kind> | "
          "agent-beat <dir> <goal> | "
          "release <dir> <goal> [reason] | "
          "spend <dir> <tokens> [goal] [--k v ...] | emit <dir> <goal> <kind> [--k v ...] | "
@@ -6398,6 +6404,11 @@ def _dispatch(argv):
         # positional-vs-flag disambiguation (amendment C, ~line 1480 below), one position later.
         reason = argv[5] if len(argv) > 5 and not argv[5].startswith("--") else ""
         flags = _flags(argv[6:] if reason else argv[5:])
+        qkind = flags.get("qkind")
+        if qkind is not None and qkind not in _load("qkind").QKINDS:
+            print(f"loop.py record: unknown --qkind {qkind!r} "
+                  f"(expected one of {', '.join(_load('qkind').QKINDS)})", file=sys.stderr)
+            return 2
         retro_grade = flags.get("retro-grade")
         if retro_grade is not None and retro_grade not in ledger.RETRO_GRADES:
             print(f"loop.py record: unknown grade {retro_grade!r} "
@@ -6518,9 +6529,9 @@ def _dispatch(argv):
                 return 2
         if merged_pr:
             _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],
-                    reason, retro_grade=retro_grade, merged_pr=True); return 0
+                    reason, retro_grade=retro_grade, merged_pr=True, qkind=qkind); return 0
         _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],
-                reason, retro_grade=retro_grade); return 0
+                reason, retro_grade=retro_grade, qkind=qkind); return 0
     if len(argv) >= 4 and argv[1] == "claim":       # #1962: claim a goal you already chose
         _coexist_notice(argv[2], "loop.py claim", once=True)    # #251/#314: once per run
         config = state.load_config(argv[2])

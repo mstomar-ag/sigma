@@ -671,3 +671,14 @@ def test_comment_and_body_append_are_rest_writes_with_swallow_and_false_semantic
     with contextlib.redirect_stderr(err):
         assert u._append_block(bsrc, 5, "old", "BLOCK") is False
     assert err.getvalue().count("\n") == 1 and "could not write them into the body" in err.getvalue()
+
+
+def test_declared_kind_wins_in_the_brief():
+    """#994: a kind declared on the park comment beats the substring guess, and the machine line is
+    not shown as part of the reason."""
+    u, q = _mod("unpark"), _mod("qkind")
+    text = "changes requested on the API shape\n" + q.render_line("owner_hold")
+    run = _runner(views={"5": _view(comments=[_park(text)])})
+    b = u.brief(".sdlc", _config(), 5, run=run)
+    assert b["reason_class"] == "owner_hold"
+    assert b["park_reason"] == "changes requested on the API shape"

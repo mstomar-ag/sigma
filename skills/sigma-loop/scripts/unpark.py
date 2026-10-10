@@ -55,6 +55,7 @@ auto_unpark = _load("auto_unpark")
 backlog_check = _load("backlog_check")
 legacy = _load("legacy")          # #239: a Q&A block written under the previous name
 decision_tier = _load("decision_tier")
+qkind = _load("qkind")            # #994: a kind declared on the park comment
 loop = _load("loop")
 
 #: The fixed heading of the recorded block, in the body and in the comment alike. Deliberately free
@@ -234,7 +235,10 @@ def brief(sdlc_dir, config, number, source=None, run=None):
     # #1392 / PR-1: BOTH re-derived from text that is always on the issue. `loop._reason_class` and
     # `decision_tier.classify` are pure functions; the ledger fields are unreachable on a stock
     # config (ledger.enabled ships false) and `decision_tier.resolve` is gated off besides.
-    reason_class = loop._reason_class(reason) if reason else "unknown"
+    declared = qkind.parse_line(reason) if reason else None      # #994: a declared kind wins
+    if declared:
+        reason = qkind.strip_line(reason)
+    reason_class = declared or (loop._reason_class(reason) if reason else "unknown")
     tier, tier_signal = decision_tier.classify(reason) if reason else (None, None)
 
     goal_doc = {"ref": str(number), "raw": (data.get("title") or "") + "\n" + body}

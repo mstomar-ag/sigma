@@ -67,6 +67,7 @@ LIBRARY_ONLY = {
     "feature_land_merge",
     "conflict_state",
     "feature_park",
+    "qkind",
     "feature_upkeep_prove",
     "conflict_proof",
     "unattended_git",
