@@ -22,8 +22,11 @@ STATE. A skip records the pass outcome `current` for the unit, with both tips, i
 measure counts from the right anchor and the backstop is not re-armed for a branch with nothing to do).
 """
 import importlib.util
+import json
+import os
 import pathlib
 import re
+import tempfile
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _LOADED = {}
@@ -84,6 +87,138 @@ def landed(run, cwd, unit_ref, base_ref, base_name, landing_prs=None):
                 and request.get("head_sha") == unit_tip):
             return LANDED_PR, unit_tip, base_tip
     return NOT_LANDED, unit_tip, base_tip
+
+
+# ------------------------------------------------------------------------------------------ the engine's settings
+
+#: Seconds per git verb for the engine's runner. Bounds, not tuning: a hung command is killed with its whole group.
+GIT_LIMITS = {"default": GIT_TIMEOUT_SECONDS, "fetch": 120, "push": 120, "ls-remote": 60, "rebase": 300}
+REPLAY, CLEAN_PUSH, RESOLVED_PUSH = "replay", "clean-push", "resolved-push"
+
+
+def engine_env(environ=None):
+    """The environment the engine's git commands run in: no prompt, `GIT_EDITOR=true` (it outranks `-c core.editor`), and
+    none of the repository-location variables. A new mapping; the input is never changed."""
+    return _sibling("bounded_run").unattended_env(environ)
+
+
+def hooks_policy(phase):
+    """Hooks are OFF while commits are replayed (they fire once per replayed commit) and for the push of a clean replay
+    (no new code), ON for a push after a resolved conflict (new code). An unknown phase reads OFF: the safe answer."""
+    git_runner = _sibling("unattended_git")
+    return git_runner.HOOKS_INHERIT if phase == RESOLVED_PUSH else git_runner.HOOKS_OFF
+
+
+def engine_runner(hooks, environ=None):
+    """-> `run(cwd, argv)` for the pass: config pins (no ref updates by rebase, no signing), the hooks policy, per-verb
+    timeouts. Injected through `run=`; the default runner of the existing engine is not changed."""
+    return _sibling("unattended_git").make_runner(GIT_LIMITS, hooks=hooks, environ=engine_env(environ))
+
+
+# ------------------------------------------------------------------------------------------ tips and restarts
+
+def recheck_tips(read, steps, max_restarts=2):
+    """Run `steps` (callables taking the tips) in order, re-reading both tips (`read() -> (unit_tip, base_tip)`) before each
+    one. A tip that moved restarts the whole sequence from the first step with the new tips, at most `max_restarts` times;
+    one more move is the outcome `moved`, and the step it would have run (the push is last) does not run.
+    -> {"outcome": "ok"|"moved"|"unreadable", "restarts": n, "tips": the tips last read}."""
+    try:
+        tips = read()
+    except Exception:                                       # noqa: BLE001 - could not tell is never stable
+        return {"outcome": "unreadable", "restarts": 0, "tips": None}
+    restarts, index = 0, 0
+    while index < len(steps):
+        try:
+            now = read()
+        except Exception:                                   # noqa: BLE001
+            return {"outcome": "unreadable", "restarts": restarts, "tips": tips}
+        if now != tips:
+            if restarts >= max_restarts:
+                return {"outcome": "moved", "restarts": restarts, "tips": now}
+            restarts, tips, index = restarts + 1, now, 0
+            continue
+        steps[index](tips)
+        index += 1
+    return {"outcome": "ok", "restarts": restarts, "tips": tips}
+
+
+# ------------------------------------------------------------------------------------------ acks
+
+ACKS_REL = "state/upkeep/acks.json"      # one string: the block name is read by the gate alone (a pin)
+
+
+def _read_acks_file(path):
+    try:
+        data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        units = data.get("units") if isinstance(data, dict) else None
+        return units if isinstance(units, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+@feature_upkeep.gated("project")
+def ack_union(config, sdlc_dir, unit, acks):
+    """Recompute the acks of `unit` after a rewrite: the union of what the runtime file already holds and `acks` (dicts with
+    `sha` and `patch_id`), written atomically (temp file in the same directory, then replace) to `.sdlc/state/upkeep/acks.json`.
+
+    A RUNTIME file, not the tracked store: the tracked store cannot be rewritten in the root checkout. It is per machine; a
+    second clone derives its own (the limit is documented, not worked around). -> {"ok": bool, "path"}."""
+    path = pathlib.Path(sdlc_dir).joinpath(*ACKS_REL.split("/"))
+    units = _read_acks_file(path)
+    seen, merged = set(), []
+    for entry in list(units.get(unit) or []) + [dict(a) for a in acks if isinstance(a, dict)]:
+        if not isinstance(entry, dict):
+            continue
+        item = {"sha": str(entry.get("sha") or ""), "patch_id": str(entry.get("patch_id") or "")}
+        if (item["sha"] or item["patch_id"]) and (item["sha"], item["patch_id"]) not in seen:
+            seen.add((item["sha"], item["patch_id"]))
+            merged.append(item)
+    units[unit] = merged
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".acks-", suffix=".tmp", dir=str(path.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"version": 1, "units": units}, indent=2, sort_keys=True))
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    except OSError:
+        return {"ok": False, "path": str(path)}
+    return {"ok": True, "path": str(path)}
+
+
+# ------------------------------------------------------------------------------------------ limits and skip reasons
+
+def reanchor_allowed(level, verify_green):
+    """Evidence is re-anchored only after a mechanical (Level 1) change or a green verify; anything else, including an
+    unknown level or a truthy-but-not-true verdict, is no."""
+    return level in (1, "mechanical") or verify_green is True
+
+
+def classify_push_refusal(*, pr_merged, remote_branch_exists):
+    """A refused push to a goal branch whose pull request already merged and whose branch is gone is a SKIP with a reason
+    (the replay would resurrect a deleted branch); anything else stays a refusal. -> {"skip": bool, "reason"}."""
+    if pr_merged is True and remote_branch_exists is False:
+        return {"skip": True, "reason": "goal-branch-deleted-after-merge"}
+    return {"skip": False, "reason": ""}
+
+
+# ------------------------------------------------------------------------------------------ the ledger note
+
+@feature_upkeep.gated("project")
+def ledger_note(config, sdlc_dir, unit_key, outcome, sha12, *, append=None):
+    """One UNADDRESSED `note` for a pass outcome: goal `upkeep-<unit-key>`, ref `upkeep:<outcome>:<sha12>`, written in this
+    process with `ledger.safe_append`. Never through `loop.py note` (it arms a real claim) and never addressed (an addressed
+    note wakes the inbox and the autowatcher). The append is injectable for tests. -> {"ok": bool, "entry"}."""
+    append = append or _sibling("ledger").safe_append
+    entry = append(sdlc_dir, "note", "upkeep-" + str(unit_key).lower(), config=config,
+                   ref="upkeep:%s:%s" % (outcome, str(sha12)[:12]))
+    return {"ok": entry is not None, "entry": entry}
 
 
 @feature_upkeep.gated("project")
