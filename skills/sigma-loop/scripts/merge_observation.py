@@ -42,6 +42,16 @@ def ownership_key(facts):
     return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
 
 
+def landing_owner_id(branch):
+    """The ONE owner-id rule for a unit landing receipt: the unit's branch (`feature/<unit>`), never the bare unit
+    name. Both landing observers (the rebase landing helper and unit completion) must key one PR identically, or one
+    landing is recorded twice. Chosen as the branch form because `verify_merge`'s persisted parent receipt path
+    and its test pin are already keyed that way."""
+    if not isinstance(branch, str) or not branch:
+        raise ValueError("a unit landing owner id needs the unit branch")
+    return branch
+
+
 def parent_receipt(facts):
     required = set(_PARENT) - {"ownership_key", "schema_version"}
     if set(facts) - set(_PARENT) or required - set(facts):

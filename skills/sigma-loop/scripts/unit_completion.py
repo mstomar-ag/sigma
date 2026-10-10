@@ -173,6 +173,7 @@ registry = _load("feature_registry")   # registry_dir / read / is_unit_name
 features = _load("features")           # BRANCH_PREFIX -- the one rule for what a unit branch is
 labels = _load("feature_labels")       # label_for -- the one rule for what a unit's LABEL is
 ledger = _load("ledger")               # team record (config-gated, default OFF; fail-open)
+upkeep = _load("feature_upkeep")       # the upkeep gate: pure, path-free, the only reader of its config block
 
 #: `work` and `feature_sync` are loaded on FIRST USE, not at import. Lazy for the reason
 #: `work._feature_sync()` is lazy -- `work` alone pulls `state`, `ledger`, `gh_session` and
@@ -903,10 +904,21 @@ def _record_unit_landing_merge(run, cwd, sdlc_dir, config, goal, unit, repo_ref,
                 or not isinstance(merge_sha, str)
                 or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", merge_sha)):
             raise ValueError("canonical PR merge facts are incomplete")
-        facts = work_module._receipt_parent_facts(raw, goal or unit, "unit", unit,
+        gated = upkeep.enabled(config or {})
+        owner = receipt.landing_owner_id(branch) if gated else unit
+        facts = work_module._receipt_parent_facts(raw, goal or unit, "unit", owner,
                                                    "unit_completion._draft")
         ownership = receipt.ownership_key(facts)
         entry_key, observation_key = receipt.observation_keys(ownership, merge_sha)
+        if gated and owner != unit and not (pathlib.Path(sdlc_dir) / "state" / "feature-merge-deliveries"
+                                            / (entry_key + ".json")).exists():
+            # Legacy lookup: a landing already recorded under the bare-unit key keeps that identity, so it is
+            # finished there (a no-op when complete) and never recorded a second time under the branch key.
+            legacy = dict(facts, owner_id=str(unit))
+            legacy_ownership = receipt.ownership_key(legacy)
+            legacy_entry, legacy_observation = receipt.observation_keys(legacy_ownership, merge_sha)
+            if (pathlib.Path(sdlc_dir) / "state" / "feature-merge-deliveries" / (legacy_entry + ".json")).exists():
+                ownership, entry_key, observation_key = legacy_ownership, legacy_entry, legacy_observation
     except Exception as exc:                        # noqa: BLE001 - best-effort observation
         print("unit landing merge observation facts pending: %s" % exc, file=sys.stderr)
         return None
@@ -1047,7 +1059,9 @@ def _draft(run, cwd, repo_ref, owner_ref, settings, branch, report, sdlc_dir=Non
         number = (out or "").rstrip("/").split("/")[-1]
         try:
             raw = json.loads(run(cwd, ["gh", "api", "repos/%s/pulls/%s" % (repo_ref, number)]))
-            facts = _work()._receipt_parent_facts(raw, goal or report["unit"], "unit", report["unit"],
+            owner = (_load("merge_observation").landing_owner_id(branch)
+                     if upkeep.enabled(config or {}) else report["unit"])
+            facts = _work()._receipt_parent_facts(raw, goal or report["unit"], "unit", owner,
                                                    "unit_completion._draft")
             status = _work()._publish_parent_receipt(sdlc_dir, config, facts)
         except Exception as exc:

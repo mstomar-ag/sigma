@@ -14,6 +14,11 @@ All notable changes to Sigma are recorded here, newest first.
   since the last success and a longer backstop for dormant units; an attempt that cannot be recorded
   never starts a pass. Both take the settings of the upkeep gate, a growth disposition records the
   retention rule for the new store, and nothing calls them yet, so there is no behaviour change.
+- **Receipt-key parity under the upkeep gate (#932, upkeep part C, slice 4).** One owner-id rule, the unit's
+  branch, through a new shared helper in merge_observation.py. While the upkeep gate is open the
+  unit-completion observer keys a landing by the branch like the rebase landing helper, so one landing
+  is recorded once; a landing already recorded under the bare unit key keeps that key. With the gate
+  closed nothing changes.
 - **Shared verify runner and unattended git runner (#920, upkeep part A, slice 4).** New bounded_run.py:
   a command run in a process group of its own under a wall-clock budget, the whole group stopped
   (SIGTERM, then SIGKILL) on overrun or when a stop file appears, a lifeline that stops the tree if the
