@@ -22,6 +22,8 @@ OWN = ("skills/sigma-loop/scripts/bounded_run.py", "skills/sigma-loop/scripts/un
 REGISTERED_CALLERS = (
     "skills/sigma-loop/scripts/feature_landed.py",
     "skills/sigma-loop/scripts/feature_upkeep_pass.py",
+    # the landing engine front half (#937): gated on the upkeep gate (refuses while closed) and rehearsal-only
+    "skills/sigma-loop/scripts/feature_land.py",
     "skills/sigma-loop/scripts/feature_upkeep_launcher.py",
     # the landing engine front half (#937): gated on the upkeep gate (refuses while closed) and rehearsal-only
     "skills/sigma-loop/scripts/feature_land.py",
