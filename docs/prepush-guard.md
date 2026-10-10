@@ -4,7 +4,8 @@
 message or an added line. It scans only commits not reachable from any remote-tracking ref, so a
 merge of the default branch never drags the upstream commits into the scan. Its output says how
 many commits were scanned and skipped. Fetch first: a stale remote-tracking ref widens the scan,
-never narrows it.
+never narrows it. Any failing git command (for example a remote sha not fetched locally) makes
+the guard exit 2 with a one-line refusal, never a clean pass.
 
 ## Patterns file
 

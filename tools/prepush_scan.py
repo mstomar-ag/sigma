@@ -24,7 +24,10 @@ for would pass everything).
 
 OUTPUT. A hit is reported as commit, surface (commit message or added line) and the pattern's line
 number; the matched text is never printed. Exit 0 clean, 1 a hit, 2 a usage or patterns refusal.
-A delete push has nothing to scan and is skipped. Read-only: it runs only git read verbs.
+Exit 2 also covers any nonzero git exit (e.g. a remote sha unknown locally): the guard refuses
+loudly rather than report "scanned 0 commits". Merge commits are diffed against their first parent
+(`git show -m --first-parent`) so conflict-resolution lines are seen; lines merged in from the other
+side also show, a conservative over-report. A delete push has nothing to scan and is skipped. Read-only: it runs only git read verbs.
 """
 import argparse
 import os
@@ -37,8 +40,17 @@ ZERO = "0" * 40
 MAX_SHOWN = 25
 
 
+class GitError(Exception):
+    """A git read verb exited nonzero; carries only the verb and code, never git's output."""
+
+
 def git(*args):
-    r = subprocess.run(["git", *args], capture_output=True, text=True, errors="replace")
+    try:
+        r = subprocess.run(["git", *args], capture_output=True, text=True, errors="replace")
+    except OSError as exc:
+        raise GitError("cannot run git (%s)" % type(exc).__name__)
+    if r.returncode:
+        raise GitError("git %s failed (exit %d)" % (args[0], r.returncode))
     return r.stdout
 
 
@@ -71,7 +83,7 @@ def scan_commit(sha, patterns):
     for n, rx in patterns:
         if rx.search(msg):
             hits.append((sha[:10], "commit message", n))
-    for ln in git("show", "--format=", "-U0", "--no-color", sha).splitlines():
+    for ln in git("show", "-m", "--first-parent", "--format=", "-U0", "--no-color", sha).splitlines():
         if ln.startswith("+") and not ln.startswith("+++"):
             for n, rx in patterns:
                 if rx.search(ln):
@@ -94,6 +106,14 @@ def main(argv=None, stdin=None):
     except ValueError as exc:
         print("prepush_scan: REFUSED: %s" % exc, file=sys.stderr)
         return 2
+    try:
+        return scan(args, patterns, stdin)
+    except GitError as exc:
+        print("prepush_scan: REFUSED: %s; nothing was verified" % exc, file=sys.stderr)
+        return 2
+
+
+def scan(args, patterns, stdin):
     exclude = [args.base] if args.base else ["--remotes"]
     scanned, skipped, bad = set(), 0, []
     for line in (stdin if stdin is not None else sys.stdin):
@@ -111,9 +131,9 @@ def main(argv=None, stdin=None):
             if c not in scanned:
                 scanned.add(c)
                 bad.extend(scan_commit(c, patterns))
-    print("prepush_scan: scanned %d commit%s, skipped %d already reachable from %s"
+    print("prepush_scan: scanned %d commit%s, skipped %d (excluded: commits already %s)"
           % (len(scanned), "" if len(scanned) == 1 else "s", skipped,
-             args.base or "remote-tracking refs"), file=sys.stderr)
+             "reachable from " + args.base if args.base else "on a remote-tracking ref"), file=sys.stderr)
     if bad:
         print("prepush_scan: REFUSED -- denied patterns would reach the remote:", file=sys.stderr)
         for c, where, n in bad[:MAX_SHOWN]:

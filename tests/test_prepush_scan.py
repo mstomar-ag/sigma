@@ -133,6 +133,80 @@ class PrePushScan(unittest.TestCase):
         self.assertIn("line 2", p.stderr)
         self.assertNotIn("unclosed", p.stderr)
 
+    def ref_line(self, local, remote):
+        return "refs/heads/main %s refs/heads/main %s\n" % (local, remote)
+
+    def head(self, repo=None):
+        return git(repo or self.r.b, "rev-parse", "HEAD").stdout.strip()
+
+    def test_unknown_remote_sha_refuses_not_fails_open(self):
+        self.r.commit(self.r.b, "f.txt", "x %s y\n" % TERM, "innocent")
+        p = self.run_tool(["--patterns", str(self.r.patterns)], self.ref_line(self.head(), "ab" * 20))
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertIn("REFUSED", p.stderr)
+        self.assertEqual(len(p.stderr.strip().splitlines()), 1)
+        self.assertNotIn(TERM, p.stderr)
+        self.assertNotIn("scanned 0", p.stderr)
+
+    def test_git_error_on_log_refuses(self):
+        import shutil
+        fake = self.r.tmp / "fakebin"
+        fake.mkdir()
+        g = fake / "git"
+        g.write_text('#!/bin/sh\nif [ "$1" = log ]; then exit 128; fi\nexec %s "$@"\n' % shutil.which("git"))
+        g.chmod(0o755)
+        self.r.commit(self.r.b, "f.txt", "x %s y\n" % TERM, "innocent")
+        env = {**ENV, "PATH": "%s:%s" % (fake, ENV["PATH"])}
+        base = git(self.r.b, "rev-parse", "origin/main").stdout.strip()
+        p = subprocess.run([sys.executable, str(TOOL), "--patterns", str(self.r.patterns)],
+                           input=self.ref_line(self.head(), base), cwd=self.r.b, env=env,
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertEqual(len(p.stderr.strip().splitlines()), 1)
+
+    def test_env_patterns_path(self):
+        self.r.commit(self.r.b, "f.txt", "x %s y\n" % TERM, "innocent")
+        base = git(self.r.b, "rev-parse", "origin/main").stdout.strip()
+        env = {**ENV, "SIGMA_PREPUSH_PATTERNS": str(self.r.patterns)}
+        p = subprocess.run([sys.executable, str(TOOL)], input=self.ref_line(self.head(), base),
+                           cwd=self.r.b, env=env, capture_output=True, text=True)
+        self.assertEqual(p.returncode, 1, p.stderr)
+        self.assertIn("added line", p.stderr)
+
+    def test_base_path(self):
+        git(self.r.b, "checkout", "-q", "-b", "topic")
+        self.r.commit(self.r.b, "f.txt", "x %s y\n" % TERM, "innocent")
+        mid = self.head()
+        self.r.commit(self.r.b, "g.txt", "fine\n", "clean")
+        args = ["--patterns", str(self.r.patterns), "--base"]
+        line = self.ref_line(self.head(), "0" * 40)
+        # base below the planted commit: it is scanned
+        self.assertEqual(self.run_tool(args + ["origin/main"], line).returncode, 1)
+        # base at the planted commit: it is excluded, only the clean one scans
+        p = self.run_tool(args + [mid], line)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("scanned 1 commit", p.stderr)
+
+    def test_merge_conflict_resolution_only_line_caught(self):
+        git(self.r.b, "checkout", "-q", "-b", "topic")
+        self.r.commit(self.r.b, "base.txt", "topic side\n", "topic edit")
+        self.r.commit(self.r.a, "base.txt", "main side\n", "main edit")
+        git(self.r.a, "push", "-q", "origin", "main")
+        git(self.r.b, "fetch", "-q", "origin")
+        m = git(self.r.b, "merge", "--no-ff", "-m", "merge main", "origin/main", check=False)
+        self.assertNotEqual(m.returncode, 0)  # conflict, as intended
+        (self.r.b / "base.txt").write_text("resolved %s\n" % TERM)
+        git(self.r.b, "add", "base.txt")
+        git(self.r.b, "commit", "-q", "-m", "merge main")
+        p = self.r.push("origin", "topic")
+        self.assertNotEqual(p.returncode, 0, p.stderr)
+        self.assertIn("added line", p.stderr)
+
+    def test_output_names_the_exclusion(self):
+        self.r.commit(self.r.b, "f.txt", "fine\n", "clean change")
+        p = self.r.push("origin", "main")
+        self.assertIn("commits already on a remote-tracking ref", p.stderr)
+
     def test_help(self):
         p = self.run_tool(["--help"])
         self.assertEqual(p.returncode, 0)
