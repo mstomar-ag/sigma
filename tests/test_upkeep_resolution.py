@@ -463,13 +463,17 @@ def test_comment_refuses_wording_and_reports_a_failed_post():
 # --------------------------------------------------------------------------- pins and the closed gate
 
 
-def test_nothing_in_the_product_imports_the_library_yet():
-    """With the gate closed every existing path is byte-identical because nothing reaches this module."""
+#: The only shipped files that reference the library; each is reached solely behind the upkeep gate.
+REGISTERED_IMPORTERS = ["feature_rebase.py", "feature_upkeep_prove.py"]
+
+
+def test_only_the_registered_importers_reference_the_library():
+    """With the gate closed every existing path is byte-identical: only these gated callers reach this module."""
     offenders = []
     for path in sorted(ROOT.glob("skills/*/scripts/*.py")) + sorted(ROOT.glob("hooks/*.py")):
         if path.name != "feature_upkeep_resolution.py" and "feature_upkeep_resolution" in path.read_text(encoding="utf-8"):
             offenders.append(path.name)
-    assert offenders == []
+    assert sorted(offenders) == REGISTERED_IMPORTERS
 
 
 def test_the_library_does_not_read_the_gate_block():

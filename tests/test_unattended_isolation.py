@@ -23,6 +23,13 @@ REGISTERED_CALLERS = (
     "skills/sigma-loop/scripts/feature_landed.py",
     "skills/sigma-loop/scripts/feature_upkeep_pass.py",
 )
+#: Registered callers that run only behind the upkeep gate: `feature_upkeep_prove.py` is loaded by `feature_rebase.py`
+#: only after `gate.enabled(config)` and the `conflicts.resolve` level check pass (see `_level1_inputs`), so with the
+#: gate closed it is never reached. Any further caller must be added here in the same change that gates it.
+GATED_CALLERS = (
+    "skills/sigma-loop/scripts/feature_upkeep_prove.py:186",
+    "skills/sigma-loop/scripts/feature_upkeep_prove.py:193",
+)
 ALLOWED_LOADS = {"shell_policy", "bounded_run"}
 #: Names of the one place a claim is armed and its helpers.
 ARMING = {"_ensure_claimed", "_ARMS_CLAIM", "_ensure_unit_tracking", "safe_append", "claim_lock"}
@@ -78,10 +85,10 @@ def arming_or_loading(src):
 
 
 def test_no_caller_and_nothing_that_arms_a_claim(tmp_path):
-    """Nothing ships that calls the runners, and neither runner loads the loop, the ledger or a claim helper."""
+    """Only the registered, gate-guarded callers reach the runners, and neither runner loads the loop, the ledger or a claim helper."""
     support.load("bounded_run")
     support.load("unattended_git")
-    assert callers(support.ROOT) == [], "a shipped caller must be gated and registered in the same change"
+    assert callers(support.ROOT) == list(GATED_CALLERS), "a shipped caller must be gated and registered in the same change"
     for stem in support.NAMES:
         assert arming_or_loading(support.source(stem)) == [], stem
     planted = {"skills/x/scripts/y.py": 'import unattended_git\nm = _load("bounded_run")\n',
