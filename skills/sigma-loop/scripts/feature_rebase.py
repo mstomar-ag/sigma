@@ -176,6 +176,8 @@ features = _load("features")
 _safe_ref = state_safe_ref = _load("state").safe_ref     # #710: ONE validator for config-supplied git names
 registry = _load("feature_registry")
 sync = _load("feature_sync")
+gate = _load("feature_upkeep")        # the upkeep gate: the only module that reads that config block
+conflict_state = _load("conflict_state")
 
 #: `work` imports THIS module (lazily, for the same reason), so a module-level load here would be a
 #: cycle -- the shape `handoff._load_sibling` already uses for `blockers`. Cached after the first
@@ -660,6 +662,51 @@ def remote_tip(run, cwd, remote, branch):
         if ref.strip() == sync.REF_PREFIX + branch:
             return sha.strip()
     return None
+
+
+#: Configuration pinned on every git process the engine runs UNDER THE UPKEEP GATE (and nowhere else). A person's
+#: own config must not decide what a replay does: `rerere.enabled` is ON whenever `$GIT_DIR/rr-cache` exists, and with
+#: `rerere.autoUpdate` a reused resolution is staged on its own, so the path leaves the unmerged set and is never
+#: proven; a signing key that prompts, or cannot be reached, stops the replay on a commit that has no conflict.
+#: ONE tuple and ONE function (`pin_env`) are the seam: the engine's runner and any later engine runner take their
+#: pin from here, so "no signing" is stated once. Unknown keys are ignored by an older git.
+REPLAY_CONFIG = ("rerere.enabled=false", "rerere.autoUpdate=false", "commit.gpgSign=false", "tag.gpgSign=false")
+
+
+def pin_env(environ):
+    """A copy of `environ` carrying every `REPLAY_CONFIG` entry as git's own `GIT_CONFIG_COUNT/KEY_n/VALUE_n` pair,
+    appended after any the caller already set (environment config outranks every file, so a person's config cannot
+    undo it). It travels in the ENVIRONMENT, not in argv, so the commands the engine runs are spelled exactly as
+    they were before the gate and the pick-time call list does not change."""
+    env = dict(environ)
+    try:
+        n = max(0, int(env.get("GIT_CONFIG_COUNT", "0")))
+    except ValueError:
+        n = 0
+    for pin in REPLAY_CONFIG:
+        key, _, value = pin.partition("=")
+        env["GIT_CONFIG_KEY_%d" % n], env["GIT_CONFIG_VALUE_%d" % n] = key, value
+        n += 1
+    env["GIT_CONFIG_COUNT"] = str(n)
+    return env
+
+
+def pinned_run(run, config):
+    """The runner the engine uses for this pass: `run` itself while the upkeep gate is closed (so every existing path
+    is byte-identical), else `run` called with `pin_env` applied to the process environment for the call's duration
+    (the argv is never touched)."""
+    if not gate.enabled(config):
+        return run
+
+    def pinned(cwd, argv):
+        saved = dict(os.environ)
+        os.environ.update(pin_env(saved))
+        try:
+            return run(cwd, argv)
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+    return pinned
 
 
 def rebase_stopped(run, path):
@@ -1199,7 +1246,7 @@ def _drop_worktree(run, cwd, path):
         pass
 
 
-def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report):
+def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, strict=False):
     """Replay `sha` (the feature tip) onto `base_ref` in a throwaway detached worktree and push it.
 
     Returns the outcome. The `finally` is the point of the whole function: whatever happens -- a
@@ -1254,7 +1301,22 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report):
             report["why"] = _flat(exc)
             # A CONFLICT IS A THING GIT SAYS, not a thing an exception string suggests: every
             # failure out of this command used to be filed as an issue titled "Rebase conflict".
-            return CONFLICT if rebase_stopped(run, path) else FAILED
+            if not rebase_stopped(run, path):
+                return FAILED
+            if strict:
+                # UNDER THE GATE a stop must have a conflicting file to be a conflict. One with none (an empty commit,
+                # a hook or signing stop, a rerere reuse) is not something a resolver may touch, so it is FAILED here,
+                # at the one call site that turns a stop into an outcome. `rebase_stopped` is not changed: it answers
+                # "is a rebase in progress", and its other call sites need that answer for exactly such a stop.
+                try:
+                    unmerged = conflict_state.conflicted_paths(run, str(path))
+                except Exception as read_failed:  # noqa: BLE001 - unread is never "conflicted"
+                    report["why"] = "the unmerged paths could not be read: %s" % _flat(read_failed)
+                    return FAILED
+                if not unmerged:
+                    report["why"] = ("the rebase stopped with no unmerged path (%s)" % report.get("why", "")).strip()
+                    return FAILED
+            return CONFLICT
         try:
             after = run(str(path), ["git", "rev-parse", "HEAD"]).strip()
         except Exception as exc:          # noqa: BLE001
@@ -1891,6 +1953,7 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
         return report
 
     run = run or _run
+    run = pinned_run(run, config)
     cwd = str(cwd or pathlib.Path(sdlc_dir).parent)
     remote = remote or _remote(config)
     branch = features.BRANCH_PREFIX + unit
@@ -1996,7 +2059,8 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
         return report
 
     path = worktree_path(sdlc_dir, unit)
-    outcome = _rebase_feature(run, cwd, path, branch, base_ref, before, remote, report)
+    outcome = _rebase_feature(run, cwd, path, branch, base_ref, before, remote, report,
+                              strict=gate.enabled(config))
     report["outcome"] = outcome
     if outcome in (CONFLICT, FAILED, WOULD_DROP):
         # MEASURED, not asserted. The body used to state "no half-applied rebase, no stranded

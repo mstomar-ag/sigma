@@ -76,6 +76,8 @@ SCHEMA = {   # dotted key -> spec; the lo/hi are guard rails against typos, not 
     "verify.timeout_minutes": {"kind": "int", "lo": 1, "hi": 1440},
     "backup.keep_days": {"kind": "int", "lo": 1, "hi": 3650},
     "backup.keep_last": {"kind": "int", "lo": 1, "hi": 1000},
+    "conflicts.resolve": {"kind": "enum", "values": ("off", "mechanical", "agent")},
+    "conflicts.mechanical_without_verify": {"kind": "bool"},
 }
 DEFAULTS = {   # the one place the defaults live; the shipped template must equal this
     "enabled": False, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
@@ -83,6 +85,7 @@ DEFAULTS = {   # the one place the defaults live; the shipped template must equa
     "triggers.dormant_every_hours": 72, "auto.window_days": 21, "auto.burst_window_hours": 24,
     "auto.target_hours": 12, "auto.floor": 3, "auto.ceiling": 40, "verify.clean_rebase": False,
     "verify.timeout_minutes": 60, "backup.keep_days": 14, "backup.keep_last": 5,
+    "conflicts.resolve": "off", "conflicts.mechanical_without_verify": False,
 }
 CROSS_CHECKS = (   # run only after every per-key check, and only when the keys involved passed theirs
     (("auto.floor", "auto.ceiling"), lambda floor, ceiling: floor <= ceiling,
@@ -147,6 +150,10 @@ def check(key, value):
         if _is_bool(value):
             return None
         return "expected the JSON boolean true or false, got " + _tname(value)
+    if kind == "enum":
+        if type(value) is str and value in spec["values"]:
+            return None
+        return "expected one of the texts %s, got %s" % (", ".join(spec["values"]), _tname(value))
     if kind == "name_list":
         if (type(value) is list and spec["min_items"] <= len(value) <= MAX_LIST_ITEMS
                 and all(type(item) is str and 0 < len(item) <= MAX_NAME_CHARS for item in value)):
@@ -262,6 +269,13 @@ def evaluate(config, door="project", environ=None):
         if not _ledger_on(config):
             missing.append("ledger")
     return {"open": not missing, "door": door, "missing": missing, "problems": list(reading.problems)}
+
+
+def conflict_level(config):
+    """How far a unit conflict may be resolved: "off" (the default), "mechanical" or "agent". Anything the block does not
+    say plainly, and any closed or invalid block, reads "off": the level is a setting of the project opt-in, never beside it."""
+    reading = read(config)
+    return reading.settings["conflicts.resolve"] if reading.enabled else "off"
 
 
 def machine_enabled(config, environ=None):
