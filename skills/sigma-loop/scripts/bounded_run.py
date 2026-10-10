@@ -403,7 +403,10 @@ def run_group(command, cwd, timeout, *, shell=False, env=None, stop_path=None, m
                       {TIMEOUT: "timed out after %gs; the process group was stopped" % timeout,
                        STOPPED: "stop file appeared; the process group was stopped"}.get(outcome, ""))
     finally:
-        _end_lifeline(sentinel, write_fd, _group_confirmed_gone(proc))
+        try:
+            _end_lifeline(sentinel, write_fd, _group_confirmed_gone(proc))
+        except Exception:                                   # noqa: BLE001 - unconfirmed: close the pipe, sentinel stops the group
+            _end_lifeline(sentinel, write_fd, False)
 
 
 # ------------------------------------------------------------------------------------------ the verify entry
