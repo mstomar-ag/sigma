@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Disposition record names the real resolution module (#1069).** `docs/launch/dispositions/945.json` called the module without its `feature_` prefix; it now names `feature_upkeep_resolution.py`, and `tests/test_disposition_module_names.py` fails when any disposition record names a `.py` file that does not exist.
 - **Live regression entrypoint, slice 1: refusal ladder, NOT RUN rows, credential-safe logging (#884, refs #810).**
   New `evals/regression/live.py` (stdlib only). Run bare it exits 2 with one `live.py: REFUSED [no-credential]: ...`
   line on stderr, nothing on stdout, and one `sigma.regression-result/v1` NOT RUN row under
