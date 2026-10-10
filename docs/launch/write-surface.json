@@ -1002,14 +1002,6 @@
     },
     {
       "path": "skills/sigma-loop/scripts/gh_api.py",
-      "function": "_default_run",
-      "rule": "gh-api-write",
-      "count": 1,
-      "gate": "the injected run is the only transport; write helpers (comment_issue, create_issue, add_labels, remove_label, close_issue, edit_issue, add_assignees) have callers since #895 slice 3a, each through GitHubSource._issue_* with the feature-label guard (create_issue/add_labels refuse feature:* unless it exists); a REST write falls back to GraphQL at most once, never on an ambiguous failure, never in a cloud session; the scanner sees only this gh invocation, not which helper called it; landing helpers (#931): merge_pr_pinned (explicit merge method, repository and 40-hex head pin all required and validated before any call; no auto-merge, no admin flag, no branch-delete option) and create_pr_nondraft (typed draft false) have no caller yet, and bounded_runner binds a working directory and keeps the exit code; the scanner sees none of them until a caller exists",
-      "risk": "low"
-    },
-    {
-      "path": "skills/sigma-loop/scripts/gh_api.py",
       "function": "_write_cache",
       "rule": "fs-remove",
       "count": 2,
@@ -1554,22 +1546,6 @@
     },
     {
       "path": "skills/sigma-loop/scripts/sources.py",
-      "function": "_gh_json",
-      "rule": "gh-label",
-      "count": 1,
-      "gate": "discovery.source == github; board writes require project.enabled",
-      "risk": "medium"
-    },
-    {
-      "path": "skills/sigma-loop/scripts/sources.py",
-      "function": "_graphql",
-      "rule": "graphql-mutation",
-      "count": 1,
-      "gate": "discovery.source == github; board writes require project.enabled",
-      "risk": "medium"
-    },
-    {
-      "path": "skills/sigma-loop/scripts/sources.py",
       "function": "_issue_add_assignees",
       "rule": "gh-api-write",
       "count": 1,
@@ -1622,14 +1598,6 @@
       "rule": "gh-api-write",
       "count": 1,
       "gate": "discovery.source == github; REST issue write on the goal issue, reached only from the loop's own claim, park and close paths",
-      "risk": "medium"
-    },
-    {
-      "path": "skills/sigma-loop/scripts/sources.py",
-      "function": "_run_gh",
-      "rule": "gh-label",
-      "count": 1,
-      "gate": "discovery.source == github; board writes require project.enabled",
       "risk": "medium"
     },
     {
@@ -1691,14 +1659,6 @@
     {
       "path": "skills/sigma-loop/scripts/sources.py",
       "function": "ensure_labels_report",
-      "rule": "gh-label",
-      "count": 1,
-      "gate": "discovery.source == github; board writes require project.enabled",
-      "risk": "medium"
-    },
-    {
-      "path": "skills/sigma-loop/scripts/sources.py",
-      "function": "fetch_issues_rest",
       "rule": "gh-label",
       "count": 1,
       "gate": "discovery.source == github; board writes require project.enabled",
@@ -2219,16 +2179,8 @@
     {
       "path": "skills/sigma-loop/scripts/work.py",
       "function": "finish",
-      "rule": "gh-pr",
-      "count": 1,
-      "gate": "work.enabled; confirmed merged PR",
-      "risk": "high"
-    },
-    {
-      "path": "skills/sigma-loop/scripts/work.py",
-      "function": "finish",
       "rule": "git-destructive",
-      "count": 1,
+      "count": 2,
       "gate": "ungated",
       "risk": "high"
     },

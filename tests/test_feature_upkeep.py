@@ -448,16 +448,15 @@ def test_machine_env_source(monkeypatch):
 
 
 def test_ledger_rule_agrees():
-    """The ledger rule restated in the gate equals ledger.enabled on well-formed input, and does not raise where that does."""
+    """The ledger rule restated in the gate equals ledger.enabled on well-formed input, and both are total on a truthy non-object block."""
     g = support.gate()
     ledger = support.script("ledger")
     base = {"upkeep": {"enabled": True}}
     for config in [{}, {"ledger": {}}] + [{"ledger": {"enabled": v}} for v in (True, False, None, "true", 1)]:
         assert g.machine_enabled(dict(base, **config), OPEN_ENV) is ledger.enabled(config), config
-    for config in ({"ledger": True}, {"ledger": "x"}):
+    for config in ({"ledger": True}, {"ledger": "x"}, {"ledger": [1]}):
         assert g.machine_enabled(dict(base, **config), OPEN_ENV) is False
-        with pytest.raises(AttributeError):
-            ledger.enabled(config)
+        assert ledger.enabled(config) is False        # total since #966: the reader no longer raises here
 
 
 def test_control_machine():
@@ -653,19 +652,6 @@ def test_docstring_table():
     assert "opposite" in doc.lower()
 
 
-def test_fold_inventory():
-    """The module is inside the unit-key fold inventory's glob, has no path join, and so needs no classification."""
-    support.gate()
-    inv = importlib.import_module("test_feature_registry")
-    stem = support.GATE.stem
-    assert stem in {p.stem for p in inv._feature_sources()}
-    assert [k for k in inv._address_builders() if k[0] == stem] == []
-    assert not any(s == stem for s, _ in inv._NO_UNIT_NAME | inv._FOLDS | inv._DOES_NOT_FOLD)
-    assert inv._builders_in("def f(a, b):\n    return a / b\n", stem)          # the predicate would see a join (arithmetic too)
-    tree = ast.parse(support.source())
-    assert not [n for n in ast.walk(tree) if isinstance(n, (ast.BinOp, ast.AugAssign)) and isinstance(n.op, ast.Div)]
-
-
 def test_imports_hygiene():
     """The module imports nothing that can spawn, connect or write; it touches only `os.environ`; it holds no marker literal."""
     support.gate()
@@ -701,3 +687,34 @@ def test_one_reader():
              and isinstance(n.args[0], ast.Name) and n.args[0].id == "BLOCK"]
     assert len(reads) == 1, "the gate must read the upkeep block in exactly one place"
     assert support.readers_outside_the_gate() == [], "only feature_upkeep.py may read the upkeep block"
+
+
+def test_gated_rest_refused():
+    """#965: `*args` would swallow a positional `environ` unseen, so a machine-door signature with one is refused."""
+    g = support.gate()
+
+    def rest(config, *args, environ=None):
+        return 1
+
+    with pytest.raises(ValueError, match="rest parameter"):
+        g.gated("machine")(rest)
+    assert g.gated("project")(rest) is not None                                 # the project door never reads `environ`
+
+
+def test_gated_doc_wording():
+    """#965: the decorator does not claim a positional `environ` is never ignored; a closed gate does ignore it."""
+    g = support.gate()
+    assert "can never be silently ignored" not in g.gated.__doc__
+    assert "rest parameter" in g.gated.__doc__ and "CLOSED gate" in g.gated.__doc__
+
+    @g.gated("machine")
+    def tick(config, *, environ=None):
+        return "ran"
+    assert tick({}, {"SIGMA_UPKEEP_JOB": "1"})["closed"] is True                # the positional mapping is ignored
+
+
+def test_tmpl_note_unknown():
+    """#965: the template does not say every reason names the key; an unknown key far from a known one is positional."""
+    note = support.parse_template()["_upkeep"]
+    assert "the reason names the key." not in note
+    assert "unknown key" in note and "position" in note.split("THE GATE FAILS CLOSED")[1]

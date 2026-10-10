@@ -63,7 +63,7 @@ NOTE_ATTEMPTS = 3
 WINDOWS = "windows"
 ENV_ALLOW = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SSH_AUTH_SOCK", "SSH_AGENT_PID", "XDG_CONFIG_HOME",
              "GIT_SSH_COMMAND", "GIT_SSH")
-ENV_ALLOW_PREFIXES = ("GH_", "GITHUB_")
+CREDENTIAL_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_HOST")
 CALL_TIMEOUT_ENV = "SIGMA_WATCH_CALL_TIMEOUT"
 _JOBS = []                                      # Popen handles of jobs this process started; polled so none stays a zombie
 
@@ -169,20 +169,32 @@ def _rank(item):
     return (0 if known else 1, -(drift.behind if known else 0), item[1])
 
 
-def make_measure(config, settings, sdlc_dir, root, now):
+class OutOfTime(Exception):
+    """Raised by a measure that found the tick's budget spent before its next git read: the unit is left unexamined."""
+
+
+def make_measure(config, settings, sdlc_dir, root, now, expired=None):
     """-> measure(unit, doc) -> Drift, built on the bounded group-kill git runner. The two reads that do not depend on the
-    unit (the shallow check and the base walk) are made once per tick."""
+    unit (the shallow check and the base walk) are made once per tick. `expired()` is asked before each read, so the budget
+    is enforced inside a unit's measurement, not only between units; it raises OutOfTime (each read is itself bounded)."""
     drift_mod, pass_mod = _sibling("feature_upkeep_drift"), _sibling("feature_upkeep_pass")
     tune, shared = drift_mod.tuning(settings), {}
 
+    def check():
+        if expired is not None and expired():
+            raise OutOfTime()
+
     def measure(unit, doc):
+        check()
         base_ref, unit_ref = refs_of(config, unit)
         if base_ref is None:
             return drift_mod.Drift(drift_mod.UNKNOWN, drift_mod.UNKNOWN, drift_mod.UNKNOWN, drift_mod.UNKNOWN, ("no-base",))
         if "shallow" not in shared:
             shared["shallow"] = drift_mod.is_shallow(pass_mod._git, root)
+        check()
         if "base" not in shared:
             shared["base"] = drift_mod.walk(pass_mod._git, root, base_ref, None, drift_mod.WALK_CAP)
+        check()
         return drift_mod.measure_unit(pass_mod._git, root, base_ref, unit_ref, tune, now,
                                       anchor=(doc or {}).get("unit_tip"), base_walk=shared["base"], shallow=shared["shallow"])
     return measure
@@ -190,13 +202,18 @@ def make_measure(config, settings, sdlc_dir, root, now):
 
 # ------------------------------------------------------------------------------------------ the job
 
+def allowed_env(source, extra=()):
+    """-> the variables of `source` the job and its engine child may see: the named allowlist, the locale family, the named
+    credential variables and `extra`. Nothing else, whatever its name looks like."""
+    return {k: v for k, v in source.items()
+            if k in ENV_ALLOW or k in CREDENTIAL_ENV or k in extra or k.startswith("LC_")}
+
+
 def job_env(config, settings, environ=None):
     """The detached job's environment: an allowlist (not the watcher's whole environment), the machine variable, an explicit
     call timeout for the push guard instead of the inherited one, and the prompt pins. No run id is set: the job is not a
     supervised run."""
-    source = os.environ if environ is None else environ
-    env = {k: v for k, v in source.items()
-           if k in ENV_ALLOW or k.startswith(ENV_ALLOW_PREFIXES) or k.startswith("LC_")}
+    env = allowed_env(os.environ if environ is None else environ)
     env[feature_upkeep.ENV_MACHINE] = "1"
     env[CALL_TIMEOUT_ENV] = str(cap_seconds(settings))
     return _sibling("bounded_run").unattended_env(env)
@@ -241,12 +258,28 @@ def write_outcome_note(config, sdlc_dir, record, append=None):
     return bool(done.get("ok"))
 
 
+def _close_killed(sdlc_dir, record, now):
+    """A job whose process was killed outright (not just its child) never wrote its final record: the lock is free and the
+    record still says running. Close it as a `failed` outcome so the same path notes it, and count it against the unit."""
+    closed = dict(record, state="done", outcome="failed", unit_tip=None, finished_at=now, killed=True)
+    write_json(sdlc_dir, RECORD_REL, closed)
+    if record.get("unit"):
+        _sibling("feature_upkeep_state").record_outcome(sdlc_dir, str(record["unit"]), now, "failed")
+    return closed
+
+
 def collect(config, sdlc_dir, now, append=None):
     """Note a finished job's outcome, once. -> "noted", "failed", "none" or "running". The record gains `noted`; a note that
     could not be written is tried again next tick, at most NOTE_ATTEMPTS times in all."""
     _reap()
     record = read_json(sdlc_dir, RECORD_REL)
-    if not record or record.get("schema") != RECORD_SCHEMA or record.get("state") != "done" or record.get("noted"):
+    if not record or record.get("schema") != RECORD_SCHEMA or record.get("noted"):
+        return "none"
+    if record.get("state") == "running":
+        if job_alive(sdlc_dir, now) != "idle":
+            return "running"
+        record = _close_killed(sdlc_dir, record, now)       # lock free, record still running: the job process itself was killed
+    elif record.get("state") != "done":
         return "none"
     if job_alive(sdlc_dir, now) != "idle":
         return "running"
@@ -295,13 +328,16 @@ def scheduler_tick(config, sdlc_dir, *, environ=None, now=None, budget=30, clock
     cursor = (read_json(sdlc_dir, STATUS_REL) or {}).get("cursor")                       # where the last out-of-time tick stopped
     if isinstance(cursor, str):
         waiting = [n for n in waiting if n > cursor] + [n for n in waiting if n <= cursor]
-    measure = deps.get("measure") or make_measure(config, settings, sdlc_dir, root, now)
     deadline, due, examined = clock() + budget, [], 0
+    measure = deps.get("measure") or make_measure(config, settings, sdlc_dir, root, now, expired=lambda: clock() >= deadline)
     for name in waiting:
         if clock() >= deadline:
             break
+        try:
+            drift = measure(name, reads[name].doc)
+        except OutOfTime:                                  # the budget ran out inside this unit: it is retried first next tick
+            break
         examined += 1
-        drift = measure(name, reads[name].doc)
         verdict = state.decide(sched, reads[name], drift, now)
         if verdict.due:
             due.append((0, name, drift, verdict))
@@ -349,6 +385,11 @@ def health(config, sdlc_dir, now=None):
                      "not ready on this machine, missing: " + ", ".join(verdict["missing"])))
     else:
         rows.append(("upkeep scheduler readiness", True, "all opt-ins present in this shell"))
+    wk = config.get("work") if isinstance(config, dict) else None
+    if not (wk.get("base") or "").strip() if isinstance(wk, dict) else True:
+        rows.append(("upkeep integration branch", False,
+                     "work.base is empty, so every upkeep pass ends no-base and does nothing; "
+                     "set work.base in .sdlc/config.json to your default branch"))
     sync = _sibling("sync")
     stale = sync.stale_after_seconds(sync.watch_interval_seconds(config))
     status = read_json(sdlc_dir, STATUS_REL)

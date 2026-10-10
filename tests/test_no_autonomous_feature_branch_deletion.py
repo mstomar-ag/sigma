@@ -249,14 +249,24 @@ _BRANCH_DD_RE = re.compile(r'"branch"\s*,\s*"-[dD]"')
 #: alone would also match `curl -d`, so the two halves are paired).
 _PUSH_D_RE = re.compile(r'"push"[^\n]*"-d"')
 
+#: `"push" ... "--mirror"` -- a mirror push deletes every remote ref the local side lacks; the write-surface
+#: scanner classes it destructive, so the guard pins it too (#958).
+_PUSH_MIRROR_RE = re.compile(r'"push"[^\n]*"--mirror"')
+
+#: A one-string command (`"git push -d origin x"`): `git push` with `-d`, `--delete` or `--mirror`, or
+#: `git update-ref` with `-d`/`--delete`, inside one quoted literal (#958).
+_STRING_FORM_RE = re.compile(
+    r"""["'][^"'\n]*\bgit\s+(?:push\b[^"'\n]*\s(?:-d|--delete|--mirror)\b"""
+    r"""|update-ref\b[^"'\n]*\s(?:-d|--delete)\b)""")
+
 #: A REST delete in any spelling: `"-X", "DELETE"`, `"--method", "DELETE"`, `"--method=DELETE"`,
 #: `"-XDELETE"`. The endpoint is NOT required on the same line (`gh_api.remove_label` puts the verb and
 #: the endpoint on different physical lines); the kind records whether a `git/refs/` endpoint is there.
 _REST_DELETE_RE = re.compile(r'"(?:-X|--method)"\s*,\s*"(?i:delete)"|"(?:--method=|-X)(?i:delete)"')
 
-#: `update-ref -d` / `--delete`, optionally after `--no-deref` -- the delete forms only; a plain
+#: `update-ref -d` / `--delete`, optionally after other flags such as `--no-deref` or `-m <msg>` (#958) -- the delete forms only; a plain
 #: `update-ref <ref> <sha>` is not a deletion and stays quiet.
-_UPDATE_REF_DELETE_RE = re.compile(r'"update-ref"\s*,\s*(?:"--no-deref"\s*,\s*)?"(?:-d|--delete)"')
+_UPDATE_REF_DELETE_RE = re.compile(r'"update-ref"\s*,(?:\s*"[^"]*"\s*,)*?\s*"(?:-d|--delete)"')
 
 #: A `gh_api.delete...(` helper call, on a `gh_api` name or a `_load("gh_api")` style loader receiver.
 _GH_API_DELETE_RE = re.compile(r"\bgh_api\b(?:[\"']\))?\.delete\w*\s*\(")
@@ -275,7 +285,8 @@ def _delete_call_sites(root):
         for lineno, line in enumerate(_python_scannable_lines(text), start=1):
             if _BRANCH_DD_RE.search(line):
                 hits.append((path, lineno, "branch_dD", line))
-            if "--delete" in line or _PUSH_D_RE.search(line):
+            if ("--delete" in line or _PUSH_D_RE.search(line) or _PUSH_MIRROR_RE.search(line)
+                    or _STRING_FORM_RE.search(line)):
                 hits.append((path, lineno, "push_delete", line))
             if _REST_DELETE_RE.search(line):
                 hits.append((path, lineno,

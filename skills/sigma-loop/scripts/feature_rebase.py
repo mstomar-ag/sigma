@@ -592,10 +592,13 @@ def _runtime_acks(sdlc_dir, unit):
         return []
 
 
-def _acked(sdlc_dir, run, cwd, unit, integration_ref):
+def _acked(sdlc_dir, run, cwd, unit, integration_ref, config=None):
     """Every ack for `unit` -> `(patch_ids, shas)`: the local file UNION the copy on the remote
     integration branch. Never raises; anything unreadable contributes nothing, so a broken store
-    fails towards REFUSING, which costs a pass and never data."""
+    fails towards REFUSING, which costs a pass and never data.
+
+    #1017: the runtime file (written only under the upkeep opt-in) is read only while that gate is open when a `config`
+    is given, so a file left behind after the gate was closed again is ignored. `config=None` keeps the old reading."""
     entries = []
     try:
         path = ack_path(sdlc_dir, unit)
@@ -605,7 +608,8 @@ def _acked(sdlc_dir, run, cwd, unit, integration_ref):
         entries += _read_acks(path.read_text(encoding="utf-8"))
     except OSError:
         pass
-    entries += _runtime_acks(sdlc_dir, unit)
+    if config is None or _gate().enabled(config):
+        entries += _runtime_acks(sdlc_dir, unit)
     try:
         entries += _read_acks(runtime_ack_path(sdlc_dir, unit).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -623,11 +627,11 @@ def _acked(sdlc_dir, run, cwd, unit, integration_ref):
             {str(e.get("sha")) for e in entries if e.get("sha")})
 
 
-def _unacked(sdlc_dir, run, cwd, unit, integration_ref, found):
+def _unacked(sdlc_dir, run, cwd, unit, integration_ref, found, config=None):
     """`found` minus every commit a human has acked -> `(still_direct, acked)`."""
     if not found:
         return found, []
-    pids, shas = _acked(sdlc_dir, run, cwd, unit, integration_ref)
+    pids, shas = _acked(sdlc_dir, run, cwd, unit, integration_ref, config)
     if not pids and not shas:
         return found, []
     still, acked = [], []
@@ -664,7 +668,7 @@ def ack(sdlc_dir, config, unit, shas, all_=False, run=None, cwd=None, remote=Non
         run(cwd, ["git", "fetch", remote, base, branch])
         base_ref, feature_ref = "%s/%s" % (remote, base), "%s/%s" % (remote, branch)
         found, _ = _unacked(sdlc_dir, run, cwd, unit, base_ref,
-                            direct_commits(run, cwd, base_ref, feature_ref))
+                            direct_commits(run, cwd, base_ref, feature_ref), config)
     except Exception as exc:              # noqa: BLE001
         result["why"] = _flat(exc)
         return result
@@ -1462,14 +1466,15 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
                              "path(s) it has" % (base_ref, len(dropped)))
             return WOULD_DROP
         if resolved is not None:
-            refused = _prove_level1(run, cwd, path, base_ref, sha, after, report, level1, resolved)
-            if refused:
-                return CONFLICT
             # NOTHING RESOLVED IS EVER PUSHED WITHOUT A BACKUP REF. The legacy push has none, so a missing descriptor
-            # is a refusal here, not a fall-back.
+            # is a refusal here, not a fall-back. It is checked BEFORE the proof (#1071): the proof can run the
+            # project's verify command, and a replay that can never be pushed is not worth that run.
             if backup is None:
                 return _park_resolved(report, _prove().refusal(_prove().NO_BACKUP,
                                                                "no backup descriptor, so a resolved replay is not pushed"))
+            refused = _prove_level1(run, cwd, path, base_ref, sha, after, report, level1, resolved)
+            if refused:
+                return CONFLICT
         outcome = _pushed(run, cwd, path, branch, sha, remote, report, backup=backup)
         if outcome == REBASED:
             report["after"] = after
@@ -2418,6 +2423,9 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
             # what a repo mid-epic looks like (`work.base` pointed at the epic's own feature
             # branch). A branch cannot be brought forward onto itself.
             report["outcome"] = NO_BASE
+            if not base:
+                report["why"] = ("work.base is empty, so upkeep has no integration branch and did nothing; "
+                                 "set it in .sdlc/config.json (for example to your default branch)")
             return report
         live, why = sync.live_branches(run, cwd, remote)
         if live is None:
@@ -2452,19 +2460,30 @@ def _level1_options(config):
         return None
 
 
+def _acks_well_formed(text):
+    """True when `text` is a whole ack document; a write cut short reads False (`_read_acks` reads it as no acks)."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False
+    return isinstance(data, dict) and isinstance(data.get("acked"), list)
+
+
 def _write_runtime_acks(sdlc_dir, run, cwd, unit, report):
     """After a resolved push only: for each (original, replayed) pair whose original was acked, ack the replayed sha and
     its patch-id in the RUNTIME file. The tracked store is not touched and the stamp is not read."""
     acked = {str(d.get("sha")) for d in (report.get("acked") or []) if isinstance(d, dict)}
     fresh = [{"sha": new, "patch_id": patch_id(run, cwd, new), "subject": "resolved replay of " + old[:12]}
              for old, new in report["resolved"]["pairs"] if old in acked]
-    if not fresh:
-        return
     path = runtime_ack_path(sdlc_dir, unit)
     try:
-        entries = _read_acks(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        entries = _read_acks(text)
+        damaged = not _acks_well_formed(text)
     except OSError:
-        entries = []
+        entries, damaged = [], False
+    if not fresh and not damaged:         # #1071: a file cut short is rewritten whole, even with nothing new to add
+        return
     have = {e.get("sha") for e in entries}
     entries += [e for e in fresh if e["sha"] not in have]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2524,7 +2543,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
         report["outcome"] = UNVERIFIABLE
         return report
     found, acked = _unacked(sdlc_dir, run, cwd, unit, base_ref,
-                            direct_commits(run, cwd, base_ref, feature_ref))
+                            direct_commits(run, cwd, base_ref, feature_ref), config)
     report["direct"] = found
     report["acked"] = acked
     if found:

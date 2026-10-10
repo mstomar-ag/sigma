@@ -142,6 +142,49 @@ def test_guard_denial_leaves_no_record_and_no_call(tmp_path):
     assert out["outcome"] == "refused:guard" and w.puts == [] and pending(w) is None
 
 
+def _cross_repo_unit(w):
+    """Register `voice` as a pair with another repository, so the sibling guard has something to ask about."""
+    spec = importlib.util.spec_from_file_location("fr_sib", SCRIPTS / "feature_registry.py")
+    reg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reg)
+    reg.write_unit(reg.registry_dir(str(w.sdlc)), "voice", {"repos": {
+        SLUG: {"branch": BRANCH, "goals": [1]}, "acme/other": {"branch": "feature/voice", "goals": [2]}}})
+
+
+def test_engine_asks_the_sibling_guard_before_it_merges(tmp_path):
+    w = MWorld(tmp_path)
+    _cross_repo_unit(w)
+    asked = []
+    out = w.merge(landed=lambda repo, branch: asked.append((repo, branch)) or False)
+    assert asked == [("acme/other", "feature/voice")]
+    assert out["outcome"] == "refused:sibling" and "not landed" in out["detail"]
+    assert w.puts == [] and pending(w) is None
+
+
+def test_engine_merges_when_the_sibling_has_landed(tmp_path):
+    w = MWorld(tmp_path)
+    _cross_repo_unit(w)
+    assert w.merge(landed=lambda repo, branch: True)["outcome"] == "merged"
+
+
+def test_engine_with_no_landed_measurement_refuses_a_pair(tmp_path):
+    w = MWorld(tmp_path)
+    _cross_repo_unit(w)
+    out = w.merge()
+    assert out["outcome"] == "refused:sibling" and w.puts == []
+
+
+def test_sibling_refusal_does_not_spend_the_approval(tmp_path):
+    w = MWorld(tmp_path)
+    _cross_repo_unit(w)
+    spec = importlib.util.spec_from_file_location("fla5", SCRIPTS / "feature_land_approval.py")
+    appr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(appr)
+    appr.approve(CONFIG, w.sdlc, "voice", SLUG, TIP, ttl_seconds=86400, now=0)
+    assert w.merge(argv=(), now=1, landed=lambda r, b: False)["outcome"] == "refused:sibling"
+    assert appr.peek(CONFIG, w.sdlc, "voice", SLUG, TIP, now=1)["ok"] is True
+
+
 def test_unattended_approval_is_consumed_once_and_the_merge_proceeds(tmp_path):
     w = MWorld(tmp_path)
     spec = importlib.util.spec_from_file_location("fla3", SCRIPTS / "feature_land_approval.py")
@@ -193,6 +236,21 @@ def test_moved_head_at_the_host_is_refused_and_still_open(tmp_path):
     out = w.merge()
     assert out["outcome"] == "refused:status-409"
     assert pending(w)["outcome"] == "refused" and w.recorded == []
+
+
+def test_landing_reply_without_sha_is_not_merged(tmp_path):
+    w = MWorld(tmp_path)
+    orig = w.gh
+
+    def gh(args):
+        out = orig(args)
+        if "--method PUT" not in " ".join(args):
+            return out
+        w.merged = False                      # the host did not merge; the reply just carries no sha
+        return json.dumps({"merged": True})
+    w.gh = gh
+    out = w.merge()
+    assert not out["outcome"].startswith("merged")
 
 
 def test_lost_acknowledgment_with_merged_readback_is_merged(tmp_path):

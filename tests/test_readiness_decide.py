@@ -1305,12 +1305,10 @@ def _ci_sentence():
             "to run on Windows (exit 2).")
 
 
-def _changelog_entry():
-    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    # The first release section (the fold of what was Unreleased), or Unreleased itself before a fold.
-    sections = re.split(r"\n(?=## )", text)
-    unreleased = next(sec for sec in sections[1:] if "(#331, #429)" in sec)
-    entries = [e for e in re.split(r"\n(?=- \*\*)", unreleased) if "(#331, #429)" in e]
+def _changelog_entry(text=None):
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8") if text is None else text
+    # Any section: Unreleased before a release, the dated section after one (#1074).
+    entries = [e for e in re.split(r"\n(?=- \*\*)", text) if e.startswith("- **") and "(#331, #429)" in e]
     assert len(entries) == 1, f"{len(entries)} changelog entries name (#331, #429)"
     return entries[0]
 

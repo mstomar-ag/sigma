@@ -245,3 +245,21 @@ def test_the_planned_files_obey_the_red_to_green_rules():
         assert (TESTS / name).is_file(), name
     assert offences == []
     assert len(list(_planned_functions())) >= 40
+
+
+def test_trap_widened(tmp_path):
+    """#965: the trap's widened event set records a socket bind, a truncate, a chmod and a utime."""
+    import socket
+    import attempt_trap
+    target = tmp_path / "f"
+    target.write_text("x")
+    with attempt_trap.AttemptTrap() as trap:
+        try:
+            socket.socket().bind(("127.0.0.1", 0))
+        except attempt_trap.Vetoed:
+            pass
+        os.truncate(target, 0)
+        os.chmod(target, 0o600)
+        os.utime(target, (1, 1))
+    assert [e for e, _ in trap.network] == ["socket.bind"], trap.network
+    assert trap.writes.count(str(target)) == 3, trap.writes

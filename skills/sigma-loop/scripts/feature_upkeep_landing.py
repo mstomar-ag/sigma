@@ -19,7 +19,9 @@ outcomes are:
 
 THE RECORD. One small JSON document per unit at `state/unit-landings/<unit key>.json`, written BEFORE the call, rewritten
 with the outcome and deleted on merged. The next landing for the unit settles a pending one with one PR read and one
-commit read through injected readers (no reconcile-tick re-read). Stale records are aged out by `prune`; the existing
+commit read through injected readers (no reconcile-tick re-read). A record with no call recorded (the process died between
+begin and the merge call) whose PR reads back open and unmerged settles as refused `crash-before-merge`, so a retry is
+not blocked until the prune. Stale records are aged out by `prune`; the existing
 goal-state pruner is keyed by terminal goals and cannot own a unit-keyed store.
 
 THE DOCTOR ROW. `doctor_row` only reads: the age of the oldest pending record and the exact re-run gesture. Age is the
@@ -247,9 +249,16 @@ def settle(sdlc_dir, config, unit, read_pr, read_commit, now):
     if doc is None:
         return None
     pre = {"unmerged": doc.get("observed_unmerged") is True, "head": doc.get("head"), "base": doc.get("base")}
+    never_called = doc.get("call") is None
     call = doc.get("call") if isinstance(doc.get("call"), dict) else {"kind": "lost", "status": None}
     pr, parents = _read_back(read_pr, read_commit, doc.get("pr"))
-    verdict = classify(pre, call, pr, parents)
+    if never_called:
+        # no call was ever recorded: the process died between begin and the merge call, so an open PR is not a lost ack
+        verdict = classify(pre, {"kind": "error", "status": None}, pr, parents)
+        if verdict.outcome == REFUSED:
+            verdict = Verdict(REFUSED, "crash-before-merge")
+    else:
+        verdict = classify(pre, call, pr, parents)
     finish(sdlc_dir, config, unit, verdict, now, pr=pr, call=call)
     return verdict
 

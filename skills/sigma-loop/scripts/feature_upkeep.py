@@ -28,7 +28,7 @@ Settings are a flat dict keyed by dotted path (for example "auto.floor"), the sa
 
 THREE OPT-INS, all off by default. (1) The project: `upkeep.enabled` is the boolean true. (2) The machine: the
 environment variable SIGMA_UPKEEP_JOB is exactly the text 1, and `ledger.enabled` is exactly true (restated here
-because the ledger module's own reader raises on a truthy non-object block, and a gate must not). (3) Spend: not
+so the gate stays free of the ledger module; the two are pinned equal, and both are total on a truthy non-object block). (3) Spend: not
 yet. The "project" door needs (1); the "machine" door needs all of (1) and (2).
 
 PRECEDENCE WITH THE OLDER SWITCH `work.rebase_upkeep` (ON by default; an unrecognised value reads ON)
@@ -247,8 +247,8 @@ def enabled(config):
 
 
 def _ledger_on(config):
-    """`ledger.enabled` is exactly true. Restated here because the ledger module's own reader raises on a truthy
-    non-object block, and a gate must not (it is pinned equal on well-formed input)."""
+    """`ledger.enabled` is exactly true. Restated here so the gate imports nothing; pinned equal to
+    `ledger.enabled`, which is also total on a truthy non-object block."""
     ledger = config.get("ledger") if isinstance(config, dict) else None
     return isinstance(ledger, dict) and ledger.get("enabled") is True
 
@@ -291,8 +291,10 @@ def gated(door="project"):
     """Decorator for an entry point `fn(config, ...)`: the gate is its first action, and a closed gate returns
     {"closed": True, "door", "missing", "problems"} WITHOUT calling the body. Write it with parentheses and put it
     OUTERMOST (a static test enforces both). A machine-door entry point must declare `environ` as a keyword-only
-    parameter, which is where the gate reads it from; any other shape is refused when the function is decorated, so an
-    `environ` passed positionally can never be silently ignored."""
+    parameter, which is where the gate reads it from, and may not take a rest parameter (`*args`, which would swallow a
+    positional `environ` unseen); any other shape is refused when the function is decorated. A CLOSED gate answers
+    before the body is called, so it ignores any positional argument beyond the config; the refusal is what keeps
+    an open gate from doing the same."""
     if door not in DOORS:
         raise ValueError("unknown door %r; expected one of %s" % (door, DOORS))
 
@@ -301,6 +303,9 @@ def gated(door="project"):
             parameter = inspect.signature(fn).parameters.get("environ")
             if parameter is None or parameter.kind is not inspect.Parameter.KEYWORD_ONLY:
                 raise ValueError("a machine-door entry point must declare environ as a keyword-only parameter: "
+                                 + getattr(fn, "__name__", "?"))
+            if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in inspect.signature(fn).parameters.values()):
+                raise ValueError("a machine-door entry point may not take a rest parameter (*args): "
                                  + getattr(fn, "__name__", "?"))
 
         @functools.wraps(fn)

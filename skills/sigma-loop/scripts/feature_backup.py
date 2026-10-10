@@ -24,8 +24,9 @@ SAFETY RULES, each proved by a test, none of them given by git itself:
   * GIT RESOLVES A SHORT NAME BY TAIL-MATCHING (`refs/heads/<name>`, `refs/tags/<name>`, `refs/<name>`,
     `refs/remotes/<name>`), and `push --delete` and a lease use the same rules. A candidate whose name also appears
     in the listing in one of those forms is KEPT (counted `skipped_ambiguous`), and just before each delete chunk the
-    exact refs are read again: a ref that vanished or moved, or that has a lookalike, is skipped. The small window
-    between that read and the push is a named ceiling, not zero.
+    exact refs are read again (each name and its `<name>/HEAD` form, which a tail pattern cannot return): a ref that
+    vanished or moved, or that has a lookalike, is skipped. The window between that read and the push is a named
+    ceiling, not zero, and its length is UNMEASURED.
   * THE DELETE USES THE `--delete` FLAG, one lease per ref (`--force-with-lease=<ref>:<sha seen>`), never a bare
     colon refspec and never `--atomic`: a ref that changed after it was listed survives and the rest go.
   * A NAME COLLISION (same unit, same second) is REFUSED, never overwritten: the push carries an expect-absent lease
@@ -498,7 +499,8 @@ def _recheck(run, cwd, remote, rows):
     the EXACT ref is present at the sha that was listed and no tail-matching lookalike is present: with the exact ref
     gone, `push --delete` would resolve the short name to a branch, tag or other ref carrying the same name."""
     try:
-        out = run(cwd, ["git", "ls-remote", remote] + [ref for ref, _sha in rows])
+        # the `<ref>/HEAD` form is asked for by name: a tail pattern of `<ref>` cannot return it (its last component is HEAD)
+        out = run(cwd, ["git", "ls-remote", remote] + [ref for ref, _sha in rows] + [ref + "/HEAD" for ref, _sha in rows])
     except Exception:                     # noqa: BLE001 - not knowing is never "safe"
         return None
     seen = {}

@@ -611,6 +611,24 @@ def _assert_carries_the_rule(text):
     assert "grant upkeep's actor a bypass" in text            # ...and what protecting it costs
 
 
+_ROUTE = ("To rebase, catch up or land a unit (a `feature/<name>` branch), use the `sigma-rebase` skill; "
+          "do not run a raw rebase, force-push or merge by hand.")
+
+
+def _flat(text):
+    return " ".join(text.split())
+
+
+def test_every_host_copy_carries_the_same_unit_routing_sentence():
+    """#940: 'rebase/land unit X' routes to the request skill, identically in all three adopter-facing copies."""
+    with _git_tmpdir() as tmp:
+        _generated(tmp, "--cursor", "--codex")
+        base = pathlib.Path(tmp)
+        for rel in (".sdlc/project.md", ".cursor/rules/sdlc.mdc", "AGENTS.md"):
+            text = (base / rel).read_text(encoding="utf-8")
+            assert _ROUTE in _flat(text), rel
+
+
 def test_scaffolded_project_md_carries_the_no_direct_commits_rule():
     with _git_tmpdir() as tmp:
         _generated(tmp)                                       # no flags: every adopter gets this file

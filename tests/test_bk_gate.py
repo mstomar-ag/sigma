@@ -16,6 +16,7 @@ import sys
 import time
 
 import backup_support as bk
+from changelog_layout import entries_naming
 
 ROOT = bk.ROOT
 UNIT = "u"
@@ -271,8 +272,12 @@ def test_rule_text_and_carve_out():
     entries = json.loads((ROOT / "docs" / "launch" / "dispositions" / "921.json").read_text(encoding="utf-8"))
     assert len(entries) == 1 and entries[0]["pattern"] == "refs/sigma/backup/<unit>/<stamp>", entries
     assert entries[0]["unscanned"] is True and entries[0]["issue"] == "#921" and "feature_backup.py" in entries[0]["evidence"]
-    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").split("## 1.0.4")[0]
-    assert "(#921, upkeep part A, slice 5)" in changelog
+    assert changelog_names_slice_5((ROOT / "CHANGELOG.md").read_text(encoding="utf-8"))
+
+
+def changelog_names_slice_5(text):
+    """Anywhere in the file: a release moves the entry under a dated heading (#1074)."""
+    return bool(entries_naming(text, "(#921, upkeep part A, slice 5)"))
 
 
 def _pass(tmp, name, block, wall=None, setup=None, race=None):

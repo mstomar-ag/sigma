@@ -253,12 +253,31 @@ def test_931_gh_api_landing_write_helpers_are_seen_and_read_helpers_are_not(tmp_
     assert [(r["function"], r["rule"], r["count"]) for r in rows] == [("land", "gh-api-write", 2)]
 
 
-def test_931_gh_api_runner_inventory_gate_text_is_pinned():
+def test_931_gh_api_landing_helper_words_are_pinned():
     # The ratchet checks presence and a non-empty gate, not the words; this pins the words (D-19).
-    inv = json.loads((ROOT / "docs" / "launch" / "write-surface.json").read_text())["entries"]
-    rows = [e for e in inv if e["path"] == "skills/sigma-loop/scripts/gh_api.py" and e["rule"] == "gh-api-write"]
-    assert rows and all(e["risk"] in {"low", "medium", "high"} for e in rows)
-    text = " ".join(e["gate"] for e in rows)
+    # Since #926 the generic runner has no inventory row, so the words live in the inventory page.
+    text = (ROOT / "docs" / "launch" / "write-surface.md").read_text()
     for phrase in ("merge_pr_pinned", "40-hex", "explicit merge method", "no auto-merge", "no branch-delete",
                    "no caller yet"):
         assert phrase in text, phrase
+
+
+def test_926_name_resolution_is_function_scoped(tmp_path):
+    source = tmp_path / "a.py"
+    source.write_text(
+        'import subprocess\n\n'
+        'def closer(n):\n    args = ["pr", "close", n]\n    subprocess.run(["gh", *args])\n\n'
+        'def finish(n):\n    args = ["worktree", "remove", n]\n    subprocess.run(["git", *args])\n\n'
+        'def generic(args):\n    subprocess.run(["gh", *args])\n')
+    rows = {(r["function"], r["rule"], r["count"]) for r in _module().scan_paths(tmp_path, [source])}
+    assert rows == {("closer", "gh-pr", 1), ("finish", "git-destructive", 1)}
+
+
+def test_926_module_constant_and_enclosing_scope_still_resolve(tmp_path):
+    source = tmp_path / "a.py"
+    source.write_text(
+        'import subprocess\nVERB = ["pr", "close", "1"]\n\n'
+        'def outer():\n    args = ["issue", "delete", "2"]\n\n    def inner():\n        subprocess.run(["gh", *args])\n'
+        '    inner()\n\ndef uses_module():\n    subprocess.run(["gh", *VERB])\n')
+    rows = {(r["function"], r["rule"]) for r in _module().scan_paths(tmp_path, [source])}
+    assert rows == {("inner", "gh-issue"), ("uses_module", "gh-pr")}
