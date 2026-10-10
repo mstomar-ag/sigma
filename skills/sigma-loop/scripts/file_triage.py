@@ -99,9 +99,13 @@ def _deny(title, body, blk):
             return "hard-stop word: " + w
     if _SECRET.search(text):
         return "secret-shaped text"
-    cls = _load("hard_stop").classify(text, {}, {"hard_stops": {"enabled": True}}).cls
-    if cls is not None:
-        return "hard-stop class: " + str(cls)
+    res = _load("hard_stop").classify(text, {}, {"hard_stops": {"enabled": True}})
+    # A shell parse failure on free prose (an odd apostrophe) is not a stop: the text is not a command.
+    # Every other cannot-tell (detector error, not text) and every matched class still parks.
+    if res.cls == "cannot-tell" and res.pattern_id == "parse-error":
+        return None
+    if res.cls is not None:
+        return "hard-stop class: " + str(res.cls)
     return None
 
 

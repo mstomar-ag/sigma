@@ -97,3 +97,42 @@ def test_template_defaults_match_code():
     assert block["triage"]["enabled"] is True
     assert block["buckets"] == m.DEFAULT_BUCKETS
     assert m.validate_buckets(tmpl)["ok"] is True
+
+
+_PROSE_BODIES = (
+    "Found while building slice 15. It's a follow-up: the user's \"quoted\" text isn't a command. cleanup.",
+    "Hand-off from the engine goal: don't re-run the doctor; it's done. The plan's step 3 is open.",
+    "Decompose child: split the parser's loop. Done when the 'edge case' doesn't recur. Unbalanced \" quote.",
+    "Design child: the writer's contract isn't stated; one apostrophe ' alone. follow-up polish.",
+)
+
+
+def test_ordinary_prose_with_odd_quotes_arms_not_parks():
+    m = _mod()
+    for body in _PROSE_BODIES:
+        d = m.decide("Tidy the writer's docs", body, {}, _cfg())
+        assert d.kind == "arm" and d.priority in ("P2", "P3", "P4"), (body, d)
+
+
+def test_dangerous_command_in_prose_with_odd_apostrophe_still_parks():
+    m = _mod()
+    for cmd in ("git push --force origin main", "kubectl delete pod web", "git reset --hard HEAD~3"):
+        d = m.decide("cleanup", "It's odd, don't run: " + cmd, {}, _cfg())
+        assert d.kind == "park", cmd
+
+
+def test_non_parse_cannot_tell_still_parks(monkeypatch):
+    m = _mod()
+    real = m._load
+
+    def fake(name):
+        if name != "hard_stop":
+            return real(name)
+
+        class H:
+            @staticmethod
+            def classify(text, ctx, cfg):
+                return real("hard_stop").Result("cannot-tell", "detector-error", "")
+        return H
+    monkeypatch.setattr(m, "_load", fake)
+    assert m.decide("cleanup", "plain words", {}, _cfg()).kind == "park"
