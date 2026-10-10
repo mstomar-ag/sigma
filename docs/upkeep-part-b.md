@@ -15,11 +15,18 @@ exactly as before: the unit branch is left untouched, nothing is pushed, and an 
 | mechanical | Level 1: a conflict confined to the changelog is resolved by the heading-aware union, proved, stamped and pushed once through the atomic backup push; anything else parks |
 | agent | Level 2: a source conflict goes to a capped, headless resolver; a second, independent session reviews the result; a failed proof or a blocking verdict parks and pushes nothing |
 
+<<<<<<< HEAD
 A parked conflict is one finding. Before filing, the pass reads the open issues once and, if one already carries the same
 conflict id in its title, files nothing and comments on it at most once a day (a counter and the time; the count is kept in
 the per-unit filed store, so a second clone may comment once more). A changed conflict id files a new issue that names the
 one it supersedes and leaves that one open. When a later pass replays the unit cleanly it comments on an issue found this
 way and does not close it. The lookup needs a resolvable repository and the gate open; a failed read just files as before.
+=======
+Level 1 also covers the release-heading case: when the base moved the old Unreleased entries under a new dated
+version heading, the unit's new entries are filed under Unreleased above that release section, the base's sections stay
+as they are, and an entry the base already has is dropped by its text; an edit to an existing line, a link footer or an
+unknown heading still parks.
+>>>>>>> fork/feature/upkeep-followups
 
 Level 1 needs a verify command. With none set the pass parks, unless `upkeep.conflicts.mechanical_without_verify` is the
 boolean true. That key IS acted on by Level 1 (the config table in `docs/branching-model.md` still says it is validated
