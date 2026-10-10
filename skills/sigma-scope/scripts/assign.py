@@ -17,8 +17,8 @@ TWO GENUINELY COUPLED THINGS, both against that same plan/report pair:
    choice at its own step 5 -- see `skills/sigma-triage/SKILL.md` -- reused as UX, not reinvented):
 
    - `PATH_FILE_AND_STOP` -- assign/leave-unassigned exactly as decided, write one ledger entry.
-     Nothing else happens: the issues stay exactly as #918 left them (`sdlc:needs-confirmation`, not
-     immediately actionable).
+     Nothing else happens: the issues stay exactly as #918 left them (with triage on, #1006: armed
+     at their plan priority or parked; with it off, `sdlc:needs-confirmation`, not actionable).
    - `PATH_START_HANDOFF` -- ALSO promotes every issue to `sdlc:goal` (see PROMOTION DECISION below),
      computes the wave workflow via `triage.schedule_waves` (reused directly, never a second
      scheduler), posts a ledger entry AND a GitHub comment on the plan's own anchor issue marking
@@ -319,7 +319,7 @@ def _apply_assignment(source, issue_numbers, assignee):
     return assigned, warnings
 
 
-def _promote_to_goal(source, issue_numbers, config):
+def _promote_to_goal(source, issue_numbers, config, *, triaged=False, parked=()):
     """Flip each issue from filed-but-not-actionable to immediately actionable: add the source's own
     configured goal label (default `sdlc:goal`), remove `handoff.proposed_label(config)` (default
     `sdlc:needs-confirmation`) -- ONE ATOMIC swap per issue. See the module docstring's PROMOTION
@@ -339,6 +339,14 @@ def _promote_to_goal(source, issue_numbers, config):
     returning a success it did not achieve -- the per-issue `except` below turns that into the same
     per-issue warning the old code produced, so `execute()`'s contract is unchanged: one failed
     promotion never stops the rest."""
+    if triaged:
+        # #1006: the report came from a triage-on compile, so every child is already armed (`sdlc:goal`) or
+        # parked at filing and nothing here adds or removes a membership label. A parked child is NOT
+        # promoted: starting work is not a way around a park.
+        held = {_as_int(n) for n in parked}
+        return [n for n in issue_numbers if n not in held], \
+               ["#%s stays parked (see its park comment); /sigma-unpark is the way out" % n
+                for n in issue_numbers if n in held]
     if not (hasattr(source, "_swap_labels") and hasattr(source, "_repo_args")):
         return [], ["promotion to goal needs github discovery mode -- source has no _swap_labels"]
     goal_label = getattr(source, "goal_label", "sdlc:goal")
@@ -546,7 +554,10 @@ def execute(sdlc_dir, config, plan, report, area, assignee, path, *, source=None
     waves = None
     if path in (PATH_START_HANDOFF, PATH_START_SELF):
         if source is not None:
-            promoted, promote_warnings = _promote_to_goal(source, issue_numbers, config)
+            triaged = "parked" in report          # written only by a triage-on compile (#1006)
+            held = [issues[k] for k in (report.get("parked") or {}) if k in issues]
+            promoted, promote_warnings = _promote_to_goal(source, issue_numbers, config,
+                                                          triaged=triaged, parked=held)
             result["promoted"] = promoted
             result["warnings"] += promote_warnings
         nodes = _nodes_from_plan(plan, report)

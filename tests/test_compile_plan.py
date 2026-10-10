@@ -58,8 +58,16 @@ class FakeSource:
     def append_to_body(self, issue, marker):
         self.body_appends.append((str(issue), marker))
 
+    def park(self, issue, text):
+        self.parks = getattr(self, "parks", [])
+        self.parks.append((str(issue), text))
+
     def by_title(self, title):
         return next(c for c in self.created if c["title"] == title)
+
+
+#: AI-filed triage switched off: the pre-triage filing path (decision rubric slice 17, #1006).
+TRIAGE_OFF = {"ai_filed": {"triage": {"enabled": False}}}
 
 
 def _titles(src):
@@ -111,10 +119,12 @@ def test_single_issue_plan_is_filed_but_not_immediately_actionable_by_default():
     merely "missing a label"."""
     src = FakeSource()
     plan = _plan(_issue("a", "Do the thing"))
-    compile_plan.compile_plan("/irrelevant/.sdlc", {}, plan, source=src)
+    compile_plan.compile_plan("/irrelevant/.sdlc", TRIAGE_OFF, plan, source=src)
     created = src.by_title("Do the thing")
     assert created["goal_label"] is False
     assert handoff.proposed_label({}) in created["labels"]
+    assert "parked" not in compile_plan.compile_plan("/irrelevant/.sdlc", TRIAGE_OFF, plan,
+                                                     source=FakeSource())
 
 
 def test_goal_label_true_opts_every_plan_issue_into_immediate_actionability():
@@ -1032,3 +1042,90 @@ def test_the_backstop_directory_is_the_two_trailing_path_parts_not_a_substring()
 def test_the_usage_string_advertises_the_forbid_priority_flag(capsys):
     compile_plan.main(["compile_plan.py"])
     assert "--forbid-priority" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------- triage at filing (rubric slice 17, #1006)
+
+
+def test_scope_children_are_armed_with_plan_priority():
+    src = FakeSource()
+    plan = _plan(_issue("a", "Do the thing", priority="P0"), _issue("b", "Then more", priority="P3"))
+    report = compile_plan.compile_plan("/irrelevant/.sdlc", {}, plan, source=src)
+    for title, prio in (("Do the thing", "P0"), ("Then more", "P3")):
+        created = src.by_title(title)
+        assert created["goal_label"] is True
+        assert created["labels"] == ["priority:" + prio]
+    assert report["parked"] == {} and not getattr(src, "parks", [])
+
+
+def test_deny_listed_child_is_parked():
+    src = FakeSource()
+    plan = _plan(_issue("a", "Clean up", body="this will drop table users"), _issue("b", "Fine"))
+    report = compile_plan.compile_plan("/irrelevant/.sdlc", {}, plan, source=src)
+    bad = src.by_title("Clean up")
+    assert bad["goal_label"] is False
+    assert handoff.proposed_label({}) not in bad["labels"]
+    assert list(report["parked"]) == ["a"] and "drop table" in report["parked"]["a"]
+    (issue, text), = src.parks
+    assert issue == report["issues"]["a"] and "sigma-qkind: needs_decision" in text
+    assert src.by_title("Fine")["goal_label"] is True
+
+
+def test_injected_triage_decides_and_a_crash_parks():
+    D = compile_plan.file_triage.Decision
+    src = FakeSource()
+    plan = _plan(_issue("a", "One"))
+    compile_plan.compile_plan("/x/.sdlc", {}, plan, source=src,
+                              triage=lambda t, b, f, c: D("park", None, "fake says park"))
+    assert src.by_title("One")["goal_label"] is False and "fake says park" in src.parks[0][1]
+
+    def boom(*a):
+        raise RuntimeError("x")
+    src2 = FakeSource()
+    compile_plan.compile_plan("/x/.sdlc", {}, plan, source=src2, triage=boom)
+    assert src2.by_title("One")["goal_label"] is False and len(src2.parks) == 1
+
+
+def test_a_failed_park_is_a_warning_not_a_raise():
+    class NoPark(FakeSource):
+        def park(self, issue, text):
+            raise RuntimeError("gh down")
+    src = NoPark()
+    report = compile_plan.compile_plan("/x/.sdlc", {}, _plan(_issue("a", "T", body="force push it")),
+                                       source=src)
+    assert any("could not park" in w for w in report["warnings"])
+
+
+def test_gate_closed_filing_is_byte_identical_to_legacy():
+    src = FakeSource()
+    plan = _plan(_issue("a", "Clean up", body="drop table users"))
+    report = compile_plan.compile_plan("/x/.sdlc", TRIAGE_OFF, plan, source=src)
+    created = src.by_title("Clean up")
+    assert created["labels"] == ["priority:P2", handoff.proposed_label({})]
+    assert created["goal_label"] is False and not hasattr(src, "parks") and "parked" not in report
+    assert set(report) == {"epic", "issues", "failed", "skipped", "order", "warnings"}
+
+
+def test_no_writer_adds_the_label():
+    """With triage on, none of the three slice-17 writers puts the confirmation label on anything."""
+    import re
+    src = FakeSource()
+    plan = _plan(_issue("a", "Fine"), _issue("b", "Bad", body="credentials"))
+    compile_plan.compile_plan("/x/.sdlc", {}, plan, source=src)
+    assert all(handoff.proposed_label({}) not in c["labels"] for c in src.created)
+    # structural: every place these files write the label sits under the triage-off branch
+    for rel in ("skills/sigma-scope/scripts/compile_plan.py", "skills/sigma-scope/scripts/assign.py"):
+        text = (_ROOT / rel).read_text()
+        for m in re.finditer(r"labels\.append\(handoff\.proposed_label|add=\[proposed\]|remove=\[proposed\]",
+                             text):
+            before = text[max(0, m.start() - 400):m.start()]
+            assert "elif not goal_label" in before or "triaged" in before or "proposed = " in before, rel
+
+
+def test_main_json_carries_parked_only_when_triage_is_on(tmp_path, capsys):
+    import json
+    sdlc = _init_sdlc(tmp_path)
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps({"issues": [{"key": "a", "title": "x", "body": "b"}]}))
+    assert compile_plan.main(["compile_plan.py", str(sdlc), "--plan", str(plan_path), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["parked"] == {}

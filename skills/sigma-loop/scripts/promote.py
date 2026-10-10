@@ -107,6 +107,11 @@ PROMOTE_COMMENT = "Promoted to `{goal}` via /sigma-promote — approved for the 
 DEMOTE_COMMENT = ("Returned to `{proposed}` via /sigma-promote — awaiting approval again; the loop "
                   "will not pick it up.")
 
+#: #1006 (decision rubric): with triage on, a demotion PARKS the issue (reason and declared question kind in
+#: the comment) instead of writing the legacy confirmation label.
+DEMOTE_PARK_COMMENT = ("Parked via /sigma-promote: demoted out of the queue, so the loop will not pick it "
+                       "up. Run /sigma-unpark to release it.")
+
 _ISSUE_FIELDS = "number,title,labels,body"
 #: `body` added #1888 so `_row` can annotate a bucket row with the `Blocked by:` reference(s) it
 #: declares -- PARSING only (`blocker_scan.extract_refs`, no live `gh` call), and still exactly TWO
@@ -552,8 +557,10 @@ def promote(sdlc_dir, config, numbers, source=None, run=None, apply=True, demote
     # #1393: demotion gives up MEMBERSHIP, so it must clear the overlays with it -- an overlay is
     # only ever legitimate alongside `goal_label`, and leaving `sdlc:in-progress` or `sdlc:blocked`
     # on an issue that is no longer a goal is the orphan shape the census exists to find.
-    add, remove = (([proposed], [goal, *source.overlay_labels()]) if demote
-                   else ([goal], [proposed]))
+    # #1006: with triage on (the default) a demotion parks rather than writing the legacy label.
+    park_demote = demote and not _feature("file_triage").is_off(config)
+    add, remove = ((([source.parked_label] if park_demote else [proposed]), [goal, *source.overlay_labels()])
+                   if demote else ([goal], [proposed]))
     verb = "demoted" if demote else "promoted"
 
     for number in numbers:
@@ -583,7 +590,7 @@ def promote(sdlc_dir, config, numbers, source=None, run=None, apply=True, demote
         # `_swap_labels` is idempotent, so this is a nicety, not a correctness guard -- except for
         # the one case that matters, `both == True`, which is the `drift` bucket and IS a real
         # repair (remove-only), so it must not be short-circuited here.
-        settled = (proposed in names and goal not in names) if demote else \
+        settled = (add[0] in names and goal not in names) if demote else \
                   (goal in names and proposed not in names)
         if settled:
             out["results"].append({"number": n, "outcome": "skipped",
@@ -624,6 +631,8 @@ def promote(sdlc_dir, config, numbers, source=None, run=None, apply=True, demote
                        "if this repo picks from the board" % column)
         audit = (DEMOTE_COMMENT.format(proposed=proposed) if demote
                  else PROMOTE_COMMENT.format(goal=goal))
+        if park_demote:
+            audit = DEMOTE_PARK_COMMENT + "\n" + _feature("qkind").render_line("needs_decision")
         tried = []                                      # the comment was attempted (never post twice)
         try:
             dr = _feature("decision_record")

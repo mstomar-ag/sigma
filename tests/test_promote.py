@@ -719,9 +719,23 @@ def test_demote_is_the_inverse_and_clears_the_overlays_with_membership():
     the orphan shape the census exists to find."""
     p = _mod("promote")
     run = _runner(views={"5": _view("sdlc:goal", "sdlc:in-progress")})
-    result = p.promote(".sdlc", _config(), ["5"], run=run, demote=True)
+    result = p.promote(".sdlc", dict(_config(), ai_filed={"triage": {"enabled": False}}), ["5"], run=run,
+                       demote=True)
     assert result["results"][0]["outcome"] == "demoted"
     assert result["results"][0]["detail"] == "+sdlc:needs-confirmation -sdlc:goal -sdlc:in-progress"
+
+
+def test_demote_parks_with_reason():
+    """#1006: with triage on (the default) a demotion writes the park label, never the legacy one, and the
+    comment carries the reason and the declared question kind."""
+    p = _mod("promote")
+    run = _runner(views={"5": _view("sdlc:goal", "sdlc:in-progress")})
+    result = p.promote(".sdlc", _config(), ["5"], run=run, demote=True)
+    assert result["results"][0]["outcome"] == "demoted"
+    assert result["results"][0]["detail"] == "+sdlc:parked -sdlc:goal -sdlc:in-progress"
+    comment = next(c[c.index("--body") + 1] for c in run.calls if c[:2] == ["issue", "comment"])
+    assert "Parked via /sigma-promote" in comment and "sigma-qkind: needs_decision" in comment
+    assert "needs-confirmation" not in comment
 
 
 def test_demote_refuses_a_parked_issue():
