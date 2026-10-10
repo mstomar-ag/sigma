@@ -410,59 +410,17 @@ def _feature_hold(sdlc_dir, config, number, names, author):
     all adoption.
 
     NEVER RAISES, AND FAILS OPEN ON EVERY AXIS -- an unadopted project, an issue declaring no unit,
-    two rival unit labels, an unreadable registry. Each answers None."""
-    try:
-        features = _feature("features")
-        try:
-            unit = features.parse_labels(sorted(names))
-        except features.AmbiguousUnit:
-            return None                                 # two rival units: no one gate to ask
-        if not unit:
-            return None
-        label = _feature("feature_labels").label_for(unit)
-        # SCOPE FIRST, AND THE ORDER IS `loop._next`'S OWN. That function short-circuits the `and`
-        # between the two gates so a goal refused for scope never also collects an ownership
-        # refusal -- one pick, one reason. A goal in an unlisted repo also has no board owner
-        # recorded there by construction, so asking ownership first would answer `not-an-owner` for
-        # every one of them and print the reason the pick would NOT have given.
-        repo = _scope_expansion(sdlc_dir, config, unit)
-        if repo:
-            return ("#%s carries %s and %s is not one of the repos that unit lists — adding one "
-                    "expands the unit's scope, which is its owner's decision (§7.3). Promoting it "
-                    "returns it to the board and the next pick sets it aside again — add %s to "
-                    "that unit's repos in the registry, then promote."
-                    % (number, label, repo, repo))
-        owner = _feature("feature_owner")
-        verdict = owner.would_hold(sdlc_dir, config, unit, author)
-        if verdict is not None:
-            return ("#%s carries %s and unit ownership still holds it: %s. Promoting it returns it "
-                    "to the board and the next pick sets it aside again — set "
-                    "repos.%s.authorized = true in the registry, or correct the owner recorded "
-                    "there, then promote."
-                    % (number, label,
-                       owner.refusal_clause(verdict, unit, verdict.repo,
-                                            "the account that opened it"),
-                       verdict.repo))
-        return None
-    except Exception:                                   # noqa: BLE001 - a wrong refusal is the wedge
-        return None
+    two rival unit labels, an unreadable registry. Each answers None.
+
+    #1005: THE BODY MOVED to `gate_hold.feature_hold` (scope first, then ownership, the pick's own
+    order), so `/sigma-unpark` asks the very same question; this keeps the name and the prose."""
+    return _feature("gate_hold").feature_hold(sdlc_dir, config, number, names, author)
 
 
 def _scope_expansion(sdlc_dir, config, unit):
     """The repo this goal is in when that repo is NOT one the unit lists, else None. #1477's
-    question, asked through #1477's own predicate -- and now the WHOLE of it: `_feature_hold` records
-    the arm that briefly existed and was withdrawn, so nothing is left out here any more."""
-    registry = _feature("feature_registry")
-    sync = _feature("feature_sync")
-    features_dir = registry.registry_dir(sdlc_dir)
-    if not features_dir.is_dir():
-        return None
-    raw = registry.read(features_dir).get(unit)
-    if raw is None:
-        return None
-    repo = sync.repo_slug(config, sync._run, str(pathlib.Path(sdlc_dir).parent),
-                          sync.DEFAULT_REMOTE)
-    return repo if sync.is_scope_expansion(registry.normalise_entry(raw), repo) else None
+    question, asked through #1477's own predicate (now `gate_hold.scope_expansion`)."""
+    return _feature("gate_hold").scope_expansion(sdlc_dir, config, unit)
 
 
 def _refusal(source, number, names, closed, demote, hold=None, unresolved=None):

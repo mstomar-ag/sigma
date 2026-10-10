@@ -155,6 +155,7 @@ def _load(name):
 registry = _load("feature_registry")     # the store: read, normalise_entry, is_authorized
 sync = _load("feature_sync")             # same_repo/repo_key/repo_slug, and the per-unit lock
 legacy = _load("legacy")                 # #239: the watermark under the previous name
+gate_hold = _load("gate_hold")           # #1005: the park write, the surface probe, the shared predicate
 ledger = _load("ledger")                 # team record (config-gated, default OFF; fail-open)
 
 #: THE VERDICT VOCABULARY. Each value is a different FACT about why the answer is what it is, not a
@@ -218,7 +219,7 @@ FLAG_AGAIN = "again"                  # announced again, after the goal was prom
 #: The methods `gate_at_pick` needs before it may refuse anything. `fetch_author` is the one this
 #: goal adds; the other three are `feature_propagate._has_surface`'s, unchanged, because the refusal
 #: is the same refusal. `LocalSource` has none of them and no repository label namespace at all.
-_SURFACE = ("fetch_author", "mark_needs_confirmation", "note", "fetch_comments_strict")
+_SURFACE = ("fetch_author", "note", "fetch_comments_strict")
 
 #: How far a failure's own text is quoted. `ledger._sanitize_free_text` caps `why` at
 #: `FREE_TEXT_CAP` from the END, so identifying facts are placed early and this bounds the rest.
@@ -808,8 +809,11 @@ def tell_at_filing(sdlc_dir, goal, unit, verdict, issue=None, actor=None):
 # --------------------------------------------------------------------------- the pick gate
 
 
-def _has_surface(source):
-    return all(callable(getattr(source, m, None)) for m in _SURFACE)
+def _has_surface(source, config=None):
+    """The reads the gate needs plus a write it can hold with: `park` when triage is on, else (or
+    for a source that cannot park) the old label write. See `gate_hold.surface_mode`."""
+    return (all(callable(getattr(source, m, None)) for m in _SURFACE)
+            and gate_hold.surface_mode(source, config, ()) is not None)
 
 
 def _author(source, goal):
@@ -1116,7 +1120,7 @@ def _gate_at_pick(sdlc_dir, source, goal, config, unit, run, cwd, remote):
     settled = may_file(entry, repo, None)
     if settled.reason not in (NO_ACTOR, NO_OWNER):
         return Gate(True, settled.reason, unit, repo, False)
-    if not _has_surface(source):
+    if not _has_surface(source, config):
         return Gate(True, NO_SURFACE, unit, repo, False)
     author = _author(source, goal)
     if settled.reason == NO_OWNER:
@@ -1147,16 +1151,24 @@ def _gate_at_pick(sdlc_dir, source, goal, config, unit, run, cwd, remote):
     if verdict.allowed:
         return Gate(True, verdict.reason, unit, repo, False)
     marked = False
+    parked = gate_hold.surface_mode(source, config, ()) == gate_hold.PARK
     try:
-        marked = source.mark_needs_confirmation(goal) is not False
+        if parked:
+            marked = gate_hold.park_for_gate(
+                source, goal, "owner_hold",
+                "%s is held by unit ownership (%s)" % (goal, verdict.reason))
+        else:
+            marked = source.mark_needs_confirmation(goal) is not False
     except Exception as exc:              # noqa: BLE001 - the refusal stands whatever the write did
-        _note("sigma: features: could not set #%s needs-confirmation (%s) — the pick is refused "
-              "and the next one retries the label\n" % (goal, _flat(exc)))
+        _note("sigma: features: could not hold #%s (%s) — the pick is refused "
+              "and the next one retries the hold\n" % (goal, _flat(exc)))
     if not marked:
         # THE TRANSIENT DIRECTION, and nothing durable is written on it. See the docstring.
         return Gate(False, verdict.reason, unit, repo, False)
-    said = _flag(source, goal, _text(unit, repo, entry, verdict, author),
-                 _again_text(unit, repo, entry, verdict, author))
+    said = _flag(source, goal,
+                 _text(unit, repo, entry, verdict, author) + (gate_hold.PARK_NOTE if parked else ""),
+                 _again_text(unit, repo, entry, verdict, author)
+                 + (gate_hold.PARK_NOTE if parked else ""))
     if said:
         # ONE WATERMARK FOR BOTH CHANNELS, still -- but the watermark is now the DEMOTION rather
         # than the hold, so a remedy that was performed and did not work is announced instead of

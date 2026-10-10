@@ -59,7 +59,7 @@ LIBRARY_ONLY = {
     "feature_backup",
     "setup_wizard", "wizard_actions", "actionlog", "blocker_scan", "blockers", "breaker",
     "decompose_goal", "design_goal", "diff_revert", "feature_classify", "feature_doc", "legacy",
-    "feature_judge", "feature_labels", "feature_registry", "feature_stamp", "feature_upkeep", "decision_rubric_cfg", "decision_store", "features", "file_triage", "decision_record", "drift_judge", "ai_filed_counter", "hard_stop_guard",
+    "feature_judge", "feature_labels", "feature_registry", "feature_stamp", "feature_upkeep", "decision_rubric_cfg", "decision_store", "features", "file_triage", "decision_record", "drift_judge", "ai_filed_counter", "hard_stop_guard", "gate_hold",
     "flake_check", "frontmatter", "gh_api", "gh_session", "goal_size", "mutation",
     "scrub", "sources", "state", "tamper_scan", "timing_store", "watch_classify", "witness",
     "bounded_run",

@@ -3615,6 +3615,9 @@ class GitHubSource:
     def mark_needs_confirmation(self, goal):
         """#1477: hand this goal back to a human as a PROPOSAL. Returns True iff the swap landed.
 
+        #1005: the two pick gates no longer call this unless `ai_filed.triage.enabled` is false; they
+        PARK with a declared kind (`gate_hold.park_for_gate`). Kept for that switched-off mode.
+
         THIS ONE GIVES UP MEMBERSHIP, and that is the difference between it and `mark_needs_label`
         one method up. That one is an OVERLAY -- a missing label self-heals the moment somebody
         creates it, so the goal keeps `sdlc:goal` and a sweep clears the overlay unattended. A scope
