@@ -245,6 +245,12 @@ ENFORCEMENT_GATES = (
      "settings": ("work.rebase_upkeep",),
      "mechanism": "refuses to resume an existing worktree that is stale against its base, first "
                   "moving the goal out of the claimed state so the refusal leaves nothing to un-park"},
+    {"control": "Cross-repo unit: other half must have landed", "function": "unit_sibling_guard",
+     "kind": "python-gate", "hosts": "all", "enabled_by": ("upkeep.enabled",), "settings": (),
+     "mechanism": "refuses a user-requested landing of a unit onto main while another repository's half of "
+                  "the same unit has not landed, and when the unit-keyed lookup cannot answer; reads the "
+                  "landing records and the feature registry, writes nothing",
+     "condition": "inert while the upkeep gate is closed"},
     {"control": "`finish` refused while the PR is open", "function": "_open_pr_refusal",
      "kind": "python-gate", "hosts": "all", "enabled_by": ("work.enabled",), "settings": (),
      "mechanism": "refuses `work.py finish` (worktree removal) while the goal's PR is still open, "
@@ -5427,6 +5433,28 @@ def _sibling_gate(sdlc_dir, config, goal, run, sleep):
             continue                        # re-READ, never re-judge: the answer is what may change
         waited = PENDING_ATTEMPTS * PENDING_INTERVAL
         return False, "%s after %ss — %s" % (SIBLING_PENDING_PREFIX, waited, "; ".join(waiting))
+
+
+def unit_sibling_guard(sdlc_dir, config, unit, here, landed=None):
+    """(ok, reason) -- refuse landing one half of a cross-repo unit while the other half has not landed.
+
+    The unit-keyed counterpart of `sibling_gate` (which is keyed by a goal and stays unwired and exempt): the landing
+    engine has a unit and no goal id. `here` is this repository's `owner/name`; `landed(repo, branch)` is the
+    engine's measurement of whether a sibling's unit branch has landed, and only the boolean `True` passes.
+
+    Inert while the upkeep gate is closed: `(True, "")` with no read. Open, it FAILS CLOSED ON ERROR and not on
+    absence -- see `cross_repo.unit_sibling_check`. NEVER RAISES: anything unexpected is a refusal naming itself."""
+    try:
+        if not _load("feature_upkeep").enabled(config if isinstance(config, dict) else {}):
+            return True, ""
+        if not isinstance(unit, str) or not unit.strip():
+            return False, "cross-repo unit check: %r is not a unit name" % (unit,)
+        if not isinstance(here, str) or not here.strip():
+            return False, "cross-repo unit `%s`: this repository's name is unknown, so the other half cannot be told" % unit
+        return _load("cross_repo").unit_sibling_check(sdlc_dir, unit, here, landed=landed)
+    except Exception as exc:                # noqa: BLE001 - "never raises" has to be total
+        return False, ("cross-repo unit check could not run (%s) -- refusing rather than reporting a pair that "
+                       "nothing measured" % type(exc).__name__)
 
 
 def _auto_merge_allowed(rec, run):

@@ -4,6 +4,11 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Upkeep part C, slice 7: cross-repo unit check (#934).** A unit-keyed sibling lookup
+  (`cross_repo.unit_sibling_check`) and its guard (`work.unit_sibling_guard`, registered in the
+  enforcement table). It refuses a landing while another repository's half of the unit has not landed,
+  and when the lookup cannot answer. Read-only, inert while the upkeep gate is closed, and nothing
+  calls it yet.
 - **Upkeep part A, slice 3: drift measure, per-unit state and the due rule (#919).** Two new
   library modules, `feature_upkeep_drift.py` and `feature_upkeep_state.py`. The first counts
   pull-request arrivals on a base branch and on a feature branch by author date over a bounded

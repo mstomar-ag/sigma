@@ -618,6 +618,116 @@ def recorded(sdlc_dir, goal):
     return got if isinstance(got, dict) and legacy.schema_is(got.get("schema"), RECORD_SCHEMA) else None
 
 
+#: CEILING on the landing records one unit-keyed lookup will read. The lookup scans the landing folder once (one
+#: small file read per record, nothing indexed by unit), so it is linear in the records ever written; nothing prunes
+#: them. At 10x or 100x that growth is the cost, so the scan is bounded and over the bound it REFUSES (cannot
+#: answer) rather than reading unboundedly or guessing. PROVISIONAL default, not measured.
+MAX_UNIT_LOOKUP_RECORDS = 5000
+
+#: Decisions that say a goal has no pair at all. Every other outcome on a record naming the unit is either a pair
+#: (`tier-1`, `tier-2`) or an unknown (`flagged`, or anything this release has not heard of), and unknown refuses.
+_NO_PAIR_OUTCOMES = (NOT_ADOPTED, NO_UNIT, NOT_CROSS_REPO)
+
+
+def _unit_landing_records(sdlc_dir, unit, max_records=None):
+    """-> `(records, error)`: every landing record that names `unit`, read from the goal-keyed store.
+
+    READ-ONLY and keyed by the unit: the store is filed per goal (`decision_path`), so the unit's records are found
+    by scanning it. The store itself is never written here. Anything that stops the scan from being a complete
+    answer is an `error` string (an unreadable folder, a symlink, a file that does not parse as a landing record,
+    more files than the ceiling), because a record that cannot be read might be this unit's."""
+    folder = pathlib.Path(sdlc_dir) / "state" / RECORD_DIRNAME
+    try:
+        if not folder.exists():
+            return [], None
+        if folder.is_symlink() or not folder.is_dir():
+            return [], "the landing record folder is not a plain directory"
+        files = sorted(p for p in folder.iterdir() if p.name.endswith(".json"))
+    except OSError as exc:
+        return [], "the landing record folder could not be listed (%s)" % exc
+    ceiling = MAX_UNIT_LOOKUP_RECORDS if max_records is None else max_records
+    if len(files) > ceiling:
+        return [], "there are more than %d landing records, the most one lookup will read" % ceiling
+    found = []
+    for path in files:
+        try:
+            if path.is_symlink():
+                return [], "landing record %s is a symbolic link" % path.name
+            got = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return [], "landing record %s could not be read (%s)" % (path.name, type(exc).__name__)
+        if not isinstance(got, dict) or not legacy.schema_is(got.get("schema"), RECORD_SCHEMA):
+            return [], "landing record %s is not a landing record this release understands" % path.name
+        if got.get("unit") == unit:
+            found.append(got)
+    return found, None
+
+
+def unit_sibling_check(sdlc_dir, unit, here, landed=None, max_records=None):
+    """-> `(ok, reason)`: has every OTHER repository's half of `unit` landed?
+
+    The unit-keyed sibling lookup the landing engine runs before it merges anything. `work.sibling_gate` is keyed by
+    a goal and stays unwired; this one is keyed by the unit, because the engine has a unit and no goal id.
+
+    Siblings are the repositories, other than `here`, that either the unit's landing records or the feature
+    registry name. `landed(repo, branch)` is the caller's measurement of whether that repository's unit branch has
+    landed (the shared landed predicate, supplied by the engine); only the boolean `True` counts as landed.
+
+    FAIL CLOSED ON ERROR, NOT ON ABSENCE. A unit with no records and no other repository is simply not cross-repo and
+    passes without any lookup. But a record that cannot be read, a `flagged` or unknown decision, a sibling with no
+    recorded branch, a missing or failing `landed`, or any answer other than `True` refuses. The reason names the
+    sibling so a person can act. Pure of writes; never touches `state/landing` beyond reading it."""
+    sync = work._feature_sync()
+    records, error = _unit_landing_records(sdlc_dir, unit, max_records)
+    if error:
+        return False, "cross-repo unit `%s`: the sibling lookup cannot answer: %s" % (unit, error)
+    repos = {}                                  # sibling repo -> spelling kept from the first source that named it
+    for rec in records:
+        outcome = rec.get("outcome")
+        if outcome in _NO_PAIR_OUTCOMES:
+            continue
+        if outcome not in (TIER_1, TIER_2):
+            return False, ("cross-repo unit `%s`: goal %s has a landing decision of `%s`, which says nothing about "
+                           "whether another repository has to land alongside" % (unit, rec.get("goal"), outcome))
+        named = rec.get("repos")
+        if not isinstance(named, dict):
+            return False, ("cross-repo unit `%s`: goal %s has a landing decision that names no repositories"
+                           % (unit, rec.get("goal")))
+        for repo in named:
+            if isinstance(repo, str) and not sync.same_repo(repo, here):
+                repos.setdefault(repo.lower(), repo)
+    try:
+        features_dir = feature_registry.registry_dir(sdlc_dir)
+        entry = feature_registry.normalise_entry(feature_registry.read(features_dir).get(unit))
+    except Exception as exc:                    # noqa: BLE001 - an unreadable registry is not "no siblings"
+        return False, ("cross-repo unit `%s`: the sibling lookup cannot answer: the feature registry could not be "
+                       "read (%s)" % (unit, type(exc).__name__))
+    for repo in entry["repos"]:
+        if not sync.same_repo(repo, here):
+            repos.setdefault(repo.lower(), repo)
+    if not repos:
+        return True, ""                         # not a pair: nothing to check, nothing looked up
+    for repo in sorted(repos.values()):
+        branch = (entry["repos"].get(sync.repo_key(entry["repos"], repo)) or {}).get("branch")
+        if not branch:
+            return False, ("cross-repo unit `%s`: the feature registry records no branch for %s, so the other half "
+                           "cannot be identified" % (unit, repo))
+        if landed is None:
+            return False, ("cross-repo unit `%s`: nothing was supplied to measure whether %s has landed" % (unit, repo))
+        try:
+            verdict = landed(repo, branch)
+        except Exception as exc:                # noqa: BLE001 - an unreadable answer is not "landed"
+            return False, ("cross-repo unit `%s`: whether %s `%s` has landed could not be read (%s)"
+                           % (unit, repo, branch, type(exc).__name__))
+        if verdict is not True:
+            if verdict is False:
+                return False, ("cross-repo unit `%s`: the other half in %s `%s` has not landed -- landing one half "
+                               "of a pair alone is a human decision" % (unit, repo, branch))
+            return False, ("cross-repo unit `%s`: whether the other half in %s `%s` has landed could not be "
+                           "determined (no clear answer)" % (unit, repo, branch))
+    return True, ""
+
+
 def _record(sdlc_dir, decision):
     """Persist, best-effort. A record that cannot be written costs the merge gate its shortcut --
     it reads `None` and refuses -- and must not cost the pick its goal."""
