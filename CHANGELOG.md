@@ -19,6 +19,8 @@ All notable changes to Sigma are recorded here, newest first.
   unit-completion observer keys a landing by the branch like the rebase landing helper, so one landing
   is recorded once; a landing already recorded under the bare unit key keeps that key. With the gate
   closed nothing changes.
+- **GitHub write plumbing in gh_api (#931, upkeep part C, slice 2).** New REST-only helpers with no caller yet: a pinned merge that requires an explicit method, repository and 40-hex head pin, commit parents, branch rules, repository settings, a typed non-draft pull request create, and a bounded runner that keeps the exit code and failure class. The landing writer joins the receipt allowlist; the doctor row and the cloud-sessions page name the degraded features. Inert unless the upkeep gate is open.
+
 - **Shared verify runner and unattended git runner (#920, upkeep part A, slice 4).** New bounded_run.py:
   a command run in a process group of its own under a wall-clock budget, the whole group stopped
   (SIGTERM, then SIGKILL) on overrun or when a stop file appears, a lifeline that stops the tree if the

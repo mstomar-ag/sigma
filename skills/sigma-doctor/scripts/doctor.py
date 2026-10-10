@@ -1060,8 +1060,9 @@ def _graphql_capability_rows(base, cfg, env=None):
     return [{"name": "GitHub GraphQL unavailable (cloud proxy)", "ok": True,
              "fix": ("source=%s (%s). Features turned off or degraded while GraphQL is blocked: "
                      "board/Projects mirroring, gh pr merge --auto, timelineItems (blocker/dependency "
-                     "edges), gh issue|pr via GraphQL until migrated (#801 slices 2-4). This is "
-                     "detection only; REST migration is in progress, not complete. Override with "
+                     "edges), gh issue|pr via GraphQL until migrated (#801 slices 2-4). Unit landing "
+                     "uses REST only: draft readiness (gh pr ready) and merge-queue landing are "
+                     "unavailable here. This is detection only; REST migration is in progress, not complete. Override with "
                      "SIGMA_GH_GRAPHQL=on|off." % (res.get("source"), res.get("reason")))}]
 
 

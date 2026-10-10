@@ -216,6 +216,17 @@ So it guarantees "no new list-literal gh call", not "no new gh call". It also ca
 through a `gh_api` helper, and `docs/launch/write-surface.json` (scanner blind spot, same reason) records only the
 helper's `_default_run`; `tests/test_issue_creation_boundary.py` pins the callers of the create helper.
 
+## Landing plumbing (upkeep part C, slice 2)
+
+`gh_api` gains REST-only helpers for landing a feature unit onto the base branch; nothing calls them yet and they
+are inert unless the upkeep gate is open. `merge_pr_pinned` requires an explicit merge method, a repository and a
+40-hex head pin, and refuses before any call otherwise; `commit_parents`, `branch_rules`, `repo_settings` and
+`create_pr_nondraft` are the supporting reads and the explicit non-draft create; `bounded_runner` binds a working
+directory and a timeout and keeps the exit code and failure class. They have no GraphQL fallback. In a cloud
+session two things stay unavailable: draft readiness (`gh pr ready` is GraphQL only) and landing through a merge
+queue (REST cannot enqueue). The alternative of the CLI merge with a head-match flag was rejected: it resolves the
+repository from the working directory, exits 0 on an enqueue and cannot return the merge commit.
+
 ## Follow-ups
 
 Remaining migration (issue read and write ops, PR ops, Projects v2, skill prose, status line, the cloud

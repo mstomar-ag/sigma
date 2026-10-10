@@ -99,11 +99,12 @@ class GhApiError(Exception):
     """A REST op failed. `str(self)` is the wrapped failure's text; `.hint` is its `.hint` or None;
     `.status` (int|None) and `.kind` come from `classify` (see module doc)."""
 
-    def __init__(self, text, hint=None, status=None, kind="other"):
+    def __init__(self, text, hint=None, status=None, kind="other", returncode=None):
         super().__init__(text)
         self.hint = hint
         self.status = status
         self.kind = kind
+        self.returncode = returncode      # the gh exit code when one was observed (#931), else None
 
 
 # ---------------------------------------------------------------- failure classification (#895)
@@ -244,7 +245,8 @@ def _call(run, args):
         raise
     except Exception as exc:                          # noqa: BLE001 - wrap, keep the text + hint
         status, kind = classify(exc)
-        raise GhApiError(str(exc), getattr(exc, "hint", None), status, kind) from exc
+        raise GhApiError(str(exc), getattr(exc, "hint", None), status, kind,
+                         getattr(exc, "returncode", None)) from exc
 
 
 def _json(run, args):
@@ -948,3 +950,156 @@ def merge_pr(run, number, merge_method="squash", sha=None, repo=None):
     if sha:
         args += ["-f", "sha=%s" % sha]
     return _json(run, args)
+
+
+# ---------------------------------------------------------------- landing plumbing (#931, upkeep part C slice 2)
+# Additive: no caller yet (the landing engine of a later slice is the first). Nothing above changes, so with the
+# upkeep gate closed every existing path is byte-identical. These helpers read no configuration. Every one takes an
+# EXPLICIT repository (the placeholder `{owner}/{repo}` resolves against whatever directory the process runs in) and
+# refuses a bad argument BEFORE any call. REST only, no GraphQL fallback. The endpoint shapes are unverified live.
+# Rejected (D-20): the CLI merge with a head-match flag; it resolves the repository from the working directory, exits 0
+# on an enqueue and cannot return the reply `sha`.
+
+_SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
+_REPO_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
+_MERGE_METHODS = ("merge", "squash", "rebase")
+
+
+def _refuse(what):
+    return GhApiError("gh_api: " + what, kind="invalid")
+
+
+def _need_repo(repo):
+    if not isinstance(repo, str) or not _REPO_RE.match(repo):
+        raise _refuse("an explicit owner/name repository is required")
+    return repo
+
+
+def _need_sha(sha, what="sha"):
+    if not isinstance(sha, str) or not _SHA_RE.match(sha):
+        raise _refuse("%s must be a full 40-character lowercase hex sha" % what)
+    return sha
+
+
+def _need_number(number):
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        raise _refuse("a positive integer pull request number is required")
+    return number
+
+
+def bounded_runner(cwd=None, timeout=120, *, popen=None):
+    """-> a `run(args)` callable for the ops above that KEEPS THE FAILURE CLASS. `_default_run` has no working
+    directory and drops the exit code; this binds `cwd` and a wall-clock `timeout`, and every failure is raised as a
+    `GhApiError` already carrying `.status`, `.kind` (via `classify`, from gh's stderr) and `.returncode`: a non-zero
+    exit keeps its code, a timeout is kind `transport`, a missing binary is kind `other` (never retried).
+    `popen` (default `subprocess.run`) is a test seam."""
+    if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
+        raise ValueError("gh_api.bounded_runner: timeout must be a positive number of seconds")
+    popen = popen or subprocess.run
+
+    def run(args):
+        try:
+            proc = popen(["gh", *args], capture_output=True, text=True, timeout=timeout, cwd=cwd)
+        except subprocess.TimeoutExpired as exc:
+            raise GhApiError("gh timed out after %ss" % timeout, "gh timed out after %ss" % timeout,
+                             None, "transport") from exc
+        except OSError as exc:
+            hint = "could not run gh (%s); is it installed?" % exc.__class__.__name__
+            raise GhApiError(hint, hint, None, "other") from exc
+        if proc.returncode != 0:
+            hint = (proc.stderr or "").strip() or "gh exited %s with no message" % proc.returncode
+            err = RuntimeError("gh failed: " + hint)
+            err.hint = hint
+            status, kind = classify(err)
+            raise GhApiError(str(err), hint, status, kind, proc.returncode)
+        return proc.stdout
+
+    return run
+
+
+def merge_pr_pinned(run, repo, number, sha, *, merge_method):
+    """PUT /pulls/{n}/merge with an EXPLICIT method (keyword-only, no default: `merge_pr` defaults to squash), the
+    repository required, and the head pin REQUIRED and validated as 40 lowercase hex (`merge_pr` silently drops an
+    empty one). GitHub refuses the merge (409) if the head moved. No auto-merge, no admin flag, no branch-delete
+    option. Returns the reply dict; read its commit with `merge_reply_sha`. A non-dict reply or a reply `sha` that is
+    not 40-hex raises."""
+    _need_repo(repo)
+    _need_number(number)
+    _need_sha(sha, "the head pin")
+    if merge_method not in _MERGE_METHODS:
+        raise _refuse("merge_method must be one of %s" % ", ".join(_MERGE_METHODS))
+    reply = _json(run, ["api", _endpoint(repo, "pulls/%d/merge" % number), "--method", "PUT",
+                        "-f", "merge_method=%s" % merge_method, "-f", "sha=%s" % sha])
+    if not isinstance(reply, dict):
+        raise GhApiError("malformed merge reply for #%d (%s)" % (number, type(reply).__name__))
+    got = reply.get("sha")
+    if got is not None and not (isinstance(got, str) and _SHA_RE.match(got)):
+        raise GhApiError("malformed merge reply for #%d: sha is not a full hex sha" % number)
+    return reply
+
+
+def merge_reply_sha(reply):
+    """The merge commit's sha from a `merge_pr_pinned` reply, or None when the reply carried none."""
+    got = reply.get("sha") if isinstance(reply, dict) else None
+    return got if isinstance(got, str) and _SHA_RE.match(got) else None
+
+
+def commit_parents(run, repo, sha):
+    """GET /commits/{sha} -> the list of parent shas (a merge commit has two). Works in a REST-only session."""
+    _need_repo(repo)
+    _need_sha(sha)
+    data = _json(run, ["api", _endpoint(repo, "commits/%s" % sha), "--method", "GET"])
+    parents = data.get("parents") if isinstance(data, dict) else None
+    if not isinstance(parents, list):
+        raise GhApiError("malformed commit payload for %s: no parents list" % sha[:12])
+    out = []
+    for p in parents:
+        got = p.get("sha") if isinstance(p, dict) else None
+        if not (isinstance(got, str) and _SHA_RE.match(got)):
+            raise GhApiError("malformed commit payload for %s: bad parent entry" % sha[:12])
+        out.append(got)
+    return out
+
+
+def branch_rules(run, repo, branch):
+    """GET /rules/branches/{branch} -> the list of rules active on the branch (rulesets only; a queue set through
+    classic branch protection is invisible, and a failed read is the caller's to treat as unknown)."""
+    _need_repo(repo)
+    if not isinstance(branch, str) or not branch:
+        raise _refuse("a branch name is required")
+    rules = _json(run, ["api", _endpoint(repo, "rules/branches/%s" % urllib.parse.quote(branch, safe="")),
+                        "--method", "GET"])
+    if not isinstance(rules, list):
+        raise GhApiError("malformed branch rules for %s (%s)" % (branch, type(rules).__name__))
+    return rules
+
+
+def rules_have_merge_queue(rules):
+    """True when any rule in a `branch_rules` list is a merge queue. A non-list raises."""
+    if not isinstance(rules, list):
+        raise _refuse("rules must be a list")
+    return any(isinstance(r, dict) and r.get("type") == "merge_queue" for r in rules)
+
+
+def repo_settings(run, repo):
+    """GET /repos/{repo} -> the repository object (a dict)."""
+    _need_repo(repo)
+    data = _json(run, ["api", "repos/%s" % repo, "--method", "GET"])
+    if not isinstance(data, dict):
+        raise GhApiError("malformed repository payload (%s)" % type(data).__name__)
+    return data
+
+
+def delete_branch_on_merge(settings):
+    """True/False from a `repo_settings` dict's `delete_branch_on_merge`; None when absent or not a boolean (unknown)."""
+    got = settings.get("delete_branch_on_merge") if isinstance(settings, dict) else None
+    return got if isinstance(got, bool) else None
+
+
+def create_pr_nondraft(run, title, body, head, base, repo):
+    """POST /pulls with an explicit, TYPED `draft: false` (`-F`, so a boolean, not the string). `create_pr` sends no
+    `draft` field and is unchanged. The repository is required."""
+    _need_repo(repo)
+    return _json(run, ["api", _endpoint(repo, "pulls"), "--method", "POST", "-f", "title=%s" % title,
+                       "-f", "body=%s" % body, "-f", "head=%s" % head, "-f", "base=%s" % base,
+                       "-F", "draft=false"])
