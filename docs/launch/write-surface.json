@@ -791,6 +791,8 @@
       "count": 1,
       "gate": "upkeep.enabled caller passes keep_days; removes only record-shaped and temp-shaped files older than the age limit in the pending-landing store, never a symlink, never outside it",
       "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_upkeep_pass.py",
       "function": "ack_union",
       "rule": "fs-remove",
