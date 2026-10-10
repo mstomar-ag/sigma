@@ -43,7 +43,7 @@ _PRUNE_AFTER = datetime.timedelta(days=2)
 _DAY = datetime.timedelta(days=1)
 
 DEFAULTS = {"allow_silent": [], "window_minutes": 1440, "spot_check_one_in": 5,
-            "max_auto_applied_per_day": 3, "stale_after_intervals": 3}
+            "max_auto_applied_per_day": 3, "stale_after_intervals": 3, "prune_after_days": 30}
 DEFAULT_INTERVAL_SECONDS = 900
 GESTURES = ("unpark", "promote")
 
@@ -80,7 +80,7 @@ def _int(v, default, low=1):
 
 
 def settings(config):
-    """The five keys; a wrong-typed value reads as its default."""
+    """The six keys; a wrong-typed value reads as its default."""
     sub = _sub(config)
     silent = sub.get("allow_silent")
     ok = isinstance(silent, list) and all(isinstance(k, str) and k for k in silent)
@@ -89,7 +89,8 @@ def settings(config):
             "spot_check_one_in": _int(sub.get("spot_check_one_in"), DEFAULTS["spot_check_one_in"]),
             "max_auto_applied_per_day": _int(sub.get("max_auto_applied_per_day"),
                                              DEFAULTS["max_auto_applied_per_day"], low=0),
-            "stale_after_intervals": _int(sub.get("stale_after_intervals"), DEFAULTS["stale_after_intervals"])}
+            "stale_after_intervals": _int(sub.get("stale_after_intervals"), DEFAULTS["stale_after_intervals"]),
+            "prune_after_days": _int(sub.get("prune_after_days"), DEFAULTS["prune_after_days"])}
 
 
 def _parse(text):
@@ -298,16 +299,23 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True):
             for a in actions:
                 a["result"] = "would"
         _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT), {"time": now.isoformat()})
-        _prune(sdlc_dir, asks, now)
+        _prune(sdlc_dir, asks, now, config)
     except Exception as exc:  # a tick never raises
         actions.append({"kind": "error", "error": type(exc).__name__, "result": "failed"})
     return actions
 
 
-def _prune(sdlc_dir, asks, now):
+def _prune(sdlc_dir, asks, now, config=None):
+    """Remove answered and vetoed asks older than two days, and applied asks (no pending veto) older
+    than `prune_after_days` (default 30, at least 1 so the rolling 24h cap count is never cut)."""
+    applied_after = datetime.timedelta(days=settings(config or {})["prune_after_days"])
     for a in asks:
         t = _parse(a.get("applied_at") or a.get("answered_at"))
-        if t is not None and a.get("state") in ("answered", "vetoed") and now - t > _PRUNE_AFTER:
+        if t is None:
+            continue
+        old = (a.get("state") in ("answered", "vetoed") and now - t > _PRUNE_AFTER) or (
+            a.get("state") == "applied" and not a.get("vetoed_at") and now - t > applied_after)
+        if old:
             try:
                 os.unlink(_ask_path(sdlc_dir, a["id"]))
             except OSError:

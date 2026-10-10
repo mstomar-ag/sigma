@@ -221,5 +221,53 @@ def test_template_block_defaults():
     tmpl = (ROOT / "skills" / "sigma-init" / "templates" / "config.json.tmpl").read_text()
     block = json.loads(tmpl)["decision_rubric"]["autonomy"]["applier"]
     assert block == {"enabled": False, "allow_silent": [], "window_minutes": 1440, "spot_check_one_in": 5,
-                     "max_auto_applied_per_day": 3, "stale_after_intervals": 3}
+                     "max_auto_applied_per_day": 3, "stale_after_intervals": 3, "prune_after_days": 30}
     assert AP.settings({}) == {k: v for k, v in block.items() if k != "enabled"}
+
+
+def _applied(sd, cfg, issue, applied_at, **extra):
+    a = _ask(sd, cfg, issue=issue)
+    ask = next(x for x in AP._asks(sd) if x["issue"] == issue)
+    ask.update(state="applied", applied_at=applied_at.isoformat(), **extra)
+    AP._write_atomic(AP._ask_path(sd, ask["id"]), ask)
+    return ask["id"]
+
+
+def _exists(sd, aid):
+    return os.path.exists(AP._ask_path(sd, aid))
+
+
+def test_old_applied_ask_is_pruned_recent_kept(tmp_path):
+    sd, cfg, _ = _setup(tmp_path)
+    now = T0 + datetime.timedelta(days=40)
+    old = _applied(sd, cfg, 1, T0 + datetime.timedelta(days=5))
+    recent = _applied(sd, cfg, 2, now - datetime.timedelta(hours=3))
+    AP.tick(sd, cfg, now, source=Src())
+    assert not _exists(sd, old) and _exists(sd, recent)
+
+
+def test_applied_ask_with_unlogged_veto_is_kept(tmp_path):
+    sd, cfg, _ = _setup(tmp_path)
+    now = T0 + datetime.timedelta(days=60)
+    aid = _applied(sd, cfg, 1, T0, vetoed_at=T0.isoformat())
+    AP._prune(sd, AP._asks(sd), now)
+    assert _exists(sd, aid)
+
+
+def test_prune_after_days_is_configurable_and_bad_value_reads_default(tmp_path):
+    sd, cfg, _ = _setup(tmp_path, {"prune_after_days": 3})
+    now = T0 + datetime.timedelta(days=10)
+    aid = _applied(sd, cfg, 1, T0 + datetime.timedelta(days=5))
+    AP.tick(sd, cfg, now, source=Src())
+    assert not _exists(sd, aid)
+    assert AP.settings(_cfg({"prune_after_days": "3"}))["prune_after_days"] == 30
+    assert AP.settings(_cfg({"prune_after_days": 0}))["prune_after_days"] == 30
+    assert AP.settings(_cfg({"prune_after_days": True}))["prune_after_days"] == 30
+
+
+def test_closed_gate_leaves_old_applied_ask(tmp_path):
+    sd, cfg, _ = _setup(tmp_path)
+    aid = _applied(sd, cfg, 1, T0)
+    closed = _cfg(enabled=False)
+    assert AP.tick(sd, closed, T0 + datetime.timedelta(days=90), source=Src()) == []
+    assert _exists(sd, aid)
