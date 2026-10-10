@@ -1650,7 +1650,7 @@ of settings that contradicts itself closes the whole block, and `/sigma-doctor` 
 | backup.keep_last | 5 | 1 to 1000 | the newest backups of each unit are kept whatever their age |
 | backup.former_prefixes | [] | list of names | namespaces an earlier product wrote, pruned the same way |
 | conflicts.resolve | "off" | off, mechanical, agent | how far a unit conflict may be resolved |
-| conflicts.mechanical_without_verify | false | boolean | validated now; not acted on by this part |
+| conflicts.mechanical_without_verify | false | boolean | lets Level 1 resolve a changelog conflict when no verify command is set; see `docs/upkeep-part-b.md` |
 ```
 
 The relation to the older switch: `work.rebase_upkeep` (on by default; an unrecognised value reads on) still decides the
