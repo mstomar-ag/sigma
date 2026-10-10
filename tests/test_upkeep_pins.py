@@ -239,3 +239,32 @@ def test_fixture_write_surface_sees_staged_writes(tmp_path):
                       "    state.atomic_write_text(p, 'x')\n    state.refuse_symlinks(p, 'y', create_parents=True)\n", encoding="utf-8")
     rows = ws.scan_paths(tmp_path, [sample])
     assert sorted((r["function"], r["rule"]) for r in rows) == [("a", "fs-write"), ("b", "fs-remove")]
+
+
+# --------------------------------------------------------------------------- #947: Level 1 on the unit path
+
+LEVEL1_SITES = {("feature_rebase.py", "_write_runtime_acks")}
+
+
+def test_947_the_runtime_ack_write_is_registered_in_the_write_surface_inventory():
+    rows = json.loads((S.ROOT / "docs" / "launch" / "write-surface.json").read_text())["entries"]
+    got = {(r["path"].rsplit("/", 1)[-1], r["function"]) for r in rows}
+    assert LEVEL1_SITES <= got
+    assert "_write_runtime_acks" in (S.ROOT / "docs" / "launch" / "write-surface.md").read_text()
+
+
+def test_947_the_level_1_module_is_pure_orchestration_with_no_config_read_and_no_push():
+    text = (S.SCRIPTS / "feature_upkeep_prove.py").read_text()
+    assert '"push"' not in text and "gate.read" not in text and "conflict_level" not in text
+    tree = ast.parse(text)
+    called = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    assert not (called & {"write_text", "write_bytes", "mkdir", "unlink", "rmtree", "urlopen"})
+
+
+def test_947_the_runtime_ack_file_lives_under_state_and_is_never_the_tracked_store():
+    spec = importlib.util.spec_from_file_location("feature_rebase_947", S.SCRIPTS / "feature_rebase.py")
+    rebase = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rebase)
+    runtime = rebase.runtime_ack_path("/x/.sdlc", "Billing")
+    assert runtime != rebase.ack_path("/x/.sdlc", "Billing") and runtime.parts[-3:-1] == ("state", "rebase-acks")
+    assert runtime.name == "billing.json"

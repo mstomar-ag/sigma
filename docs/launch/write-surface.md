@@ -96,6 +96,7 @@ LANDING HELPERS (#931): `merge_pr_pinned` and `create_pr_nondraft` are in the sc
 | skills/sigma-loop/scripts/feature_rebase.py | ack | fs-write | 2 | work.rebase_upkeep | medium |
 | skills/sigma-loop/scripts/feature_rebase.py | mark_push_refused | fs-write | 2 | work.rebase_upkeep | medium |
 | skills/sigma-loop/scripts/feature_rebase.py | push_refused | fs-remove | 1 | work.rebase_upkeep | high |
+| skills/sigma-loop/scripts/feature_rebase.py | _write_runtime_acks | fs-write | 2 | upkeep.enabled | medium |
 | skills/sigma-loop/scripts/feature_registry.py | _atomic_write_text | fs-remove | 2 | ungated | high |
 | skills/sigma-loop/scripts/feature_registry.py | _atomic_write_text | fs-write | 1 | ungated | medium |
 | skills/sigma-loop/scripts/feature_sync.py | _acquire | fs-write | 1 | ungated | medium |
