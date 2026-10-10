@@ -215,3 +215,24 @@ def test_only_approve_reads_a_login():
     src = (SCRIPTS / "rulebook.py").read_text(encoding="utf-8")
     assert _scan_outside_approve(src) == []
     assert _scan_outside_approve(src + "\ndef leak(r):\n    return r['%s']\n" % LOGIN) == [LOGIN]
+
+
+def test_match_honours_configured_hardstop_kind(tmp_path):
+    sd, cfg, rid = _proposed(tmp_path)
+    R.approve(sd, rid, "boss", cfg, now=NOW)
+    rules = R.load(sd, cfg)
+    assert R.match("needs_decision", "docs", None, rules, cfg) is not None
+    cfg["decision_rubric"]["hard_stops"] = {"hardstop_kinds": ["needs_decision"]}
+    assert R.match("needs_decision", "docs", None, rules, cfg) is None
+    assert R.prefill(sd, "needs_decision", "docs", None, cfg) is None
+
+
+def test_match_refuses_unsealed_or_invalid_rules_from_a_direct_caller(tmp_path):
+    sd, cfg, rid = _proposed(tmp_path)
+    forged = dict(R._read_raw(_file(tmp_path))[0], status="approved")  # no seal, no confirmed
+    assert R.match("needs_decision", "docs", None, [forged]) is None
+    R.approve(sd, rid, "boss", cfg, now=NOW)
+    good = R._read_raw(_file(tmp_path))[0]
+    assert R.match("needs_decision", "docs", None, [good]).rule_id == rid
+    assert R.match("needs_decision", "docs", None, [dict(good, option="reject")], ) is None  # seal broken
+    assert R.match("needs_decision", "docs", None, [dict(good, login="someone")]) is None  # schema-invalid

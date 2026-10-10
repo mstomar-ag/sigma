@@ -213,13 +213,21 @@ def approve(sdlc_dir, rule_id, login, config, now=None):
     raise KeyError(rule_id)
 
 
-def match(qkind, area, option, rules):
+def _acts(rule):
+    """True only for a schema-valid approved rule whose seal matches its content (a direct caller cannot bypass the seal)."""
+    return (isinstance(rule, dict) and validate(rule)[0] and rule.get("status") == "approved"
+            and bool(rule.get("confirmed")) and rule.get("seal") == _seal(rule))
+
+
+def match(qkind, area, option, rules, config=None):
     """The one sealed approved rule for this kind and area, as a recommendation; else None (ask).
-    `option` is None or the list of options on offer (the rule's option must be among them)."""
+    `option` is None or the list of options on offer (the rule's option must be among them).
+    `config` is the repository config: its configured hard-stop kinds never match, as the built-in ones.
+    Rules that fail the schema, or are approved without a matching seal, are ignored."""
     try:
-        if _load("hard_stop").is_hardstop_kind(qkind, None, {}):
+        if _load("hard_stop").is_hardstop_kind(qkind, None, config if isinstance(config, dict) else {}):
             return None
-        hits = [r for r in rules if isinstance(r, dict) and r.get("status") == "approved"
+        hits = [r for r in rules if _acts(r)
                 and r.get("qkind") == qkind and r.get("area") == area
                 and (option is None or r.get("option") in option)]
         return Match(hits[0]["id"], hits[0]["option"]) if len(hits) == 1 else None
@@ -229,7 +237,7 @@ def match(qkind, area, option, rules):
 
 def prefill(sdlc_dir, qkind, area, option, config):
     """A pre-fill suggestion {recommend, rule, mode} or None. Never decides."""
-    m = match(qkind, area, option, load(sdlc_dir, config))
+    m = match(qkind, area, option, load(sdlc_dir, config), config)
     return {"recommend": m.option, "rule": m.rule_id, "mode": m.mode} if m else None
 
 
