@@ -92,3 +92,41 @@ def test_gate_closed_is_byte_identical_to_no_entry_point(wired):
         assert closed["closed"] is True
     assert calls == [] and remote_tip(bare, "feature/u") == old
     assert sorted(p.name for p in (root / ".sdlc").rglob("*") if p.is_file()) == []
+
+
+BAD = ["-x", "--upload-pack=touch /tmp/p", "", "a b", "a..b", "a:b", "x.lock", "/a", "a/", "a//b", "a@{1}", ".hid", "a~1", None, 5]
+
+
+@pytest.mark.parametrize("bad", BAD)
+def test_dash_or_malformed_remote_and_branch_are_refused_before_any_git(wired, bad):
+    root, bare = wired
+    old = remote_tip(bare, "feature/u")
+    calls = []
+    for kw in ({"remote": bad, "branch": "feature/u"}, {"remote": "origin", "branch": bad}):
+        got = mod().run_unit_pass(OPEN, str(root / ".sdlc"), "u", "feature/u", "main", "main", 1000, cwd=root,
+                                  run=lambda cwd, argv: calls.append(argv), **kw)
+        assert got["result"] == "failed" and got["reason"] == "invalid-ref"
+        with pytest.raises(ValueError):
+            mod().unit_callables(root, kw["remote"], kw["branch"])
+    assert calls == [] and remote_tip(bare, "feature/u") == old
+
+
+def test_plain_names_are_valid():
+    assert all(mod().valid_ref(v) for v in ("origin", "feature/u", "sdlc/1098", "a.b-c_d"))
+
+
+def test_the_push_is_a_lease_not_a_plain_force(wired):
+    """The control: with the lease swapped for a plain force the moved-branch test below goes red (seen once by hand)."""
+    root, bare = wired
+    seen = []
+    rewrite, push = mod().unit_callables(root, "origin", "feature/u")
+    real = mod().engine_runner("off")
+
+    def spy(cwd, argv):
+        seen.append(argv)
+        return real(cwd, argv)
+    tips = (remote_tip(bare, "feature/u"), remote_tip(bare, "main"))
+    rewrite(spy, tips)
+    push(spy, tips)
+    pushes = [a for a in seen if a[:2] == ["git", "push"]]
+    assert len(pushes) == 1 and pushes[0][2].startswith("--force-with-lease=refs/heads/feature/u:") and "--force" not in pushes[0]

@@ -145,8 +145,26 @@ def run_job(config, sdlc_dir, root, unit, run_id, cap, *, environ=None, command=
     return {"outcome": outcome, "unit_tip": tip}
 
 
+def _unit_pass(config, sdlc_dir, root, unit, unit_pass=None):
+    """The pass entry point (`run_unit_pass`) for the unit, against the remote-tracking refs of its remote. -> {"unit_pass":
+    the pass's result word}, or {} when no base is configured. Never raises: a failure reads `failed`, the line is still printed."""
+    try:
+        rebase = _sibling("feature_rebase")
+        remote = rebase._remote(config)
+        base = rebase._safe_ref("work.base", rebase._settings(config).get("base")) or ""
+        branch = rebase.features.BRANCH_PREFIX + unit
+        if not base:
+            return {}
+        call = unit_pass or _sibling("feature_upkeep_pass").run_unit_pass
+        got = call(config, str(sdlc_dir), unit, "refs/remotes/%s/%s" % (remote, branch), "refs/remotes/%s/%s" % (remote, base),
+                   base, int(time.time()), remote=remote, branch=branch, cwd=str(root))
+        return {"unit_pass": got.get("result") if isinstance(got, dict) else "failed"}
+    except Exception:                                     # noqa: BLE001 - maintenance never costs the line
+        return {"unit_pass": "failed"}
+
+
 @feature_upkeep.gated("machine")
-def run_engine(config, sdlc_dir, root, unit, *, environ=None, upkeep=None):
+def run_engine(config, sdlc_dir, root, unit, *, environ=None, upkeep=None, unit_pass=None):
     """The pass itself, inside the child: the engine's own entry point, called in-process, handed NO goal. Prints one JSON
     line (`outcome`, `unit_tip`) as its last line of output. -> the report."""
     upkeep = upkeep or _sibling("feature_rebase").upkeep
@@ -154,6 +172,7 @@ def run_engine(config, sdlc_dir, root, unit, *, environ=None, upkeep=None):
     report = report if isinstance(report, dict) else {}
     tip = report.get("tip") or report.get("after") or report.get("unit_tip")
     line = {"outcome": report.get("outcome") or "failed", "unit_tip": tip if isinstance(tip, str) else None}
+    line.update(_unit_pass(config, sdlc_dir, root, unit, unit_pass))
     print(json.dumps(line, sort_keys=True), flush=True)
     return line
 

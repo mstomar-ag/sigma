@@ -285,9 +285,36 @@ def test_the_engine_is_handed_no_goal_so_a_filing_is_addressed_to_nobody(tmp_pat
     def fake(sdlc_dir, config, goal, unit, **kw):
         calls.append((goal, unit))
         return {"outcome": "conflict", "after": H40}
-    line = j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, upkeep=fake)
-    assert calls == [(None, "voice")] and line == {"outcome": "conflict", "unit_tip": H40}
+    line = j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, upkeep=fake,
+                        unit_pass=lambda *a, **k: {"result": "rewritten"})
+    assert calls == [(None, "voice")] and line == {"outcome": "conflict", "unit_tip": H40, "unit_pass": "rewritten"}
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == line
+
+
+def test_the_engine_calls_the_pass_entry_point_with_the_unit_refs_only_when_open(tmp_path, capsys):
+    j, sdlc, seen = job(), project(tmp_path), []
+
+    def entry(config, sdlc_dir, unit, unit_ref, base_ref, base_name, now, **kw):
+        seen.append((unit, unit_ref, base_ref, base_name, kw["remote"], kw["branch"]))
+        return {"result": "rewritten"}
+    quiet = lambda *a, **k: {"outcome": "current"}
+    line = j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, upkeep=quiet, unit_pass=entry)
+    assert seen == [("voice", "refs/remotes/origin/feature/voice", "refs/remotes/origin/main", "main", "origin", "feature/voice")]
+    assert line["unit_pass"] == "rewritten"
+    seen.clear()
+    for config, env in ((open_config(), {}), ({}, ENV)):                  # machine door shut / project door shut
+        assert j.run_engine(config, sdlc, str(tmp_path), "voice", environ=env, upkeep=quiet, unit_pass=entry)["closed"] is True
+    assert seen == []
+    capsys.readouterr()
+
+
+def test_a_raising_pass_entry_point_reads_failed_not_a_crash(tmp_path, capsys):
+    def boom(*a, **k):
+        raise RuntimeError("x")
+    line = job().run_engine(open_config(), project(tmp_path), str(tmp_path), "voice", environ=ENV,
+                            upkeep=lambda *a, **k: {"outcome": "current"}, unit_pass=boom)
+    assert line["unit_pass"] == "failed"
+    capsys.readouterr()
 
 
 # ------------------------------------------------------------------------------------------ the notes
