@@ -77,6 +77,12 @@ def validate_buckets(config):
         return {"ok": False, "buckets": {}, "reason": "ai_filed.buckets could not be read"}
 
 
+def is_off(config):
+    """True exactly when triage is switched off (`ai_filed.triage.enabled` is the JSON false), the one
+    state in which a writer keeps its pre-triage behaviour. Never raises; a broken config reads as on."""
+    return decide("", "", {}, config).kind == "queue"
+
+
 def _load(name):
     spec = importlib.util.spec_from_file_location(name, _HERE / (name + ".py"))
     mod = importlib.util.module_from_spec(spec)
