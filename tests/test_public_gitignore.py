@@ -169,3 +169,11 @@ def test_dropping_a_reinclusion_line_flips_plans_to_ignored(tmp_path):
     rc, source, pattern, shown = _check(_repo(tmp_path / "mutated", mutated), ".sdlc/plans/x.md")
     assert (rc, source, pattern, shown) == (0, ".gitignore", ".sdlc/*", ".sdlc/plans/x.md")
     _assert_not_ignored(_repo(tmp_path / "shipped", text), ".sdlc/plans/x.md")
+
+
+def test_decision_records_are_tracked_and_their_index_and_lock_are_not(tmp_path):
+    repo = _repo(tmp_path, _override_text())
+    _assert_not_ignored(repo, ".sdlc/decisions/20261010T120000-ab12cd34.json")
+    _assert_not_ignored(repo, ".sdlc/decisions/archive-2025.json")
+    _assert_ignored(repo, ".sdlc/decisions/_index.json")
+    _assert_ignored(repo, ".sdlc/decisions/_index.lock")
