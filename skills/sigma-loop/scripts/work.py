@@ -3865,7 +3865,94 @@ def _union_diff3(text):
     return "\n".join(out), True
 
 
-def _try_union_changelog(path, run):
+_HEAD_UNRELEASED = "## Unreleased"
+_HEAD_VERSION_RE = re.compile(r"^## \d+\.\d+\.\d+(?: [\u2014-] .*)?$")
+_LINK_FOOTER_RE = re.compile(r"^\[[^\]]+\]: ")
+
+
+def _union_headed(text):
+    """Heading-aware sibling of `_union_diff3`: (resolved, True) or (None, False), the same contract.
+
+    Same proof of losslessness (every hunk is a pure two-sided insertion, empty diff3 base) and the same
+    de-duplication, but the unit's lines are placed under the section the unit's base had them under. On
+    the release-cut shape the base side (ours) inserts a version heading at the very point the unit
+    (theirs) inserts an entry under `## Unreleased`; `_union_diff3` writes ours then theirs, which files
+    the entry under the version just cut. Here, when the hunk sits under `## Unreleased` and ours carries
+    a heading, theirs goes above ours' first heading. The non-blank lines of the result are the same
+    multiset as `_union_diff3`'s, so placement changes and nothing else does.
+
+    A shape it does not recognise parks (returns False) instead of guessing: any `## ` line that is not
+    `## Unreleased` or `## X.Y.Z` with an optional dash suffix, a link-footer line, a heading on the
+    unit's side, a heading in ours with no known section above the hunk, or ours' heading under a
+    version section. A hunk whose ours side has no heading keeps the legacy order."""
+    out, lines, i, hunks, section = [], text.split("\n"), 0, 0, None
+    while i < len(lines):
+        if not lines[i].startswith(_D3_OURS):
+            if lines[i].startswith("## "):
+                section = lines[i]
+            out.append(lines[i]); i += 1; continue
+        hunks += 1
+        i += 1
+        ours = []
+        while i < len(lines) and not lines[i].startswith(_D3_BASE):
+            if lines[i] == _D3_THEIRS or lines[i].startswith(_D3_END):
+                return None, False
+            ours.append(lines[i]); i += 1
+        if i >= len(lines):
+            return None, False
+        i += 1
+        base = []
+        while i < len(lines) and lines[i] != _D3_THEIRS:
+            base.append(lines[i]); i += 1
+        if i >= len(lines) or base:
+            return None, False
+        i += 1
+        theirs = []
+        while i < len(lines) and not lines[i].startswith(_D3_END):
+            theirs.append(lines[i]); i += 1
+        if i >= len(lines):
+            return None, False
+        i += 1
+        side_heads = [ln for ln in ours + theirs if ln.startswith("## ")]
+        if any(ln != _HEAD_UNRELEASED and not _HEAD_VERSION_RE.match(ln) for ln in side_heads):
+            return None, False
+        if any(_LINK_FOOTER_RE.match(ln) for ln in ours + theirs):
+            return None, False
+        if theirs == ours:
+            out.extend(ours)
+        elif any(ln.startswith("## ") for ln in theirs):
+            return None, False
+        else:
+            cut = next((n for n, ln in enumerate(ours) if ln.startswith("## ")), None)
+            if cut is None:
+                out.extend(ours); out.extend(theirs)
+            elif section != _HEAD_UNRELEASED:
+                return None, False
+            else:
+                tail = theirs if not theirs or not theirs[-1].strip() else theirs + [""]
+                out.extend(ours[:cut]); out.extend(tail); out.extend(ours[cut:])
+        for ln in reversed(out):
+            if ln.startswith("## "):
+                section = ln
+                break
+    if not hunks:
+        return None, False
+    return "\n".join(out), True
+
+
+def _union_for(config):
+    """The union `rebase` hands `_union_rescue`: the heading-aware one only while part A's gate is open and
+    `conflicts.resolve` is mechanical or agent, else the legacy `_union_diff3` (so a closed gate, a broken
+    config or a module that will not load leaves every caller byte-identical)."""
+    try:
+        if _load("feature_upkeep").conflict_level(config) in ("mechanical", "agent"):
+            return _union_headed
+    except Exception:                       # noqa: BLE001 - any doubt keeps the legacy path
+        pass
+    return _union_diff3
+
+
+def _try_union_changelog(path, run, union=_union_diff3):
     """True only when a CHANGELOG-ONLY, provably-lossless conflict was resolved and staged."""
     try:
         unmerged = [ln.strip() for ln in
@@ -3888,7 +3975,7 @@ def _try_union_changelog(path, run):
     try:
         run(path, ["git", "checkout", "--merge", "--conflict=diff3", "--", _CHANGELOG])
         target = pathlib.Path(path) / _CHANGELOG
-        resolved, ok = _union_diff3(target.read_text(encoding="utf-8"))
+        resolved, ok = union(target.read_text(encoding="utf-8"))
         if not ok:
             return False
         target.write_text(resolved, encoding="utf-8")
@@ -3898,10 +3985,10 @@ def _try_union_changelog(path, run):
     return True
 
 
-def _union_rescue(path, run):
+def _union_rescue(path, run, union=_union_diff3):
     """True only when the WHOLE rebase completed through union-merged CHANGELOG conflicts."""
     for _ in range(UNION_ROUNDS):
-        if not _try_union_changelog(path, run):
+        if not _try_union_changelog(path, run, union):
             return False
         try:
             # `core.editor=true` is not a nicety: `rebase --continue` opens an editor for the
@@ -3951,7 +4038,7 @@ def rebase(sdlc_dir, config, goal, run=None):
         # ONE narrow exception to "any failure aborts": a CHANGELOG.md conflict where BOTH sides
         # only inserted (see `_union_diff3`). That shape is mechanical and lossless, and it is the
         # single most frequent conflict in this repo. Everything else still aborts.
-        if _union_rescue(path, run):
+        if _union_rescue(path, run, _union_for(config)):
             refused = (_replay_would_lose(path, run, pre_rebase_head, f"{remote}/{base}",
                                           rec["branch"])
                        or _push_refused(path, rec["branch"]))

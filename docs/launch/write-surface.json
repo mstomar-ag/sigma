@@ -1933,7 +1933,7 @@
       "function": "_try_union_changelog",
       "rule": "fs-write",
       "count": 1,
-      "gate": "ungated",
+      "gate": "CHANGELOG-only provably lossless conflicts; the heading-aware placement runs only under upkeep.enabled with conflicts.resolve mechanical or agent, else the legacy union",
       "risk": "medium"
     },
     {
