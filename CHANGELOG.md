@@ -4,8 +4,6 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-- **Unit sibling guard: a foreign file no longer blocks every lookup, and the landing engine now calls the guard (#1068).** `cross_repo._unit_landing_records` skips (and names on stderr) a file in the landing folder that is readable but does not parse as a landing record; symlinks, unreadable files and the record ceiling still refuse. `feature_land_merge.complete` (and `feature_land.land`) take an optional `landed(repo, branch)` and run `work.unit_sibling_guard` after the tip re-read and before the approval guard, refusing `refused:sibling` without spending an approval; with no measurement supplied a unit that names another repository refuses, a single-repo unit is unchanged, and the closed upkeep gate stays byte-identical.
-
 - **Drift measure: `--end-of-options` before the refs in its history read (#1063).** The `git log` in `feature_upkeep_drift.walk` now passes the marker before the included and excluded refs, so a ref name is never parsed as an option even if the existing dash and whitespace refusal were bypassed. The `rev-parse` call takes no ref and is unchanged. The argv test asserts the marker precedes the ref, and a mutant that drops it is seen red.
 - **Live regression entrypoint, slice 1: refusal ladder, NOT RUN rows, credential-safe logging (#884, refs #810).**
   New `evals/regression/live.py` (stdlib only). Run bare it exits 2 with one `live.py: REFUSED [no-credential]: ...`
