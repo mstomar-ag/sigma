@@ -4,6 +4,10 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Head-pinned merge helper: dot-only repository segments and sha-less replies refused (#1067).** The `gh_api` repository
+  pattern now rejects a dot-only owner or name segment, and `merge_pr_pinned` raises on a merge reply that carries no
+  full hex sha, so the landing reads the pull request back and reports it as not merged instead of trusting the reply.
+
 - **Live regression entrypoint, slice 1: refusal ladder, NOT RUN rows, credential-safe logging (#884, refs #810).**
   New `evals/regression/live.py` (stdlib only). Run bare it exits 2 with one `live.py: REFUSED [no-credential]: ...`
   line on stderr, nothing on stdout, and one `sigma.regression-result/v1` NOT RUN row under

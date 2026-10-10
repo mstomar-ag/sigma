@@ -1646,6 +1646,30 @@ def test_merge_reply_without_sha_reads_none_and_failure_keeps_class():
     assert ei.value.status == 409
 
 
+@pytest.mark.parametrize("repo", ["./r", "../r", "o/.", "o/..", ".../r", "o/..."])
+def test_repo_pattern_rejects_dot_only_segments(repo):
+    g = _mod("gh_api")
+    run = Fake("{}")
+    with pytest.raises(g.GhApiError) as ei:
+        g.merge_pr_pinned(run, repo, 11, SHA, merge_method="merge")
+    assert ei.value.kind == "invalid" and run.calls == []
+
+
+@pytest.mark.parametrize("repo", ["o/r", "a.b/c-d_e", "o/.github", "o/r.."])
+def test_repo_pattern_keeps_ordinary_names(repo):
+    g = _mod("gh_api")
+    run = Fake(json.dumps({"merged": True, "sha": SHA2}))
+    g.merge_pr_pinned(run, repo, 11, SHA, merge_method="merge")
+    assert len(run.calls) == 1
+
+
+@pytest.mark.parametrize("reply", [{"merged": True}, {"merged": False, "message": "x"}, {"merged": True, "sha": None}])
+def test_merge_pr_pinned_rejects_reply_without_sha(reply):
+    g = _mod("gh_api")
+    with pytest.raises(g.GhApiError):
+        g.merge_pr_pinned(Fake(json.dumps(reply)), "o/r", 11, SHA, merge_method="merge")
+
+
 def test_commit_parents_argv_and_validation():
     g = _mod("gh_api")
     run = Fake(json.dumps({"sha": SHA, "parents": [{"sha": SHA2}, {"sha": "c" * 40}]}))
