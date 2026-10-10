@@ -268,11 +268,13 @@ def argv_failures(d, tmp):
     walk = d.walk(rec, tmp, "main", "unit", 7)
     S.expect(bad, "the walk reads", (walk.rows, walk.truncated, walk.reason), ((), False, None))
     S.expect(bad, "the exact command", rec.calls, [["git", "log", "--first-parent", "--no-show-signature", "-n", "8",
-                                                    "--format=%H%x09%at%x09%s", "main", "^unit"]])
+                                                    "--format=%H%x09%at%x09%s", "--end-of-options", "main", "^unit"]])
     rec.calls.clear()
     d.walk(rec, tmp, "main")
     S.expect(bad, "no exclusion, default cap", rec.calls, [["git", "log", "--first-parent", "--no-show-signature", "-n",
-                                                            str(d.WALK_CAP + 1), "--format=%H%x09%at%x09%s", "main"]])
+                                                            str(d.WALK_CAP + 1), "--format=%H%x09%at%x09%s", "--end-of-options", "main"]])
+    marked = [c for c in rec.calls if c[:2] == ["git", "log"]]
+    S.expect(bad, "every ref follows the end-of-options marker", ["--end-of-options" in c and c.index("--end-of-options") < c.index("main") for c in marked], [True])
     banned = [a for call in rec.calls for a in call if a.startswith(("--since", "--after", "--until", "--max-age", "--min-age"))]
     S.expect(bad, "no committer-date filter", banned, [])
     rec.calls.clear()
@@ -349,6 +351,7 @@ MUTANTS = (   # (what the broken copy does, the check that must see it, source e
     ("the threshold is not clamped", "math", [("    return fractions.Fraction(min(max(raw, tune.floor), tune.ceiling))", "    return fractions.Fraction(raw)")]),
     ("a settings value is not checked", "tuning", [("        why = gate.check(key, settings[key])\n        if why:\n            raise ValueError(\"%s: %s\" % (key, why))\n", "")]),
     ("an anchor is ignored", "flow", [("            if row[0] == anchor:", "            if False:")]),
+    ("the end-of-options marker is dropped", "argv", [('"--end-of-options", include]', "include]")]),
     ("a committer-date filter is passed to git", "argv", [('"-n", str(cap + 1),', '"-n", str(cap + 1), "--since=1.day",')]),
 )
 
