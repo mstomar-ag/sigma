@@ -96,6 +96,12 @@ def _metadata(path, function, rule):
         ("skills/sigma-loop/scripts/feature_sync.py", "recover", "fs-remove"):
             ("explicit `feature_sync.py recover --discard`; renames Sigma's own recovery copy of the "
              "registry sheet aside, never deletes it", "medium"),
+        ("skills/sigma-loop/scripts/feature_upkeep_resolution.py", "post_comment", "gh-api-write"):
+            ("upkeep.enabled and a finding the engine filed; integer finding id and explicit owner/name repository; "
+             "text passes the wording check; one comment, never edited or closed here", "medium"),
+        ("skills/sigma-loop/scripts/feature_upkeep_resolution.py", "prune", "fs-remove"):
+            ("upkeep.enabled caller passes keep_days; removes only record-shaped files in the engine's own resolutions "
+             "store, never a symlink, never outside it", "high"),
         ("tools/readiness/baseline.py", "snapshot", "fs-write"):
             ("explicit snapshot command; empty destination", "medium"),
         ("tools/readiness/baseline.py", "snapshot", "git-destructive"):
