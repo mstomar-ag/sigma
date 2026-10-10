@@ -557,6 +557,11 @@ def _slug_from_url(url):
     return slug if _SLUG_RE.match(slug) else None
 
 
+def slug_from_remote_url(url):
+    """Public wrapper over the validated slug parser: `owner/name` from a git remote URL, or None."""
+    return _slug_from_url(url)
+
+
 def repo_slug(config, run, cwd, remote):
     """Which repo this goal belongs to -> `owner/name`, or None.
 

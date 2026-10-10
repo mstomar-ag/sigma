@@ -1117,6 +1117,34 @@ def branch_rules(run, repo, branch):
     return rules
 
 
+def _need_ruleset_id(ruleset_id):
+    if not isinstance(ruleset_id, int) or isinstance(ruleset_id, bool) or ruleset_id < 1:
+        raise _refuse("a positive integer ruleset id is required")
+    return ruleset_id
+
+
+def ruleset(run, repo, ruleset_id):
+    """GET /repos/{repo}/rulesets/{id} -> the ruleset object (a dict), which carries `current_user_can_bypass`.
+    Read-only. The reply shape is the documented one, not seen live here."""
+    _need_repo(repo)
+    _need_ruleset_id(ruleset_id)
+    data = _json(run, ["api", _endpoint(repo, "rulesets/%d" % ruleset_id), "--method", "GET"])
+    if not isinstance(data, dict):
+        raise GhApiError("malformed ruleset payload (%s)" % type(data).__name__)
+    return data
+
+
+def org_ruleset(run, org, ruleset_id):
+    """GET /orgs/{org}/rulesets/{id} -> the organisation ruleset object (a dict). Read-only, same caveat."""
+    if not isinstance(org, str) or not re.match(r"[A-Za-z0-9_.-]+\Z", org):
+        raise _refuse("an organisation name is required")
+    _need_ruleset_id(ruleset_id)
+    data = _json(run, ["api", "orgs/%s/rulesets/%d" % (org, ruleset_id), "--method", "GET"])
+    if not isinstance(data, dict):
+        raise GhApiError("malformed ruleset payload (%s)" % type(data).__name__)
+    return data
+
+
 def rules_have_merge_queue(rules):
     """True when any rule in a `branch_rules` list is a merge queue. A non-list raises."""
     if not isinstance(rules, list):
