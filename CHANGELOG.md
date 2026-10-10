@@ -4,6 +4,15 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Shared verify runner and unattended git runner (#920, upkeep part A, slice 4).** New bounded_run.py:
+  a command run in a process group of its own under a wall-clock budget, the whole group stopped
+  (SIGTERM, then SIGKILL) on overrun or when a stop file appears, a lifeline that stops the tree if the
+  caller itself is killed, bounded output, a distinct no-command outcome, and a refusal unless the checkout
+  is a scratch worktree with the git-local shell-command trust. New unattended_git.py: the rebase engine's
+  runner contract with no prompts, editor or askpass helper, signing off, a hooks policy, a fetch that
+  leaves the fetch record alone and starts no maintenance, and a required time limit per git verb. The
+  doctor gains a bounded local-probe helper. Nothing calls any of it yet and `feature_sync._run` and the
+  doctor's `_real_run` are unchanged, so there is no behaviour change.
 - **Never-delete guard and write-surface ratchet widened ahead of backup refs (#918, upkeep part A,
   slice 2).** The guard now also flags `git push -d`, colon-empty and backup-namespace refspecs, a
   REST `DELETE` in any spelling, `update-ref -d`/`--delete` and `gh_api` delete helpers, and its

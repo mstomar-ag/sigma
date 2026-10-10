@@ -74,6 +74,21 @@ def _real_run(args):
         return _RawFailure(str(exc))
 
 
+def _bounded_run(args, timeout=None):
+    """`_real_run`'s return contract (the output text, or a `_RawFailure` carrying it), with a time limit on EVERY
+    command, local or not. `_real_run` leaves local probes uncapped on purpose (a slow local diagnostic must never be
+    reclassified as a missing tool), so a caller that cannot afford to hang on a wedged binary calls this instead: the
+    upkeep readiness rows of a later slice. Built on init's runner, which stops the whole process tree on an overrun
+    and returns 124; the limit is the fleet's per-call bound unless the caller passes one. Never raises."""
+    try:
+        preflight = _load_init_script("preflight")
+        limit = preflight.call_timeout() if timeout is None else timeout
+        code, text = preflight.real_runner([str(a) for a in args], timeout=limit)
+    except Exception as exc:
+        return _RawFailure("%s: the bounded probe could not run (%s)" % (args[0] if args else "", exc))
+    return text if code == 0 else _RawFailure(text)
+
+
 def _cfg(sdlc_dir):
     try:
         data = json.loads((pathlib.Path(sdlc_dir) / "config.json").read_text())
