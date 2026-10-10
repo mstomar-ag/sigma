@@ -11,7 +11,7 @@ list by a test, so the two cannot drift silently)."""
 import re
 
 #: The closed list of declarable kinds. The first nine are the park-reachable reason classes;
-#: `scope_hold` and `owner_hold` are the gate-hold kinds (their questions belong to a later slice).
+#: `scope_hold` and `owner_hold` are the gate-hold kinds (written by the two pick gates through `gate_hold`).
 QKINDS = ("irreversible", "needs_decision", "merge_conflict", "failing_check", "no_evidence",
           "dependency", "review_cap", "quota", "unknown", "scope_hold", "owner_hold")
 

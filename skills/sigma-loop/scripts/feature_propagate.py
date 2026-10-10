@@ -129,6 +129,7 @@ registry = _load("feature_registry")     # the store: schema, read, normalise_en
 sync = _load("feature_sync")             # repo_slug, the runner shape, the scope-expansion rule
 ledger = _load("ledger")                 # team record (config-gated, default OFF; fail-open)
 legacy = _load("legacy")                 # #239: records written under the previous name
+gate_hold = _load("gate_hold")           # #1005: the park write, the surface probe, the shared predicate
 
 #: WHY `cross_repo` IS NOT LOADED HERE. It loads `work` at ITS module level and `work` loads this
 #: module, so an eager `_load("cross_repo")` would recurse -- `_load` has no `sys.modules` cache to
@@ -808,9 +809,12 @@ def _scope_text(unit, repo, owner):
         % (SCOPE_MARKER, unit, repo, owner or "The unit owner", repo))
 
 
-def _has_surface(source):
-    return all(callable(getattr(source, m, None))
-               for m in ("mark_needs_confirmation", "note", "fetch_comments_strict"))
+def _has_surface(source, config=None):
+    """Can this source hold a goal? With triage on it needs `park` (the hold is a park); a source that
+    can only write the old label keeps doing that; with neither the gate reports no surface. The probe
+    MUST accept `park`: if it asked for the label method alone, a source without it would read as no
+    surface and the gate would fail open."""
+    return gate_hold.surface_mode(source, config, ("note", "fetch_comments_strict")) is not None
 
 
 def _flag(source, goal, text):
@@ -969,17 +973,23 @@ def _gate_at_pick(sdlc_dir, source, goal, config, unit, run, cwd, remote):
     if not sync.is_scope_expansion(entry, repo):
         return Gate(True, IN_SCOPE, unit, repo, False)
     owner = entry.get("owner")
-    if not _has_surface(source):
+    mode = gate_hold.surface_mode(source, config, ("note", "fetch_comments_strict"))
+    if mode is None:
         _note("sigma: features: goal %s declares unit %s from %s, which the unit does not list "
-              "— this backlog source cannot mark it needs-confirmation, so the pick carries on and "
+              "— this backlog source cannot park or mark it, so the pick carries on and "
               "the registry refuses the widening instead.\n" % (goal, unit, repo))
         return Gate(True, EXPANSION, unit, repo, False)
     marked = False
     try:
-        marked = source.mark_needs_confirmation(goal) is not False
+        if mode == gate_hold.PARK:
+            marked = gate_hold.park_for_gate(
+                source, goal, "scope_hold",
+                "%s declares unit %s from %s, which the unit does not list" % (goal, unit, repo))
+        else:
+            marked = source.mark_needs_confirmation(goal) is not False
     except Exception as exc:              # noqa: BLE001 - the refusal stands whatever the write did
-        _note("sigma: features: could not set #%s needs-confirmation (%s) — the pick is refused "
-              "and the next one retries the label\n" % (goal, _flat(exc)))
+        _note("sigma: features: could not hold #%s (%s) — the pick is refused "
+              "and the next one retries the hold\n" % (goal, _flat(exc)))
     if not marked:
         # THE TRANSIENT DIRECTION, and nothing durable is written on it. See the docstring: the goal
         # still carries `sdlc:goal`, so it comes back, and a note written here would be written
@@ -1001,7 +1011,8 @@ def _gate_at_pick(sdlc_dir, source, goal, config, unit, run, cwd, remote):
     #
     # THE `why` LEADS WITH THE FACTS, because `ledger._sanitize_free_text` caps it at
     # `FREE_TEXT_CAP` from the END: the goal, the unit and the repo can never be truncated away.
-    if _flag(source, goal, _scope_text(unit, repo, owner)):
+    if _flag(source, goal, _scope_text(unit, repo, owner)
+             + (gate_hold.PARK_NOTE if mode == gate_hold.PARK else "")):
         _tell(sdlc_dir, goal, unit,
               "goal %s declares unit %s from %s, which that unit does not list -- adding a repo "
               "expands the unit's scope, so the goal is inert until you accept it"

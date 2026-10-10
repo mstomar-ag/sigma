@@ -804,7 +804,7 @@ def test_only_one_place_branches_on_the_board_owner_wins_arm():
     assert branches == ["if verdict.reason == BOARD_OWNER_WINS:"]
     for sibling in ("handoff.py", "promote.py"):
         assert "BOARD_OWNER_WINS" not in (SCRIPTS / sibling).read_text(encoding="utf-8")
-    assert "refusal_clause" in (SCRIPTS / "promote.py").read_text(encoding="utf-8")
+    assert "refusal_clause" in (SCRIPTS / "gate_hold.py").read_text(encoding="utf-8")   # #1005: moved from promote
 
 
 # ------------------------------------------------- the remedy has to be one you can perform

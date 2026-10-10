@@ -89,6 +89,7 @@ sources = _load("sources")
 legacy = _load("legacy")        # #239: a keep-parked opt-out written under the previous name
 mirror = _load("mirror")
 backlog_check = _load("backlog_check")
+gate_hold = _load("gate_hold")    # #1005: a park that declares a gate kind is never resumed here
 triage = _load("triage")          # apply_actions / _execute_action -- reused live, not reimplemented
 blockers = _load("blockers")      # #1393: classify() -- the ONE membership-safety policy, not a second
 blocker_scan = _load("blocker_scan")   # #2532: closed_state() -- the rule this file's own
@@ -321,6 +322,8 @@ def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cach
         raw_comments = backlog_check._fetch_scrubbed_comments(sdlc_dir, config, goal_doc, run=run)
         if _is_exempt(raw_comments):
             continue                                    # #1152: deliberate park, opted out -- untouched
+        if gate_hold.declared_gate_kind(raw_comments):
+            continue                                    # #1005: scope_hold / owner_hold wait for the registry edit
         extra_text = backlog_check._cap_join_excerpts(
             backlog_check._strip_offboard_prefixes(
                 backlog_check._filter_dismissal_comments(raw_comments)))

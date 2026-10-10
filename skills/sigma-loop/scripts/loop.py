@@ -1430,7 +1430,7 @@ def _feature_scope_ok(source, goal, unit):
     read is not evidence the goal belongs here.
 
     NOT A REFUSAL IN THE `_scope_ok_at_pick`/`_owner_ok_at_pick` SENSE, and it must run BEFORE
-    both. Those two hold a goal for a human (`sdlc:needs-confirmation`, a comment, a ledger line)
+    both. Those two hold a goal for a human (a park, or with triage off `sdlc:needs-confirmation`; a comment, a ledger line)
     because the goal itself has a problem. This one is not about the goal at all -- it is this
     run's own narrowing, and the goal is perfectly fine for the run that IS scoped to its unit. So
     nothing is written to it: no label, no overlay, no comment, no claim. It is simply passed
@@ -2213,13 +2213,14 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
         # would be unpickable by anyone until something cleared it.
         # #1477: the scope check runs on the unit `attach_at_pick` just RESOLVED, so it reads no
         # issue of its own. A goal declaring a unit from a repo that unit does not list is refused
-        # here rather than parked: it becomes `sdlc:needs-confirmation` (inert until its owner
+        # here and the goal is held: parked as scope_hold (with ai_filed.triage.enabled false, `sdlc:needs-confirmation`
+        # as before; inert until its owner
         # promotes it -- a scope expansion needs a DECISION, unlike a missing label, which
         # self-heals), joins this call's `skip` set, and the pick moves on. Same lock discipline as
         # the line above it: the refusal path leaves the loop without reaching the `try/finally`
         # below, so the claim lock is released explicitly or the goal is unpickable by anyone.
         # #1479: and then WHO FILED IT. Same lock, same moment, same refusal shape as the scope
-        # check above -- `sdlc:needs-confirmation`, inert until its owner promotes it -- but a
+        # check above -- a park declared owner_hold (or the old label, triage off), inert until its owner acts -- but a
         # different question: that one asks whether the unit may touch this repo, this one asks
         # whether the person who opened the issue was entitled to put work on this board at all.
         # Short-circuited behind it deliberately: a goal already held for scope must not also be

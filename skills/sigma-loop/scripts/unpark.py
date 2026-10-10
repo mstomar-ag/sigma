@@ -56,6 +56,7 @@ backlog_check = _load("backlog_check")
 legacy = _load("legacy")          # #239: a Q&A block written under the previous name
 decision_tier = _load("decision_tier")
 qkind = _load("qkind")            # #994: a kind declared on the park comment
+gate_hold = _load("gate_hold")    # #1005: the hold guard shared with promote
 decision_record = _load("decision_record")   # slice 8: store record + attributed comment
 loop = _load("loop")
 
@@ -128,6 +129,18 @@ QUESTIONS = {
         {"id": "route", "ask": "This session paused to hand off, not because of a problem. Keep "
                                "going with a fresh session, or look into it first?",
          "options": ["keep going", "look into it first"]},
+    ],
+    # #1005: the gate-hold kinds. Releasing either without the registry edit sends the goal back for
+    # exactly one pick, so `resolve` refuses until the registry allows it.
+    "scope_hold": [
+        {"id": "route", "ask": "This goal is in a repository its unit does not list. Add that "
+                               "repository to the unit in the registry, or drop the goal?",
+         "options": ["add the repository", "drop this"]},
+    ],
+    "owner_hold": [
+        {"id": "route", "ask": "The account that opened this is not a recorded owner of its unit. "
+                               "Authorize it in the registry, correct the recorded owner, or drop "
+                               "the goal?", "options": ["authorize it", "correct the owner", "drop this"]},
     ],
     "unknown": [
         {"id": "next", "ask": "Here is what it stopped on: {reason} What should happen next?"},
@@ -399,6 +412,14 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
                 "detail": "#%s is closed — reopen it first if it should be worked" % n}
 
     names = _names(data)
+    if decision == "unpark" and gate_hold.declared_gate_kind(
+            [c.get("body") or "" for c in (data.get("comments") or [])]):
+        # #1005: the hold guard `/sigma-promote` already has. A gate hold is released by a registry edit,
+        # not by a label; unparking without it returns the goal for one pick and it is parked again.
+        held = gate_hold.gate_hold_blocks(source, n, config, sdlc_dir=sdlc_dir, names=names,
+                                          gesture="unpark")
+        if held:
+            return {"number": n, "decision": decision, "outcome": "failed", "detail": held}
     block = render_block(answers, questions_asked)
     # #1393: `proposed_label` joins the removal set. An issue can be BOTH awaiting approval and
     # parked (a proposal a human parked rather than ruled on), and an unpark that only dropped
