@@ -415,6 +415,9 @@ def test_every_delete_shaped_call_site_in_the_kit_is_one_of_the_known_reviewed_o
         ("skills/sigma-loop/scripts/release_manifest.py", "publish_to_ledger_branch", "colon_refspec"),
         ("skills/sigma-loop/scripts/feature_backup.py", "_atomic_leased_push", "colon_refspec"),
         ("skills/sigma-loop/scripts/feature_backup.py", "_delete_chunk", "push_delete"),
+        # classifier pattern text, never executed: hard_stop.py only matches command text with
+        # regexes (module-level pattern, no enclosing function); it never runs git
+        ("skills/sigma-loop/scripts/hard_stop.py", None, "push_delete"),
     }, found
 
 
