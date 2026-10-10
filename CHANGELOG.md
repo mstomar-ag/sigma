@@ -9,6 +9,14 @@ All notable changes to Sigma are recorded here, newest first.
   enforcement table). It refuses a landing while another repository's half of the unit has not landed,
   and when the lookup cannot answer. Read-only, inert while the upkeep gate is closed, and nothing
   calls it yet.
+- **Upkeep part B, slice 2: a heading-aware CHANGELOG union, off by default (#943).** `work.py` gains
+  `_union_headed`, a sibling of `_union_diff3` (left byte-identical): on a conflict where both sides
+  only inserted, an entry added under `## Unreleased` stays under it when the base side cut a version
+  heading at the same point, instead of landing under the version just cut. Every other shape (a
+  bracketed or unknown heading, a link footer, a heading on the unit's side) parks as before.
+  `work.rebase` reads the upkeep gate and passes the sibling to `_union_rescue` only while
+  `upkeep.enabled` is true and `conflicts.resolve` is `mechanical` or `agent`; with the gate closed the
+  in-pass goal replay, `ensure_fresh` and the merge gate's BEHIND remedy behave exactly as before.
 - **Upkeep part A, slice 3: drift measure, per-unit state and the due rule (#919).** Two new
   library modules, `feature_upkeep_drift.py` and `feature_upkeep_state.py`. The first counts
   pull-request arrivals on a base branch and on a feature branch by author date over a bounded
