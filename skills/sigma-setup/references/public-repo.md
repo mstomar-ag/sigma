@@ -76,7 +76,7 @@ Re-running `/sigma-setup` later keeps these values: a deliberate `false`/`"off"`
 ## Labels
 
 `labels` creates the ten lifecycle labels (`sdlc:goal`, `sdlc:in-progress`, `sdlc:parked`,
-`sdlc:blocked`, `sdlc:blocking`, `sdlc:needs-confirmation`, `sdlc:needs-label`, `sdlc:designed`,
+`sdlc:blocked`, `sdlc:blocking`, the legacy `sdlc:needs-confirmation`, `sdlc:needs-label`, `sdlc:designed`,
 `sdlc:needs-unit`, `sdlc:needs-triage`) and `priority:P0`–`priority:P3`. They must exist before
 anyone can file a goal, because GitHub refuses to apply a label that does not exist. It prints one
 line per label (`created`, `existed`, or `FAILED: <reason>`) and `labels ensured on <repo>` only

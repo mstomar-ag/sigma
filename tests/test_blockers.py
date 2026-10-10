@@ -96,16 +96,21 @@ def test_sigmas_own_unruled_proposal_is_promoted():
     """The approval gate stops SPECULATIVE AI-filed work. An issue that real, already-approved work
     is stalled behind is by definition not speculative -- and the label pair is decisive:
     `sdlc:followup` means Sigma filed it, `sdlc:needs-confirmation` means no human has ever
-    ruled on it. There is no human decision here to override."""
+    ruled on it. There is no human decision here to override.
+
+    Slice 18: the confirmation label is legacy-only, so this is read through the PROVENANCE label
+    (ROUTED, which grants membership) and never as a PROMOTED verdict."""
     b = _mod("blockers")
-    assert _classify(_st("sdlc:needs-confirmation", "sdlc:followup")) == b.PROMOTED
+    assert _classify(_st("sdlc:needs-confirmation", "sdlc:followup")) == b.ROUTED
 
 
 def test_a_proposal_a_human_filed_is_never_promoted():
     """No `sdlc:followup` means a person filed it and deliberately left it awaiting approval. That
     IS a human decision, and promoting it would override one."""
     b = _mod("blockers")
-    assert _classify(_st("sdlc:needs-confirmation")) == b.NEEDS_HUMAN
+    # Slice 18: no confirmation row any more -- a bare leftover is outside the loop's world, and is
+    # surfaced (UNMANAGED), never adopted.
+    assert _classify(_st("sdlc:needs-confirmation")) == b.UNMANAGED
 
 
 def test_a_parked_blocker_outranks_the_promotion_rule():
@@ -155,7 +160,7 @@ def test_the_deadlock_is_closed_end_to_end():
     b = _mod("blockers")
     run = _runner(views={"7": _view("sdlc:needs-confirmation", "sdlc:followup")})
     result = b.resolve(".sdlc", _config(), _source(b, run), "42", ["7"], run=run)
-    assert [r["verdict"] for r in result["results"]] == [b.PROMOTED]
+    assert [r["verdict"] for r in result["results"]] == [b.ROUTED]
     assert result["resolved"] == ["7"] and result["surfaced"] == []
     doc = next(a for c in run.gql for a in c if str(a).startswith("query=mutation"))
     assert "addLabelsToLabelable" in doc and "removeLabelsFromLabelable" in doc
@@ -188,7 +193,7 @@ def test_needs_human_and_chained_write_no_labels_at_all():
     for labels in (("sdlc:needs-confirmation",), ("sdlc:parked",)):
         run = _runner(views={"7": _view(*labels)})
         result = b.resolve(".sdlc", _config(), _source(b, run), "42", ["7"], run=run)
-        assert result["results"][0]["verdict"] in (b.NEEDS_HUMAN, b.CHAINED)
+        assert result["results"][0]["verdict"] in (b.UNMANAGED, b.CHAINED)
         assert not any(str(a).startswith("query=mutation") for c in run.gql for a in c), labels
         assert result["surfaced"] == ["7"]
 
@@ -205,7 +210,7 @@ def test_every_refusal_names_the_route_out():
     """A refusal inside the machinery built to remove dead ends must not itself be one."""
     b = _mod("blockers")
     for labels, needle in ((("sdlc:parked",), "/sigma-unpark"),
-                           (("sdlc:needs-confirmation",), "/sigma-promote")):
+                           (("bug",), "outside the loop")):
         run = _runner(views={"7": _view(*labels)})
         result = b.resolve(".sdlc", _config(), _source(b, run), "42", ["7"], run=run)
         assert needle in result["results"][0]["detail"], labels
@@ -256,7 +261,7 @@ def test_one_unresolvable_blocker_never_stops_the_others_being_resolved():
     run = _runner(views={"7": _view("sdlc:parked"),
                          "8": _view("sdlc:needs-confirmation", "sdlc:followup")})
     result = b.resolve(".sdlc", _config(), _source(b, run), "42", ["7", "8"], run=run)
-    assert [r["verdict"] for r in result["results"]] == [b.CHAINED, b.PROMOTED]
+    assert [r["verdict"] for r in result["results"]] == [b.CHAINED, b.ROUTED]
     assert result["resolved"] == ["8"] and result["surfaced"] == ["7"]
 
 
@@ -321,7 +326,7 @@ def test_a_failed_comment_never_undoes_a_landed_resolution():
     run = _runner(views={"7": _view("sdlc:needs-confirmation", "sdlc:followup")},
                   fail_on=["issues/7/comments"])
     result = b.resolve(".sdlc", _config(), _source(b, run), "42", ["7"], run=run)
-    assert result["results"][0]["verdict"] == b.PROMOTED and result["results"][0]["acted"] is True
+    assert result["results"][0]["verdict"] == b.ROUTED and result["results"][0]["acted"] is True
 
 
 def test_a_failed_label_write_is_reported_and_the_blocker_stays_surfaced():
@@ -384,28 +389,29 @@ def test_the_withheld_membership_decision_survives_a_second_pass():
 # --- cloud-review findings (bug_001, bug_002, bug_004) -------------------------------------------
 
 
-def test_the_drift_shape_is_repaired_not_declared_workable():
-    """Review bug_004. `{goal, needs-confirmation}` is the one drift shape with NO recovery path:
-    both queue paths refuse it (`not_eligible_labels` covers `proposed_label`), so nothing works it
-    and nothing closes it -- while `auto_unpark` will not resume whatever it blocks until it CLOSES.
-    The membership short-circuit bucketed it PICKABLE, and the park then told the operator "every
-    named blocker is now workable". A park with an honest reason gets investigated; one that says
-    everything is fine gets trusted."""
+def test_the_legacy_drift_shape_is_routed_so_the_leftover_is_stripped():
+    """Slice 18 (review bug_004). `{goal, needs-confirmation}` is refused by the queue's
+    `not_eligible_labels`, so reading it PICKABLE deadlocked it: never worked, never stripped. It is
+    ROUTED, and `_act` strips the leftover through the remove-only swap."""
     b = _mod("blockers")
-    assert _classify(_st("sdlc:goal", "sdlc:needs-confirmation", "sdlc:followup")) == b.PROMOTED
-    assert _classify(_st("sdlc:goal", "sdlc:needs-confirmation")) == b.NEEDS_HUMAN
-
-
-def test_repairing_the_drift_shape_only_removes_the_gate():
-    """Membership is already present, so the atomic swap is remove-only -- byte-identical to the
-    repair `/sigma-promote` performs on its own `drift` bucket."""
-    b = _mod("blockers")
-    run = _runner(views={"7": _view("sdlc:goal", "sdlc:needs-confirmation", "sdlc:followup")})
+    assert _classify(_st("sdlc:goal", "sdlc:needs-confirmation", "sdlc:followup")) == b.ROUTED
+    assert _classify(_st("sdlc:goal", "sdlc:needs-confirmation")) == b.ROUTED
+    run = _runner(views={"7": _view("sdlc:goal", "sdlc:needs-confirmation")})
     result = b.resolve(".sdlc", _config(), _source(b, run), "42", ["7"], run=run)
-    assert result["results"][0]["verdict"] == b.PROMOTED
+    assert result["results"][0]["verdict"] == b.ROUTED
     doc = next(a for c in run.gql for a in c if str(a).startswith("query=mutation"))
-    assert "removeLabelsFromLabelable" in doc and "addLabelsToLabelable" not in doc
-    assert b.park_reason(result) is None          # genuinely resolved now
+    assert "removeLabelsFromLabelable" in doc
+
+
+def test_granting_membership_still_strips_a_leftover_label():
+    """The removal is kept legacy-inert: a Sigma-filed leftover that is granted membership leaves
+    without the confirmation label, so no {goal, leftover} drift is manufactured."""
+    b = _mod("blockers")
+    run = _runner(views={"7": _view("sdlc:needs-confirmation", "sdlc:followup")})
+    result = b.resolve(".sdlc", _config(), _source(b, run), "42", ["7"], run=run)
+    assert result["results"][0]["verdict"] == b.ROUTED
+    doc = next(a for c in run.gql for a in c if str(a).startswith("query=mutation"))
+    assert "removeLabelsFromLabelable" in doc and "addLabelsToLabelable" in doc
 
 
 def test_a_blocker_that_is_itself_blocked_says_so_rather_than_claiming_it_will_be_picked():

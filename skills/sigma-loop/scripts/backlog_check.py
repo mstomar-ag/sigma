@@ -393,7 +393,7 @@ def _explicit_blockers(goal_doc, docs, extra_text=""):
     CONFIDENCE, not just presence, now depends on the matched PHRASE (#1497). This scan keeps the
     full `TRIGGERS` vocabulary (see `blocker_scan.TRIGGERS`'s own docstring for why it must, unlike
     the fetch-time scan) — a weak trigger ("needs", "after", "requires", "waiting on") is prose-
-    shaped, not a declaration: the label vocabulary itself (`sdlc:needs-confirmation`) and
+    shaped, not a declaration: the label vocabulary itself (including the legacy confirmation label) and
     Sigma's own quoted park-comment boilerplate ("needs human review") both trip it on real
     board text, and `_resolve_blockers_for_park` hands a `confident` finding straight to
     `blockers.resolve`, which WRITES TO the referenced issue. So the finding still stays PRESENT —
@@ -495,7 +495,7 @@ def _fetch_scrubbed_comments(sdlc_dir, config, goal_doc, run=None):
         # dismissed-finding scan nor auto_unpark's keep-parked check can see it; the prose still counts.
         # #709: only a TRUSTED author's prose reaches the blocker scan at all. Defusing markers (the
         # #650 rule) left a stranger's "Blocked by #50" prose driving the default-on auto-unpark
-        # sweep past the needs-confirmation gate; the whole text is dropped, with one stderr note.
+        # sweep past the legacy confirmation gate; the whole text is dropped, with one stderr note.
         kept = []
         for c in sources.fetch_comments(config, goal_doc["ref"], run=run):
             if c.get("association") not in sources.TRUSTED_ASSOCIATIONS:

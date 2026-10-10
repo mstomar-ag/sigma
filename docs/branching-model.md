@@ -1335,8 +1335,8 @@ felt like.
 recording the field first made possible — no data migration, no schema bump. An issue carrying
 `feature:<name>` may be created **directly** only by the unit owner or by the owner of the repo it is
 created in; **where those two disagree the board owner wins**, and the more restrictive gate applies.
-Anyone else is never blocked from raising it — it lands as `sdlc:needs-confirmation`, inert until
-promoted, plus a ledger entry addressed to the owner. Two gates, reached by different callers:
+Anyone else is never blocked from raising it — it is parked with the declared kind `owner_hold` (the legacy `sdlc:needs-confirmation`
+label only when triage is off), inert until the owner acts, plus a ledger entry addressed to the owner. Two gates, reached by different callers:
 `handoff.create_tracked_issue` for every issue Sigma opens (follow-ups included), and
 `feature_owner.gate_at_pick` for an issue anyone else opened, which reads the issue's **author**
 rather than its picker. The filing gate is asked about the unit the issue **will declare** — a

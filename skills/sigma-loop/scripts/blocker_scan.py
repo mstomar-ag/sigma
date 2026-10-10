@@ -107,7 +107,7 @@ legacy = _load_legacy()
 #: inside the excerpt is found today and is still found -- but #1497 found the identical live-write
 #: exposure one level up: `backlog_check._explicit_blockers` scans the excerpt with this same full
 #: vocabulary and, before #1497, marked EVERY match `confident` regardless of phrase, so the same
-#: `sdlc:needs-confirmation` label text or a quoted "needs human review" park comment reaching
+#: legacy confirmation label text or a quoted "needs human review" park comment reaching
 #: `_resolve_blockers_for_park` could mutate a third issue from inside the 500-character excerpt,
 #: no truncation required. `_explicit_blockers` now sets `confident` only for an `EXPLICIT_TRIGGERS`
 #: phrase, so presence is unchanged (this docstring's claim still holds) but a weak-trigger match is

@@ -92,7 +92,7 @@ bare `gh issue create` nobody can find. It is filed `blocks_goal=False`: a confl
 unit's branch is not a reason to park the goal that happened to trigger the pass, and
 `create_tracked_issue`'s own docstring names that exact false-blocking bug. And
 `immediately_actionable=False`: resolving two divergent histories is a judgement about intent, which
-is what the `sdlc:needs-confirmation` tier is for.
+is what the declared-question park is for.
 
 AND THE TREE IS LEFT CLEAN, WHICH IS THE HARDER HALF. A half-applied rebase poisons every later goal
 in the run, and an unattended loop has nobody to notice. `work.rebase()`'s abort-on-any-failure
@@ -1914,7 +1914,7 @@ def _file_issue(sdlc_dir, config, goal, report, title, why, body, slot="", key="
     `blocks_goal=False`: the goal that triggered the pass is not the goal that conflicted, and
     `create_tracked_issue`'s own docstring names false-blocking as the bug that axis exists to
     prevent. `immediately_actionable=False`: reconciling two divergent histories is a judgement
-    about intent, which is what `sdlc:needs-confirmation` is for.
+    about intent, which is what a declared-question park is for.
 
     `slot` IDENTIFIES THE FINDING and `key` FINGERPRINTS ITS STATE, so an unchanged finding is
     filed once rather than every pick -- see `_told_before`. The clause still reports the finding on

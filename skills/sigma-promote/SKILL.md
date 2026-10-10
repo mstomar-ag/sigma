@@ -14,14 +14,15 @@ empty path. Claude keeps its provided value.
 
 Detailed selection triggers: [selection](references/selection.md).
 
-`sdlc:needs-confirmation` is the human approval gate. An issue Sigma filed itself carries it
-and deliberately does **not** carry `sdlc:goal`, so no loop picks it up until a person says so.
+There is no confirmation queue any more. Sigma files what it finds already decided: triage arms an
+AI-filed issue (`sdlc:goal` at a bucket priority) or parks it with a declared question kind. The old
+`sdlc:needs-confirmation` label is legacy: nothing writes it unless `ai_filed.triage.enabled` is
+false, and a leftover one is inert.
 
-**The approval gesture is removing `sdlc:needs-confirmation`** — not adding `sdlc:goal`. Do the
-intuitive thing in the GitHub UI and the issue ends up carrying both, which is not a state the model
-has a name for, and which the two queue paths used to read differently. This skill is the way
-across: one atomic label swap, the board card moved with it, and a worklist of everything already
-stuck.
+This skill is for what is still stuck: one atomic label swap that approves an issue, the board card
+moved with it, a worklist of everything nothing can pick, and `migrate-confirmation` for leftovers
+of the old queue. Adding `sdlc:goal` by hand beside a leftover label makes a half-approved pair,
+which the `drift` bucket below repairs.
 
 Engine: `${CLAUDE_SKILL_DIR}/../sigma-loop/scripts/promote.py`.
 
@@ -32,7 +33,7 @@ Engine: `${CLAUDE_SKILL_DIR}/../sigma-loop/scripts/promote.py`.
 | Bucket | What it is | What to do |
 |---|---|---|
 | **deadlocked** | carries `sdlc:blocking`, no `sdlc:goal` | other work is blocked on it and **no queue can serve it** — approve it or the thing it blocks never resumes |
-| **awaiting** | carries `sdlc:needs-confirmation` | the ordinary approval queue |
+| **awaiting** | carries a legacy `sdlc:needs-confirmation` | a leftover of the retired queue; migrate it or approve it |
 | **drift** | carries **both** labels | a half-finished approval; repair is one removal |
 
 `deadlocked` is listed first because it is the only bucket where doing nothing is actively harmful.
@@ -59,7 +60,7 @@ python3 "${CLAUDE_SKILL_DIR}/../sigma-loop/scripts/promote.py" apply .sdlc 1284 
 python3 "${CLAUDE_SKILL_DIR}/../sigma-loop/scripts/promote.py" demote .sdlc 1284
 ```
 
-Per issue: add `sdlc:goal` and remove `sdlc:needs-confirmation` in **one** atomic swap, move the
+Per issue: add `sdlc:goal` and remove any legacy `sdlc:needs-confirmation` in **one** atomic swap, move the
 board card to `Ready`, leave an audit comment. `demote` is the exact inverse and sends the card back
 to `Backlog` — a human who promoted something by mistake now has an undo.
 
@@ -81,7 +82,8 @@ One failure never stops the rest; each issue reports its own outcome.
 
 ## Flow
 
-1. `list` — read the three buckets. Start with `deadlocked`.
+1. `list` — read the three buckets. Start with `deadlocked`. Leftover legacy labels: run
+   `migrate-confirmation` once (below) rather than approving them one by one.
 2. For each candidate, look at the issue before approving it: an AI-filed proposal is a *proposal*.
    If it is wrong or stale, close it instead of promoting it.
 3. `apply --dry-run` on the set, confirm the swaps, then `apply`.
@@ -96,3 +98,25 @@ One failure never stops the rest; each issue reports its own outcome.
   reason in a `NOTE:` at the top; `--json` carries `read`/`errors` per bucket. `apply` reports a
   quota failure as `rate-limited` (the issue is fine; retry after reset), distinct from `failed`.
 - `/sigma-doctor` reports the `deadlocked` set as a check row, so it surfaces without being looked for.
+
+## Migrating the retired confirmation queue
+
+`python3 "${CLAUDE_SKILL_DIR}/../sigma-loop/scripts/promote.py" migrate-confirmation .sdlc [--dry-run | --apply]`
+
+One-time move of every issue still carrying `sdlc:needs-confirmation`. **Dry run is the default and makes
+zero writes**; only `--apply` writes (giving both flags is a usage error). It pages through every labelled
+issue (past the 200-issue backlog window) and prints `covered N of M`; it exits non-zero when N is below M,
+when the listing fails, or when the fetch hit its cap (`ai_filed.migration.max_issues`, default 10000).
+
+| Population | How it is recognised | Result |
+|---|---|---|
+| ownership hold | the ownership flag comment | parked (`owner_hold`) |
+| scope hold | the scope-expansion flag comment | parked (`scope_hold`) |
+| follow-up | the `sdlc:followup` label | the rubric bucket priority; a lower existing priority is kept |
+| human-typed | none of the above | armed at its own priority, parked when it has none |
+
+Every arm goes through the same deny-list as filing, and a park results from any open `Blocked by:`
+reference or gate hold (the predicates `apply` uses). Arm and park are each ONE atomic label swap that also
+removes the confirmation label, so a parked issue never keeps it. Each migrated issue gets one comment saying
+which and why. Closed issues are left untouched (and counted as covered). A second run changes nothing.
+With `ai_filed.triage.enabled` false the verb refuses, because the queue is then still the intended state.

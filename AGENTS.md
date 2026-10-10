@@ -88,8 +88,9 @@ its failure modes are in [agent-rules detail](docs/agent-rules-detail.md).
 ## Labels
 
 Read [the label model](docs/label-model.md) before writing any `sdlc:*` label.
-`sdlc:goal` is membership; in-progress/blocked/blocking are overlays; parked and
-needs-confirmation stand alone. Prefer the atomic promote/unpark gestures. See
+`sdlc:goal` is membership; in-progress/blocked/blocking are overlays; parked stands
+alone (the old needs-confirmation label is legacy: nothing writes it unless triage is off).
+Prefer the atomic promote/unpark gestures. See
 [agent-rules detail](docs/agent-rules-detail.md) for the operational nuances.
 
 ## The Dossier pipeline — where work comes from

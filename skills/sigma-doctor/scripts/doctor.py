@@ -1586,8 +1586,8 @@ def _unreachable_blocker_scan(gh_cfg, run):
 
     So a blocker without `goal_label` is unreachable, while `auto_unpark` refuses to resume whatever
     it blocks until that blocker CLOSES. Nothing breaks that cycle on its own -- and the commonest
-    way in is completely ordinary: a hand-off filed `immediately_actionable=False` carries
-    `sdlc:needs-confirmation` and deliberately no goal label (`handoff.py`), and something later
+    way in is completely ordinary: a hand-off filed `immediately_actionable=False` once carried the
+    legacy confirmation label and deliberately no goal label (`handoff.py`), and something later
     declares itself blocked by it.
 
     Report-only, and deliberately so: auto-adding `goal_label` would defeat the very approval gate
@@ -1609,6 +1609,23 @@ def _unreachable_blocker_scan(gh_cfg, run):
         if goal not in names:
             flagged.append(i.get("number"))
     return flagged
+
+
+def _legacy_confirmation_scan(gh_cfg, config, run):
+    """Decision-rubric slice 18: open issues still carrying the LEGACY confirmation label.
+
+    Nothing writes that label any more (a filed follow-up is already a goal), so a hit is a leftover
+    from an old board. ADVISORY only -- the caller reports it as a warning with the one gesture that
+    clears it (`/sigma-promote`); nothing here, or anywhere in doctor, writes. The label name is read
+    as a legacy alias (`ledger.handoff.proposed_label`, default `sdlc:needs-confirmation`).
+
+    Fail-open like every scan in this file: an unreadable response yields `[]`."""
+    legacy = (_block(_block(config, "ledger"), "handoff").get("proposed_label")
+              or "sdlc:needs-confirmation")
+    issues = _list(run, gh_cfg, ["number", "labels"], [legacy])
+    if issues is None:
+        return []
+    return [i.get("number") for i in issues if isinstance(i, dict) and "number" in i]
 
 
 def _orphan_in_progress_scan(gh_cfg, config, run):
@@ -2744,6 +2761,18 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                 "multi-label invariant (which only flags issues carrying more than one). Nothing in "
                 "the loop can find or resume them. Re-add the label that reflects their real state, "
                 "or close them."))
+
+        # Decision-rubric slice 18: the confirmation label is legacy-only, so a leftover is advice.
+        leftovers = _legacy_confirmation_scan(gh_disc, cfg, run)
+        if leftovers:
+            shown = ", ".join(f"#{n}" for n in leftovers[:10])
+            more = f" (+{len(leftovers) - 10} more)" if len(leftovers) > 10 else ""
+            out.append(_chk(
+                "no issue still carries the legacy confirmation label (advisory)",
+                False,
+                f"{shown}{more} carry the legacy confirmation label. Nothing writes it any more, so "
+                "this is a leftover from an older board: the loop will never pick these. Run "
+                "`/sigma-promote` to approve or clear each one. Advisory only -- nothing was changed."))
 
         # #1392: blockers nothing can pick -- see `_unreachable_blocker_scan` for why
         # `sdlc:blocking` is a tie-break rather than a queue, and why this is report-only.

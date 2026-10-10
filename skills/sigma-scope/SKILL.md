@@ -87,7 +87,7 @@ The skill is seven steps:
      .sdlc/plans/scope/<slug>.plan.json --report .sdlc/plans/scope/<slug>.report.json` — this is
      the ONLY supported way to invoke `compile_plan.compile_plan()` from here (see "Why
      `scope.py`" below); never pass `--actionable` at this step, issues are armed at their plan priority (or parked if
-     the deny-list matches); with `ai_filed.triage.enabled` false they file as `sdlc:needs-confirmation`.
+     the deny-list matches); with `ai_filed.triage.enabled` false they file with the legacy `sdlc:needs-confirmation`.
 
 7. **Resolve assignment and the execution path.** Infer `area` from the plan's own primary
    touched path (the directory/file step 2 and step 6 centered on); if the plan genuinely spans
@@ -157,8 +157,8 @@ touched — this is a new, thin, independently-tested bridge, not a rewrite of e
 ## Caveats
 
 **Proposed, not actionable, until step 7 says so:** every issue `scope.py`/`compile_plan.py` creates
-is armed at its plan priority, or parked when the deny-list matches (triage off: filed as
-`sdlc:needs-confirmation`, never `sdlc:goal`). Only step 7's `assign.py execute` with a `start-now-*` path promotes it to
+is armed at its plan priority, or parked when the deny-list matches (triage off: filed with the
+legacy `sdlc:needs-confirmation`, never `sdlc:goal`). Only step 7's `assign.py execute` with a `start-now-*` path promotes it to
 `sdlc:goal`. `file-and-stop` leaves it exactly as created, on purpose — nothing else happens until a
 later `/sigma-triage` or manual promotion picks it up.
 

@@ -6,7 +6,8 @@ and the one `docs/board.md` describes. Nothing here talks to GitHub.
 Nothing is copied from elsewhere. The Status options are the configured columns
 (`sources.GitHubSource.col`), Priority's are `discovery.PRIORITIES` (`P0`..`P4`), Phase's are
 `phase_report.PHASE_TOKENS` with `PHASE_BOARD_COLORS`, and the "Needs a human" labels are the
-source's own `parked_label` / `goal_blocked_label` / `proposed_label`. Change one of those and the
+source's own `parked_label` / `goal_blocked_label` (the legacy confirmation label is NOT in the
+filter any more -- nothing writes it; bootstrap still creates it for old boards). Change one of those and the
 spec follows.
 
 WHAT THE API CAN SET (read-only schema introspection, 2026-09-29, the evidence recorded on #234): a view's
@@ -102,7 +103,7 @@ def build(src, priorities):
     def one_of(field, values):
         return qualifier(field) + ",".join(value(v) for v in values)
 
-    labels = (src.parked_label, src.goal_blocked_label, src.proposed_label)
+    labels = (src.parked_label, src.goal_blocked_label)
     views = [
         {"name": BOARD, "layout": "BOARD_LAYOUT", "filter": "",
          "fields": cols("Title", prio, phase, "Assignees", "Linked pull requests"),
@@ -126,8 +127,8 @@ def build(src, priorities):
          "filter": "is:open " + one_of("label", labels),
          "fields": cols("Title", prio, status, "Labels", "Updated"),
          "group_by": None, "sort": [],
-         "why": "The /sigma-promote and /sigma-unpark inbox: parked, blocked and awaiting-"
-                "confirmation items. On labels, one qualifier, because a project filter cannot OR "
+         "why": "The /sigma-promote and /sigma-unpark inbox: parked and blocked "
+                "items. On labels, one qualifier, because a project filter cannot OR "
                 "across two fields; the labels are what the Status lanes mirror."},
         {"name": ROADMAP, "layout": "ROADMAP_LAYOUT",
          "filter": one_of(prio, ("P0", "P1")) if prio else "",

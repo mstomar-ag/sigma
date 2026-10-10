@@ -13,7 +13,7 @@ paths satisfy that; one does not, and it is the one Sigma walks down itself:
       |     autowatch surfaces it. This path is fine.
       |
       +-- same-area, immediately_actionable=False
-      |     issue opened with proposed_label and NO goal_label; ledger entry is only kind="note",
+      |     issue opened with followup_label and NO goal_label; ledger entry is only kind="note",
       |     which autowatch does not watch; goal #42 -> sdlc:blocked.
       |     Nothing can pick the blocker. `auto_unpark` will not resume #42 until the blocker
       |     CLOSES. Neither side can move. Sigma built this, and told nobody.
@@ -32,12 +32,11 @@ with a reason from a closed set. There is no fourth option and no silent one.
 WHY PROMOTION IS NOT "DEFEATING THE APPROVAL GATE". The gate (#233) exists to stop SPECULATIVE
 AI-filed work from consuming the backlog. An issue that real, already-approved work is now stalled
 behind is by definition not speculative. And the label pair is decisive: `sdlc:followup` means
-Sigma filed it, `proposed_label` means NO HUMAN HAS EVER RULED ON IT -- so there is no human
-decision to override. When a human filed the proposal themselves, `sdlc:followup` is absent and the
-verdict is `needs_human` instead. This is the provenance label earning its keep.
+Sigma filed it. The confirmation label is legacy-only here (slice 18): a leftover is read through
+its provenance label like any other issue, and `_act` still strips the leftover when it grants
+membership.
 
 WHAT THIS MODULE WILL NOT DO:
-  - promote a proposal a HUMAN filed (`needs_human`) -- that is a real decision, already made;
   - un-park anything (`chained`) -- a park is human-owned, and `auto_unpark` is the only sweep
     allowed to reverse one, on evidence this module does not have;
   - adopt an unlabelled third-party issue into `goal_label` (`unmanaged`) -- it was never ours, so
@@ -63,8 +62,8 @@ blocker_scan = _load("blocker_scan")   # #2532: the shared MERGED/CLOSED resolut
 #: PARKED has had a human decision made on it, and `sdlc:followup` alone cannot know that.
 PICKABLE = "pickable"        # already in the queue; blocking_priority_override sorts it first
 CHAINED = "chained"          # parked -- a human owns it; never auto-undone
-PROMOTED = "promoted"        # Sigma's own unruled proposal, and real work waits on it
-NEEDS_HUMAN = "needs_human"  # a HUMAN filed the proposal; promoting would override their decision
+PROMOTED = "promoted"        # LEGACY, never returned by classify now. Sigma's own unruled proposal, and real work waits on it
+NEEDS_HUMAN = "needs_human"  # LEGACY, never returned by classify now. a HUMAN filed the proposal; promoting would override their decision
 ROUTED = "routed"            # someone else's; grant membership and address it to them
 UNMANAGED = "unmanaged"      # not in Sigma's world at all; surface, never adopt
 STALE = "stale"              # closed -- not a blocker
@@ -104,24 +103,13 @@ def classify(state, goal_label, proposed_label, parked_label, followup_label, me
     names = set(state.get("labels") or ())
     if parked_label in names:
         return CHAINED                       # BEFORE the promotion test -- see the constant block
-    if proposed_label in names:
-        # BEFORE the membership test, and that order is the fix for a real deadlock (review
-        # bug_004). `goal_label in names` used to short-circuit here, so an issue in the drift shape
-        # {goal, needs-confirmation} -- exactly what `/sigma-promote list`'s `drift` bucket exists to
-        # enumerate, and what the README documents a human producing by ADDING `sdlc:goal` instead
-        # of removing the proposal label -- was bucketed PICKABLE. Both queue paths refuse it
-        # (`not_eligible_labels` covers `proposed_label`), so nothing would ever work it, nothing
-        # would close it, and `auto_unpark` will not resume whatever it blocks until it CLOSES. The
-        # park text then told the operator "every named blocker is now workable", which is the worst
-        # possible failure: a park with an honest reason gets investigated, one that says everything
-        # is fine gets trusted.
-        #
-        # Testing it first makes the drift shape self-repairing when it is ours to repair --
-        # `_act`'s PROMOTED branch computes add=[] (membership already present) and
-        # remove=[proposed_label], which is precisely the atomic drift repair `promote.py` performs.
-        # A human-filed proposal still lands on NEEDS_HUMAN and is surfaced, never quietly promoted.
-        return PROMOTED if followup_label in names else NEEDS_HUMAN
+    # Legacy label (decision-rubric slice 18): the confirmation label is NO LONGER a classification
+    # row. A filed follow-up is already a goal, so nothing new carries the label; a leftover is
+    # classified by its OTHER labels (provenance -> ROUTED, which grants membership and, in `_act`,
+    # strips the leftover). `proposed_label` stays a parameter only so callers keep one signature.
     if goal_label in names:
+        if proposed_label in names:
+            return ROUTED                    # {goal, leftover}: the queue refuses it; `_act` strips it
         return PICKABLE
     if _other_assignees(state, me):
         return ROUTED
@@ -246,9 +234,6 @@ def _act(source, goal, ref, verdict, state, goal_label, proposed_label, sdlc_dir
     if verdict == CHAINED:
         return ("#%s is parked — a human owns that decision, so this chain needs one too. "
                 "Run /sigma-unpark on #%s." % (ref, ref)), False
-    if verdict == NEEDS_HUMAN:
-        return ("#%s is awaiting approval and a HUMAN filed it — promoting it would override a "
-                "real decision. Run /sigma-promote on #%s." % (ref, ref)), False
     if verdict == UNMANAGED:
         return ("#%s carries no Sigma label and nobody is assigned — it is outside the loop's "
                 "world, so it will not be picked up on its own" % ref), False
@@ -272,6 +257,9 @@ def _act(source, goal, ref, verdict, state, goal_label, proposed_label, sdlc_dir
     if verdict == ROUTED:
         _route(sdlc_dir, config, goal, ref, state, run)
         others = _other_assignees(state, ledger.actor(config, run))
+        if not others:                                  # Sigma-filed (provenance label), nobody else's
+            return ("#%s was filed by Sigma and had no membership — granted %s so the loop can "
+                    "work it" % (ref, goal_label)), True
         return ("#%s belongs to %s — granted %s and recorded in the ledger for them"
                 % (ref, ", ".join("@" + a for a in others) or "another owner",
                    goal_label)), True

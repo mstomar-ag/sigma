@@ -109,7 +109,7 @@ def test_spec_reuses_the_kits_vocabulary_and_never_copies_it(tmp_path):
     assert list(views) == VIEWS
     assert views["In flight"]["filter"] == 'is:open status:Doing,QC,Blocked'
     assert views["Needs a human"]["filter"] == (
-        'is:open label:on-ice,sdlc:blocked,sdlc:needs-confirmation')
+        'is:open label:on-ice,sdlc:blocked')
     assert views["v1.0 roadmap"]["filter"] == "priority:P0,P1"
     assert views["Epics"]["filter"] == "label:epic"
     assert [v["layout"] for v in spec["views"]] == [

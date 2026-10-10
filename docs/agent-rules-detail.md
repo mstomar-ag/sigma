@@ -24,7 +24,8 @@ combinations are legal, and the exact gestures for promoting, parking and unpark
 before writing any label by hand.** The short version:
 
 - `sdlc:goal` is MEMBERSHIP. `sdlc:in-progress`, `sdlc:blocked` and `sdlc:blocking` are OVERLAYS
-  that ride alongside it. `sdlc:parked` and `sdlc:needs-confirmation` stand ALONE.
+  that ride alongside it. `sdlc:parked` stands ALONE. The old `sdlc:needs-confirmation` label is
+  legacy: Sigma files armed or parked now, and writes it only when `ai_filed.triage.enabled` is false.
 - Anything waiting to be **picked** carries `sdlc:goal`; anything waiting for a **human** carries
   only its own label.
 - Prefer `/sigma-promote` and `/sigma-unpark` over editing labels directly — they perform the whole
