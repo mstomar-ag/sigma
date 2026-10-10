@@ -518,7 +518,10 @@ def _config(sdlc_dir):
 
 
 def settings(config):
-    return (config or {}).get("ledger") or {}
+    """The `ledger` block, or `{}`. Total: a non-object config or block (a hand-edited `"ledger": true`)
+    reads as absent instead of raising on `.get`."""
+    block = config.get("ledger") if isinstance(config, dict) else None
+    return block if isinstance(block, dict) else {}
 
 
 def enabled(config):

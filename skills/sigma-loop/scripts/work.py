@@ -1153,7 +1153,8 @@ _TRUSTED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
 
 def settings(config):
     s = dict(DEFAULTS)
-    s.update(config.get("work") or {})
+    block = config.get("work") if isinstance(config, dict) else None
+    s.update(block if isinstance(block, dict) else {})
     for key, label in (("remote", "work.remote"), ("base", "work.base"),
                        ("branch_prefix", "work.branch_prefix")):
         s[key] = state.safe_ref(label, s.get(key))      # #710: option injection into git

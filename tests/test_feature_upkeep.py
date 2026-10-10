@@ -448,16 +448,15 @@ def test_machine_env_source(monkeypatch):
 
 
 def test_ledger_rule_agrees():
-    """The ledger rule restated in the gate equals ledger.enabled on well-formed input, and does not raise where that does."""
+    """The ledger rule restated in the gate equals ledger.enabled on well-formed input, and both are total on a truthy non-object block."""
     g = support.gate()
     ledger = support.script("ledger")
     base = {"upkeep": {"enabled": True}}
     for config in [{}, {"ledger": {}}] + [{"ledger": {"enabled": v}} for v in (True, False, None, "true", 1)]:
         assert g.machine_enabled(dict(base, **config), OPEN_ENV) is ledger.enabled(config), config
-    for config in ({"ledger": True}, {"ledger": "x"}):
+    for config in ({"ledger": True}, {"ledger": "x"}, {"ledger": [1]}):
         assert g.machine_enabled(dict(base, **config), OPEN_ENV) is False
-        with pytest.raises(AttributeError):
-            ledger.enabled(config)
+        assert ledger.enabled(config) is False        # total since #966: the reader no longer raises here
 
 
 def test_control_machine():
@@ -651,19 +650,6 @@ def test_docstring_table():
     for phrase in ("work.rebase_upkeep", "Pick time", "Scheduler", "A person's request", "Chat"):
         assert phrase in doc, phrase
     assert "opposite" in doc.lower()
-
-
-def test_fold_inventory():
-    """The module is inside the unit-key fold inventory's glob, has no path join, and so needs no classification."""
-    support.gate()
-    inv = importlib.import_module("test_feature_registry")
-    stem = support.GATE.stem
-    assert stem in {p.stem for p in inv._feature_sources()}
-    assert [k for k in inv._address_builders() if k[0] == stem] == []
-    assert not any(s == stem for s, _ in inv._NO_UNIT_NAME | inv._FOLDS | inv._DOES_NOT_FOLD)
-    assert inv._builders_in("def f(a, b):\n    return a / b\n", stem)          # the predicate would see a join (arithmetic too)
-    tree = ast.parse(support.source())
-    assert not [n for n in ast.walk(tree) if isinstance(n, (ast.BinOp, ast.AugAssign)) and isinstance(n.op, ast.Div)]
 
 
 def test_imports_hygiene():

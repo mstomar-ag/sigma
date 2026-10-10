@@ -87,7 +87,8 @@ _run = feature_sync._run
 
 
 def settings(config):
-    return (config or {}).get("drift_watch") or {}
+    block = config.get("drift_watch") if isinstance(config, dict) else None
+    return block if isinstance(block, dict) else {}
 
 
 def enabled(config):
