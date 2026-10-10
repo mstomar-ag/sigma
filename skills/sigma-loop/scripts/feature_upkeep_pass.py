@@ -69,14 +69,40 @@ def _tip(run, cwd, ref):
     return tip
 
 
+def _shared(run):
+    """The shared predicate's runner `(argv, cwd) -> (rc, out, err)` over this module's `(cwd, argv) -> stdout` runner; no
+    runner given means the shared bounded runner itself."""
+    shared = _sibling("feature_landed")
+    if run is None:
+        def default(argv, cwd):
+            bounded = _sibling("bounded_run")
+            result = bounded.run_group([str(a) for a in argv], str(cwd), GIT_TIMEOUT_SECONDS, env=bounded.unattended_env(),
+                                       merge=False)
+            if result.code is None:
+                return shared.RC_UNRUNNABLE, "", ""
+            return result.code, result.out or "", result.err or ""
+        return default
+
+    def adapted(argv, cwd):
+        try:
+            return 0, run(cwd, list(argv)[3:] if list(argv)[:2] == ["git", "-C"] else list(argv)), ""
+        except Exception:                                   # noqa: BLE001 - could not tell is never landed
+            return shared.RC_UNRUNNABLE, "", ""
+    return adapted
+
+
 def landed(run, cwd, unit_ref, base_ref, base_name, landing_prs=None):
-    """-> (verdict, unit_tip, base_tip): verdict is LANDED_CONTAINED, LANDED_PR, NOT_LANDED or UNREADABLE."""
+    """-> (verdict, unit_tip, base_tip): verdict is LANDED_CONTAINED, LANDED_PR, NOT_LANDED or UNREADABLE. The ancestry half is
+    the shared predicate's (`feature_landed`); the merged-request half reads an injected source (no network here)."""
+    shared, runner = _sibling("feature_landed"), _shared(run)
     try:
-        unit_tip, base_tip = _tip(run, cwd, unit_ref), _tip(run, cwd, base_ref)
-        ahead = run(cwd, ["rev-list", "--max-count=1", unit_tip, "--not", base_tip]).strip()
+        unit_tip, base_tip = _tip(run or _git, cwd, unit_ref), _tip(run or _git, cwd, base_ref)
+        answer, _, _ = shared._ancestry(runner, str(cwd), unit_tip, base_tip)
     except Exception:                                       # noqa: BLE001 - could not tell is never landed
         return UNREADABLE, None, None
-    if ahead == "":
+    if answer == "unknown":
+        return UNREADABLE, None, None
+    if answer == "yes":
         return LANDED_CONTAINED, unit_tip, base_tip
     try:
         requests = list(landing_prs()) if landing_prs else []
@@ -224,7 +250,7 @@ def ledger_note(config, sdlc_dir, unit_key, outcome, sha12, *, append=None):
 @feature_upkeep.gated("project")
 def upkeep_pass(config, sdlc_dir, unit, unit_ref, base_ref, base_name, now, *, run=None, cwd=".", landing_prs=None):
     """One pass for one unit. -> {"result": "skipped"|"not-landed"|"unreadable", "reason", "unit", "unit_tip", "base_tip"}."""
-    verdict, unit_tip, base_tip = landed(run or _git, cwd, unit_ref, base_ref, base_name, landing_prs)
+    verdict, unit_tip, base_tip = landed(run, cwd, unit_ref, base_ref, base_name, landing_prs)
     report = {"result": NOT_LANDED, "reason": verdict, "unit": unit, "unit_tip": unit_tip, "base_tip": base_tip}
     if verdict == UNREADABLE:
         report["result"] = UNREADABLE
