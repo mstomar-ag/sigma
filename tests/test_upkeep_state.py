@@ -287,10 +287,10 @@ def due_failures(s, d):
 def outcome_failures(s, d, tmp):
     bad = []
     engine = S.sibling("feature_rebase")
-    S.expect(bad, "the engine's outcomes, all of them", (set(s.OUTCOMES) == set(engine.OUTCOMES), len(s.OUTCOMES)), (True, 17))
-    S.expect(bad, "each outcome in one class", len(set(s.SUCCESS) | set(s.FAILURE) | set(s.NEUTRAL)), 17)
+    S.expect(bad, "the engine's outcomes, all of them", (set(s.OUTCOMES) == set(engine.OUTCOMES), len(s.OUTCOMES)), (True, 18))
+    S.expect(bad, "each outcome in one class", len(set(s.SUCCESS) | set(s.FAILURE) | set(s.NEUTRAL)), 18)
     S.expect(bad, "the classes", (s.SUCCESS, s.FAILURE, s.NEUTRAL), (("rebased", "current"), ("occupied", "unverifiable", "direct-commits",
-             "conflict", "lease-refused", "failed", "would-drop", "name-too-long"), ("disabled", "no-unit", "not-adopted", "no-base", "no-branch",
+             "conflict", "lease-refused", "failed", "would-drop", "name-too-long", "parked"), ("disabled", "no-unit", "not-adopted", "no-base", "no-branch",
              "remote-unreadable", "busy")))
     for outcome in s.OUTCOMES:
         sdlc = fresh(tmp, "outcome")
