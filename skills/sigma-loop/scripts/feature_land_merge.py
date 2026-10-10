@@ -7,7 +7,10 @@ the rest, in this order, and stops at the first refusal:
 1. THE GATE. The upkeep project gate is the first call of the public entry; closed means no read, no write, no call.
 2. LAST TIP RE-READ. The unit tip must still be T and the base tip must still be the one T was verified against.
    Otherwise refuse (`tip-moved`) before the guard, so an approval is not spent on a head that is already stale.
-3. THE GUARD, LAST. `feature_land_approval.authorize`: attended consent, or the single-use approval consumed
+3. THE SIBLING GUARD, then THE APPROVAL GUARD, LAST. `work.unit_sibling_guard` refuses (`sibling`) while another
+   repository's half of the unit has not landed, before an approval can be spent. `landed(repo, branch)` is the
+   caller's measurement; none supplied means a unit that names another repository refuses. Then
+   `feature_land_approval.authorize`: attended consent, or the single-use approval consumed
    create-once and bound to T. Every other check has passed by then; nothing but the record and the call follow.
 4. THE PENDING RECORD, THEN THE CALL. `feature_upkeep_landing.run_landing` writes the pending record BEFORE the call (no
    record, no call), makes the call, reads the pull request and the merge commit back, classifies and settles.
@@ -81,7 +84,7 @@ def take_marker(sdlc_dir, unit, number):
 
 @_gate_first
 def complete(config, sdlc_dir, unit, *, slug, branch, base, head, base_tip, number, argv, environ, gh_run, read_tip,
-             record=None, now=None):
+             record=None, now=None, landed=None):
     """Steps 2 to 6 for one verified head -> a result dict with `outcome`."""
     gh_api = _load("gh_api")
     landing = _load("feature_upkeep_landing")
@@ -89,6 +92,9 @@ def complete(config, sdlc_dir, unit, *, slug, branch, base, head, base_tip, numb
     stamp = int(time.time()) if now is None else now
     if read_tip(branch) != head or read_tip(base) != base_tip:
         return _refuse("tip-moved", "a tip moved after verify; nothing was approved or merged")
+    ok, why = _load("work").unit_sibling_guard(sdlc_dir, config, unit, slug, landed=landed)
+    if not ok:
+        return _refuse("sibling", why)
     verdict = approval.authorize(config, sdlc_dir, unit, slug, head, argv=argv, environ=environ, now=now)
     if not verdict.get("ok"):
         return _refuse("guard", verdict.get("reason", "the landing guard denied"))

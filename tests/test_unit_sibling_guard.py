@@ -88,13 +88,26 @@ def test_lookup_that_cannot_answer_refuses(tmp_path):
         assert ok is False and OTHER in why
 
 
-def test_unreadable_or_foreign_records_refuse(tmp_path):
-    for raw in ("{not json", json.dumps({"schema": "other@1", "unit": UNIT}), json.dumps([1])):
-        d = _sdlc(tmp_path / ("r%d" % abs(hash(raw))))
+def test_foreign_files_in_the_landing_folder_are_ignored_and_named(tmp_path, capsys):
+    # a file that does not parse as a landing record is not this unit's evidence: skip it, say so, keep answering
+    for n, raw in enumerate(("{not json", json.dumps({"schema": "other@1", "unit": UNIT}), json.dumps([1]), "")):
+        d = _sdlc(tmp_path / ("r%d" % n))
         _unit(d)
-        _landing(d, 1, raw=raw, name="9.json")
-        ok, why = _guard(d, lambda r, b: True)
-        assert ok is False and "9.json" in why
+        _landing(d, 1)
+        _landing(d, 9, raw=raw, name="9.json")
+        seen = []
+        assert _guard(d, lambda r, b: seen.append(r) or True) == (True, "")
+        assert seen == [OTHER]
+        assert "9.json" in capsys.readouterr().err
+
+
+def test_foreign_file_does_not_hide_a_real_refusal(tmp_path):
+    d = _sdlc(tmp_path)
+    _unit(d)
+    _landing(d, 1)
+    _landing(d, 9, raw="{not json", name="9.json")
+    ok, why = _guard(d, lambda r, b: False)
+    assert ok is False and "not landed" in why
 
 
 def test_flagged_record_for_the_unit_refuses(tmp_path):
