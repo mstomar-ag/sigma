@@ -272,6 +272,11 @@ _UPDATE_REF_DELETE_RE = re.compile(r'"update-ref"\s*,(?:\s*"[^"]*"\s*,)*?\s*"(?:
 _GH_API_DELETE_RE = re.compile(r"\bgh_api\b(?:[\"']\))?\.delete\w*\s*\(")
 
 
+#: A Python HTTP-client DELETE: `method="DELETE"` keyword, `requests|httpx.delete(`, `.request("DELETE"` (#959).
+_HTTP_DELETE_RE = re.compile(
+    r"""\bmethod\s*=\s*["'](?i:delete)["']|\b(?:requests|httpx)\.delete\s*\(|\.request\(\s*["'](?i:delete)["']""")
+
+
 def _delete_call_sites(root):
     """The guard, as a pure function: `(path, lineno, kind, line_text)` for every branch/ref
     delete-shaped (or delete-CAPABLE, for `colon_refspec`) line found under `root`'s tracked
@@ -293,6 +298,8 @@ def _delete_call_sites(root):
                              "rest_delete_ref" if "git/refs/" in line else "rest_delete", line))
             if _UPDATE_REF_DELETE_RE.search(line):
                 hits.append((path, lineno, "update_ref_delete", line))
+            if _HTTP_DELETE_RE.search(line):
+                hits.append((path, lineno, "http_delete", line))
             if _GH_API_DELETE_RE.search(line):
                 hits.append((path, lineno, "gh_api_delete", line))
             if ":refs/" in line:

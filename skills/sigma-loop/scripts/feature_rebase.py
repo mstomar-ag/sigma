@@ -597,7 +597,7 @@ def _acked(sdlc_dir, run, cwd, unit, integration_ref, config=None):
     integration branch. Never raises; anything unreadable contributes nothing, so a broken store
     fails towards REFUSING, which costs a pass and never data.
 
-    #1017: the runtime file (written only under the upkeep opt-in) is read only while that gate is open when a `config`
+    #1017/#1086: both runtime files (`state/upkeep/acks.json` and the per-unit `state/rebase-acks/` one; written only under the upkeep opt-in) are read only while that gate is open when a `config`
     is given, so a file left behind after the gate was closed again is ignored. `config=None` keeps the old reading."""
     entries = []
     try:
@@ -610,10 +610,10 @@ def _acked(sdlc_dir, run, cwd, unit, integration_ref, config=None):
         pass
     if config is None or _gate().enabled(config):
         entries += _runtime_acks(sdlc_dir, unit)
-    try:
-        entries += _read_acks(runtime_ack_path(sdlc_dir, unit).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        pass
+        try:
+            entries += _read_acks(runtime_ack_path(sdlc_dir, unit).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
     try:
         rel = pathlib.Path(os.path.relpath(path.resolve(), pathlib.Path(cwd).resolve())).as_posix()
     except ValueError:                    # a different drive on Windows: no repo-relative path

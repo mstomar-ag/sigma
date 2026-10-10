@@ -10,6 +10,7 @@ on EVERY real entry point with an enabled control per driver, so a closed result
 What it does not prove: anything about a hosting service. Everything here is local and offline."""
 import ast
 import re
+import sys
 import types
 
 import pytest
@@ -285,3 +286,35 @@ def test_control_a_stripped_decorator_is_seen_red_for_every_real_driver(tmp_path
             escaped.append((stem, fn))
     monkeypatch.setattr(support, "script", ORIGINAL_SCRIPT)
     assert escaped == [], "removing the decorator changed nothing for: %s" % escaped
+
+
+# ------------------------------------------------------------------------------------ the cold-bytecode seam (#1073)
+
+def _cold_bytecode(tmp_path, monkeypatch):
+    """A fresh, empty bytecode cache that may be written: what the first run on a clean checkout, or the first run after
+    a source edit, sees. Pre-warmed caches (the usual local run) hide the seam."""
+    monkeypatch.setattr(sys, "pycache_prefix", str(tmp_path / "cold-pyc"))
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    for name, mod in list(sys.modules.items()):      # a sibling already imported by an earlier test would hide the seam
+        if str(getattr(mod, "__file__", "") or "").startswith(str(support.SCRIPTS)):
+            monkeypatch.delitem(sys.modules, name)
+
+
+def test_control_loading_a_script_inside_the_trap_records_its_bytecode_write(tmp_path, monkeypatch):
+    """The cause of the intermittent red in the near-enabled matrix, made deterministic: the job script imports its
+    siblings when it is LOADED, and a load under a cold bytecode cache writes a .pyc, which the trap records as a write.
+    Whether that happened depended on which parallel worker warmed the cache first."""
+    _cold_bytecode(tmp_path, monkeypatch)
+    import attempt_trap
+    with attempt_trap.AttemptTrap() as trap:
+        support.script("feature_upkeep_job")
+    assert any(w.endswith(".pyc") or ".pyc." in w for w in trap.writes), trap.writes
+
+
+def test_the_matrix_is_closed_under_a_cold_bytecode_cache(tmp_path, monkeypatch):
+    """The fix at the seam: the drivers load their scripts BEFORE the trap opens, so a cold cache is never a write the
+    closed run is charged for. Run the job drivers (the ones that import siblings) with the cache cold."""
+    _cold_bytecode(tmp_path, monkeypatch)
+    drivers = support.drivers(support.gate())
+    for fn in ("run_job", "run_engine"):
+        assert proof.offences(tmp_path / fn, monkeypatch, drivers[("feature_upkeep_job", fn)], proof.machine_cases()[:3]) == []
