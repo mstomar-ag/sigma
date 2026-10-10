@@ -85,6 +85,22 @@ def test_tip_moving_every_time_is_moved_and_never_pushes(repo):
     assert notes.calls[0][2]["ref"].startswith("upkeep:moved:")
 
 
+@pytest.mark.parametrize("rewrite", [lambda run, tips: {"ok": False}, lambda run, tips: 1 / 0])
+def test_a_failed_or_raising_rewrite_never_pushes(repo, rewrite):
+    diverged(repo)
+    pushes = []
+    result = run_pass(repo, rewrite=rewrite, push=lambda run, tips: pushes.append(1), ledger_append=Notes())
+    assert result["result"] == "failed" and pushes == []
+
+
+def test_a_raising_push_is_a_failed_pass(repo):
+    diverged(repo)
+
+    def push(run, tips):
+        raise RuntimeError("refused")
+    assert run_pass(repo, rewrite=ok_rewrite, push=push, ledger_append=Notes())["result"] == "failed"
+
+
 # ------------------------------------------------------------------ (2) engine runner and hooks policy
 
 def test_replay_and_push_get_runners_built_with_the_hooks_policy(repo):

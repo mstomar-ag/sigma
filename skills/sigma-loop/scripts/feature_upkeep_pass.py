@@ -311,14 +311,22 @@ def _engine(config, sdlc_dir, unit, unit_ref, base_ref, run, cwd, report, rewrit
     box = {}
 
     def step_rewrite(tips):
-        outcome = rewrite(factory(hooks_policy(REPLAY)), tips) or {}
+        try:
+            outcome = rewrite(factory(hooks_policy(REPLAY)), tips) or {}
+        except Exception:                                   # noqa: BLE001 - a failed rewrite is a failed pass, never a push
+            outcome = {"ok": False}
         box["rewrite"] = outcome
         if outcome.get("acks"):
             ack_union(config, sdlc_dir, unit, outcome["acks"])
 
     def step_push(tips):
+        if (box.get("rewrite") or {}).get("ok") is False:   # nothing was rewritten: nothing is pushed
+            return
         phase = RESOLVED_PUSH if (box.get("rewrite") or {}).get("resolved") else CLEAN_PUSH
-        push(factory(hooks_policy(phase)), tips)
+        try:
+            push(factory(hooks_policy(phase)), tips)
+        except Exception:                                   # noqa: BLE001 - a refused or failed push is a failed pass
+            box["rewrite"] = {"ok": False}
     steps = [step_rewrite] + ([step_push] if push is not None else [])
     checked = recheck_tips(read, steps)
     report["restarts"] = checked["restarts"]
