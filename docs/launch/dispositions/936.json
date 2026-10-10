@@ -1,0 +1,18 @@
+[
+  {
+    "pattern": ".sdlc/state/unit-landings/",
+    "issue": "#936",
+    "decision": "directory rollup of the per-unit pending-landing record files below it",
+    "pruner_or_cap": "directory rollup, no writer of its own: at most one small record per unit (keyed by the folded unit key), deleted when the landing is merged and aged out by the prune below",
+    "evidence": "skills/sigma-loop/scripts/feature_upkeep_landing.py (STORE_REL, prune); the writer reaches the path through the shared atomic helper and symlink refusal in state.py, which the scan cannot attribute to this path",
+    "unscanned": true
+  },
+  {
+    "pattern": ".sdlc/state/unit-landings/<unit>.json",
+    "issue": "#936",
+    "decision": "bounded by unit count and by age: one document per unit, written before the merge call, rewritten with the outcome, deleted on merged",
+    "pruner_or_cap": "prune(sdlc_dir, config, keep_days) in feature_upkeep_landing.py removes record-shaped files and crash leftovers older than keep_days (default 14), never a symlink; goal_state_prune.FILE_FAMILIES is keyed by terminal goals and cannot own a unit-keyed store; each document is capped at 8192 characters on write and on read, the prune scans at most 100000 entries and the doctor listing at most 1000; owner the project; lever: delete a record file, which loses only the local pending marker (the next landing re-reads the pull request)",
+    "evidence": "tests/test_upkeep_landing.py (test_prune_ages_out_only_stale_record_shaped_files, test_begin_writes_pending_and_merged_deletes); writer is feature_upkeep_landing.py _write through state.atomic_write_text",
+    "unscanned": true
+  }
+]

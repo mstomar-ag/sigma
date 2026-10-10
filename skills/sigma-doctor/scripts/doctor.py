@@ -2383,6 +2383,16 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
             "commits -- see docs/branching-model.md §3b for the resolution, or set "
             '`work.rebase_upkeep: "off"` while it stands.'))
 
+    # #936: a unit landing left pending (upkeep part C). Gated on the upkeep block and read-only: a closed gate
+    # emits nothing, so a project without the block sees an unchanged check list.
+    try:
+        import time as _t
+        landing_row = _load_loop_script("feature_upkeep_landing").doctor_row(base, cfg, int(_t.time()))
+    except Exception:                     # noqa: BLE001 - a doctor row never crashes the doctor
+        landing_row = None
+    if landing_row:
+        out.append(_chk(landing_row["name"], landing_row["ok"], landing_row["fix"]))
+
     # A shared site-packages holds one slot per import name. A local `pip install [-e] <path>` bakes
     # that path in permanently, so on a machine running several worktrees of the same repo (this
     # project's own normal working style), whichever worktree last ran that command silently wins

@@ -1386,6 +1386,7 @@ _FOLDS = {
     ("feature_doc", "doc_path"),              # #1673 — the `<name>.md` page a person opens
     ("feature_upkeep_state", "unit_state_path"),    # #919 — the per-unit upkeep state file
     ("feature_upkeep_resolution", "store_path"),            # #945 — the per-resolution record, unit folded after the name guard
+    ("feature_upkeep_landing", "record_path"),              # #936 — the pending-landing record, unit folded after the name guard
 }
 
 #: Derived keys that do NOT fold — A RECORD OF OPEN DEFECTS, never a design decision. When one is
@@ -1434,6 +1435,9 @@ _NO_UNIT_NAME = {
     ("feature_upkeep_state", "_load"),        # #919: the sibling importer, once per module
     ("feature_upkeep_resolution", "_load"),           # #945: the sibling importer, once per module
     ("feature_upkeep_resolution", "prune"),   # #945: a directory sweep keyed by age; no unit name reaches it
+    ("feature_upkeep_landing", "_load"),      # #936: the sibling importer, once per module
+    ("feature_upkeep_landing", "prune"),      # #936: a directory sweep keyed by age; no unit name reaches it
+    ("feature_upkeep_landing", "pending"),    # #936: a read-only listing of the whole store; no unit name reaches it
     ("feature_propagate", "record_path"),     # keyed by GOAL, not by unit
     ("feature_rebase", "rebase_stopped"),     # takes a path that is already built
     # #278: keyed by a git BRANCH name (which may be a goal's `sdlc/<n>`), never a unit name; its
