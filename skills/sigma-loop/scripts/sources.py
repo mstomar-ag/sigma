@@ -181,6 +181,7 @@ def _load(name):
 
 
 legacy = _load("legacy")
+hsg = _load("hard_stop_guard")      # decision rubric slice 10: a no-op until hard_stops.enabled is true
 discovery = _load("discovery")
 state = _load("state")
 frontmatter = _load("frontmatter")   # LocalSource.fetch_title_body's title/body split (#519)
@@ -950,6 +951,7 @@ class GitHubSource:
 
     def __init__(self, config, run=None, sdlc_dir=None):
         gh = ((config.get("discovery") or {}).get("github")) or {}
+        self._hs_config = config
         self.repo = gh.get("repo") or ""
         self.goal_label = gh.get("goal_label", "sdlc:goal")
         self.in_progress_label = gh.get("in_progress_label", "sdlc:in-progress")
@@ -2934,6 +2936,8 @@ class GitHubSource:
         failure is no longer silent: it writes one stderr line (mirrors
         `_swap_labels_best_effort`'s own loud-but-non-raising shape) and is recorded in
         `release_warnings()` so a caller that wants to know can."""
+        if hsg.blocks_issue_write(self, goal, "release"):    # slice 10: a foreign issue is parked, not written
+            return
         terminal = False
         try:
             info = self._read_issue(goal, ["state", "labels"])
@@ -3019,6 +3023,8 @@ class GitHubSource:
                 pass
 
     def complete(self, goal):
+        if hsg.blocks_issue_write(self, goal, "complete"):    # slice 10: a foreign issue is parked, not written
+            return
         # #505: when this issue is ALREADY CLOSED by the time this call runs, `gh issue close
         # --comment` on an ALREADY-closed
         # issue exits 0 but silently drops the --comment text (verified live against the real gh
@@ -3171,6 +3177,8 @@ class GitHubSource:
         self._set_board_status(goal, self.col["blocked"])
 
     def park(self, goal, reason, tier=None):
+        if hsg.blocks_issue_write(self, goal, "park"):    # slice 10: a foreign issue is parked, not written
+            return
         comment = PARK_COMMENT_PREFIX + _sanitize_offboard_reason(reason)
         # #953/#1185: no new `gh` call -- richer text in the one that already fires. `tier` is
         # optional and additive: omitted (the default, and every park loop.py's _record() doesn't
@@ -3336,6 +3344,8 @@ class GitHubSource:
         quota touched, so an unset `repo` can never again defeat this fallback. A REST call that
         itself fails (genuinely no git remote to infer from, bad auth, ...) raises that failure
         directly -- there is nothing further to fall back to."""
+        if hsg.blocks_issue_write(self, goal, "note"):    # slice 10: a foreign issue is parked, not written
+            return
         for attempt in range(self._NOTE_RETRIES):
             try:
                 self._run(["issue", "comment", goal, *self._repo_args(), "--body", text])

@@ -73,6 +73,7 @@ def _load(name):
 
 state = _load("state")
 ledger = _load("ledger")
+hsg = _load("hard_stop_guard")      # decision rubric slice 10: a no-op until hard_stops.enabled is true
 legacy = _load("legacy")             # #239: PR directives/markers written under the previous name
 scrub_module = _load("scrub")
 scrub = scrub_module.scrub
@@ -3086,6 +3087,33 @@ def _emit_risk_gates(sdlc_dir, config, goal, categories):
         actionlog.safe_append(sdlc_dir, goal, "gate", gate=gate_kind, verdict="absent", why=why)
 
 
+def _hs_push_stop(sdlc_dir, config, rec, text, prefix="PARK"):
+    """Decision rubric slice 10: the hard-stop classifier at a push chokepoint. "" while the gate is closed (no
+    call is made); else a refusal line carrying the class and pattern id. The branch is classified by the register-based
+    own predicate, so Sigma's lease push of its own goal branch passes."""
+    if not hsg.enabled(config):
+        return ""
+    try:
+        reg = _load("feature_registry")
+        registry = reg.read(reg.registry_dir(sdlc_dir))
+    except Exception:                           # noqa: BLE001 - unreadable registry reads as not-own
+        registry = None
+    v = hsg.guard(text, {"branch": rec.get("branch"), "registry": registry}, config)
+    return f"{prefix}: {v.reason}" if v.blocked else ""
+
+
+def _hs_diff_stop(config, run, path, argv, only):
+    """Slice 10: the staged-diff classes (secrets, tamper) at commit and pr. "" while the gate is closed."""
+    if not hsg.enabled(config):
+        return ""
+    try:
+        diff = run(path, argv) or ""
+    except Exception:                           # noqa: BLE001 - an unreadable diff is cannot-tell
+        return "REFUSED: hard stop: cannot tell what the diff holds (unreadable)"
+    v = hsg.guard(diff, {"only": only, "prose": True}, config)
+    return f"REFUSED: {v.reason}" if v.blocked else ""
+
+
 def commit(sdlc_dir, config, goal, run=None, message=""):
     """Stage and commit everything in THIS GOAL'S worktree — unless what got staged is a credential.
 
@@ -3116,6 +3144,9 @@ def commit(sdlc_dir, config, goal, run=None, message=""):
     if not staged:
         return "nothing to commit"
     refusal = _secret_refusal(path, staged, config, run)
+    if refusal:
+        return refusal
+    refusal = _hs_diff_stop(config, run, path, ["git", "diff", "--cached"], ("access_secrets", "tamper_oversight"))
     if refusal:
         return refusal
     # #910: SCAN BEFORE THE COMMIT, EMIT AFTER IT. Before, because the tripwire reads the working
@@ -3477,6 +3508,10 @@ def pr(sdlc_dir, config, goal, run=None, no_tests=None):
     if test_first_refusal:
         return test_first_refusal
 
+    refusal = (_hs_push_stop(sdlc_dir, config, rec, f"git push -u {remote} {rec['branch']}")
+               or _hs_diff_stop(config, run, path, ["git", "diff", f"{remote}/{base}...HEAD"], ("tamper_oversight",)))
+    if refusal:
+        return refusal
     run(path, ["git", "push", "-u", remote, rec["branch"]])
     number = run(path, ["gh", "api",
                         f"repos/{{owner}}/{{repo}}/pulls?head={{owner}}:{rec['branch']}",
@@ -4165,6 +4200,10 @@ def rebase(sdlc_dir, config, goal, run=None):
                        or _push_refused(path, rec["branch"]))
             if refused:
                 return refused
+            gated = _hs_push_stop(sdlc_dir, config, rec,
+                                     f"git push --force-with-lease {remote} HEAD:{rec['branch']}")
+            if gated:
+                return gated
             run(path, ["git", "push", "--force-with-lease", remote, f"HEAD:{rec['branch']}"])
             _rerecord_cut_tip(sdlc_dir, config, goal, rec, run, path, remote, base)
             return "rebased (CHANGELOG union-merged)"
@@ -4219,6 +4258,9 @@ def rebase(sdlc_dir, config, goal, run=None):
                or _push_refused(path, rec["branch"]))
     if refused:
         return refused
+    gated = _hs_push_stop(sdlc_dir, config, rec, f"git push --force-with-lease {remote} HEAD:{rec['branch']}")
+    if gated:
+        return gated
     run(path, ["git", "push", "--force-with-lease", remote, f"HEAD:{rec['branch']}"])
     _rerecord_cut_tip(sdlc_dir, config, goal, rec, run, path, remote, base)
     return "rebased"
