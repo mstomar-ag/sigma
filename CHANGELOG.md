@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- Upkeep part A, slice 6 wiring: the pass re-reads tips, uses the engine runner and hooks policy, writes acks, limits re-anchoring, skips deleted goal branches and writes the ledger note (#1016).
 - Upkeep part C, slice 5: read-back classifier and pending-landing record (#936).
 - **Upkeep part B, slice 6: unit conflicts are parked, with one capped finding per conflict (#946).** Behind the
   existing upkeep opt-in only. A unit rebase that stops on a conflict nobody resolves now ends with the new `parked`
