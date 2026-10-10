@@ -114,7 +114,9 @@ def _file(tmp_path, **flags):
             pass
 
     src = Src()
-    handoff.create_tracked_issue(str(tmp_path), {}, "42", "api", "a follow-up", same_area=True,
+    # slice 15 (#1003): the pin is the triage-OFF label set; the armed set is tested in test_handoff
+    off = {"ai_filed": {"triage": {"enabled": False}}}
+    handoff.create_tracked_issue(str(tmp_path), off, "42", "api", "a follow-up", same_area=True,
                                  blocks_goal=False, source=src, **flags)
     return src.created[0]
 

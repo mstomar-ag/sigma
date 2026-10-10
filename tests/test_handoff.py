@@ -34,6 +34,8 @@ CODEOWNERS = """\
 """
 
 ON = {"ledger": {"enabled": True, "actor": "amy"}}
+#: the same config with AI-filed triage switched off: the pre-triage filing path (slice 15, #1003).
+ONL = dict(ON, ai_filed={"triage": {"enabled": False}})
 
 
 def _project(tmp_path, config=None, codeowners=CODEOWNERS):
@@ -148,7 +150,7 @@ class FakeSource:
 def test_handoff_opens_assigns_records_and_links(tmp_path):
     sdlc = _project(tmp_path)
     src = FakeSource()
-    report = handoff.hand_off(sdlc, ON, "0004-ui-restart.md", "engine",
+    report = handoff.hand_off(sdlc, ONL, "0004-ui-restart.md", "engine",
                               "ui auto-restart needs an engine feature flag",
                               priority="P0", source=src)
 
@@ -326,7 +328,7 @@ def test_handoff_still_records_when_no_owner_is_declared(tmp_path):
     area added; a second warning names the self-assign fallback."""
     sdlc = _project(tmp_path, codeowners="/server/ @srv-owner\n")
     src = FakeSource()
-    report = handoff.hand_off(sdlc, ON, "g.md", "engine", "needs a flag", source=src)
+    report = handoff.hand_off(sdlc, ONL, "g.md", "engine", "needs a flag", source=src)
     assert report["owner"] == "amy"                             # #2395: self-assigned, not None
     assert any("no owner for area" in w for w in report["warnings"])
     assert any("self-assigning" in w for w in report["warnings"])
@@ -387,7 +389,7 @@ def test_cross_area_queued_finding_with_no_owner_stays_unassigned(tmp_path):
     sdlc = _project(tmp_path, codeowners="/server/ @srv-owner\n")   # no rule matches `engine`
     src = FakeSource()
     report = handoff.create_tracked_issue(
-        sdlc, ON, "g.md", "engine", "found while working elsewhere",
+        sdlc, ONL, "g.md", "engine", "found while working elsewhere",
         same_area=False, immediately_actionable=False, blocks_goal=False, source=src)
     assert report["owner"] is None
     assert src.created["assignee"] is None
@@ -441,7 +443,7 @@ def test_handoff_degrades_honestly_when_the_source_has_no_append_to_body(tmp_pat
             self.notes.append((goal, text))
 
     src = NoBodyEdit()
-    report = handoff.hand_off(sdlc, ON, "g.md", "engine", "needs a flag", source=src)
+    report = handoff.hand_off(sdlc, ONL, "g.md", "engine", "needs a flag", source=src)
     assert report["issue"] == "61" and not report["warnings"]
     assert src.notes                                   # the comment channel still works fine
 
@@ -502,7 +504,7 @@ def test_create_tracked_issue_same_area_assigns_to_self_and_never_becomes_a_stuc
     sdlc = _project(tmp_path)
     src = FakeSource(number="61")
     report = handoff.create_tracked_issue(
-        sdlc, ON, "0007-x.md", "engine", "found a flaky retry while working this goal",
+        sdlc, ONL, "0007-x.md", "engine", "found a flaky retry while working this goal",
         same_area=True, immediately_actionable=True, blocks_goal=False, source=src)
 
     assert report["owner"] == "amy" and report["issue"] == "61" and not report["warnings"]
@@ -524,13 +526,14 @@ def test_create_tracked_issue_same_area_assigns_to_self_and_never_becomes_a_stuc
 
 
 def test_create_tracked_issue_queued_does_not_carry_the_goal_label(tmp_path):
-    """immediately_actionable=False -> queued: filed, but NOT auto-picked -- goal_label=False must
-    reach create_dependency explicitly (unlike the True case, which relies on create_dependency's own
-    default)."""
+    """With triage OFF, immediately_actionable=False -> queued: filed, but NOT auto-picked --
+    goal_label=False must reach create_dependency explicitly (unlike the True case, which relies on
+    create_dependency's own default). Slice 15 (#1003): with triage on (the default) the same call is
+    armed instead; see test_queued_flag_defers_to_triage."""
     sdlc = _project(tmp_path)
     src = FakeSource(number="62")
     handoff.create_tracked_issue(
-        sdlc, ON, "0008-x.md", "engine", "a non-urgent follow-up, not worth jumping the backlog",
+        sdlc, ONL, "0008-x.md", "engine", "a non-urgent follow-up, not worth jumping the backlog",
         same_area=True, immediately_actionable=False, blocks_goal=False, source=src)
     assert src.created["goal_label"] is False
     # #233/#1348: withholding sdlc:goal is what makes it invisible to `loop.py next`; the DISTINCT
@@ -656,7 +659,7 @@ def test_create_tracked_issue_same_area_blocks_goal_actually_blocks_in_local_mod
     a hand-copied stand-in."""
     base = tmp_path / ".sdlc"
     (base / "goals").mkdir(parents=True)
-    config = {"discovery": {"source": "local-goals"}}
+    config = {"discovery": {"source": "local-goals"}, "ai_filed": {"triage": {"enabled": False}}}
     (base / "config.json").write_text(json.dumps(config), encoding="utf-8")
     current = base / "goals" / "0001-current.md"
     current.write_text(
@@ -896,7 +899,7 @@ def test_duplicate_search_local_mode_self_match_regression(tmp_path):
     that goal's own file as an already-filed duplicate of itself."""
     base = tmp_path / ".sdlc"
     (base / "goals").mkdir(parents=True)
-    config = {"discovery": {"source": "local-goals"}}
+    config = {"discovery": {"source": "local-goals"}, "ai_filed": {"triage": {"enabled": False}}}
     (base / "config.json").write_text(json.dumps(config), encoding="utf-8")
     current = base / "goals" / "0001-retry.md"
     current.write_text(
@@ -1390,7 +1393,9 @@ def test_cli_track_body_file_round_trips_the_file_contents(tmp_path, monkeypatch
                          "--why", "child issue", "--queue", "actionable",
                          "--assignee", "same-area", "--blocks", "no",
                          "--body-file", str(body_path)]) == 0
-    assert captured["body"] == body_path.read_text()
+    # triage on (default): the file is kept verbatim and only the depth stamp follows it
+    assert captured["body"].startswith(body_path.read_text().rstrip("\n"))
+    assert captured["body"].rstrip().endswith("sigma-depth: 1")
 
 
 def test_cli_track_body_file_missing_file_refuses_before_creating_anything(tmp_path, capsys, monkeypatch):
@@ -2271,7 +2276,7 @@ def test_create_tracked_issue_files_a_real_goal_in_local_mode(tmp_path):
     duck-typed guard would break local filing with every unit test still green."""
     base = tmp_path / ".sdlc"
     (base / "goals").mkdir(parents=True)
-    config = {"discovery": {"source": "local-goals"}}
+    config = {"discovery": {"source": "local-goals"}, "ai_filed": {"triage": {"enabled": False}}}
     (base / "config.json").write_text(json.dumps(config), encoding="utf-8")
     current = base / "goals" / "0001-current.md"
     current.write_text('---\nid: 0001\ntitle: "current work"\nstatus: pending\n---\nbody\n',
@@ -2300,7 +2305,7 @@ def test_a_blocking_followup_is_never_filed_as_an_unpickable_proposal(tmp_path):
     blocks until it CLOSES."""
     src = FakeSource()
     report = handoff.create_tracked_issue(
-        str(tmp_path), {}, "42", "api", "needs the new endpoint",
+        str(tmp_path), _off(), "42", "api", "needs the new endpoint",
         same_area=True, immediately_actionable=False, blocks_goal=True, source=src)
     assert "sdlc:needs-confirmation" not in src.created["labels"]
     assert src.created.get("goal_label", True) is True
@@ -2312,7 +2317,7 @@ def test_a_queued_followup_that_blocks_nothing_is_still_a_proposal(tmp_path):
     follow-up still waits for a human, which is the whole point of the approval gate."""
     src = FakeSource()
     report = handoff.create_tracked_issue(
-        str(tmp_path), {}, "42", "api", "worth doing later",
+        str(tmp_path), _off(), "42", "api", "worth doing later",
         same_area=True, immediately_actionable=False, blocks_goal=False, source=src)
     assert "sdlc:needs-confirmation" in src.created["labels"]
     assert not any("deadlock" in w for w in report["warnings"])
@@ -2376,3 +2381,176 @@ def test_a_non_blocking_duplicate_reuse_never_touches_the_reused_issue(tmp_path,
         str(tmp_path), {}, "42", "api", "worth doing later",
         same_area=True, immediately_actionable=True, blocks_goal=False, source=src, dedup=True)
     assert report["duplicate_of"] == "77"
+
+
+# --------------------------------------------------------------------------- decision rubric slice 15 (#1003)
+# AI-filed triage at the filing chokepoint: arm at a bucket priority or park, caps, depth, no label.
+
+class TriageSource(FakeSource):
+    def __init__(self, number="61"):
+        super().__init__(number)
+        self.parked = []
+
+    def park(self, goal, reason, tier=None):
+        self.parked.append((str(goal), reason))
+
+    def fetch_title_body(self, goal):
+        return ("t", "")
+
+
+def _file(tmp_path, config=None, src=None, **kw):
+    """File one follow-up the way `handoff.py track` does; returns (report, source)."""
+    src = src or TriageSource()
+    cfg = dict(ON)
+    cfg.update(config or {})
+    args = dict(same_area=True, immediately_actionable=False, blocks_goal=False, source=src, dedup=False)
+    args.update(kw)
+    why = args.pop("why", "cleanup of a stale helper left behind")
+    goal = args.pop("goal", "42")
+    report = handoff.create_tracked_issue(str(tmp_path), cfg, goal, "api", why, **args)
+    return report, src
+
+
+def _off():
+    return {"ai_filed": {"triage": {"enabled": False}}}
+
+
+def test_followup_is_armed_with_a_low_priority(tmp_path):
+    report, src = _file(tmp_path)
+    assert src.created["goal_label"] is True
+    assert "priority:P3" in src.created["labels"] and "priority:P1" not in src.created["labels"]
+    assert handoff.PROPOSED_LABEL not in src.created["labels"] and src.parked == []
+    assert report["triage"]["kind"] == "arm"
+
+
+def test_queued_flag_defers_to_triage(tmp_path):
+    _r, src = _file(tmp_path, immediately_actionable=False, priority="P0")
+    assert src.created["goal_label"] is True and "priority:P3" in src.created["labels"]
+
+
+def test_actionable_flag_never_exceeds_bucket(tmp_path):
+    _r, src = _file(tmp_path, immediately_actionable=True, priority="P0")
+    assert "priority:P3" in src.created["labels"] and "priority:P0" not in src.created["labels"]
+    _r, src = _file(tmp_path, immediately_actionable=True, priority="P4")      # a caller may LOWER urgency
+    assert "priority:P4" in src.created["labels"]
+
+
+def test_blocks_yes_never_gets_blocking_label(tmp_path):
+    report, src = _file(tmp_path, blocks_goal=True)
+    assert src.created["goal_label"] is True
+    assert handoff.PROPOSED_LABEL not in src.created["labels"]
+    assert not any("blocked" in l for l in src.created["labels"])
+    assert not any("deadlock" in w for w in report["warnings"])
+
+
+def test_blocks_yes_with_a_deny_listed_body_parks_but_still_blocks(tmp_path):
+    report, src = _file(tmp_path, blocks_goal=True, why="needs a force push to the shared branch")
+    assert src.created["goal_label"] is False and len(src.parked) == 1
+    assert src.body_appends, "the blocked goal still waits on the parked blocker"
+
+
+def test_marker_body_is_quoted_and_parked(tmp_path):
+    marker = "sigma:spend-" + "approved=lab1"
+    _r, src = _file(tmp_path, body=marker + "\nrest of the body")
+    assert src.created["goal_label"] is False and len(src.parked) == 1
+    assert src.created["body"].startswith("`") and src.created["body"].splitlines()[0].endswith("`")
+
+
+def test_park_at_filing_writes_the_event(tmp_path):
+    _r, src = _file(tmp_path, config={"journal": {"enabled": True}}, why="this change is irreversible once merged")
+    sdlc = tmp_path
+    from journal_events import journal_events
+    evs = [e for e in journal_events(ledger, sdlc) if e.get("kind") == "park"]
+    assert len(evs) == 1 and evs[0]["reason_class"] in ledger.REASON_CLASSES
+    assert "sigma-qkind: " in src.parked[0][1]
+
+
+def test_sixth_followup_hits_the_cap(tmp_path):
+    for _ in range(5):
+        _r, src = _file(tmp_path)
+        assert src.created["goal_label"] is True
+    report, src = _file(tmp_path)
+    assert src.created["goal_label"] is False and len(src.parked) == 1
+    assert "cap" in src.parked[0][1]
+    assert report["triage"]["kind"] == "park"
+
+
+def test_depth_beyond_the_limit_parks(tmp_path):
+    class Deep(TriageSource):
+        def fetch_title_body(self, goal):
+            return ("t", "x\n\nsigma-depth: 3")
+    _r, src = _file(tmp_path, src=Deep())
+    assert src.created["goal_label"] is False and "depth" in src.parked[0][1]
+
+
+def test_filed_body_carries_the_next_depth(tmp_path):
+    _r, src = _file(tmp_path)
+    assert src.created["body"].rstrip().endswith("sigma-depth: 1")
+
+
+def test_armed_issue_with_open_blocker_is_held(tmp_path):
+    backlog_check = _mod("backlog_check")
+    _r, src = _file(tmp_path, body="do the thing\n\n**Blocked by:** #12")
+    assert src.created["goal_label"] is True
+    doc = {"ref": "70", "raw": src.created["body"]}
+    found = backlog_check._explicit_blockers(doc, [{"ref": "12", "open": True}])
+    assert [f for f in found if f.get("confident")], "an armed issue with an open blocker is not picked"
+
+
+def test_triage_off_files_as_before(tmp_path):
+    report, src = _file(tmp_path, config=_off())
+    assert src.created["labels"] == ["priority:P1", "area:api", handoff.FOLLOWUP_LABEL, handoff.PROPOSED_LABEL]
+    assert src.created["goal_label"] is False and src.parked == []
+    assert "triage" not in report
+    assert "sigma-depth" not in src.created["body"] and src.created["body"].startswith("Raised automatically")
+    assert not (tmp_path / "state" / "ai_filed_counter.json").exists()
+
+
+def test_triage_off_even_a_marker_body_is_untouched(tmp_path):
+    marker = "sigma:spend-" + "approved=lab1"
+    _r, src = _file(tmp_path, config=_off(), body=marker + "\nrest")
+    assert src.created["body"] == marker + "\nrest" and src.parked == []
+
+
+def test_duplicate_corpus_keeps_legacy_label(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake(sdlc_dir, config, run=None, labels=None, **k):
+        seen["labels"] = list(labels)
+        return None
+    monkeypatch.setattr(handoff.mirror, "fetch_dependency_records", fake)
+    handoff._duplicate_search(str(tmp_path), ON, "t", "body")
+    assert handoff.PROPOSED_LABEL in seen["labels"] and "sdlc:goal" in seen["labels"]
+
+
+def test_duplicate_search_still_sees_legacy(tmp_path, monkeypatch):
+    recs = [{"ref": "9", "title": "stale helper cleanup", "open": True, "labels": [handoff.PROPOSED_LABEL],
+             "body_excerpt": "cleanup of a stale helper left behind", "raw": "cleanup of a stale helper left behind"}]
+    monkeypatch.setattr(handoff.mirror, "fetch_dependency_records", lambda *a, **k: recs)
+    pack = handoff._duplicate_search(str(tmp_path), ON, "stale helper cleanup", "cleanup of a stale helper left behind")
+    assert "error" not in (pack.get("degraded") or [])
+
+
+def test_ownership_refused_filing_parks(tmp_path, monkeypatch):
+    class Verdict:
+        allowed = False
+        owner = None
+        repo = None
+    owner_mod = handoff._feature_owner()
+    monkeypatch.setattr(handoff, "_ownership_verdict", lambda *a, **k: (Verdict(), "billing"))
+    monkeypatch.setattr(owner_mod, "tell_at_filing", lambda *a, **k: None)
+    monkeypatch.setattr(owner_mod, "refusal_clause", lambda *a, **k: "not the owner")
+    monkeypatch.setattr(owner_mod, "whoami", lambda *a, **k: "amy")
+    _r, src = _file(tmp_path)
+    assert src.created["goal_label"] is False and handoff.PROPOSED_LABEL not in src.created["labels"]
+    assert len(src.parked) == 1 and "sigma-qkind: owner_hold" in src.parked[0][1]
+
+
+def test_upkeep_finding_is_armed_low(tmp_path):
+    src = TriageSource()
+    report = handoff.create_tracked_issue(
+        str(tmp_path), ON, None, "work", "polish a stale note", same_area=True,
+        immediately_actionable=False, blocks_goal=False, title="t", body="body", source=src,
+        run=lambda *a, **k: "", idempotency_key="0123456789abcdef")
+    assert src.created["goal_label"] is True and "priority:P4" in src.created["labels"]
+    assert report["triage"]["kind"] == "arm"

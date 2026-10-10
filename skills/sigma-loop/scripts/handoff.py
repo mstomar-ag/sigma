@@ -31,6 +31,7 @@ import importlib.util
 import pathlib
 import re
 import sys
+import time
 
 _HERE = pathlib.Path(__file__).resolve().parent
 #: #1204: dedup.py lives in the SIBLING skill sigma-scope, not this one -- the same cross-skill,
@@ -61,10 +62,18 @@ sources = _load("sources")
 mirror = _load("mirror")                    # #1204: mirror.fetch_dependency_records's own corpus
 dedup = _load_path(_DEDUP_PATH, "dedup")     # #1204: the reused duplicate-search engine (#917)
 feature_stamp = _load("feature_stamp")       # #1471: the unit an issue Sigma files inherits
+file_triage = _load("file_triage")           # #1003: arm or park an AI-filed issue at filing
+ai_filed_counter = _load("ai_filed_counter")  # #1003: bounded counter, caps and depth
+spend_approval = _load("spend_approval")     # #1003: quotes a permission marker on the first body line
+qkind = _load("qkind")                       # #1003: the declared kind of a park at filing
 
 DEFAULT_PRIORITY = "P1"
 DEPENDENCY_LABEL = "sdlc:dependency"
-#: #233: the DISTINCT label every queued (immediately_actionable=False) tracked issue carries. It is
+#: LEGACY (decision rubric, #1003): with triage on (the default) AI-filed issues are armed or parked at
+#: filing and never get this label. It is still written when triage is switched off
+#: (`ai_filed.triage.enabled` false) and still READ by the duplicate-corpus query and the blocker
+#: readers, so a leftover labelled issue stays inert. #233: the DISTINCT label every queued
+#: (immediately_actionable=False) tracked issue carried. It is
 #: what makes the loop-proposed-but-unpromoted set QUERYABLE — before this, such an issue was only
 #: identifiable by what it was MISSING (`sdlc:goal`), so nothing could surface the pending count and
 #: it grew unnoticed six times in one run (#224–#232). Orthogonal to `sdlc:goal`: it never causes a
@@ -250,7 +259,7 @@ def _ownership_verdict(sdlc_dir, config, goal, units, run):
     beats an inherited default -- so `handoff track --label feature:<x>` created directly-actionable
     work carrying a stranger's unit while this function was asked about `None` and answered
     "no question arises". Recorded `create_dependency` call before the fix: `goal_label=True`, the
-    unit label present, no `sdlc:needs-confirmation`, and zero warnings.
+    unit label present, no legacy `sdlc:needs-confirmation`, and zero warnings.
 
     EVERY DECLARED UNIT IS ASKED, AND THE FIRST REFUSAL WINS. Two rival `feature:` labels is a state
     `features.read` refuses outright, so there is no right one to pick -- and checking only the
@@ -286,7 +295,8 @@ def _duplicate_search(sdlc_dir, config, title, text, exclude_refs=None, run=None
 
     In github mode, `mirror.fetch_dependency_records` supplies a corpus deliberately NOT scoped by
     `discovery.github.assignee` (a follow-up filed by a different person/session must still be
-    found) and covering BOTH `discovery.github.goal_label` and the `sdlc:needs-confirmation` label (a queued
+    found) and covering BOTH `discovery.github.goal_label` and the legacy `sdlc:needs-confirmation` label,
+    kept as a READER so a leftover labelled issue is still matched (#1003; a queued
     follow-up withholds the goal label by design -- see PROPOSED_LABEL -- so a query restricted to
     it alone can never dedup one follow-up against another). When that corpus isn't available (not
     github mode, no `gh`, offline, any error -- `fetch_dependency_records` is fail-open and returns
@@ -424,6 +434,63 @@ def _upstream_runner(upstream_run, run):
     if run is not None:
         return _upstream().adapt_runner(run)
     return None
+
+
+def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, actionable):
+    """#1003: the triage outcome for one AI-filed issue, or None when triage is off (`ai_filed.triage.enabled`
+    exactly false), in which case NOTHING here runs and the filing is as it was. -> a dict with `kind`
+    ("arm" or "park"), `priority`, `reason`, `qkind`, `text` (marker line quoted) and `depth`.
+
+    A caller's `--queue` word does not decide: queued and actionable both defer to the bucket, and an
+    actionable caller `--priority` may only LOWER urgency below the bucket's, never raise it."""
+    decision = file_triage.decide(heading, text, {}, config)
+    if decision.kind == "queue":
+        return None
+    plan = {"kind": decision.kind, "priority": decision.priority, "reason": decision.reason,
+            "qkind": "needs_decision", "text": text, "depth": None}
+    text, quoted = spend_approval.scrub_marker(text)
+    plan["text"] = text
+    if plan["kind"] == "arm" and actionable and re.fullmatch(r"P[0-4]", str(priority)) \
+            and int(priority[1]) > int(plan["priority"][1]):
+        plan["priority"] = priority
+    lim = ai_filed_counter.limits(config)
+    path = pathlib.Path(str(sdlc_dir)) / lim["counter_path"]
+    counter = ai_filed_counter.load(path)
+    plan["counter_path"] = path
+    if not nogoal:
+        plan["depth"] = ai_filed_counter.ancestry_depth(goal, source) + 1
+    if quoted and plan["kind"] == "arm":
+        plan["kind"], plan["priority"], plan["reason"] = "park", None, "permission marker on the first body line was quoted"
+    if plan["kind"] == "arm" and ai_filed_counter.over_cap(counter, key_goal, _run_id(), config):
+        plan["kind"], plan["priority"], plan["reason"] = "park", None, "ai_filed cap reached or counter unreadable"
+    if plan["kind"] == "arm" and plan["depth"] is not None and plan["depth"] > lim["max_depth"]:
+        plan["kind"], plan["priority"], plan["reason"] = "park", None, "ai_filed depth limit reached"
+    return plan
+
+
+def _run_id():
+    try:
+        return _load("state").run_identity()
+    except Exception:                                          # noqa: BLE001 - attribution is best effort
+        return None
+
+
+def _triage_finish(sdlc_dir, config, source, plan, issue, key_goal, report):
+    """#1003: after the issue exists: park it when triage said so (comment carries the declared kind, and
+    a `park` event is appended), then count the filing. Never raises."""
+    if plan["kind"] == "park":
+        text = "Parked at filing: %s\n%s" % (plan["reason"], qkind.render_line(plan["qkind"]))
+        try:
+            source.park(str(issue), text)
+            ledger.safe_append(sdlc_dir, "park", str(issue), config=config, stream=ledger.EVENTS,
+                               reason_class="needs_decision", why=plan["reason"])
+        except Exception as exc:                               # noqa: BLE001 - never block the filing
+            report["warnings"].append("could not park #%s at filing (%s): it carries no goal label and "
+                                      "no parked label until a human looks at it" % (issue, exc))
+    if not ai_filed_counter.bump(plan["counter_path"], _run_id(), key_goal, time.time(), config):
+        report["warnings"].append("ai_filed counter could not be updated (unreadable or unwritable): "
+                                  "later filings are parked until it is fixed or removed")
+
 
 
 def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
@@ -718,7 +785,15 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                 report["warnings"].append(
                     "classified under unit %r: no unit was declared, inherited, or explicitly "
                     "targeted (discovery.no_dangling_goal.core, #2363)" % classified)
+        # #1003: triage decides arm or park at THIS chokepoint (the follow-up and upkeep-finding writers
+        # all pass through here). None = switched off: everything below is the legacy behaviour.
+        triage = _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority,
+                              immediately_actionable)
+        if triage is not None:
+            text = triage["text"]
         labels = [f"priority:{priority}", f"area:{area}", *extra_labels]
+        if triage is not None and triage["kind"] == "arm":
+            labels[0] = f"priority:{triage['priority']}"
         # #1347: guaranteed, not a caller-supplied extra — dedup against a caller that already
         # passed it explicitly (harmless either way, but a repeated label in one `gh` call is
         # needless noise).
@@ -749,7 +824,15 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         # "filed as a proposal" there would describe a filing that did not happen.
         ownership, ownership_unit = (None, None) if nogoal else _ownership_verdict(
             sdlc_dir, config, goal, feature_stamp.declared_units(labels, unit), run)
-        if ownership is not None:
+        if triage is not None:
+            # #1003: triage never arms an ownership-refused filing; it parks with kind owner_hold.
+            if ownership is not None:
+                triage.update(kind="park", priority=None, qkind="owner_hold",
+                              reason="a non-owner filing under a unit it does not own")
+            immediately_actionable = triage["kind"] == "arm"
+            report["triage"] = {"kind": triage["kind"], "priority": triage["priority"],
+                                "reason": triage["reason"]}
+        elif ownership is not None:
             immediately_actionable = False
         # #1393: `blocks_goal=True` together with `immediately_actionable=False` is INCOHERENT --
         # it asserts "real work is stalled behind this" and "nobody may pick this up" at the same
@@ -763,7 +846,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         # with a blocked goal and no blocker recorded anywhere, which is strictly worse. The
         # warning is what makes it visible rather than silent: the caller asked for a proposal and
         # got a goal, and they are told exactly why.
-        if blocks_goal and not immediately_actionable and ownership is None:
+        if triage is None and blocks_goal and not immediately_actionable and ownership is None:
             report["warnings"].append(
                 "filed #<new> as an actionable goal, not a proposal: it was requested as queued "
                 "(needs human approval) AND as blocking this goal, which cannot both be true -- a "
@@ -800,7 +883,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         # added at this single labels-assembly point (the one funnel every proposal passes through --
         # retro, `track --queue queued`, decompose), is what `/sigma-status` counts. Added ONLY here,
         # never for immediately_actionable=True: an actionable issue is a real goal, not a proposal.
-        if not immediately_actionable:
+        if triage is None and not immediately_actionable:
             labels.append(proposed_label(config))
         # goal_label is passed only when it DIFFERS from create_dependency's own default (True) --
         # not "goal_label=immediately_actionable" unconditionally -- so a source implementation that
@@ -916,6 +999,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
             # neither effect changes an outcome. Same family as the shared-boilerplate inflation
             # that made decompose_check opt out of the search entirely (`dedup=False`, above), just
             # far smaller.
+            if triage is not None and triage["depth"] is not None:
+                text = ai_filed_counter.stamp(text, triage["depth"])
             if unit:
                 stamped = feature_stamp.stamp_body(text, unit)
                 text, unit = stamped.body, stamped.unit
@@ -943,6 +1028,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
             # because a create that produced no number has nothing to label.
             if unit and report["issue"]:
                 report["warnings"] += feature_stamp.attach(source, report["issue"], unit)
+            if triage is not None and report["issue"]:
+                _triage_finish(sdlc_dir, config, source, triage, report["issue"], key_goal, report)
             # #1479: and the owner is told, HERE rather than at the gate, so the note can name the
             # issue they are being asked to promote. `tell_at_filing` writes nothing on an allowed
             # verdict, so the reading of the verdict stays in exactly one place -- the gate.
@@ -962,7 +1049,9 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                 # field compares against `ledger.actor`.
                 owner_module = _feature_owner()
                 report["warnings"].append(
-                    f"filed under unit {ownership_unit!r} as a proposal, not an actionable goal: "
+                    f"filed under unit {ownership_unit!r} as " + ("a parked owner hold" if triage is not None
+                                                                   else "a proposal")
+                    + ", not an actionable goal: "
                     + owner_module.refusal_clause(ownership, ownership_unit, ownership.repo,
                                                   "this account")
                     + ". "

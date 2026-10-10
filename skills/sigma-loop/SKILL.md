@@ -149,9 +149,9 @@ Then repeat until the helper says stop:
 
    **Blocked on someone else's AREA? Hand it off before you park** — use `handoff.py open`, THEN
    park this goal as normal. **Found something worth tracking that isn't a cross-area blocker? Never
-   call `gh issue create` directly.** Use `handoff.py track`, and **choose `--queue queued` — on an
-   autonomous or overnight run that is the DEFAULT posture for a non-blocking finding, not the
-   exception**; **`--blocks yes` is what drives `--queue actionable`.** Every flag, and how a kit
+   call `gh issue create` directly.** Use `handoff.py track`, and **choose `--queue queued`
+   for a non-blocking finding: triage arms it at a low priority or parks it**; **`--blocks yes`
+   is what drives `--queue actionable`.** Every flag, and how a kit
    finding is routed off this board: `references/filing.md`.
 
    As you complete each phase, **record it** so the issue timeline is the audit trail:

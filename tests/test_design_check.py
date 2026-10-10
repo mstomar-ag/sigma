@@ -106,7 +106,8 @@ def _design_cfg(tmp_path, mode=None, extra=None):
     gd = {"enabled": True}
     if mode is not None:
         gd["mode"] = mode
-    cfg = {"goal_design": gd, "ledger": {"actor": "rae"}}
+    # pre-triage filing path pinned here; design children are converted by a later slice (#1003)
+    cfg = {"goal_design": gd, "ledger": {"actor": "rae"}, "ai_filed": {"triage": {"enabled": False}}}
     if extra:
         cfg.update(extra)
     return _sdlc(tmp_path, cfg)
