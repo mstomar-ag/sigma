@@ -746,6 +746,14 @@
     },
     {
       "path": "skills/sigma-loop/scripts/feature_rebase.py",
+      "function": "_write_runtime_acks",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "upkeep.enabled",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_rebase.py",
       "function": "ack",
       "rule": "fs-write",
       "count": 2,
@@ -767,14 +775,6 @@
       "count": 1,
       "gate": "work.rebase_upkeep",
       "risk": "high"
-    },
-    {
-      "path": "skills/sigma-loop/scripts/feature_rebase.py",
-      "function": "_write_runtime_acks",
-      "rule": "fs-write",
-      "count": 2,
-      "gate": "upkeep.enabled",
-      "risk": "medium"
     },
     {
       "path": "skills/sigma-loop/scripts/feature_registry.py",
@@ -911,6 +911,22 @@
       "count": 1,
       "gate": "upkeep.enabled caller passes keep_days; removes only record-shaped files in the engine's own resolutions store, never a symlink, never outside it",
       "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_review.py",
+      "function": "prune",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "opt-in; upkeep.enabled caller passes keep_days; removes only manifest-shaped regular files older than the age limit under the review store, never a symlink, never outside it",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_review.py",
+      "function": "write_manifest",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "opt-in; upkeep.enabled; one create-once manifest per unit under the review store in the local state directory",
+      "risk": "medium"
     },
     {
       "path": "skills/sigma-loop/scripts/gh_api.py",
