@@ -1,0 +1,18 @@
+[
+  {
+    "pattern": ".sdlc/state/upkeep/reviews/",
+    "issue": "#950",
+    "decision": "directory rollup of the per-unit review manifests below it",
+    "pruner_or_cap": "directory rollup, no writer of its own: one directory per unit (keyed by the folded unit key); an empty unit directory is left behind and is bounded by the unit count",
+    "evidence": "skills/sigma-loop/scripts/feature_upkeep_review.py (STORE_REL, prune); the writer reaches the path through the shared symlink refusal in state.py",
+    "unscanned": true
+  },
+  {
+    "pattern": ".sdlc/state/upkeep/reviews/<unit>/<generation>.json",
+    "issue": "#950",
+    "decision": "bounded by unit count, by a per-unit generation cap and by age: one write-once manifest per review",
+    "pruner_or_cap": "prune(sdlc_dir, config, keep_days) in feature_upkeep_review.py removes manifest-shaped files older than keep_days (default 14), never a symlink; at most 50 generations per unit (another review is blocked until a prune), each manifest capped at 65536 characters, the prune scans at most 100000 entries; goal-keyed review pruning cannot own a unit-keyed store; owner the project; lever: delete a manifest file, which loses only the local record of that review",
+    "evidence": "tests/test_upkeep_review.py (test_prune_bounds_the_store, test_generation_cap_blocks_another_review, test_manifest_is_write_once_and_complete); writer is feature_upkeep_review.py write_manifest",
+    "unscanned": true
+  }
+]

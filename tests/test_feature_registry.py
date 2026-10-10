@@ -1449,6 +1449,8 @@ _NO_UNIT_NAME = {
     ("feature_upkeep_landing", "_load"),      # #936: the sibling importer, once per module
     ("feature_upkeep_landing", "prune"),      # #936: a directory sweep keyed by age; no unit name reaches it
     ("feature_upkeep_landing", "pending"),    # #936: a read-only listing of the whole store; no unit name reaches it
+    ("feature_upkeep_review", "_sibling"),   # #950: the reviewer route; the importer, no unit name
+    ("feature_upkeep_review", "write_manifest"),   # #950: the unit name reaches it only through store_dir, which refuses a bad name and folds the rest
     ("feature_upkeep_launcher", "_acquire_lock"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
     ("feature_upkeep_launcher", "_run"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
     ("feature_upkeep_launcher", "_sibling"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name

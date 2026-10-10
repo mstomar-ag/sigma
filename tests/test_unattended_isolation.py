@@ -23,6 +23,7 @@ REGISTERED_CALLERS = (
     "skills/sigma-loop/scripts/feature_landed.py",
     "skills/sigma-loop/scripts/feature_upkeep_pass.py",
     "skills/sigma-loop/scripts/feature_upkeep_launcher.py",
+    "skills/sigma-loop/scripts/feature_upkeep_review.py",
     "skills/sigma-loop/scripts/feature_upkeep_job.py",
     "skills/sigma-loop/scripts/feature_upkeep_sched.py",
 )

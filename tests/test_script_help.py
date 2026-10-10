@@ -77,6 +77,7 @@ LIBRARY_ONLY = {
     "feature_upkeep_landing",
     "feature_upkeep_pass",
     "feature_upkeep_launcher",
+    "feature_upkeep_review",
     "feature_upkeep_sched",
 }
 

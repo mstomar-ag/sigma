@@ -140,6 +140,13 @@ EXTERNAL_CONTROLS = (
                   "generation, so a re-review needs a new one; a post is refused unless the "
                   "evidence is the goal's current generation and the PR head is unchanged.",
      "readme": "Independent review (advisory)"},
+    {"control": "Upkeep conflict reviewer route", "kind": "advice", "hosts": "claude-code",
+     "enabled_by": ("upkeep.enabled", "upkeep.conflicts.resolve"), "settings": (),
+     "mechanism": "`feature_upkeep_review.py` asks the reviewer to judge a resolved unit conflict in a second headless "
+                  "session given a brief without the resolver's transcript; the route is `verified: false`, was never "
+                  "run against the real command line, and cannot prove the resolver did not influence the reviewer. "
+                  "It can only add a refusal; a block, a bad reply, a timeout or a moved tree all stop the push",
+     "condition": "needs a validated model id; the shipped catalog holds only a placeholder, so the route stays closed"},
     {"control": "Irreversible actions park", "kind": "advice", "hosts": "all",
      "enabled_by": (), "settings": ("gates.irreversible_actions", "gates.on_block"),
      "mechanism": "the loop's instructions ask the agent to park rather than run a "
