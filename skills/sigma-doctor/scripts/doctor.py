@@ -2383,7 +2383,6 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
             "commits -- see docs/branching-model.md §3b for the resolution, or set "
             '`work.rebase_upkeep: "off"` while it stands.'))
 
-<<<<<<< HEAD
     # #936: a unit landing left pending (upkeep part C). Gated on the upkeep block and read-only: a closed gate
     # emits nothing, so a project without the block sees an unchanged check list.
     try:
@@ -2393,7 +2392,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
         landing_row = None
     if landing_row:
         out.append(_chk(landing_row["name"], landing_row["ok"], landing_row["fix"]))
-=======
+
     # Part B, level 3: a unit whose rebase was PARKED on a conflict nobody resolved. Its own marker file and its own
     # wording -- never the would-drop row above, which would call a park "N tracked paths removed". Emitted only when a
     # park is on record (the marker exists only when the upkeep gate was open), so a project that never opted in sees
@@ -2404,7 +2403,6 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
             f"parked since {at} ({age}) on a conflict in {files} file(s); nothing was pushed and the unit stays behind "
             "its base until a person resolves it -- the finding filed for it carries a brief. A later clean pass "
             "clears this row and closes the finding."))
->>>>>>> fork/feature/branch-upkeep
 
     # A shared site-packages holds one slot per import name. A local `pip install [-e] <path>` bakes
     # that path in permanently, so on a machine running several worktrees of the same repo (this

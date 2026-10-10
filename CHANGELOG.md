@@ -4,9 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-<<<<<<< HEAD
 - Upkeep part C, slice 5: read-back classifier and pending-landing record (#936).
-=======
 - **Upkeep part B, slice 6: unit conflicts are parked, with one capped finding per conflict (#946).** Behind the
   existing upkeep opt-in only. A unit rebase that stops on a conflict nobody resolves now ends with the new `parked`
   outcome: nothing is pushed, a capped brief (files, commits, bytes and time; no network call; marker strings and kit paths
@@ -17,7 +15,6 @@ All notable changes to Sigma are recorded here, newest first.
   (never a reused one, never one a live slot still points at), and the doctor shows an age row from the park's own marker.
   With the opt-in closed every existing path is unchanged.
 
->>>>>>> fork/feature/branch-upkeep
 - Upkeep part C, slice 3: test substrate for REST merges (#935).
 - **Upkeep part C, slice 7: cross-repo unit check (#934).** A unit-keyed sibling lookup
   (`cross_repo.unit_sibling_check`) and its guard (`work.unit_sibling_guard`, registered in the
