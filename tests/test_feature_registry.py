@@ -1437,6 +1437,7 @@ _NO_UNIT_NAME = {
     ("feature_stamp", "_load"),
     ("feature_sync", "_load"),
     ("feature_upkeep_drift", "_load"),        # #919: the sibling importer, once per module
+    ("feature_upkeep_pass", "_sibling"),      # #922: the sibling importer, once per module
     ("feature_upkeep_state", "_load"),        # #919: the sibling importer, once per module
     ("feature_upkeep_resolution", "_load"),           # #945: the sibling importer, once per module
     ("feature_upkeep_resolution", "prune"),   # #945: a directory sweep keyed by age; no unit name reaches it
