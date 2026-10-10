@@ -745,6 +745,22 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_landing.py",
+      "function": "finish",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "upkeep.enabled and a merged read-back verdict; removes only the one record of the unit it was handed inside the pending-landing store, after the unit key passes the name guard",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_landing.py",
+      "function": "prune",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "upkeep.enabled caller passes keep_days; removes only record-shaped and temp-shaped files older than the age limit in the pending-landing store, never a symlink, never outside it",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_upkeep_resolution.py",
       "function": "post_comment",
       "rule": "gh-api-write",
