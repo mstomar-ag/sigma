@@ -68,6 +68,7 @@ LIBRARY_ONLY = {
     "conflict_state",
     "feature_park",
     "qkind",
+    "landing_preflight",
     "feature_upkeep_prove",
     "conflict_proof",
     "unattended_git",

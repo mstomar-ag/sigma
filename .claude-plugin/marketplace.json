@@ -8,7 +8,7 @@
     {
       "name": "sigmaloop",
       "description": "Sigma Loop: guardrails + an overnight autopilot for your AI coding agent, an SDLC loop that will not finish a goal without a recorded plan, plan review and review, on a GitHub Projects board.",
-      "version": "1.0.6",
+      "version": "1.0.7",
       "source": "./"
     }
   ]

@@ -1077,6 +1077,43 @@ def _graphql_capability_rows(base, cfg, env=None):
                      "SIGMA_GH_GRAPHQL=on|off." % (res.get("source"), res.get("reason")))}]
 
 
+def _landing_rows(base, cfg, run, which):
+    """#974: branch-creation ruleset rows. Silent when fine; one MISSING row per blocking ruleset (named, never its
+    id); one hand-built advisory row (ok True, text shown) when anything could not be checked. Gated by the caller on
+    work.enabled, not cheap_only. The GitHub reply shape is assumed, not seen live. Never raises."""
+    try:
+        if not which("gh"):
+            return []                        # the gh preflight rows already report that
+        lp = _load_loop_script("landing_preflight")
+        work = _block(cfg, "work")
+        remote = work.get("remote") or "origin"
+        prefix = work.get("branch_prefix") or "sdlc/"
+        reason = ""
+        slug = None
+        try:
+            url = str(run(["git", "-C", str(base.parent), "remote", "get-url", str(remote)]) or "").strip()
+            slug = _load_loop_script("feature_sync").slug_from_remote_url(url) if url else None
+        except Exception:                    # noqa: BLE001
+            slug = None
+        if not slug:
+            reason = "the work remote has no readable owner/name"
+            blockers, unknown = [], False
+        else:
+            blockers, unknown = lp.ruleset_blockers(_raising_gh(run), slug, prefix)
+            if unknown:
+                reason = "a rules read failed, was malformed, or lacked the bypass flag"
+        rows = [_chk("branch creation under %s allowed (ruleset %s)" % (prefix, b["name"]), False,
+                     "ruleset %s restricts creating or updating %s* branches and current_user_can_bypass is not "
+                     "true for this account (%s). Ask an admin to add this account as a bypass actor, or point "
+                     "work.remote / work.branch_prefix elsewhere." % (b["name"], prefix, b["bypass"]))
+                for b in blockers]
+        if reason:
+            rows.append({"name": "branch-creation rulesets: could not check", "ok": True, "fix": reason})
+        return rows
+    except Exception:                        # noqa: BLE001 - a detector that cannot run says nothing
+        return []
+
+
 def _awaiting_merge_row(sdlc_dir, now=None):
     """#255 LIVENESS: one row for every goal awaiting a merge. A goal that waits reports no error,
     ever -- an armed auto-merge whose required check failed never lands, a PR that can no longer be
@@ -2534,6 +2571,8 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     if _block(cfg, "work").get("enabled") or disc.get("source") == "github":
         out.extend(_preflight_rows(base, cfg, run, which, injected, cheap_only))
         out.extend(_graphql_capability_rows(base, cfg))     # #801: advisory, detection only
+        if _block(cfg, "work").get("enabled") and not cheap_only:
+            out.extend(_landing_rows(base, cfg, run, which))        # #974: branch-creation rulesets
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
     out.extend(_resolver_rows(base, cfg, which, cheap_only))
     if disc.get("source") == "github":
@@ -2963,6 +3002,17 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                         "verify.command has a RELATIVE .venv/venv/node_modules path — but work.enabled "
                         "runs it in a fresh worktree with NONE of your installed deps (fails exit=127). "
                         "Use an absolute interpreter path, a venv activated on PATH, or a wrapper script."))
+
+    # #974: the first word of the verify command must exist (a cd-prefixed or otherwise opaque command is never checked).
+    if vcmd:
+        try:
+            gone = _load_loop_script("landing_preflight").interpreter_missing(vcmd, which)
+        except Exception:                    # noqa: BLE001 - a check that cannot run says nothing
+            gone = None
+        if gone:
+            out.append(_chk("verify.command interpreter is on PATH", False,
+                            "%s is not on PATH or not an executable file -> install it, or put an absolute "
+                            "interpreter path in verify.command." % gone))
 
     # #255 LIVENESS: goals `record review` left awaiting a merge. Local reads only (the work
     # records), so it is not gated by `cheap_only`; silent (no row) when work is off.
