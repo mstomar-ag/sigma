@@ -33,6 +33,7 @@ KNOWN_READERS = {
     "skills/sigma-loop/scripts/feature_upkeep_landing.py": "landing helper behind the project door",
     "skills/sigma-loop/scripts/unit_completion.py": "unit completion report, closed gate keeps the old report",
     "skills/sigma-rebase/scripts/rebase_brief.py": "attended rebase brief, closed gate keeps the old brief",
+    "skills/sigma-loop/scripts/feature_upkeep_launcher.py": "resolver launcher, checks the project door and the resolve level itself; closed returns before any read",
 }
 
 
