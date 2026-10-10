@@ -238,3 +238,27 @@ def test_readiness_tool_write_metadata_is_specific():
         "explicit file subcommand; OWNER/sigma-drill- name fullmatch; repository read back and "
         "must be private; declared --max-usd; never run by Sigma", "high")
     assert mod._metadata("tools/readiness/injection_drill.py", "_write_json", "fs-write")[1] == "medium"
+
+
+def test_931_gh_api_landing_write_helpers_are_seen_and_read_helpers_are_not(tmp_path):
+    mod = _module()
+    for name in ("merge_pr_pinned", "create_pr_nondraft"):
+        assert name in mod._GH_API_WRITES
+    source = tmp_path / "caller.py"
+    source.write_text('import gh_api\n\ndef land():\n    gh_api.merge_pr_pinned(run, "o/r", 1, "x", merge_method="merge")\n'
+                      '    gh_api.create_pr_nondraft(run, "t", "b", "h", "m", "o/r")\n'
+                      '    gh_api.commit_parents(run, "o/r", "x")\n    gh_api.branch_rules(run, "o/r", "m")\n'
+                      '    gh_api.repo_settings(run, "o/r")\n')
+    rows = mod.scan_paths(tmp_path, [source])
+    assert [(r["function"], r["rule"], r["count"]) for r in rows] == [("land", "gh-api-write", 2)]
+
+
+def test_931_gh_api_runner_inventory_gate_text_is_pinned():
+    # The ratchet checks presence and a non-empty gate, not the words; this pins the words (D-19).
+    inv = json.loads((ROOT / "docs" / "launch" / "write-surface.json").read_text())["entries"]
+    rows = [e for e in inv if e["path"] == "skills/sigma-loop/scripts/gh_api.py" and e["rule"] == "gh-api-write"]
+    assert rows and all(e["risk"] in {"low", "medium", "high"} for e in rows)
+    text = " ".join(e["gate"] for e in rows)
+    for phrase in ("merge_pr_pinned", "40-hex", "explicit merge method", "no auto-merge", "no branch-delete",
+                   "no caller yet"):
+        assert phrase in text, phrase

@@ -572,3 +572,21 @@ def test_child_receipt_refuses_a_correctly_sized_non_hex_merge_sha(tmp_path):
     # Non-vacuity: a real hex SHA of the same length still works.
     child = merge_observation.child_receipt(parent, {"merge_sha": "b" * 40, "github_merged_at": "2026-01-01T00:00:00Z"})
     assert json.loads(child)["merge_sha"] == "b" * 40
+
+
+def test_931_landing_writer_is_allowlisted_and_an_unknown_writer_is_not():
+    import importlib.util, pathlib
+    path = pathlib.Path(__file__).resolve().parent.parent / "skills" / "sigma-loop" / "scripts" / "merge_observation.py"
+    spec = importlib.util.spec_from_file_location("merge_observation_931", path)
+    mo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mo)
+    assert "verify_merge.land_unit" in mo._WRITERS
+    assert {"work.pr", "unit_completion._draft", "verify_merge.ensure_landing_pr"} <= set(mo._WRITERS)
+    facts = dict(canonical_repository_id="r", owner_kind="unit", owner_id="feature/u", goal=None, head_ref="feature/u",
+                 base_ref="main", pr_number=1, pr_node_id="PR_1", creating_writer="verify_merge.land_unit",
+                 pr_created_at="2026-01-01T00:00:00Z")
+    assert mo.parent_receipt(facts)
+    facts["creating_writer"] = "somebody.else"
+    import pytest
+    with pytest.raises(ValueError):
+        mo.parent_receipt(facts)

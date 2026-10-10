@@ -2,9 +2,11 @@
 
 WHAT IT IS. A pure function over an already-loaded config dict (and an injectable environment mapping). It decides
 whether the optional, automatic upkeep of long-lived feature branches may run at all. It does no I/O and spawns
-nothing, and nothing in the product calls it yet: this release ships the gate, the template block that documents it,
-and the test that proves a closed gate does nothing. Projects scaffolded earlier never receive the block (the scaffold
-never overwrites an existing config); they copy it in if they want it.
+nothing. So far two things read the block through it: the pick-time rebase pass of feature_rebase.py, which asks the
+project door before it pushes a unit branch (to keep the old tip as a backup ref), and the restore and prune
+commands of feature_backup.py; the rest of the block is read by later releases. A test proves a closed gate does
+nothing. Projects scaffolded earlier never receive the block (the scaffold never overwrites an existing config);
+they copy it in if they want it.
 
 TOTAL. No input makes it raise: a missing or non-object config, a non-object block, a wrong type, NaN, infinity, a
 huge integer, an unknown key or an oversized block all read CLOSED. A closed reading carries the DEFAULTS as its
@@ -78,6 +80,7 @@ SCHEMA = {   # dotted key -> spec; the lo/hi are guard rails against typos, not 
     "backup.keep_last": {"kind": "int", "lo": 1, "hi": 1000},
     "conflicts.resolve": {"kind": "enum", "values": ("off", "mechanical", "agent")},
     "conflicts.mechanical_without_verify": {"kind": "bool"},
+    "backup.former_prefixes": {"kind": "name_list", "min_items": 0},
 }
 DEFAULTS = {   # the one place the defaults live; the shipped template must equal this
     "enabled": False, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
@@ -86,6 +89,7 @@ DEFAULTS = {   # the one place the defaults live; the shipped template must equa
     "auto.target_hours": 12, "auto.floor": 3, "auto.ceiling": 40, "verify.clean_rebase": False,
     "verify.timeout_minutes": 60, "backup.keep_days": 14, "backup.keep_last": 5,
     "conflicts.resolve": "off", "conflicts.mechanical_without_verify": False,
+    "backup.former_prefixes": [],
 }
 CROSS_CHECKS = (   # run only after every per-key check, and only when the keys involved passed theirs
     (("auto.floor", "auto.ceiling"), lambda floor, ceiling: floor <= ceiling,

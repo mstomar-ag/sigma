@@ -1,0 +1,10 @@
+[
+  {
+    "pattern": "refs/sigma/backup/<unit>/<stamp>",
+    "issue": "#921",
+    "decision": "capped (a remote ref namespace, pruned by age and count; the pruner is a manual command until the scheduler slice)",
+    "pruner_or_cap": "feature_backup.py prune_backups keeps the newest backup.keep_last (default 5) of each unit and removes the rest only when older than backup.keep_days (default 14), at most 200 per call; until a scheduler calls it only a person typing the prune command runs it, so with upkeep enabled the namespace gains one ref per rewritten unit tip between runs; a unit keeps at least its newest 5 backups for as long as the remote exists",
+    "evidence": "skills/sigma-loop/scripts/feature_rebase.py _pushed hands the unit push to skills/sigma-loop/scripts/feature_backup.py push_unit, which creates the ref when the upkeep gate is open, and prune_backups removes it; the namespace lives on the remote, not in a local store, so the local scan cannot see its writer",
+    "unscanned": true
+  }
+]

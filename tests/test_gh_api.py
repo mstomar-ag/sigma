@@ -1579,3 +1579,214 @@ def test_add_assignees_get_user_5xx_follows_the_idempotent_table():
     g.add_assignees(run, 7, ["@me"], repo="o/r", env={})
     assert [c for c in run.calls if c[0] == "issue"] == [
         ["issue", "edit", "7", "--repo", "o/r", "--add-assignee", "@me"]]
+
+
+# ---------------------------------------------------------------- #931: landing write plumbing (upkeep part C, slice 2)
+
+SHA = "a" * 40
+SHA2 = "b" * 40
+
+
+def test_merge_pr_pinned_argv_is_explicit_and_pin_last():
+    g = _mod("gh_api")
+    run = Fake(json.dumps({"merged": True, "sha": SHA2}))
+    out = g.merge_pr_pinned(run, "o/r", 11, SHA, merge_method="merge")
+    assert run.calls == [["api", "repos/o/r/pulls/11/merge", "--method", "PUT", "-f", "merge_method=merge",
+                          "-f", "sha=" + SHA]]
+    assert g.merge_reply_sha(out) == SHA2
+    assert not any("auto" in a or "delete" in a for a in run.calls[0])
+
+
+@pytest.mark.parametrize("kw", [
+    dict(sha=""), dict(sha=None), dict(sha="abc123"), dict(sha="A" * 40), dict(sha="g" * 40), dict(sha=SHA + "0"),
+    dict(merge_method="squash-ish"), dict(merge_method=""), dict(repo=""), dict(repo=None), dict(repo="{owner}/{repo}"),
+    dict(repo="norepo"), dict(number=0), dict(number=True), dict(number="11"),
+], ids=lambda kw: "-".join("%s=%r" % kv for kv in kw.items()))
+def test_merge_pr_pinned_refuses_before_any_call(kw):
+    g = _mod("gh_api")
+    args = dict(repo="o/r", number=11, sha=SHA, merge_method="merge")
+    args.update(kw)
+    run = Fake("{}")
+    with pytest.raises(g.GhApiError) as ei:
+        g.merge_pr_pinned(run, args["repo"], args["number"], args["sha"], merge_method=args["merge_method"])
+    assert ei.value.kind == "invalid" and run.calls == []
+
+
+def test_merge_pr_pinned_method_is_keyword_only_and_required():
+    g = _mod("gh_api")
+    with pytest.raises(TypeError):
+        g.merge_pr_pinned(Fake("{}"), "o/r", 11, SHA)
+    with pytest.raises(TypeError):
+        g.merge_pr_pinned(Fake("{}"), "o/r", 11, SHA, "merge")
+
+
+@pytest.mark.parametrize("reply", ["[]", "null", json.dumps({"merged": True, "sha": "xyz"}),
+                                   json.dumps({"merged": True, "sha": 5})], ids=["list", "null", "bad-sha", "int-sha"])
+def test_merge_pr_pinned_rejects_malformed_replies(reply):
+    g = _mod("gh_api")
+    with pytest.raises(g.GhApiError):
+        g.merge_pr_pinned(Fake(reply), "o/r", 11, SHA, merge_method="merge")
+
+
+def test_merge_reply_without_sha_reads_none_and_failure_keeps_class():
+    g = _mod("gh_api")
+    assert g.merge_reply_sha({"merged": False, "message": "x"}) is None
+    exc = RuntimeError("gh failed")
+    exc.hint = "gh: Head branch was modified. Review and try the merge again. (HTTP 409)"
+    with pytest.raises(g.GhApiError) as ei:
+        g.merge_pr_pinned(Fake(exc), "o/r", 11, SHA, merge_method="merge")
+    assert ei.value.status == 409
+
+
+def test_commit_parents_argv_and_validation():
+    g = _mod("gh_api")
+    run = Fake(json.dumps({"sha": SHA, "parents": [{"sha": SHA2}, {"sha": "c" * 40}]}))
+    assert g.commit_parents(run, "o/r", SHA) == [SHA2, "c" * 40]
+    assert run.calls == [["api", "repos/o/r/commits/" + SHA, "--method", "GET"]]
+    for bad in ('{"parents": null}', '{"parents": [{"sha": "x"}]}', "[]", '{"parents": ["x"]}'):
+        with pytest.raises(g.GhApiError):
+            g.commit_parents(Fake(bad), "o/r", SHA)
+    run = Fake("{}")
+    with pytest.raises(g.GhApiError):
+        g.commit_parents(run, "o/r", "main")
+    with pytest.raises(g.GhApiError):
+        g.commit_parents(run, None, SHA)
+    assert run.calls == []
+
+
+def test_branch_rules_and_queue_detection():
+    g = _mod("gh_api")
+    run = Fake(json.dumps([{"type": "pull_request"}, {"type": "merge_queue"}]))
+    rules = g.branch_rules(run, "o/r", "main")
+    assert run.calls == [["api", "repos/o/r/rules/branches/main", "--method", "GET"]]
+    assert g.rules_have_merge_queue(rules) is True
+    assert g.rules_have_merge_queue([{"type": "pull_request"}]) is False
+    assert g.rules_have_merge_queue([]) is False
+    run = Fake("[]")
+    g.branch_rules(run, "o/r", "feature/a b")
+    assert run.calls[0][1] == "repos/o/r/rules/branches/feature%2Fa%20b"
+    with pytest.raises(g.GhApiError):
+        g.branch_rules(Fake("{}"), "o/r", "main")
+    with pytest.raises(g.GhApiError):
+        g.branch_rules(Fake("[]"), "", "main")
+    with pytest.raises(g.GhApiError):
+        g.rules_have_merge_queue({"type": "merge_queue"})
+
+
+@pytest.mark.parametrize("payload,want", [({"delete_branch_on_merge": True}, True),
+                                          ({"delete_branch_on_merge": False}, False),
+                                          ({}, None), ({"delete_branch_on_merge": "true"}, None)])
+def test_repo_settings_and_delete_branch_on_merge(payload, want):
+    g = _mod("gh_api")
+    run = Fake(json.dumps(payload))
+    got = g.repo_settings(run, "o/r")
+    assert run.calls == [["api", "repos/o/r", "--method", "GET"]]
+    assert g.delete_branch_on_merge(got) is want
+    with pytest.raises(g.GhApiError):
+        g.repo_settings(Fake("[]"), "o/r")
+
+
+def test_create_pr_nondraft_sends_typed_false_and_requires_repo():
+    g = _mod("gh_api")
+    run = Fake('{"number": 12}')
+    assert g.create_pr_nondraft(run, "T", "B", "feature/u", "main", "o/r") == {"number": 12}
+    assert run.calls == [["api", "repos/o/r/pulls", "--method", "POST", "-f", "title=T", "-f", "body=B",
+                          "-f", "head=feature/u", "-f", "base=main", "-F", "draft=false"]]
+    run = Fake("{}")
+    with pytest.raises(g.GhApiError):
+        g.create_pr_nondraft(run, "T", "B", "h", "main", None)
+    assert run.calls == []
+
+
+class _Proc:
+    def __init__(self, rc=0, out="", err=""):
+        self.returncode, self.stdout, self.stderr = rc, out, err
+
+
+def _runner(g, outcome, **kw):
+    seen = []
+
+    def fake(argv, **k):
+        seen.append((argv, k))
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return g.bounded_runner(popen=fake, **kw), seen
+
+
+def test_bounded_runner_binds_cwd_timeout_and_returns_stdout():
+    g = _mod("gh_api")
+    run, seen = _runner(g, _Proc(0, '{"a": 1}'), cwd="/some/dir", timeout=7)
+    assert run(["api", "user"]) == '{"a": 1}'
+    argv, k = seen[0]
+    assert argv == ["gh", "api", "user"] and k["cwd"] == "/some/dir" and k["timeout"] == 7
+    assert k["capture_output"] is True and k["text"] is True
+
+
+def test_bounded_runner_keeps_exit_code_status_and_kind():
+    g = _mod("gh_api")
+    run, _ = _runner(g, _Proc(1, "", "gh: Not Found (HTTP 404)"))
+    with pytest.raises(g.GhApiError) as ei:
+        run(["api", "x"])
+    assert (ei.value.returncode, ei.value.status, ei.value.kind) == (1, 404, "not_found")
+    assert "Not Found" in ei.value.hint
+    run, _ = _runner(g, _Proc(1, "", "gh: boom (HTTP 502)"))
+    with pytest.raises(g.GhApiError) as ei:
+        run(["api", "x"])
+    assert ei.value.kind == "server" and ei.value.returncode == 1
+
+
+def test_bounded_runner_timeout_is_transport_and_missing_binary_is_other():
+    g = _mod("gh_api")
+    run, _ = _runner(g, subprocess.TimeoutExpired(["gh"], 5))
+    with pytest.raises(g.GhApiError) as ei:
+        run(["api", "x"])
+    assert ei.value.kind == "transport" and ei.value.returncode is None and ei.value.status is None
+    run, _ = _runner(g, FileNotFoundError("gh"))
+    with pytest.raises(g.GhApiError) as ei:
+        run(["api", "x"])
+    assert ei.value.kind == "other" and ei.value.returncode is None and "gh" in ei.value.hint
+
+
+def test_bounded_runner_rejects_bad_timeout():
+    g = _mod("gh_api")
+    for bad in (0, -1, True, "5", None):
+        with pytest.raises(ValueError):
+            g.bounded_runner(timeout=bad)
+
+
+def test_call_carries_returncode_from_the_wrapped_failure():
+    g = _mod("gh_api")
+    exc = RuntimeError("x")
+    exc.returncode = 4
+    exc.hint = "gh: nope (HTTP 422)"
+    with pytest.raises(g.GhApiError) as ei:
+        g.view_pr(Fake(exc), 1, repo="o/r")
+    assert ei.value.returncode == 4 and ei.value.kind == "invalid"
+    with pytest.raises(g.GhApiError) as ei:
+        g.view_pr(Fake(RuntimeError("y")), 1, repo="o/r")
+    assert ei.value.returncode is None
+
+
+def test_gate_closed_existing_pr_ops_are_byte_identical():
+    g = _mod("gh_api")
+    run = Fake("{}")
+    g.create_pr(run, "T", "B", head="h", base="b")
+    g.view_pr(run, 3)
+    g.merge_pr(run, 3)
+    g.merge_pr(run, 3, sha="")
+    assert run.calls == [
+        ["api", "repos/{owner}/{repo}/pulls", "--method", "POST", "-f", "title=T", "-f", "body=B", "-f", "head=h",
+         "-f", "base=b"],
+        ["api", "repos/{owner}/{repo}/pulls/3", "--method", "GET"],
+        ["api", "repos/{owner}/{repo}/pulls/3/merge", "--method", "PUT", "-f", "merge_method=squash"],
+        ["api", "repos/{owner}/{repo}/pulls/3/merge", "--method", "PUT", "-f", "merge_method=squash"],
+    ]
+    assert _mod("gh_api").GhApiError("t").returncode is None
+
+
+def test_gh_api_adds_no_literal_gh_pr_list_and_no_graphql_string():
+    src = (S / "gh_api.py").read_text()
+    assert '"gh", "pr"' not in src and '"gh", "issue"' not in src
+    assert src.count('"graphql"') == 1

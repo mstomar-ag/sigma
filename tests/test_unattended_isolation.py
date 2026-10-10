@@ -17,6 +17,11 @@ import unattended_support as support
 #: Relative paths of the two modules; they are exempt from the caller scan by PATH, never by file name.
 OWN = ("skills/sigma-loop/scripts/bounded_run.py", "skills/sigma-loop/scripts/unattended_git.py")
 #: Siblings the new modules may load. Anything else (the loop script, autowatch, the ledger, the work script) is not.
+#: Registered callers, exempt by PATH: the shared "landed" predicate (#930) builds its read-only runner on `bounded_run`
+#: and is itself a library with no caller until its gated callers ship.
+REGISTERED_CALLERS = (
+    "skills/sigma-loop/scripts/feature_landed.py",
+)
 ALLOWED_LOADS = {"shell_policy", "bounded_run"}
 #: Names of the one place a claim is armed and its helpers.
 ARMING = {"_ensure_claimed", "_ARMS_CLAIM", "_ensure_unit_tracking", "safe_append", "claim_lock"}
@@ -48,7 +53,7 @@ def callers(root):
     for pattern in ("skills/**/*.py", "hooks/**/*.py", "tools/**/*.py", "evals/**/*.py", "contract/**/*.py"):
         for path in sorted(root.glob(pattern)):
             rel = path.relative_to(root).as_posix()
-            if rel in OWN or "node_modules" in path.parts:
+            if rel in OWN or rel in REGISTERED_CALLERS or "node_modules" in path.parts:
                 continue
             found += ["%s:%d" % (rel, line) for line, _stem in references(path.read_text(encoding="utf-8"), set(support.NAMES))]
     return sorted(found)

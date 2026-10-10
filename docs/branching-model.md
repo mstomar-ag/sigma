@@ -1493,12 +1493,89 @@ ops branch: its source side is the same fixed literal `HEAD`, and its destinatio
 `sdlc-ledger` ops-branch ref rather than any `feature/<name>` ref, so it cannot name a unit
 branch at all. All three are audited, not merely absent-mindedly safe.
 
+**The one exception: backup refs.** An optional part of upkeep (section 13c, off by default) keeps the old tip of
+a rewritten unit branch under `refs/sigma/backup/<unit>/<UTC stamp>`. Those are not `feature/<name>` branches,
+so the invariant above is unchanged for them, and the guard states its rule for that namespace in one sentence,
+which this section carries verbatim:
+
+> The never-delete guard pins every delete-shaped call it can see under skills/ and hooks/; under refs/sigma/backup/ the only sanctioned automatic deletion is a prune by literal prefix.
+
+Two places in `skills/sigma-loop/scripts/feature_backup.py` are pinned beside the older ones:
+`_atomic_leased_push`, which builds the two refspecs of the atomic push (the source of each is the literal `HEAD`
+or a full object name that was checked, never empty), and `_delete_chunk`, the prune, which uses the `--delete`
+flag with one lease per ref and names only refs that parse as exactly `<prefix><unit>/<stamp>`. When upkeep is
+enabled the engine's `_pushed` hands the unit push to `_atomic_leased_push`, whose source is the same literal
+`HEAD`; `_pushed`'s own refspec line, used when upkeep is off, is unchanged. Nothing else in Sigma deletes under that
+namespace, and nothing deletes a `feature/<name>` branch. Until a pass calls the prune unattended, the sentence is a
+rule for that future caller: today a person runs it.
+
 **The guard.** `tests/test_no_autonomous_feature_branch_deletion.py` makes this checked rather than
 observed: a structural scan pins the exact, reviewed set of branch/ref-delete-shaped (and
 delete-capable) call sites across every file the kit tracks under `skills/` and `hooks/` — a new
 one appearing anywhere fails the pin immediately, by file, function and kind — plus a behavioral
 proof that `finish()` and `merge()` never name a `feature/<name>` branch in a delete-shaped call
 even when the very goal being finished declared that unit as its base.
+
+### 13c. Backups of a rewritten unit tip (off by default)
+
+When upkeep is enabled (`upkeep.enabled: true`), each time the pick-time rebase pass force-pushes a unit branch it also
+keeps the old tip under `refs/sigma/backup/<unit>/<UTC stamp>`, for example
+`refs/sigma/backup/billing/20261010T031500Z`, in the same `git push --atomic` as the leased update of the branch, so
+both land or neither does: a branch that moved under the pass refuses both, and a second backup of the same unit in
+the same second is refused rather than overwritten (the pick line says the backup ref is taken; retry a second
+later). A unit name over 220 bytes is refused before the replay, because the ref would pass 255 bytes: the pass
+reports `name-too-long` and pushes nothing, never a push without a backup. With upkeep off the pass pushes exactly as
+it always did. The attended rebase and the goal-branch pushes rewrite branches with no backup at all. The rest of
+the pass (landed-unit skip, restarts, hooks policy, the ack file, goal replays, skip reasons) is a later change.
+
+Two commands work on backups, both behind the upkeep gate (while it is closed they do nothing and exit 3):
+
+```
+python3 skills/sigma-loop/scripts/feature_rebase.py restore .sdlc billing --list
+python3 skills/sigma-loop/scripts/feature_rebase.py restore .sdlc billing <stamp> --expect <tip>
+python3 skills/sigma-loop/scripts/feature_rebase.py prune .sdlc --dry-run
+```
+
+`restore` puts the branch back at the backup you name. You state `--expect`, the tip the branch has now (`--list`
+prints it), and the push is leased on that tip: if the branch moved, nothing is changed. The tip being replaced is
+kept as a new backup in the same atomic push. `prune` removes backups older than `backup.keep_days` (14) and
+keeps the newest `backup.keep_last` (5) of each unit whatever their age; age is read from the stamp in the name,
+never from the commit, and so from the clock of the machine that made it (one running ahead ages backups early, one
+running behind stamps a fresh backup as old; the newest five of each unit are kept whatever their age); a stamp in the
+future is kept; at most 200 are removed per run, so a large backlog takes several runs. It selects by the exact prefix itself, because a listing by pattern also returns branches, tags
+and other namespaces whose names merely end with it. `backup.former_prefixes` ships empty; a namespace an
+earlier product wrote can be listed there, in the form `refs/<name>/backup/`, to have it pruned the same way.
+
+Git resolves a short ref name by tail-matching, so `git push --delete` of a backup name could take a branch, tag or
+other ref carrying the same name when the backup itself is gone. The prune therefore keeps (and reports as
+`skipped_ambiguous`) any candidate that has such a lookalike in the listing, and re-reads the exact refs just before
+each delete, skipping any that vanished or moved (`skipped_vanished`). A lookalike that appears in the instant between
+that re-read and the push is a named residual window, not zero. A lookalike also keeps its backup out of the prune, so
+a stalled backup is cleared by removing the lookalike by hand.
+
+Nothing prunes by itself yet, so while upkeep is enabled run the prune now and then; each rewrite adds one ref.
+
+A restore is not sticky. While upkeep is enabled the next pick of a goal in that unit brings the branch forward again,
+keeping the restored tip as a backup; set `work.rebase_upkeep` to `off` first to keep the restored branch where it is.
+
+Limits, stated rather than discovered: a host that rejects, hides or caps the namespace, or that cannot do an
+atomic push, fails the whole push on every pass (turn upkeep off, which restores the plain push); a client pre-push
+hook that allows only branches refuses the backup; the commands have no network timeout of their own.
+
+With the gate closed, or on a machine that has only a plain clone, restore by hand with plain git. A plain clone does
+not carry `refs/sigma/*`, and the old tip is on no branch, so fetch the backup before pushing it:
+
+```
+git ls-remote <remote> refs/heads/feature/<unit>
+git ls-remote <remote> 'refs/sigma/backup/<unit>/*'
+git fetch <remote> refs/sigma/backup/<unit>/<stamp>
+git push --force-with-lease=refs/heads/feature/<unit>:<tip> <remote> <backup sha>:refs/heads/feature/<unit>
+```
+
+The first command prints the tip the branch has now (`<tip>`); the second lists every backup of the unit with its sha
+(`<backup sha>`) and its stamp. The lease makes git refuse if the branch moved since you read it. The same note about
+a restore not being sticky applies. Unlike the `restore` command, this route keeps no backup of the tip it replaces:
+record that tip first if you may want it back.
 
 ---
 

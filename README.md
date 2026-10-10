@@ -71,7 +71,10 @@ it does not force. It parks on:
 
 - a hard checkpoint / a decision only you can make,
 - an **irreversible or expensive action** (deploy, delete, overwrite, spend, migrate) — its
-  instructions ask the agent to park it rather than run it unattended (advice: no code reads `gates.irreversible_actions`),
+  instructions ask the agent to park it rather than run it unattended (advice: no code reads `gates.irreversible_actions`;
+  that advice is about the agent, and two things Sigma's own code does are outside it because each is bounded by
+  construction: the lease-protected force-push of a unit branch, and, only once you enable upkeep, the removal of old
+  backup refs under Sigma's own backup namespace; see `docs/branching-model.md` section 13b),
   unless you opted in (`spend_approval`, off by default) and wrote a single-use
   `sigma:spend-approved=<label>` line as the first line of that goal's issue body, which
   `loop.py spend-approval` checks, audits and then honours once (a per-use go-ahead, not a spend cap; the check is on who opened the issue, so any repo writer could add the marker to it),

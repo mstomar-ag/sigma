@@ -537,6 +537,38 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_backup.py",
+      "function": "_atomic_leased_push",
+      "rule": "git-destructive",
+      "count": 1,
+      "gate": "upkeep.enabled; the caller that decides to back up holds the gate (the engine's gate query), and restore and prune query it themselves; no entry point is registered",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_backup.py",
+      "function": "_atomic_leased_push",
+      "rule": "git-push",
+      "count": 1,
+      "gate": "upkeep.enabled; the caller that decides to back up holds the gate (the engine's gate query), and restore and prune query it themselves; no entry point is registered",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_backup.py",
+      "function": "_delete_chunk",
+      "rule": "git-destructive",
+      "count": 1,
+      "gate": "upkeep.enabled; the caller that decides to back up holds the gate (the engine's gate query), and restore and prune query it themselves; no entry point is registered",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_backup.py",
+      "function": "_delete_chunk",
+      "rule": "git-push",
+      "count": 1,
+      "gate": "upkeep.enabled; the caller that decides to back up holds the gate (the engine's gate query), and restore and prune query it themselves; no entry point is registered",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_doc.py",
       "function": "_atomic_write_bytes",
       "rule": "fs-remove",
@@ -745,11 +777,27 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_resolution.py",
+      "function": "post_comment",
+      "rule": "gh-api-write",
+      "count": 1,
+      "gate": "upkeep.enabled and a finding the engine filed; integer finding id and explicit owner/name repository; text passes the wording check; one comment, never edited or closed here",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_resolution.py",
+      "function": "prune",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "upkeep.enabled caller passes keep_days; removes only record-shaped files in the engine's own resolutions store, never a symlink, never outside it",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/gh_api.py",
       "function": "_default_run",
       "rule": "gh-api-write",
       "count": 1,
-      "gate": "the injected run is the only transport; write helpers (comment_issue, create_issue, add_labels, remove_label, close_issue, edit_issue, add_assignees) have callers since #895 slice 3a, each through GitHubSource._issue_* with the feature-label guard (create_issue/add_labels refuse feature:* unless it exists); a REST write falls back to GraphQL at most once, never on an ambiguous failure, never in a cloud session; the scanner sees only this gh invocation, not which helper called it",
+      "gate": "the injected run is the only transport; write helpers (comment_issue, create_issue, add_labels, remove_label, close_issue, edit_issue, add_assignees) have callers since #895 slice 3a, each through GitHubSource._issue_* with the feature-label guard (create_issue/add_labels refuse feature:* unless it exists); a REST write falls back to GraphQL at most once, never on an ambiguous failure, never in a cloud session; the scanner sees only this gh invocation, not which helper called it; landing helpers (#931): merge_pr_pinned (explicit merge method, repository and 40-hex head pin all required and validated before any call; no auto-merge, no admin flag, no branch-delete option) and create_pr_nondraft (typed draft false) have no caller yet, and bounded_runner binds a working directory and keeps the exit code; the scanner sees none of them until a caller exists",
       "risk": "low"
     },
     {
@@ -1917,7 +1965,7 @@
       "function": "_try_union_changelog",
       "rule": "fs-write",
       "count": 1,
-      "gate": "ungated",
+      "gate": "CHANGELOG-only provably lossless conflicts; the heading-aware placement runs only under upkeep.enabled with conflicts.resolve mechanical or agent, else the legacy union",
       "risk": "medium"
     },
     {
