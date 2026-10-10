@@ -359,6 +359,8 @@ def test_template_carries_the_conflicts_keys_and_a_note():
     assert cfg["upkeep"]["conflicts"] == {"resolve": "off", "mechanical_without_verify": False}
     note = cfg["_upkeep_conflicts"]
     assert isinstance(note, str) and "upkeep.enabled" in note and '"off"' in note
+    assert "later release" not in note and "later releases" not in note and "neither changes what runs" not in note
+    assert "Level 1" in note and "verify command" in note and "mechanical_without_verify" in note
     missing, extra = support.key_gaps(cfg["upkeep"], support.gate().SCHEMA)
     assert missing == [] and extra == []
     assert json.dumps(cfg["upkeep"]).count("resolve") == 1
