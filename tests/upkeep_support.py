@@ -144,19 +144,22 @@ def drivers(gate_module):
     """(stem, function) -> callable(config, sdlc_dir, environ). Shipped entry points add theirs here (see
     REGISTERED_ENTRY_POINTS)."""
     p = probe(gate_module)
+    # Load every script HERE, outside any trap: loading imports siblings, and under a cold bytecode cache that writes a
+    # .pyc the trap would record as the closed run's write (#1073). The lambdas below only call.
+    pass_, sched, job = script("feature_upkeep_pass"), script("feature_upkeep_sched"), script("feature_upkeep_job")
     return {("upkeep_probe", "attempt_project"): lambda c, s, e: p.attempt_project(c, s),
             ("upkeep_probe", "attempt_machine"): lambda c, s, e: p.attempt_machine(c, s, environ=e),
-            ("feature_upkeep_pass", "upkeep_pass"): lambda c, s, e: script("feature_upkeep_pass").upkeep_pass(
+            ("feature_upkeep_pass", "upkeep_pass"): lambda c, s, e: pass_.upkeep_pass(
                 c, s, "u", "feature/u", "main", "main", 0),
-            ("feature_upkeep_pass", "ack_union"): lambda c, s, e: script("feature_upkeep_pass").ack_union(
+            ("feature_upkeep_pass", "ack_union"): lambda c, s, e: pass_.ack_union(
                 c, s, "u", [{"sha": "a" * 40, "patch_id": "p"}]),
-            ("feature_upkeep_sched", "scheduler_tick"): lambda c, s, e: script("feature_upkeep_sched").scheduler_tick(
+            ("feature_upkeep_sched", "scheduler_tick"): lambda c, s, e: sched.scheduler_tick(
                 c, s, environ=e),
-            ("feature_upkeep_job", "run_job"): lambda c, s, e: script("feature_upkeep_job").run_job(
+            ("feature_upkeep_job", "run_job"): lambda c, s, e: job.run_job(
                 c, s, ".", "u", "r", 5, environ=e),
-            ("feature_upkeep_job", "run_engine"): lambda c, s, e: script("feature_upkeep_job").run_engine(
+            ("feature_upkeep_job", "run_engine"): lambda c, s, e: job.run_engine(
                 c, s, ".", "u", environ=e),
-            ("feature_upkeep_pass", "ledger_note"): lambda c, s, e: script("feature_upkeep_pass").ledger_note(
+            ("feature_upkeep_pass", "ledger_note"): lambda c, s, e: pass_.ledger_note(
                 c, s, "u", "rebased", "a" * 12)}
 
 
