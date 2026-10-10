@@ -1610,7 +1610,8 @@ def test_a_gh_issue_view_blip_does_not_disarm_the_scope_gate():
         kind, goal = lp._next(base, gh, cfg)
     assert (kind, goal) == ("DONE", None)                  # refused, and nothing else was queued
     assert "sdlc:in-progress" not in run.live["42"]
-    assert "sdlc:needs-confirmation" in run.live["42"]
+    # #1005: with ai_filed.triage on (default) the scope hold is a PARK, not needs-confirmation.
+    assert "sdlc:parked" in run.live["42"]
 
 
 def test_the_gate_and_the_base_cannot_disagree_about_whether_a_unit_exists():
@@ -1798,7 +1799,8 @@ _KNOWN_ADOPTION_GATED_CALL_SITES = frozenset({
     "feature_rebase.py:_upkeep",
     "feature_sync.py:_sync_at_pick",
     "loop.py:_unit_at_pick",
-    "promote.py:_scope_expansion",
+    # #1005: the scope-expansion hold moved out of promote.py into gate_hold.py (same gate, new home).
+    "gate_hold.py:scope_expansion",
     "unit_completion.py:_signal",
     "work.py:_adopted",
     "work.py:_sibling_gate",
