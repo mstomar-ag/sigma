@@ -143,7 +143,7 @@ def inert_failures(tmp):
               "skills/sigma-loop/scripts/feature_upkeep_sched.py"])        # #923: the scheduler
     support = importlib.import_module("upkeep_support")
     S.expect(bad, "the registered entry points (#922: the pass, its acks file, its ledger note)", support.REGISTERED_ENTRY_POINTS,
-             {"feature_upkeep_pass": {"upkeep_pass", "ack_union", "ledger_note"},
+             {"feature_upkeep_pass": {"upkeep_pass", "ack_union", "ledger_note", "run_unit_pass"},   # #1085
               "feature_upkeep_sched": {"scheduler_tick"},                  # #923
               "feature_upkeep_job": {"run_job", "run_engine"}})
     ws = tool("write_surface")

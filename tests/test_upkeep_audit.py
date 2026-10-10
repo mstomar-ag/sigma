@@ -252,12 +252,12 @@ def test_enabled_control_per_real_driver(tmp_path, monkeypatch):
     assert acted >= 4, "most real drivers should leave a trace when open; the control is vacuous otherwise"
 
 
-def _without_decorator(fn):
+def _without_decorator(*fns):
     """A loader for loop scripts that strips the gate decorator from `fn` (the mutation: the gate is gone)."""
     def load(stem):
         path = support.SCRIPTS / (stem + ".py")
         text = path.read_text(encoding="utf-8")
-        pattern = re.compile(r'@feature_upkeep\.gated\("\w+"\)\n(def %s\()' % re.escape(fn))
+        pattern = re.compile(r'@feature_upkeep\.gated\("\w+"\)\n(def (?:%s)\()' % "|".join(re.escape(f) for f in fns))
         if not pattern.search(text):
             return ORIGINAL_SCRIPT(stem)
         namespace = {"__name__": stem + "_stripped", "__file__": str(path)}
@@ -269,12 +269,18 @@ def _without_decorator(fn):
 ORIGINAL_SCRIPT = support.script
 
 
+#: Entry points whose whole body is a call to another gated entry point (#1085: `run_unit_pass` -> `upkeep_pass`). Their own
+#: decorator is the outer door (closed before any callable is built); stripping it alone changes nothing because the inner
+#: gate still closes, so the strip control is run on them with the delegate's gate stripped too (see the test below).
+DELEGATING = {("feature_upkeep_pass", "run_unit_pass"): ("upkeep_pass",)}
+
+
 def test_control_a_stripped_decorator_is_seen_red_for_every_real_driver(tmp_path, monkeypatch):
     """The mutation, per real entry point: remove its decorator and the closed run is no longer closed (or the body
     raises). Without this the matrix above could pass for a driver whose gate is not what keeps it closed."""
     escaped = []
     for n, (stem, fn, door, _driver) in enumerate(real_drivers()):
-        monkeypatch.setattr(support, "script", _without_decorator(fn))
+        monkeypatch.setattr(support, "script", _without_decorator(fn, *DELEGATING.get((stem, fn), ())))
         driver = support.drivers(support.gate())[(stem, fn)]
         try:
             result, _trap, _diff, _project = support.run_case(tmp_path / ("s%d" % n), monkeypatch, driver, {}, {})

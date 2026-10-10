@@ -93,7 +93,7 @@ def template_cfg():
 
 #: stem -> names of the functions shipped code has gated. One entry point so far (the upkeep pass). A later slice that gates one adds it here AND adds a trap driver in `drivers()`; two tests make
 #: forgetting either red.
-REGISTERED_ENTRY_POINTS = {"feature_upkeep_pass": {"upkeep_pass", "ack_union", "ledger_note"},
+REGISTERED_ENTRY_POINTS = {"feature_upkeep_pass": {"upkeep_pass", "ack_union", "ledger_note", "run_unit_pass"},
                            "feature_upkeep_sched": {"scheduler_tick"},
                            "feature_upkeep_job": {"run_job", "run_engine"}}
 
@@ -157,7 +157,9 @@ def drivers(gate_module):
             ("feature_upkeep_job", "run_engine"): lambda c, s, e: script("feature_upkeep_job").run_engine(
                 c, s, ".", "u", environ=e),
             ("feature_upkeep_pass", "ledger_note"): lambda c, s, e: script("feature_upkeep_pass").ledger_note(
-                c, s, "u", "rebased", "a" * 12)}
+                c, s, "u", "rebased", "a" * 12),
+            ("feature_upkeep_pass", "run_unit_pass"): lambda c, s, e: script("feature_upkeep_pass").run_unit_pass(
+                c, s, "u", "feature/u", "main", "main", 0, remote="origin", branch="feature/u")}
 
 
 def run_case(tmp_path, monkeypatch, driver, config, environ=None):
