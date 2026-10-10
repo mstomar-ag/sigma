@@ -4840,6 +4840,24 @@ def _autonomy_state(cfg, sdlc_dir=None):
         return "unreadable (%s)" % type(exc).__name__
 
 
+def _applier_state(cfg, sdlc_dir=None, now=None):
+    """Applier tick readout (read-only, no network): off, or on with the tick's age. A tick that has
+    not run for `stale_after_intervals` watch intervals reads as dead; the goal simply stays parked."""
+    try:
+        mod = _load_loop_script("applier")
+        if not mod.enabled(cfg):
+            return "off (default)"
+        import datetime as _dt
+        when = now or _dt.datetime.now(_dt.timezone.utc)
+        beat = mod.read_heartbeat(sdlc_dir if sdlc_dir is not None else ".sdlc")
+        if mod.tick_is_dead(beat, cfg, when):
+            return ("on, WARNING: the applier tick looks dead (%s); parked questions stay parked until the "
+                    "watcher runs again" % ("never ran" if beat is None else "last tick " + beat.isoformat()))
+        return "on: last tick " + beat.isoformat()
+    except Exception as exc:  # a readout never fails the dashboard
+        return "unreadable (%s)" % type(exc).__name__
+
+
 _LEGACY_MODULE = []
 
 
@@ -5115,6 +5133,8 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
                  'config: "decision_rubric": {"records": {"enabled": true, "repo_visibility": "private"}}'))
     rows.append(("autonomy levels (OFF by default)", _autonomy_state(cfg, sdlc_dir),
                  'config: "decision_rubric": {"autonomy": {"enabled": true}}'))
+    rows.append(("applier tick (OFF by default)", _applier_state(cfg, sdlc_dir),
+                 'config: "decision_rubric": {"autonomy": {"applier": {"enabled": true}}}'))
     return rows
 
 
