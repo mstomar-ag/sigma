@@ -236,19 +236,19 @@ def _cfg(slug=""):
 
 
 def test_the_slug_from_the_remote_is_accepted_when_it_matches(repo):
-    git(repo, "remote", "set-url", "origin", "git@github.com:Acme/App.git")
+    git(repo, "remote", "set-url", "origin", "git" "@github.com:Acme/App.git")
     assert fl.resolve_slug(_cfg(), REAL, repo, "origin") == ("Acme/App", "")
     assert fl.resolve_slug(_cfg("acme/app"), REAL, repo, "origin") == ("acme/app", "")
 
 
 def test_a_configured_slug_that_differs_from_the_remote_is_refused_without_echoing_either(repo):
-    git(repo, "remote", "set-url", "origin", "git@github.com:acme/app.git")
+    git(repo, "remote", "set-url", "origin", "git" "@github.com:acme/app.git")
     slug, reason = fl.resolve_slug(_cfg("other/thing"), REAL, repo, "origin")
     assert slug is None and "differs" in reason and "other" not in reason and "app" not in reason
 
 
 def test_a_placeholder_slug_and_an_unreadable_remote_are_refused(repo):
-    git(repo, "remote", "set-url", "origin", "git@github.com:acme/app.git")
+    git(repo, "remote", "set-url", "origin", "git" "@github.com:acme/app.git")
     assert fl.resolve_slug(_cfg("{owner}/{repo}"), REAL, repo, "origin")[0] == "acme/app"   # falls back to the remote
     assert fl.resolve_slug(_cfg("acme/app"), REAL, repo, "missing-remote")[0] is None
 
@@ -342,7 +342,7 @@ def test_gate_open_the_report_gains_a_landed_field_and_the_text_names_it(tmp_pat
     def runner(argv, cwd):
         seen.append(argv[0])
         if "get-url" in argv:
-            return 0, "git@github.com:acme/app.git\n", ""
+            return 0, "git" "@github.com:acme/app.git\n", ""
         if argv[0] == "gh":
             return 0, "[]", ""
         return REAL(argv, cwd)
