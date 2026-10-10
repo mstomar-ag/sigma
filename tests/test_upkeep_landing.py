@@ -210,6 +210,38 @@ def test_prune_ages_out_only_stale_record_shaped_files(tmp_path):
         mod.prune(tmp_path, OPEN, 0)
 
 
+def test_prune_removes_a_stale_real_mkstemp_temp_and_keeps_a_fresh_one(tmp_path):
+    import tempfile
+    mod.begin(tmp_path, OPEN, "keep", 1, PRE, 100)
+    store = tmp_path / "state" / "unit-landings"
+    made = []
+    for _ in range(2):
+        fd, name = tempfile.mkstemp(prefix=".", suffix=".tmp", dir=str(store))
+        os.close(fd)
+        made.append(pathlib.Path(name))
+    os.utime(made[0], (1000, 1000))
+    now = 1000 + 15 * 86400
+    os.utime(made[1], (now, now))
+    os.utime(store / "keep.json", (now, now))
+    assert mod.prune(tmp_path, OPEN, 14, now=now) == 1
+    assert not made[0].exists() and made[1].exists()
+
+
+def test_an_unsettled_record_is_not_overwritten_by_a_new_landing(tmp_path):
+    mod.begin(tmp_path, OPEN, "voice", 7, PRE, 100)
+    mod.finish(tmp_path, OPEN, "voice", mod.Verdict("unconfirmed", "lost"), 110, call=LOST)
+    before = mod.read_record(tmp_path, "voice")
+    assert mod.begin(tmp_path, OPEN, "voice", 8, PRE, 200) == (False, "unsettled-record", None)
+    called = []
+
+    def boom(_):
+        raise OSError("down")
+    got = mod.run_landing(tmp_path, OPEN, "voice", 8, PRE, lambda: called.append(1) or OK, boom, boom, 300)
+    assert not called and not got.called and got.outcome == "refused"
+    after = mod.read_record(tmp_path, "voice")
+    assert after["pr"] == 7 and after["call"] == before["call"] and after["outcome"] == "unconfirmed"
+
+
 def test_symlinked_store_is_refused(tmp_path):
     (tmp_path / "state").mkdir()
     (tmp_path / "elsewhere").mkdir()

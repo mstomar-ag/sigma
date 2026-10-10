@@ -72,7 +72,7 @@ PENDING = "pending"
 CALL_KINDS = ("ok", "error", "lost")
 
 _SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
-_RECORD_NAME = re.compile(r"\.?[a-z0-9][a-z0-9._-]*\.json(?:\.tmp)?")
+_RECORD_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*\.json|\.[A-Za-z0-9_]{8}\.tmp")
 
 Verdict = collections.namedtuple("Verdict", "outcome reason")
 WriteResult = collections.namedtuple("WriteResult", "ok reason path")
@@ -195,6 +195,8 @@ def begin(sdlc_dir, config, unit, number, pre, now):
         return WriteResult(False, "gate-closed", None)
     if type(number) is not int or type(now) is not int:
         return WriteResult(False, "bad-input", None)
+    if read_record(sdlc_dir, unit) is not None:
+        return WriteResult(False, "unsettled-record", None)
     return _write(sdlc_dir, unit, _document(unit, number, pre, None, now, PENDING, "call-in-flight"))
 
 
@@ -254,6 +256,7 @@ def run_landing(sdlc_dir, config, unit, number, pre, do_merge, read_pr, read_com
     """Record, call, read back, classify, settle -> Landing(outcome, reason, called). The record is written BEFORE
     `do_merge`; if it cannot be written the call is never made. `do_merge()` returns the call dict, or raises (a raise
     is a lost acknowledgment and leaves the pending record for the next landing)."""
+    settle(sdlc_dir, config, unit, read_pr, read_commit, now)
     started = begin(sdlc_dir, config, unit, number, pre, now)
     if not started.ok:
         return Landing(REFUSED, "record-%s" % started.reason, False)

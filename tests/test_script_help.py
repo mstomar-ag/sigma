@@ -65,6 +65,7 @@ LIBRARY_ONLY = {
     "bounded_run",
     "feature_landed",
     "conflict_state",
+    "conflict_proof",
     "unattended_git",
     "merge_queue", "tier_escalation", "board_spec", "red_green", "shell_policy", "logroll",
     "codex_runtime",
