@@ -96,3 +96,25 @@ One failure never stops the rest; each issue reports its own outcome.
   reason in a `NOTE:` at the top; `--json` carries `read`/`errors` per bucket. `apply` reports a
   quota failure as `rate-limited` (the issue is fine; retry after reset), distinct from `failed`.
 - `/sigma-doctor` reports the `deadlocked` set as a check row, so it surfaces without being looked for.
+
+## Migrating the retired confirmation queue
+
+`python3 "${CLAUDE_SKILL_DIR}/../sigma-loop/scripts/promote.py" migrate-confirmation .sdlc [--dry-run | --apply]`
+
+One-time move of every issue still carrying `sdlc:needs-confirmation`. **Dry run is the default and makes
+zero writes**; only `--apply` writes (giving both flags is a usage error). It pages through every labelled
+issue (past the 200-issue backlog window) and prints `covered N of M`; it exits non-zero when N is below M,
+when the listing fails, or when the fetch hit its cap (`ai_filed.migration.max_issues`, default 10000).
+
+| Population | How it is recognised | Result |
+|---|---|---|
+| ownership hold | the ownership flag comment | parked (`owner_hold`) |
+| scope hold | the scope-expansion flag comment | parked (`scope_hold`) |
+| follow-up | the `sdlc:followup` label | the rubric bucket priority; a lower existing priority is kept |
+| human-typed | none of the above | armed at its own priority, parked when it has none |
+
+Every arm goes through the same deny-list as filing, and a park results from any open `Blocked by:`
+reference or gate hold (the predicates `apply` uses). Arm and park are each ONE atomic label swap that also
+removes the confirmation label, so a parked issue never keeps it. Each migrated issue gets one comment saying
+which and why. Closed issues are left untouched (and counted as covered). A second run changes nothing.
+With `ai_filed.triage.enabled` false the verb refuses, because the queue is then still the intended state.
