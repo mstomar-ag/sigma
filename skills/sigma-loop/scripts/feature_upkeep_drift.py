@@ -167,7 +167,7 @@ def walk(run, cwd, include, exclude=None, cap=WALK_CAP):
     (`truncated`), and the extra row is dropped. `reason` is None, or `git-failed` / `bad-argument` with no rows."""
     if not (_ref_ok(include) and (exclude is None or _ref_ok(exclude)) and type(cap) is int and cap >= 1):
         return Walk((), False, "bad-argument")
-    argv = ["git", "log", "--first-parent", "--no-show-signature", "-n", str(cap + 1), "--format=%H%x09%at%x09%s", include]
+    argv = ["git", "log", "--first-parent", "--no-show-signature", "-n", str(cap + 1), "--format=%H%x09%at%x09%s", "--end-of-options", include]
     if exclude is not None:
         argv.append("^" + exclude)
     try:
