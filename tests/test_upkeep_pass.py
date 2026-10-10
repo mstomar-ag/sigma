@@ -120,7 +120,7 @@ def test_unanswerable_git_is_unreadable_never_landed(repo):
 # ---- break-it controls: each mutant must turn a pin above red
 def test_control_contained_test_inverted_is_caught(repo):
     commit(repo, "main", "b.txt")
-    mutant = support.script("feature_upkeep_pass", ('if ahead == "":', 'if ahead != "":'))
+    mutant = support.script("feature_upkeep_pass", ('if answer == "yes":', 'if answer != "yes":'))
     assert call(mutant, repo)["result"] != "skipped"
 
 

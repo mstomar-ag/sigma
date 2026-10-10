@@ -1829,6 +1829,10 @@ _REGISTRY_WRITE_CALLERS = {
 #: primitive -- i.e. could write `features/units/*.json` or `features/index.json` without the
 #: registry. Each is said here to be one that does not, or does so under a rule of its own.
 _REGISTRY_ADJACENT_WRITERS = {
+    "feature_rebase": "names the registry files only to read the unit record's tip fields; its writes are the leased push "
+                      "of a branch and the per-unit state under `state/upkeep/`, never a unit or index record",
+    "feature_upkeep_pass": "reads the unit record for its tips; writes only the per-unit upkeep state and the acks "
+                           "file under `state/upkeep/`, never a unit or index record",
     "migrate": "the converter: refuses a legacy delta record (names `repair`), converts the index "
                "only once no record is left in the previous schema, under the unit's lock",
     "coexist": "reads `features/` once to take the one-time backup; writes only under "
