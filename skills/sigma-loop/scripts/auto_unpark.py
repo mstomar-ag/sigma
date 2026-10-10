@@ -477,7 +477,8 @@ def compute_blocking_actions(sdlc_dir, config, source, blocked_issues, currently
             if verdict in (blockers.PROMOTED, blockers.ROUTED):
                 if source.goal_label not in state["labels"]:
                     add.append(source.goal_label)
-                if verdict == blockers.PROMOTED and source.proposed_label in state["labels"]:
+                # legacy leftover: stripped when membership is granted, so no {goal, leftover} drift
+                if source.proposed_label in state["labels"]:
                     remove.append(source.proposed_label)
         # A read failure degrades to the blocking label ALONE -- today's behaviour -- never to a
         # guessed membership grant. Fail open toward doing less, and let doctor surface it.

@@ -93,7 +93,8 @@ def test_compile_plan_label_set_is_pinned():
     plan = {"issues": [{"key": "a", "title": "t", "body": "b", "priority": "P1"}]}
     src = _Src()
     compile_plan.compile_plan("/x/.sdlc", {}, plan, source=src)
-    assert src.created == [{"labels": ["priority:P1", "sdlc:needs-confirmation"], "goal_label": False}]
+    # Slice 17/18: a compiled plan arms by default; the confirmation label is no longer written.
+    assert src.created == [{"labels": ["priority:P1"], "goal_label": True}]
     src = _Src()
     compile_plan.compile_plan("/x/.sdlc", {}, plan, source=src, goal_label=True)
     assert src.created == [{"labels": ["priority:P1"], "goal_label": True}]

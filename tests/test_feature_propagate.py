@@ -1179,7 +1179,7 @@ def test_the_promoter_named_in_the_residue_is_the_one_that_writes_the_label(tmp_
     blockers = _load("blockers")
     state = {"labels": ["sdlc:needs-confirmation", "sdlc:followup"], "assignees": []}
     assert blockers.classify(state, "sdlc:goal", "sdlc:needs-confirmation", "sdlc:parked",
-                             "sdlc:followup", "me") == blockers.PROMOTED
+                             "sdlc:followup", "me") == blockers.ROUTED   # slice 18: the proposal arm is gone
     src = (SCRIPTS / "feature_propagate.py").read_text(encoding="utf-8")
     doc = (ROOT / "docs" / "label-model.md").read_text(encoding="utf-8")
     for text in (src, doc):

@@ -125,6 +125,10 @@ def _github_counts(gh_cfg, run, config=None):
     pending = open `sdlc:goal` minus those active-in-progress. done/failed don't map to a single
     open-issue label in github mode, so they stay 0.
 
+    LEGACY-ONLY (decision-rubric slice 18): the confirmation label is no longer written -- a filed
+    follow-up is already a goal -- so `proposed` counts LEFTOVERS from old boards only, and is 0 on
+    a clean repo. The label name is read as a legacy alias (`handoff.proposed_label(config)`).
+
     #233: `proposed` DOES map now. A retro/hand-off follow-up filed with immediately_actionable=False
     carries the distinct, config-overridable label `handoff.proposed_label(config)` (#1348 renamed
     the shipped default to `sdlc:needs-confirmation`; a repo can still override it back) and
@@ -416,7 +420,8 @@ def main(argv):
     if warning:
         print(warning, file=sys.stderr)
     s = summary(argv[1] if len(argv) > 1 else ".sdlc")
-    line = (f"backlog: {s['proposed']} proposed, {s['pending']} pending, {s['in_progress']} in-progress, "
+    legacy = f"{s['proposed']} legacy-proposed, " if s["proposed"] else ""   # leftovers only
+    line = (f"backlog: {legacy}{s['pending']} pending, {s['in_progress']} in-progress, "
             f"{s['done']} done, {s['parked']} parked, {s['failed']} failed | "
             f"iteration {s['iteration']} | "
             f"review-queue: {'NEEDS ATTENTION' if s['queue_nonempty'] else 'empty'}")

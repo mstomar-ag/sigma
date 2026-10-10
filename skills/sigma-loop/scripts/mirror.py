@@ -329,7 +329,7 @@ def fetch_dependency_records(sdlc_dir, config=None, run=None, labels=(), open_li
     `discovery.github.assignee` when configured (`fetch_and_write`, above) -- a follow-up filed by a
     different person/session is invisible to a search that reuses it unchanged, exactly the blind
     spot #1204 exists to close; (2) it filters open issues to ONE label (`discovery.github.
-    goal_label`, default `sdlc:goal`) -- a queued follow-up (`sdlc:needs-confirmation`, withholding
+    goal_label`, default `sdlc:goal`) -- a queued follow-up (the legacy confirmation label, withholding
     `sdlc:goal` by design, see handoff.py's PROPOSED_LABEL) never matches it, so follow-ups could
     never dedup against each other. This function fixes both: no assignee filter ever, and one
     `gh issue list --label <L>` call PER label in `labels` (issued separately and merged rather than

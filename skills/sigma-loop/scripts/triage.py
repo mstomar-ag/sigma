@@ -464,6 +464,7 @@ def _bucket_enqueued(issues, gh_cfg, gh_source=None):
                           gh_cfg.get("needs_label_label") or "sdlc:needs-label",
                           gh_cfg.get("needs_unit_label") or "sdlc:needs-unit",
                           gh_cfg.get("needs_triage_label") or "sdlc:needs-triage",
+                          # legacy alias, read-only: a leftover is never ready to pick
                           gh_cfg.get("proposed_label") or "sdlc:needs-confirmation"))
     prefix = gh_source.priority_prefix if gh_source is not None else "priority:"
     eligible = []
@@ -2108,8 +2109,9 @@ def _picked_actions(plan, state_by_issue, assignee, goal_label, parked_label, bl
         # (each label is still only named when it actually needs changing, so "second apply = zero
         # actions" still holds literally); only the number of writes it takes to close the gap is.
         add = [goal_label] if goal_label not in state["labels"] else []
-        # #1393: `proposed_label` joins the removal set. Picking an issue that carries
-        # `sdlc:needs-confirmation` used to ADD `sdlc:goal` on top of it, producing exactly the
+        # #1393: `proposed_label` joins the removal set. LEGACY-INERT since decision-rubric slice 18:
+        # nothing writes the label now, but a picked issue that still carries a leftover is cleaned
+        # here, exactly as before. Picking an issue that carries the label used to ADD `sdlc:goal` on top of it, producing exactly the
         # half-promoted state `_fetch_pending`, `_card_is_eligible` and `/sigma-promote`'s `drift`
         # bucket all call drift -- so `enact` was manufacturing the corruption promote.py exists to
         # repair, and the picked issue stayed unpickable afterwards. A human choosing an issue in a

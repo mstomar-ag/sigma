@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """promote.py (#1392) -- the ONE sanctioned way to move an issue across the human approval gate.
 
-WHY THIS EXISTS. `sdlc:needs-confirmation` (`handoff.PROPOSED_LABEL`, #233) is the approval gate:
-an issue Sigma filed itself carries it and deliberately does NOT carry `sdlc:goal`, so no loop
+LEGACY-ONLY LABEL (decision-rubric slice 18). Nothing writes the confirmation label any more -- a
+filed follow-up is already a goal, armed or parked with a declared question -- so every bucket
+below that keys on `proposed_label` lists LEFTOVERS from old boards, and this verb stays as the
+way to approve or clear each one. The history that follows explains why the buckets exist.
+
+WHY THIS EXISTS. The legacy confirmation label (`handoff.PROPOSED_LABEL`, #233) was the approval gate:
+an issue Sigma filed itself carried it and deliberately does NOT carry `sdlc:goal`, so no loop
 can pick it until a human says so. The approval gesture is REMOVING that label -- but nothing ever
 said so out loud, and the intuitive gesture in the GitHub UI is the opposite one: ADD `sdlc:goal`.
 Do that and the issue carries BOTH, which is not a state the model has a name for.
@@ -58,7 +63,7 @@ case: a sibling issue in the very same batch that had only just been promoted, n
 `apply` now parses EVERY `Blocked by:`/`depends on`/`depends upon` reference a body names (reusing
 `blocker_scan.extract_refs`, the same whole-body scanner `mirror.py` and the pick-time dependency
 gate already read blockers off of) and refuses unless every one is a LIVE, confirmed CLOSED issue --
-never "carries `sdlc:goal`", never "not carrying `sdlc:needs-confirmation`", and never
+never "carries `sdlc:goal`", never "not carrying the legacy confirmation label", and never
 `blockers.classify`'s adjacent `PICKABLE` verdict, which answers a different question (see
 `_blocker_status`'s own docstring). `list` shows which rows declare a blocker at all, at zero extra
 `gh` cost; only `apply` (and its `--dry-run`) ever live-verifies what one resolves to.
