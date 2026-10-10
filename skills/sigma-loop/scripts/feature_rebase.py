@@ -2418,6 +2418,9 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
             # what a repo mid-epic looks like (`work.base` pointed at the epic's own feature
             # branch). A branch cannot be brought forward onto itself.
             report["outcome"] = NO_BASE
+            if not base:
+                report["why"] = ("work.base is empty, so upkeep has no integration branch and did nothing; "
+                                 "set it in .sdlc/config.json (for example to your default branch)")
             return report
         live, why = sync.live_branches(run, cwd, remote)
         if live is None:

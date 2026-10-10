@@ -349,6 +349,11 @@ def health(config, sdlc_dir, now=None):
                      "not ready on this machine, missing: " + ", ".join(verdict["missing"])))
     else:
         rows.append(("upkeep scheduler readiness", True, "all opt-ins present in this shell"))
+    wk = config.get("work") if isinstance(config, dict) else None
+    if not (wk.get("base") or "").strip() if isinstance(wk, dict) else True:
+        rows.append(("upkeep integration branch", False,
+                     "work.base is empty, so every upkeep pass ends no-base and does nothing; "
+                     "set work.base in .sdlc/config.json to your default branch"))
     sync = _sibling("sync")
     stale = sync.stale_after_seconds(sync.watch_interval_seconds(config))
     status = read_json(sdlc_dir, STATUS_REL)

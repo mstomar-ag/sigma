@@ -337,6 +337,32 @@ def test_health_rows_show_liveness_and_readiness_only_when_the_block_is_on(tmp_p
     assert fresh["upkeep scheduler liveness"] is True and stale["upkeep scheduler liveness"] is False
 
 
+def test_health_names_an_unset_base_only_when_upkeep_is_on(tmp_path):
+    """#1062: with upkeep on and `work.base` empty the pass ends `no-base` and does nothing; the doctor row says so."""
+    m, sdlc = sched(), project(tmp_path)
+    unset = open_config()
+    unset["work"]["base"] = ""
+    rows = dict((label, (ok, detail)) for label, ok, detail in m.health(unset, sdlc, 1_000_000))
+    ok, detail = rows["upkeep integration branch"]
+    assert ok is False and "work.base" in detail and "no-base" in detail
+    assert "upkeep integration branch" not in dict((l, o) for l, o, _ in m.health(open_config(), sdlc, 1_000_000))
+    off = copy.deepcopy(S.template_cfg())
+    assert m.health(off, sdlc, 1_000_000) == []
+
+
+def test_a_fresh_init_with_upkeep_turned_on_shows_the_unset_base_row(tmp_path):
+    """The fresh-repository path end to end: scaffold, read the written config, turn upkeep on, ask the doctor's reader."""
+    sys.path.insert(0, str(S.SCRIPTS.parent.parent / "sigma-init" / "scripts"))
+    import sdlc_init
+    sdlc_init.scaffold(tmp_path)
+    cfg = json.loads((tmp_path / ".sdlc" / "config.json").read_text(encoding="utf-8"))
+    assert cfg["work"]["base"] == ""
+    cfg["upkeep"]["enabled"] = True
+    cfg.setdefault("ledger", {})["enabled"] = True
+    labels = [label for label, _, _ in sched().health(cfg, str(tmp_path / ".sdlc"), 1_000_000)]
+    assert "upkeep integration branch" in labels
+
+
 def test_a_hung_job_reads_as_hung_and_a_dead_one_as_idle(tmp_path):
     m, sdlc = sched(), project(tmp_path)
     lock, beat = pathlib.Path(sdlc, m.LOCK_REL), pathlib.Path(sdlc, m.BEAT_REL)
