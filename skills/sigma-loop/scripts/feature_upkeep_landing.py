@@ -21,7 +21,9 @@ THE RECORD. One small JSON document per unit at `state/unit-landings/<unit key>.
 with the outcome and deleted on merged. The next landing for the unit settles a pending one with one PR read and one
 commit read through injected readers (no reconcile-tick re-read). A record with no call recorded (the process died between
 begin and the merge call) whose PR reads back open and unmerged settles as refused `crash-before-merge`, so a retry is
-not blocked until the prune. Stale records are aged out by `prune`; the existing
+not blocked until the prune. That settle only applies once the record is LIVENESS_SECONDS old; a younger one is
+another process's landing still in flight and is left pending (settle reports unconfirmed `landing-in-flight`, no
+reads, no write). Stale records are aged out by `prune`; the existing
 goal-state pruner is keyed by terminal goals and cannot own a unit-keyed store.
 
 THE DOCTOR ROW. `doctor_row` only reads: the age of the oldest pending record and the exact re-run gesture. Age is the
@@ -62,6 +64,11 @@ MAX_RECORD_CHARS = 8192
 MAX_PRUNE_SCAN = 100000
 MAX_LIST_SCAN = 1000
 DEFAULT_KEEP_DAYS = 14
+# A never-called pending record younger than this is a landing that may still be between begin and the merge call, in
+# another process; settle leaves it alone. The window between begin and the call is a few local steps plus one HTTP
+# request, bounded by that request's timeout (well under a minute), so ten minutes is generous without making a real
+# crash block the unit for long. Clock-skewed (future-dated) records count as young: leaving one is the safe side.
+LIVENESS_SECONDS = 600
 RERUN_GESTURE = "python3 skills/sigma-rebase/scripts/verify_merge.py land .sdlc <unit>"
 
 MERGED = "merged"
@@ -250,6 +257,9 @@ def settle(sdlc_dir, config, unit, read_pr, read_commit, now):
         return None
     pre = {"unmerged": doc.get("observed_unmerged") is True, "head": doc.get("head"), "base": doc.get("base")}
     never_called = doc.get("call") is None
+    started = doc.get("started_at")
+    if never_called and type(started) is int and type(now) is int and now - started < LIVENESS_SECONDS:
+        return Verdict(UNCONFIRMED, "landing-in-flight")
     call = doc.get("call") if isinstance(doc.get("call"), dict) else {"kind": "lost", "status": None}
     pr, parents = _read_back(read_pr, read_commit, doc.get("pr"))
     if never_called:

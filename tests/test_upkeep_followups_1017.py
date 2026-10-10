@@ -83,3 +83,29 @@ def test_attempt_rebase_never_raises_when_the_lease_tip_cannot_be_read(tmp_path)
     report = m.attempt_rebase(run, str(tmp_path), "origin", "feature/x", "main", lease=True)
     assert report["outcome"] == m.FAILED
     assert "cannot read refs" in report["why"]
+
+
+def _unit_runtime_acks(rebase, sdlc, entries):
+    path = pathlib.Path(rebase.runtime_ack_path(str(sdlc), "u"))
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"acked": entries}))
+
+
+def test_per_unit_runtime_acks_are_read_only_while_the_gate_is_open(tmp_path):
+    rebase = support.script("feature_rebase")
+    sdlc = tmp_path / ".sdlc"
+    _unit_runtime_acks(rebase, sdlc, [{"sha": "b" * 40, "patch_id": "pid2"}])
+    args = (str(sdlc), _boom, str(tmp_path), "u", "origin/main")
+    assert rebase._acked(*args, config=CLOSED) == (set(), set())
+    assert rebase._acked(*args, config=OPEN) == ({"pid2"}, {"b" * 40})
+    assert rebase._acked(*args) == ({"pid2"}, {"b" * 40})
+
+
+def test_tracked_acks_still_count_with_the_gate_closed(tmp_path):
+    rebase = support.script("feature_rebase")
+    sdlc = tmp_path / ".sdlc"
+    tracked = pathlib.Path(rebase.ack_path(str(sdlc), "u"))
+    tracked.parent.mkdir(parents=True)
+    tracked.write_text(json.dumps({"acked": [{"sha": "c" * 40, "patch_id": "pid3"}]}))
+    got = rebase._acked(str(sdlc), _boom, str(tmp_path), "u", "origin/main", config=CLOSED)
+    assert got == ({"pid3"}, {"c" * 40})

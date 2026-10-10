@@ -17,7 +17,7 @@ from pathlib import Path
 RISK = {"gh-issue": "medium", "gh-pr": "medium", "gh-label": "medium",
         "gh-project": "medium", "gh-api-write": "medium", "graphql-mutation": "medium",
         "git-push": "high", "git-destructive": "high", "git-ref-write": "high", "fs-remove": "high",
-        "fs-rmtree": "high", "fs-write": "medium", "network-post": "high"}
+        "fs-rmtree": "high", "fs-write": "medium", "network-post": "high", "network-delete": "high"}
 _GH_ACTIONS = {"issue": {"close", "reopen", "edit", "comment", "create", "delete", "transfer", "lock"},
                "pr": {"create", "merge", "close", "comment", "review", "edit", "ready"},
                "label": {"create", "edit", "delete"},
@@ -305,6 +305,17 @@ def _scoped_calls(tree):
                 yield node, values
 
 
+def _is_http_delete(node, name, tokens):
+    """A Python HTTP-client DELETE: `method="DELETE"` keyword, `requests|httpx.delete(`, `.request("DELETE", ...)` (#959)."""
+    for kw in node.keywords:
+        if kw.arg == "method" and any(s.lower() == "delete" for s in _strings(kw.value, {})):
+            return True
+    if name in {"requests.delete", "httpx.delete"}:
+        return True
+    return (name.endswith(".request") and bool(node.args) and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str) and node.args[0].value.lower() == "delete")
+
+
 def _rules_for_call(node, values):
     name = _call_name(node.func)
     strings = [s for arg in list(node.args) + [kw.value for kw in node.keywords]
@@ -347,6 +358,8 @@ def _rules_for_call(node, values):
                 rules.add("git-ref-write")      # a plain update-ref creates or moves a ref (#960)
     if _is_gh_api_write_call(node.func):
         rules.add("gh-api-write")
+    if _is_http_delete(node, name, tokens):
+        rules.add("network-delete")
     if name == "shutil.rmtree":
         rules.add("fs-rmtree")
     elif name.startswith("os.") and name.split(".")[-1] in {"unlink", "remove", "rmdir", "replace", "rename"}:

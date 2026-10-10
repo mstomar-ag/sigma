@@ -627,11 +627,34 @@ def _alive(pid):
 import pytest  # noqa: E402
 
 
+def _clock_starts_when_ready(monkeypatch, pidfile):
+    """The seam of the flaky timing (#1073): `communicate(timeout=1)` starts its clock at spawn, so on a loaded machine the
+    shell had not yet run `echo $! > pidfile` when the kill landed, and the test read a missing or empty pidfile. Wrap
+    Popen so a call waits (bounded, generously, NOT a raised timeout) until the stub reports its grandchild, and only then
+    starts the real clock. Returns the list of spawns."""
+    import time
+    real, spawned = pr.subprocess.Popen, []
+
+    class Ready(real):
+        def communicate(self, input=None, timeout=None):
+            ceiling = time.monotonic() + 30
+            while not (pidfile.exists() and pidfile.read_text().strip()) and time.monotonic() < ceiling:
+                time.sleep(0.02)
+            return super().communicate(input, timeout)
+
+    def popen(*a, **kw):
+        spawned.append(a)
+        return Ready(*a, **kw)
+    monkeypatch.setattr(pr.subprocess, "Popen", popen)
+    return spawned
+
+
 @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX; Windows uses taskkill /T")
 def test_a_hung_gh_is_killed_with_its_whole_process_group(tmp_path, monkeypatch):
     import time
     pidfile = tmp_path / "grandchild.pid"
     monkeypatch.setattr(pr, "BOARD_GH", _hanging_gh(tmp_path, pidfile))
+    spawned = _clock_starts_when_ready(monkeypatch, pidfile)
     run = pr._bounded_gh(budget_s=30, call_timeout_s=1)
     t0 = time.monotonic()
     with pytest.raises(pr.BoardCallTimeout):
@@ -642,10 +665,35 @@ def test_a_hung_gh_is_killed_with_its_whole_process_group(tmp_path, monkeypatch)
     while _alive(grandchild) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not _alive(grandchild), "the hung gh's own child outlived the kill"
-    t1 = time.monotonic()
     with pytest.raises(pr.BoardCallTimeout, match="earlier"):  # nothing else runs this boundary
         run(["project", "item-edit"])
-    assert time.monotonic() - t1 < 0.5
+    assert len(spawned) == 1, "the second call must raise without spawning"     # not a wall-clock bound
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX; Windows uses taskkill /T")
+def test_control_a_slow_starting_gh_is_what_made_the_kill_test_flaky(tmp_path, monkeypatch):
+    """Deterministic control at the seam: a stub that takes 2s to report its grandchild (a loaded machine, made exact)
+    against the 1s call timeout. Un-gated, the kill lands first and no pid was ever recorded; gated, the pid is there."""
+    import time
+    gh = tmp_path / "slow-gh"
+    pidfile = tmp_path / "pid"
+    gh.write_text("#!/bin/sh\nsleep 2\nsleep 15 &\necho $! > %s\nsleep 15\n" % pidfile, encoding="utf-8")
+    gh.chmod(0o755)
+    monkeypatch.setattr(pr, "BOARD_GH", str(gh))
+    run = pr._bounded_gh(budget_s=30, call_timeout_s=1)
+    with pytest.raises(pr.BoardCallTimeout):
+        run(["project", "item-edit"])
+    assert not (pidfile.exists() and pidfile.read_text().strip()), "un-gated, the kill precedes the pid"
+    monkeypatch.undo()
+    monkeypatch.setattr(pr, "BOARD_GH", str(gh))
+    _clock_starts_when_ready(monkeypatch, pidfile)
+    with pytest.raises(pr.BoardCallTimeout):
+        pr._bounded_gh(budget_s=30, call_timeout_s=1)(["project", "item-edit"])
+    pid = int(pidfile.read_text().strip())
+    deadline = time.monotonic() + 3
+    while _alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not _alive(pid)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="exercised through the POSIX spawn")
