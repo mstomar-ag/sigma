@@ -624,12 +624,20 @@ def promote(sdlc_dir, config, numbers, source=None, run=None, apply=True, demote
                        "if this repo picks from the board" % column)
         audit = (DEMOTE_COMMENT.format(proposed=proposed) if demote
                  else PROMOTE_COMMENT.format(goal=goal))
-        if _feature("decision_record").enabled(config):          # slice 8: store record + attributed comment
-            rec = _feature("decision_record").build("demote" if demote else "promote", n, "unknown",
-                                           verb, "", "human")
-            err = _feature("decision_record").write_all(sdlc_dir, rec, config, source, text=audit)["error"]
-            detail += "; " + err if err else ""
-        else:
+        tried = []                                      # the comment was attempted (never post twice)
+        try:
+            dr = _feature("decision_record")
+            if dr.enabled(config):                      # slice 8: store record + attributed comment
+                rec = dr.build("demote" if demote else "promote", n, "unknown", verb, "", "human")
+
+                def _post(num, body):
+                    tried.append(num)
+                    source._issue_comment(num, body)
+                err = dr.write_all(sdlc_dir, rec, config, source, text=audit, poster=_post)["error"]
+                detail += "; " + err if err else ""
+        except Exception as exc:                        # noqa: BLE001 - never break the gesture
+            detail += "; decision record failed: %s" % exc
+        if not tried:
             try:
                 source._issue_comment(n, audit)         # REST first (#895 3a)
             except Exception:                           # noqa: BLE001 - audit trail is best-effort
