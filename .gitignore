@@ -18,6 +18,8 @@ __pycache__/
 .sdlc/plans/scope/
 !.sdlc/research/
 !.sdlc/acceptance/
+!.sdlc/decisions/
+.sdlc/decisions/_*
 !.sdlc/evidence/
 .sdlc/evidence/*
 !.sdlc/evidence/453/

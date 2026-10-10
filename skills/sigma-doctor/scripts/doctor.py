@@ -4739,7 +4739,7 @@ def _model_max_tier(cfg):
     return tier if tier in ("haiku", "sonnet", "opus", "fable") else "opus"
 
 
-def _decision_rubric_state(cfg):
+def _decision_rubric_state(cfg, sdlc_dir=None):
     """Decision-rubric readout for the features dashboard (informational, read-only, no network).
     The public signal is the public-repository profile being applied (ledger and auto-merge both off);
     it is a heuristic, so the warning says so."""
@@ -4755,7 +4755,18 @@ def _decision_rubric_state(cfg):
         wk = cfg.get("work") if isinstance(cfg, dict) else None
         auto = wk.get("auto_merge") if isinstance(wk, dict) else None
         warn = mod.public_repo_warning(cfg, True if (led is False and auto == "off") else None)
-        return state + ("; " + warn if warn else "")
+        extra = []
+        if warn:
+            extra.append(warn)
+        if sdlc_dir is not None and rub.part_enabled("records"):
+            store = _load_loop_script("decision_store")
+            cap = store.ceiling_warning(sdlc_dir, cfg)
+            if cap:
+                extra.append(cap)
+            old = store.untracked_old(sdlc_dir, config=cfg)
+            if old:
+                extra.append("%d decision records are untracked for over a day; commit them" % len(old))
+        return state + "".join("; " + e for e in extra)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
 
@@ -5031,7 +5042,7 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
         "run: python3 skills/sigma-doctor/scripts/migrate.py .sdlc (dry run), then --apply; "
         "and rename the environment variable it names to match",
     ))
-    rows.append(("decision rubric (OFF by default)", _decision_rubric_state(cfg),
+    rows.append(("decision rubric (OFF by default)", _decision_rubric_state(cfg, sdlc_dir),
                  'config: "decision_rubric": {"records": {"enabled": true, "repo_visibility": "private"}}'))
     return rows
 

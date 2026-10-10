@@ -529,6 +529,38 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/decision_store.py",
+      "function": "_lock",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "records part enabled (reindex, archive); creates only the lock file inside the records folder",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/decision_store.py",
+      "function": "_publish",
+      "rule": "fs-remove",
+      "count": 2,
+      "gate": "records part enabled; removes only the temp file this call created beside its target after a failed write",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/decision_store.py",
+      "function": "append",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "decision_rubric.records.enabled is exactly true; exclusive create of one new id-named file in the records folder; never overwrites",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/decision_store.py",
+      "function": "archive",
+      "rule": "fs-remove",
+      "count": 2,
+      "gate": "person-run archive verb; records part enabled; removes only record files older than records.archive_after_days after they are written into a yearly archive file under the lock",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/diff_revert.py",
       "function": "cleanup",
       "rule": "fs-remove",
