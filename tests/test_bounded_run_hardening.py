@@ -158,3 +158,25 @@ def test_timeout_error_keeps_no_argument_text():
     assert error.argv == ["git", "fetch"]
     assert "secret-979" not in repr(vars(error)) and "token-979" not in repr(vars(error))
     assert str(error) == "git fetch: timed out after 2s"
+
+
+def test_lifeline_is_ended_when_the_group_gone_confirmation_raises(tmp_path, monkeypatch):
+    """#1065: a confirmation that raises must not skip ending the lifeline; it ends it as not-confirmed (pipe closed,
+    no `done`), and the run's own result is not replaced by the confirmation's error."""
+    br = support.load("bounded_run")
+    ended = []
+    real_end = br._end_lifeline
+
+    def spy(sentinel, write_fd, group_gone=True):
+        ended.append(group_gone)
+        real_end(sentinel, write_fd, group_gone)
+        ended.append(sentinel.poll() is not None)
+
+    def boom(proc):
+        raise RuntimeError("confirmation failed")
+
+    monkeypatch.setattr(br, "_end_lifeline", spy)
+    monkeypatch.setattr(br, "_group_confirmed_gone", boom)
+    result = br.run_group([sys.executable, "-c", "pass"], tmp_path, 30, term_grace=1)
+    assert result.outcome == br.OK
+    assert ended == [False, True], "the lifeline was not ended as unconfirmed and reaped"
