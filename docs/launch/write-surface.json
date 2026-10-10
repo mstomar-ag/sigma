@@ -785,6 +785,22 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_job.py",
+      "function": "__call__",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "upkeep.enabled (machine door, the job is started only by the gated decision step); refreshes only the job's own heartbeat file from the supervisor's poll clock",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_job.py",
+      "function": "_touch",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "upkeep.enabled (machine door); touches only the job's own heartbeat file under the runtime state directory, an OS error is swallowed",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_upkeep_landing.py",
       "function": "finish",
       "rule": "fs-remove",
