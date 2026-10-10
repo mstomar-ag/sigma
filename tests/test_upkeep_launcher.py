@@ -48,6 +48,7 @@ if not mode.get("no_transcript"):
             "message": {"role": "assistant", "model": "claude-opus-5", "id": "m1", "usage": usage}}
     (d / "s.jsonl").write_text(json.dumps(line) + "\\n")
 if mode.get("sleep"):
+    time.sleep(mode.get("delay", 0))
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
     (here / "child.pid").write_text(str(child.pid))
     time.sleep(120)
@@ -142,8 +143,31 @@ def test_charge_is_written_locally_and_as_a_note(rig):
 
 # ------------------------------------------------------------------------------------------ control 2: killed means the full cap
 
-def test_timeout_kills_the_group_and_charges_the_cap(rig):
+def _budget_starts_when_ready(monkeypatch, rig):
+    """Start signal at the seam (#1099): `run_group` begins its wall-clock budget right after the spawn, so on a loaded
+    machine a 1s budget can expire before the fake has even finished starting python and written `child.pid`. Wrap Popen so
+    the spawn of the fake `claude` returns only once the fake reports its grandchild (bounded at 30s, NOT a raised timeout);
+    the budget then starts from a running child."""
+    import subprocess
+    import time
+    real, pidfile, binary = subprocess.Popen, rig.fakedir / "child.pid", str(rig.binary)
+
+    class Ready(real):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            if a and a[0] and a[0][0] == binary:
+                ceiling = time.monotonic() + 30
+                while not (pidfile.exists() and pidfile.read_text().strip()) and time.monotonic() < ceiling:
+                    time.sleep(0.02)
+    monkeypatch.setattr(subprocess, "Popen", Ready)
+
+
+def test_timeout_kills_the_group_and_charges_the_cap(rig, monkeypatch):
+    """Cause (#1099): the 1s budget started at spawn, before the fake had written `child.pid`, so under suite load the
+    kill landed first and the pid read failed. The spawn now returns once the child has reported (a start signal), so the
+    budget is measured from a running child; the timeout itself is unchanged."""
     rig.mode({"sleep": True})
+    _budget_starts_when_ready(monkeypatch, rig)
     result = rig.launcher.launch(rig.request(timeout=1))
     assert result.outcome == "killed", result
     assert result.charged_usd == CAP and result.charged_usd != METERED
@@ -153,6 +177,20 @@ def test_timeout_kills_the_group_and_charges_the_cap(rig):
             os.kill(pid, 0)
             import time
             time.sleep(0.1)
+
+
+def test_control_a_slow_starting_child_is_what_made_the_kill_test_flaky(rig, monkeypatch):
+    """Deterministic control: the fake takes 2s to report its grandchild (a loaded machine, made exact) against the 1s
+    budget. Un-gated, the kill lands first and no pid was ever recorded; gated, the pid is there."""
+    rig.mode({"sleep": True, "delay": 2})
+    result = rig.launcher.launch(rig.request(timeout=1))
+    assert result.outcome == "killed", result
+    assert not (rig.fakedir / "child.pid").exists(), "un-gated, the kill precedes the pid"
+    (rig.fakedir / "child.pid").unlink(missing_ok=True)
+    _budget_starts_when_ready(monkeypatch, rig)
+    result = rig.launcher.launch(rig.request(timeout=1))
+    assert result.outcome == "killed", result
+    assert int((rig.fakedir / "child.pid").read_text())
 
 
 def test_a_missing_transcript_charges_the_cap(rig):
