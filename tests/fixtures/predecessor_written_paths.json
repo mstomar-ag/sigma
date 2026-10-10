@@ -113,6 +113,7 @@
     "skills/sigma-init/scripts/sdlc_init.py::scaffold",
     "skills/sigma-init/scripts/sdlc_init.py::scaffold_extras",
     "skills/sigma-init/scripts/verify_detect.py::write_verify",
+    "skills/sigma-loop/scripts/applier.py::_read_config",
     "skills/sigma-setup/scripts/setup.py::write_cfg"
    ]
   },
@@ -147,6 +148,7 @@
    "vetted_writers": [
     "skills/sigma-loop/scripts/comment_watch.py::tick",
     "skills/sigma-loop/scripts/drift_watch.py::sweep",
+    "skills/sigma-loop/scripts/handoff.py::_triage_finish",
     "skills/sigma-loop/scripts/ledger.py::append",
     "skills/sigma-loop/scripts/ledger.py::main",
     "skills/sigma-loop/scripts/ledger.py::safe_append",
@@ -172,6 +174,7 @@
    "vetted_writers": [
     "skills/sigma-loop/scripts/comment_watch.py::tick",
     "skills/sigma-loop/scripts/drift_watch.py::sweep",
+    "skills/sigma-loop/scripts/handoff.py::_triage_finish",
     "skills/sigma-loop/scripts/ledger.py::append",
     "skills/sigma-loop/scripts/ledger.py::main",
     "skills/sigma-loop/scripts/ledger.py::safe_append",
@@ -369,6 +372,7 @@
    "vetted_writers": [
     "skills/sigma-loop/scripts/comment_watch.py::tick",
     "skills/sigma-loop/scripts/drift_watch.py::sweep",
+    "skills/sigma-loop/scripts/handoff.py::_triage_finish",
     "skills/sigma-loop/scripts/ledger.py::append",
     "skills/sigma-loop/scripts/ledger.py::main",
     "skills/sigma-loop/scripts/ledger.py::safe_append",
@@ -394,6 +398,7 @@
    "vetted_writers": [
     "skills/sigma-loop/scripts/comment_watch.py::tick",
     "skills/sigma-loop/scripts/drift_watch.py::sweep",
+    "skills/sigma-loop/scripts/handoff.py::_triage_finish",
     "skills/sigma-loop/scripts/ledger.py::append",
     "skills/sigma-loop/scripts/ledger.py::main",
     "skills/sigma-loop/scripts/ledger.py::safe_append",
@@ -419,6 +424,7 @@
    "vetted_writers": [
     "skills/sigma-loop/scripts/comment_watch.py::tick",
     "skills/sigma-loop/scripts/drift_watch.py::sweep",
+    "skills/sigma-loop/scripts/handoff.py::_triage_finish",
     "skills/sigma-loop/scripts/ledger.py::append",
     "skills/sigma-loop/scripts/ledger.py::main",
     "skills/sigma-loop/scripts/ledger.py::safe_append",
@@ -505,6 +511,8 @@
     "skills/sigma-loop/scripts/slack_commands_listen.py::acquire_single_instance",
     "skills/sigma-loop/scripts/slack_commands_listen.py::run",
     "skills/sigma-loop/scripts/slack_commands_listen.py::write_heartbeat",
+    "skills/sigma-loop/scripts/spend_approval.py::_check",
+    "skills/sigma-loop/scripts/spend_approval.py::_counter_write",
     "skills/sigma-loop/scripts/state.py::_cursor_lock",
     "skills/sigma-loop/scripts/state.py::_patch_cursor",
     "skills/sigma-loop/scripts/state.py::_queue",
