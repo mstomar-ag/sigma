@@ -65,6 +65,8 @@ LIBRARY_ONLY = {
     "unattended_git",
     "merge_queue", "tier_escalation", "board_spec", "red_green", "shell_policy", "logroll",
     "codex_runtime",
+    "feature_upkeep_drift",
+    "feature_upkeep_state",
 }
 
 

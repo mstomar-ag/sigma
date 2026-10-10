@@ -1,0 +1,18 @@
+[
+  {
+    "pattern": ".sdlc/state/upkeep/units/",
+    "issue": "#919",
+    "decision": "directory rollup of the per-unit upkeep state files below it",
+    "pruner_or_cap": "directory rollup, no writer of its own: the sum of the per-unit files below it, each rewritten in place and never listed or appended to; see the pattern for the file below",
+    "evidence": "skills/sigma-loop/scripts/feature_upkeep_state.py (STATE_REL); writer is invisible to the scan by name, which reports only a generic .sdlc/<part> row at the helper call lines; docs/launch/dispositions/919.json",
+    "unscanned": true
+  },
+  {
+    "pattern": ".sdlc/state/upkeep/units/<unit>.json",
+    "issue": "#919",
+    "decision": "intentionally unbounded (one small document per unit of work, rewritten in place; the retention rule for the new store)",
+    "pruner_or_cap": "none by decision: measured 281 bytes per document (a 9-character unit name, two 40-hex tips) and 4 KiB on disk each, so 1,000 units hold 281,000 bytes and occupy 4,000 KiB on disk (one machine, APFS, 4 KiB blocks); other sizes are linear extrapolations and not measurements: 100 units about 400 KiB on disk, 10,000 units about 39 MiB; the directory is never listed, so a read costs one open whatever its size (0.077 ms each over 1,000 units, one machine); a crash between the temporary file and the rename can leave one dot-named .tmp file beside the document (about 0.3 KiB, one per crash, nothing prunes it); owner the project; lever: delete a unit's file, after which the unit reads as never attempted and is re-evaluated, which is not an outage, or delete the directory; a pruner for the files of units that no longer exist in the registry is a recorded follow-up and is not part of this change",
+    "evidence": "tests/test_upkeep_pins.py (test_growth_disposition); writer is feature_upkeep_state.py record_attempt and record_outcome through the shared atomic helper and symlink refusal in state.py, which the scan cannot attribute to this path",
+    "unscanned": true
+  }
+]

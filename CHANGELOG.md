@@ -4,6 +4,16 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Upkeep part A, slice 3: drift measure, per-unit state and the due rule (#919).** Two new
+  library modules, `feature_upkeep_drift.py` and `feature_upkeep_state.py`. The first counts
+  pull-request arrivals on a base branch and on a feature branch by author date over a bounded
+  first-parent walk, derives the drift threshold from the window and burst rates and clamps it, and
+  answers UNKNOWN, never zero, when the walk cap is hit, git fails, the repository is shallow or
+  commits exist but none classify. The second keeps one atomically written state file per unit
+  (unreadable state reads as overdue) and the due rule: a cooldown since the last attempt, a backstop
+  since the last success and a longer backstop for dormant units; an attempt that cannot be recorded
+  never starts a pass. Both take the settings of the upkeep gate, a growth disposition records the
+  retention rule for the new store, and nothing calls them yet, so there is no behaviour change.
 - **Shared verify runner and unattended git runner (#920, upkeep part A, slice 4).** New bounded_run.py:
   a command run in a process group of its own under a wall-clock budget, the whole group stopped
   (SIGTERM, then SIGKILL) on overrun or when a stop file appears, a lifeline that stops the tree if the

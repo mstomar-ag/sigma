@@ -1384,6 +1384,7 @@ _FOLDS = {
     ("feature_propagate", "sibling_path"),    # #1672 — a shard path in ANOTHER repo
     ("feature_rebase", "worktree_path"),      # #1673 — the throwaway upkeep checkout
     ("feature_doc", "doc_path"),              # #1673 — the `<name>.md` page a person opens
+    ("feature_upkeep_state", "unit_state_path"),    # #919 — the per-unit upkeep state file
 }
 
 #: Derived keys that do NOT fold — A RECORD OF OPEN DEFECTS, never a design decision. When one is
@@ -1427,6 +1428,8 @@ _NO_UNIT_NAME = {
     ("feature_registry", "_load"),
     ("feature_stamp", "_load"),
     ("feature_sync", "_load"),
+    ("feature_upkeep_drift", "_load"),        # #919: the sibling importer, once per module
+    ("feature_upkeep_state", "_load"),        # #919: the sibling importer, once per module
     ("feature_propagate", "record_path"),     # keyed by GOAL, not by unit
     ("feature_rebase", "rebase_stopped"),     # takes a path that is already built
     # #278: keyed by a git BRANCH name (which may be a goal's `sdlc/<n>`), never a unit name; its
@@ -1665,8 +1668,9 @@ def test_nothing_declared_free_of_unit_names_touches_the_unit_name_vocabulary(tm
     Membership of that set cannot be measured (see its own comment), so what is measured instead is
     the thing a wrong answer leaves behind: a function that really handles a unit name has to guard
     it, fold it, or build its address, and all four of those are spelled with the names below.
-    Measured over the tree as it stands, this separates the two groups exactly — 7 of 7 folded
-    builders name at least one, 13 of 13 declared unit-name-free name none.
+    Measured over the tree as it stands, this separates the two groups exactly — every folded
+    builder names at least one, and every one declared unit-name-free names none. (The sets above
+    are the count: prose counts of them went stale as members were added, so none is repeated here.)
 
     ONE WAY ONLY, AND THAT IS THE WHOLE DESIGN. Run the other way, as an auto-classifier, it would
     have waved through every one of the four keys #1674's discovery was written to catch: none of
