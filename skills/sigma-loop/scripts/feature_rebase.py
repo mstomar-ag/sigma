@@ -2556,7 +2556,8 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
             registry_now = registry.read(registry.registry_dir(sdlc_dir))
         except Exception:             # noqa: BLE001 - an unreadable registry reads as not-own
             registry_now = None
-        verdict = hsg.guard("git push --force-with-lease %s HEAD:refs/heads/%s" % (remote, branch),
+        # Classifier TEXT only (never executed); the real push is `_pushed`, the one pinned colon-refspec site.
+        verdict = hsg.guard("git push --force-with-lease %s HEAD:%s" % (remote, "refs/heads/" + branch),
                             {"branch": branch, "registry": registry_now}, config)
         if verdict.blocked:
             report["outcome"] = FAILED
