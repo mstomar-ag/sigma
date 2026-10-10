@@ -76,6 +76,7 @@ Cursor adapter is not verified in a live session; Codex has partial live validat
 | Stop | — | `completion_gate.sh` | yes | Stop gate |
 | Stop | — | `time_track.py stop` | no | — (time tracking) |
 | SessionStart | — | `session_start.sh` | no | SessionStart policy brief |
+| Unit landing guard | Python gate | `feature_land.py` `land`: the upkeep gate is its first call, so a closed gate makes no process, network or model call and writes no file; the verb ends in a rehearsal outcome and names no merge operation in this release; an unattended request (no consent flag naming this unit, or a driven-launcher fingerprint) is refused before the upkeep pass can push unless a live unit approval bound to the current tip exists, which is checked, not consumed; the scheduler's import closure cannot reach `land` (a structural test with a control). Queue, repository-setting and landed-state preconditions each refuse with a distinct reason. | off — `upkeep.enabled: true` | Claude Code, Cursor, Codex |
 
 ## Not yet in this table
 

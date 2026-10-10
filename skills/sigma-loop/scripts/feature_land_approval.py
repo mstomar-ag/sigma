@@ -116,31 +116,50 @@ def approve(config, sdlc_dir, unit, slug, head, *, ttl_seconds=DEFAULT_TTL_SECON
     return {"ok": True, "expires_at": body["expires_at"]}
 
 
-@_gate_first
-def consume(config, sdlc_dir, unit, slug, head, *, now=None):
-    """Validate the record for exactly this unit, slug and head, then take the single-use marker (create-once)."""
+def _validate(unit, slug, head, sdlc_dir, now):
+    """-> (None, marker path) when a live record for exactly this unit, slug and head exists, else (reason, None)."""
     why = _check(unit, slug, head)
     if why:
-        return _deny(why)
+        return why, None
     record, marker = approval_path(sdlc_dir, slug, head, unit)
     try:
         state.refuse_symlinks(sdlc_dir, pathlib.Path(*STATE_PARTS, record.name))
         state.refuse_symlinks(sdlc_dir, pathlib.Path(*STATE_PARTS, marker.name))
     except OSError:
-        return _deny("approval path has a symlink component; refusing")
+        return "approval path has a symlink component; refusing", None
     try:
         data = json.loads(record.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return _deny("no readable approval for this unit at this head; run the approve verb")
+        return "no readable approval for this unit at this head; run the approve verb", None
     if not isinstance(data, dict):
-        return _deny("approval record is malformed")
+        return "approval record is malformed", None
     expires = data.get("expires_at")
     if not (isinstance(expires, int) and not isinstance(expires, bool)):
-        return _deny("approval record is malformed")
+        return "approval record is malformed", None
     if (data.get("unit"), data.get("slug"), data.get("head")) != (registry.unit_key(unit), slug, head):
-        return _deny("approval record does not match this unit, repository and head")
+        return "approval record does not match this unit, repository and head", None
     if _now(now) >= expires:
-        return _deny("approval expired; run the approve verb again")
+        return "approval expired; run the approve verb again", None
+    return None, marker
+
+
+@_gate_first
+def peek(config, sdlc_dir, unit, slug, head, *, now=None):
+    """Would `consume` succeed right now? Reads only: no marker is taken, nothing is written. A used approval denies."""
+    why, marker = _validate(unit, slug, head, sdlc_dir, now)
+    if why:
+        return _deny(why)
+    if marker.exists():
+        return _deny("approval for this head was already used (single use); a landing needs a new head")
+    return {"ok": True}
+
+
+@_gate_first
+def consume(config, sdlc_dir, unit, slug, head, *, now=None):
+    """Validate the record for exactly this unit, slug and head, then take the single-use marker (create-once)."""
+    why, marker = _validate(unit, slug, head, sdlc_dir, now)
+    if why:
+        return _deny(why)
     try:
         fd = os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
