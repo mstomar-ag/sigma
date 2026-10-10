@@ -476,14 +476,24 @@ def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, 
     """Post `text`. With the records part open it is posted WITH the decision record's id and the
     record is stored; closed, this is exactly `_comment` (byte-identical). Returns "" or a
     "; <error>" suffix for the caller's detail."""
-    if not decision_record.enabled(config):
-        _comment(source, number, text)
-        return ""
-    choice = (answers or {}).get(CLOSING_QUESTION["id"]) or gesture
-    rec = decision_record.build(gesture, number, _declared_kind(data), choice,
-                                _substantive_reason(answers), decision_record.how_for(gesture))
-    out = decision_record.write_all(sdlc_dir, rec, config, source, text=text)
-    return "; " + out["error"] if out["error"] else ""
+    tried = []                                          # the comment was attempted (never post twice)
+    try:
+        if decision_record.enabled(config):
+            choice = (answers or {}).get(CLOSING_QUESTION["id"]) or gesture
+            rec = decision_record.build(gesture, number, _declared_kind(data), choice,
+                                        _substantive_reason(answers), decision_record.how_for(gesture))
+
+            def _post(num, body):
+                tried.append(num)
+                source._issue_comment(num, body)
+            out = decision_record.write_all(sdlc_dir, rec, config, source, text=text, poster=_post)
+            return "; " + out["error"] if out["error"] else ""
+    except Exception as exc:                            # noqa: BLE001 - never break the gesture
+        if not tried:
+            _comment(source, number, text)
+        return "; decision record failed: %s" % exc
+    _comment(source, number, text)
+    return ""
 
 
 def _comment(source, number, text):

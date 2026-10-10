@@ -576,6 +576,11 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
                 unparked.append(n)
                 text = _UNPARK_COMMENT.format(refs=", ".join(f"#{r}" for r in refs),
                                               label=source.goal_label)
+                posted = []
+
+                def _post(num, body, _n=n):
+                    source.note(num, body)
+                    posted.append(num)                  # a record failure after this must not re-post
                 try:
                     dr = _load("decision_record")
                     if dr.enabled(config):              # slice 8: autonomous record + same-id comment
@@ -583,10 +588,11 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
                                                         "blocker(s) closed: " + ", ".join(
                                                             f"#{r}" for r in refs),
                                                         dr.how_for("sweep")),
-                                     config, source, text=text, poster=source.note)
+                                     config, source, text=text, poster=_post)
                         continue
                 except Exception:
-                    pass
+                    if posted:
+                        continue
                 try:
                     source.note(n, text)
                 except Exception:

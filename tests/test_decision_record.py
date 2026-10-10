@@ -156,3 +156,67 @@ def test_gh_sites_go_through_the_helper():
         text = (S / (name + ".py")).read_text()
         assert "subprocess" not in text and '"gh"' not in text and "'gh'" not in text
         assert "gh issue" not in text and "gh api" not in text
+
+
+# --- #1092: a record failure with the gate open never breaks the gesture or double-posts ----------
+
+def _boom(*a, **k):
+    raise RuntimeError("boom")
+
+
+def test_unpark_record_build_error_is_swallowed_and_comment_posted(tmp_path):
+    u = _mod("unpark")
+    u.decision_record.build = _boom
+    run = tu._runner(views={"5": tu._view(labels=("sdlc:parked",), comments=[tu._park("x")])})
+    res = u.resolve(str(tmp_path), _on(tu._config()), 5, {"decision": "go"}, "unpark", run=run)
+    assert res["outcome"] == "unparked" and "decision record failed" in res["detail"]
+    assert _bodies(run, 5) == [u.render_block({"decision": "go"})]
+
+
+def test_promote_record_build_error_is_swallowed_and_comment_posted(tmp_path):
+    p = _mod("promote")
+    p._feature("decision_record").build = _boom
+    run = tp._runner(views={"5": tp._view("sdlc:needs-confirmation")})
+    res = p.promote(str(tmp_path), _on(tp._config()), ["5"], run=run)
+    r = res["results"][0]
+    assert r["outcome"] == "promoted" and "decision record failed" in r["detail"]
+    assert _bodies(run, 5) == [p.PROMOTE_COMMENT.format(goal="sdlc:goal")]
+
+
+def _sweep(tmp_path, cfg):
+    au = _mod("auto_unpark")
+    issue = ta._blocked_issue(42, body="blocked by #7 until the base lands")
+    run = ta._label_aware_sweep_runner(
+        by_label={"sdlc:parked": "[]", "sdlc:blocked": json.dumps([issue])}, states={"7": "CLOSED"})
+    return au, run, au.sweep_unpark(str(tmp_path), cfg, apply=True, run=run)
+
+
+def test_sweep_never_posts_twice_when_record_write_raises_after_posting(tmp_path):
+    au = _mod("auto_unpark")
+    real = au._load
+
+    class Fake:
+        enabled = staticmethod(lambda c: True)
+        build = staticmethod(lambda *a, **k: {})
+        how_for = staticmethod(lambda g: "autonomous")
+
+        @staticmethod
+        def write_all(sdlc, rec, cfg, src, text="", poster=None):
+            poster(42, text)
+            raise RuntimeError("late")
+    au._load = lambda n: Fake if n == "decision_record" else real(n)
+    issue = ta._blocked_issue(42, body="blocked by #7 until the base lands")
+    run = ta._label_aware_sweep_runner(
+        by_label={"sdlc:parked": "[]", "sdlc:blocked": json.dumps([issue])}, states={"7": "CLOSED"})
+    au.sweep_unpark(str(tmp_path), _on(ta._config()), apply=True, run=run)
+    assert len(_bodies(run, 42)) == 1
+
+
+def test_sweep_comment_is_byte_identical_with_gate_closed(tmp_path):
+    au, run, res = _sweep(tmp_path, ta._config())
+    assert res["unparked"] == ["42"]
+    bodies = _bodies(run, 42)
+    assert len(bodies) == 1
+    assert bodies[0] == ("Auto-unparked by Sigma \u2014 blocker(s) #7 closed; re-added sdlc:goal "
+                         "for re-examination.")
+    assert "Decision record" not in bodies[0] and not (tmp_path / "decisions").exists()
