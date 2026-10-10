@@ -913,6 +913,46 @@
       "risk": "high"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_level2.py",
+      "function": "_write_attempts",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "opt-in; upkeep.enabled and conflicts.resolve agent; atomic replace of the one per-unit attempts file under the local state directory, bounded entry count",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_level2.py",
+      "function": "_write_attempts",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "opt-in; upkeep.enabled and conflicts.resolve agent; one per-unit attempts file under the local state directory, written to a temporary name then replaced",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_level2.py",
+      "function": "export_tree",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "opt-in; upkeep.enabled and conflicts.resolve agent; copies tracked files into a fresh scratch tree made by this pass, never into the work tree",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_level2.py",
+      "function": "resolve_stop",
+      "rule": "fs-rmtree",
+      "count": 1,
+      "gate": "opt-in; upkeep.enabled and conflicts.resolve agent; removes only the scratch directory this pass created for the resolver, never the work tree or a ref",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_level2.py",
+      "function": "resolve_stop",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "opt-in; upkeep.enabled and conflicts.resolve agent; writes resolved file text back into the unit worktree for the stop being resolved, checked by proof and review before any push",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_upkeep_review.py",
       "function": "prune",
       "rule": "fs-remove",

@@ -1474,9 +1474,12 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
         if outcome == REBASED:
             report["after"] = after
             if resolved is not None:
-                report["resolved"] = {"level": 1, "run_id": resolved["run_id"], "original_tip": sha, "new_tip": after,
+                report["resolved"] = {"level": resolved.get("level", 1), "run_id": resolved["run_id"], "original_tip": sha, "new_tip": after,
                                       "files": resolved["files"], "checks": resolved["checks"],
                                       "pairs": resolved["pairs"]}
+                if resolved.get("level") == 2:
+                    report["resolved"]["extra"] = _load("feature_upkeep_level2").record_fields(
+                        resolved, resolved.get("review"), resolved["plan"]["launch"].get("model"))
         return outcome
     finally:
         _drop_worktree(run, cwd, path)
@@ -1512,6 +1515,8 @@ def _level1(run, cwd, path, base_ref, report, level1):
     (so the description is of the real stop) and `report["why"]` carries the code."""
     prove = _prove()
     if not prove.eligible(run, path):
+        if level1.get("level2") is not None:
+            return _level2(run, path, report, level1)
         return None
     out = prove.resolve_stops(run, path, level1["union"], level1["run_id"], rebase_stopped)
     if not out["refusal"]:
@@ -1531,6 +1536,47 @@ def _level1(run, cwd, path, base_ref, report, level1):
     return {"parked": True}
 
 
+#: Level 2 (upkeep part B, slice 10). A seam, None in the shipped engine: until the owner supplies the binary, the credential
+#: route and the caps (nothing reads them from configuration) the resolver is unreachable. A function `(config) -> plan dict`.
+LEVEL2_PLAN_FACTORY = None
+
+
+def _level2_plan(config):
+    """The Level 2 plan, or None -- the factory unset, the level not `agent`, or any doubt. Pure query."""
+    try:
+        if LEVEL2_PLAN_FACTORY is None or gate.conflict_level(config) != "agent":
+            return None
+        return LEVEL2_PLAN_FACTORY(config)
+    except Exception:                     # noqa: BLE001 - a doubtful plan reads closed
+        return None
+
+
+def _level2(run, path, report, level1):
+    """A stop Level 1 does not take, at level `agent`: the capped resolver -> the result dict, `{"parked": True}` on a
+    refusal (the stop is described as it was), never None."""
+    level2 = _load("feature_upkeep_level2")
+    plan = dict(level1["level2"], run_id=level1["run_id"], unit=report["unit"], now=time.time())
+    out = level2.resolve_stops(run, path, plan, rebase_stopped)
+    report["level2_charged"] = out["charged"]
+    if out["refusal"]:
+        _park_resolved(report, out["refusal"])
+        return {"parked": True}
+    return {"run_id": level1["run_id"], "stops": out["stops"], "files": out["files"], "level": 2, "evidence": out["evidence"],
+            "charged": out["charged"], "plan": plan}
+
+
+def _review_level2(run, path, base_ref, sha, after, report, resolved):
+    """Level 2 only, after the proof and before the push -> True when the reviewer did not approve (parked)."""
+    level2 = _load("feature_upkeep_level2")
+    refused, review = level2.review_gate(run, path, base_ref, sha, after, resolved["evidence"], resolved["plan"])
+    resolved["review"] = review
+    if refused:
+        report["level2_charged"] = round(resolved["charged"] + float(refused.get("charged") or 0.0), 6)
+        _park_resolved(report, refused)
+        return True
+    return False
+
+
 def _prove_level1(run, cwd, path, base_ref, sha, after, report, level1, resolved):
     """After the resolved rebase completed and before any push: the proof. -> True when it refused (the unit is
     parked, nothing pushed)."""
@@ -1542,6 +1588,8 @@ def _prove_level1(run, cwd, path, base_ref, sha, after, report, level1, resolved
     if got["refusals"]:
         _park_resolved(report, got["refusals"][0])
         return True
+    if resolved.get("level") == 2:
+        return _review_level2(run, path, base_ref, sha, after, report, resolved)
     return False
 
 
@@ -2398,7 +2446,8 @@ def _level1_options(config):
         return {"union": _work()._union_for(config), "run_id": _load("feature_upkeep_resolution").new_run_id(),
                 "verify_command": verify if isinstance(verify, str) else None,
                 "verify_timeout": int(settings["verify.timeout_minutes"]) * 60,
-                "allow_no_verify": settings["conflicts.mechanical_without_verify"] is True}
+                "allow_no_verify": settings["conflicts.mechanical_without_verify"] is True,
+                "level2": _level2_plan(config)}
     except Exception:                     # noqa: BLE001 - a doubtful gate reads closed
         return None
 
@@ -2434,7 +2483,7 @@ def _after_resolved_push(sdlc_dir, config, run, cwd, remote, base_ref, report):
     try:
         res = _load("feature_upkeep_resolution")
         record = res.make_record(unit, got["level"], got["run_id"], got["original_tip"], got["new_tip"],
-                                 str(report.get("backup") or ""), got["files"], got["checks"])
+                                 str(report.get("backup") or ""), got["files"], got["checks"], **got.get("extra", {}))
         written = res.write_record(sdlc_dir, record)
         if not written.ok:
             _note("sigma: rebase upkeep: the resolution record was not written (%s).\n" % written.reason)

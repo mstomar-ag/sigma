@@ -172,7 +172,7 @@ def prove(run, cwd, base_ref, before, after, stops, verify_command=None, verify_
     by_new = {c["sha"]: c for c in replayed}
     out["pairs"] = [list(p) for p in paired["pairs"]]
     for old, new in paired["pairs"]:
-        conflicted = {CHANGELOG} if old in stops else set()
+        conflicted = (set((stops[old] or {}).get("files") or (CHANGELOG,))) if old in stops else set()   # Level 2 names its own
         out["refusals"] += proof.multiset_differences(by_old[old]["diff"], by_new[new]["diff"], conflicted)
     out["checks"]["pairing"] = "refused" if out["refusals"] else "passed"
     if out["refusals"]:

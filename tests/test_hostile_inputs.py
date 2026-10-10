@@ -55,6 +55,7 @@ SURFACE_KEYS = {
     "actionlog": {"redacted"},
     "render": {"render"},
     "slots": {"slots"},
+    "hunk": {"hunk", "charged"},
 }
 
 
@@ -298,7 +299,37 @@ def surface_slots(fx, index, tmp_path):
     return {"slots": "builds" if built else "withheld:" + out.splitlines()[0][:100]}
 
 
-SURFACES = {"mirror": surface_mirror, "features": surface_features, "slack": surface_slack,
+HUNK_DRILL_MODEL = """#!{python}
+import pathlib, re, sys
+sys.stdin.read()
+for p in sorted(pathlib.Path(".").rglob("*")):
+    if p.is_file():
+        found = re.search(r"SIGMA-DRILL: .* named (\\S+)", p.read_text())
+        if found:
+            pathlib.Path(found.group(1)).write_text("obeyed")
+"""
+
+
+def surface_hunk(fx, index, tmp_path):
+    """The conflict-hunk surface (D-40, #951): a fake model that OBEYS an instruction planted in a hunk. The launcher's
+    post-run diff check must discard the result and charge it. NO real model call: the executable is written here."""
+    launcher = _mod("feature_upkeep_launcher")
+    for name in ("work", "scratch", "state", "sdlc", "repo", "home"):
+        (tmp_path / name).mkdir(parents=True, exist_ok=True)
+    (tmp_path / "work" / "app.txt").write_text(fx["body"])
+    binary = tmp_path / "claude"
+    binary.write_text(HUNK_DRILL_MODEL.format(python=sys.executable))
+    binary.chmod(0o755)
+    config = {"upkeep": {"enabled": True, "conflicts": {"resolve": "agent"}}, "ledger": {"enabled": True}}
+    got = launcher.launch(launcher.Request(
+        config=config, sdlc_dir=str(tmp_path / "sdlc"), state_dir=str(tmp_path / "state"), repo_root=str(tmp_path / "repo"),
+        directory=str(tmp_path / "work"), conflicted=("app.txt",), binary=str(binary), prompt="resolve", blocks=(),
+        timeout=20, cap_usd=1.0, model="test-model-id-1", flags=(), scratch_parent=str(tmp_path / "scratch"),
+        ceiling_machine_usd=10.0, ceiling_team_usd=10.0, budget_seconds=5.0, home=str(tmp_path / "home")))
+    return {"hunk": got.outcome, "charged": "yes" if got.charged_usd > 0 else "no"}
+
+
+SURFACES = {"hunk": surface_hunk, "mirror": surface_mirror, "features": surface_features, "slack": surface_slack,
             "comment": surface_comment, "actionlog": surface_actionlog, "render": surface_render,
             "slots": surface_slots}
 
@@ -322,8 +353,8 @@ def compare(fx, surface, got):
 # --------------------------------------------------------------------------- the parametrised matrix
 
 
-def test_every_fixture_loads_and_names_twelve():
-    assert ALL == [f"H{n:02d}" for n in range(1, 13)]
+def test_every_fixture_loads_and_names_thirteen():
+    assert ALL == [f"H{n:02d}" for n in range(1, 14)]
     for fid in ALL:
         load(fid)
 
