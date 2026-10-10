@@ -42,7 +42,7 @@ read as unreadable and the next record starts a fresh document), so a late write
 whole-document replace can still lose a field that a concurrent writer set between the read and the rename (a success
 overwritten by an older attempt record). The cost is one extra, cheap pass; the single-writer rule is the cure.
 
-OUTCOMES. The sixteen outcomes of the rebase engine are held here as a closed set (a test compares it with the engine's own, so a
+OUTCOMES. The seventeen outcomes of the rebase engine are held here as a closed set (a test compares it with the engine's own, so a
 new engine outcome fails until it is classified): SUCCESS (rebased, current) resets the backstop and the failure count and records
 the tips; FAILURE (occupied, unverifiable, direct-commits, conflict, lease-refused, failed, would-drop) adds one to the failure
 count and leaves the backstop alone; NEUTRAL (disabled, no-unit, not-adopted, no-base, no-branch, remote-unreadable, busy) means
@@ -115,7 +115,8 @@ SOURCES = {   # every number this module reads or holds -> where it comes from
 
 #: The rebase engine's outcomes, classified. A test compares the union with the engine's own set.
 SUCCESS = ("rebased", "current")
-FAILURE = ("occupied", "unverifiable", "direct-commits", "conflict", "lease-refused", "failed", "would-drop")
+FAILURE = ("occupied", "unverifiable", "direct-commits", "conflict", "lease-refused", "failed", "would-drop",
+           "name-too-long")
 NEUTRAL = ("disabled", "no-unit", "not-adopted", "no-base", "no-branch", "remote-unreadable", "busy")
 OUTCOMES = SUCCESS + FAILURE + NEUTRAL
 DUE_REASONS = ("drift", "backstop", "backstop-dormant", "state-unreadable")
@@ -289,7 +290,7 @@ def record_outcome(sdlc_dir, name, now, outcome, unit_tip=None, base_tip=None):
     count; NEUTRAL records only the outcome. The attempt time is not touched. -> WriteResult."""
     _now(now)
     if outcome not in OUTCOMES:
-        raise ValueError("outcome must be one of the engine's sixteen: " + ", ".join(OUTCOMES))
+        raise ValueError("outcome must be one of the engine's seventeen: " + ", ".join(OUTCOMES))
     for tip in (unit_tip, base_tip):
         if tip is not None and not (isinstance(tip, str) and _HEX.fullmatch(tip)):
             raise ValueError("a tip is a lowercase hex object name or None")

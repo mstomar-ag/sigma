@@ -56,6 +56,7 @@ MAX_WORKERS = 8
 
 REASON = "library, loaded by path; no CLI"
 LIBRARY_ONLY = {
+    "feature_backup",
     "setup_wizard", "wizard_actions", "actionlog", "blocker_scan", "blockers", "breaker",
     "decompose_goal", "design_goal", "diff_revert", "feature_classify", "feature_doc", "legacy",
     "feature_judge", "feature_labels", "feature_registry", "feature_stamp", "feature_upkeep", "features",

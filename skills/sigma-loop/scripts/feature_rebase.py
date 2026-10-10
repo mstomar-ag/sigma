@@ -202,6 +202,40 @@ def _handoff():
     return _HANDOFF
 
 
+#: `feature_upkeep` (the gate) and `feature_backup` are loaded on first use. A pick with the gate closed loads the
+#: first (a small, pure module) and never the second.
+_GATE = None
+_BACKUP = None
+#: The wall clock the backup stamp is read from; None means the real one. A seam for tests, like `_run`.
+_WALL = None
+
+
+def _gate():
+    global _GATE
+    if _GATE is None:
+        _GATE = _load("feature_upkeep")
+    return _GATE
+
+
+def _backup():
+    global _BACKUP
+    if _BACKUP is None:
+        _BACKUP = _load("feature_backup")
+    return _BACKUP
+
+
+def _backup_wanted(config):
+    """Is the upkeep gate open for the project door? A PURE query of the slice-1 gate: no command, no file, never
+    raises (a query that failed reads closed, so the legacy push is what runs). It is called directly rather than
+    through the gate's decorator on purpose: a decorated entry point must be registered with a trap driver, which
+    contradicts two slice-1 pins (the template note must say RESERVED while nothing is registered); the slice that
+    builds the full pass registers it."""
+    try:
+        return _gate().evaluate(config, "project")["open"] is True
+    except Exception:                 # noqa: BLE001 - a gate query must never break a pick
+        return False
+
+
 # --------------------------------------------------------------------------- constants
 
 #: `.sdlc/state/rebase/<unit>` -- the ephemeral detached worktree. Under `state/` because
@@ -283,9 +317,12 @@ FAILED = "failed"                     # something went wrong; nothing here is cl
 #: computed and before `_pushed` or any later accept/keep logic, so everything layered on top of the
 #: replay (a different replay strategy, an acknowledgement lever) sits inside it, never around it.
 WOULD_DROP = "would-drop"
+#: The upkeep gate is open and the unit's name is too long for a backup ref (a ref over 255 bytes). Refused BEFORE
+#: the replay, and nothing is pushed: upkeep never pushes a unit branch it could not back up.
+NAME_TOO_LONG = "name-too-long"
 OUTCOMES = (DISABLED, NO_UNIT, NOT_ADOPTED, NO_BASE, NO_BRANCH, OCCUPIED, REMOTE_UNREADABLE,
             CURRENT, BUSY, UNVERIFIABLE, DIRECT_COMMITS, CONFLICT, LEASE_REFUSED, REBASED, FAILED,
-            WOULD_DROP)
+            WOULD_DROP, NAME_TOO_LONG)
 
 #: The outcomes worth a clause on `work.start()`'s own one-line result -- the ONLY channel any of
 #: this reaches a person through on a normal run.
@@ -300,7 +337,7 @@ OUTCOMES = (DISABLED, NO_UNIT, NOT_ADOPTED, NO_BASE, NO_BRANCH, OCCUPIED, REMOTE
 #: divergence from the SAME `live_branches` call on the SAME pick and puts it in ITS clause, so
 #: repeating it here would report one unreachable remote twice on one line.
 IN_CLAUSE = (BUSY, OCCUPIED, UNVERIFIABLE, DIRECT_COMMITS, CONFLICT, LEASE_REFUSED, REBASED, FAILED,
-             WOULD_DROP)
+             WOULD_DROP, NAME_TOO_LONG)
 
 #: #144: how many removed paths `report["dropped"]` (and the filed issue, and the doctor marker)
 #: name. The COUNT is always exact (`dropped_count`); only the listing is capped, so a revert of a
@@ -1246,7 +1283,7 @@ def _drop_worktree(run, cwd, path):
         pass
 
 
-def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, strict=False):
+def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, strict=False, backup=None):
     """Replay `sha` (the feature tip) onto `base_ref` in a throwaway detached worktree and push it.
 
     Returns the outcome. The `finally` is the point of the whole function: whatever happens -- a
@@ -1339,7 +1376,7 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
             report["why"] = ("bringing it forward onto %s would remove or roll back %d tracked "
                              "path(s) it has" % (base_ref, len(dropped)))
             return WOULD_DROP
-        outcome = _pushed(run, cwd, path, branch, sha, remote, report)
+        outcome = _pushed(run, cwd, path, branch, sha, remote, report, backup=backup)
         if outcome == REBASED:
             report["after"] = after
         return outcome
@@ -1347,8 +1384,12 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
         _drop_worktree(run, cwd, path)
 
 
-def _pushed(run, cwd, path, branch, sha, remote, report):
+def _pushed(run, cwd, path, branch, sha, remote, report, backup=None):
     """Push the replayed head under an explicit lease -> `REBASED` | `LEASE_REFUSED` | `FAILED`.
+
+    `backup` is None for the legacy push below, which is untouched. A descriptor (only ever built when the upkeep gate
+    is open) hands the push to `_pushed_with_backup`: one atomic push that also keeps `sha`, the tip being replaced,
+    as a backup ref.
 
     WHICH OF THE TWO FAILURES IT WAS IS A MEASUREMENT. The old test was `"stale info" in
     report["why"]` -- git's own wording, searched for inside a 600-character (then 200-character)
@@ -1362,6 +1403,8 @@ def _pushed(run, cwd, path, branch, sha, remote, report):
     refused for some other reason entirely (branch protection, credentials, the network), which is
     a `FAILED` a human has to hear about. An unreadable tip is not evidence of a refusal, so it
     falls to `FAILED` -- which is now reported rather than silent."""
+    if backup is not None:
+        return _pushed_with_backup(run, cwd, path, branch, sha, remote, report, backup)
     try:
         run(str(path), ["git", "push", "--force-with-lease=%s:%s" % (branch, sha),
                         remote, "HEAD:refs/heads/%s" % branch])
@@ -1371,6 +1414,21 @@ def _pushed(run, cwd, path, branch, sha, remote, report):
         now = remote_tip(run, cwd, remote, branch)
         report["tip"] = now
         return LEASE_REFUSED if (now is not None and now != sha) else FAILED
+
+
+def _pushed_with_backup(run, cwd, path, branch, sha, remote, report, backup):
+    """The open-gate twin of the push above -> `REBASED` | `LEASE_REFUSED` | `FAILED`: ONE atomic push that moves the
+    branch under the same explicit-sha lease and keeps `sha` under the backup namespace, so both land or neither does.
+    A stale lease is `LEASE_REFUSED` and a taken backup name is `FAILED` worded in `report["why"]`, both decided by
+    reading the remote back (`feature_backup.push_unit`); in neither case does the branch move.
+    No command runs before the push that the legacy path does not run."""
+    got = _backup().push_unit(run, path, cwd, remote, backup["unit"], sha, clock=backup.get("clock"))
+    if got["outcome"] == _backup().PUSHED:
+        report["backup"] = got["backup"]
+        return REBASED
+    report["why"] = got.get("why", "") or got["outcome"]
+    report["tip"] = got.get("tip")
+    return LEASE_REFUSED if got["outcome"] == _backup().LEASE_REFUSED else FAILED
 
 
 # --------------------------------------------------------------------------- the goal branches
@@ -1850,6 +1908,8 @@ _WORDING = {
                  "roll back %(dropped)d tracked path(s) it has (%(named)s) -- the base most likely holds a "
                  "revert of the branch's own commits; the push was refused and the remote left "
                  "unchanged"),
+    NAME_TOO_LONG: ("%(branch)s was NOT rebased: %(why)s -- upkeep keeps the old tip as a backup ref and will not "
+                    "push a unit branch it cannot back up; the remote was left unchanged"),
 }
 
 
@@ -2058,9 +2118,21 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
                     body=_direct_body(unit, branch, base, found))
         return report
 
+    # THE BACKUP DESCRIPTOR. With the upkeep gate open (the project door; a pure query that adds no command) the push
+    # below also keeps the old tip as a backup ref, in the same atomic push. Closed, `backup` stays None and the
+    # push is the legacy one, byte for byte. Placed here, after every early return, so a unit that is current, blocked
+    # or unverifiable is not refused for a push it was never going to make.
+    backup = None
+    if _backup_wanted(config):
+        problem = _backup().unit_problem(unit)
+        if problem is not None:
+            report["outcome"] = NAME_TOO_LONG if problem[0] == _backup().TOO_LONG else FAILED
+            report["why"] = problem[1]
+            return report
+        backup = {"unit": unit, "clock": _WALL}
     path = worktree_path(sdlc_dir, unit)
     outcome = _rebase_feature(run, cwd, path, branch, base_ref, before, remote, report,
-                              strict=gate.enabled(config))
+                              strict=gate.enabled(config), backup=backup)
     report["outcome"] = outcome
     if outcome in (CONFLICT, FAILED, WOULD_DROP):
         # MEASURED, not asserted. The body used to state "no half-applied rebase, no stranded
@@ -2123,7 +2195,75 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
 
 USAGE = ("usage: feature_rebase.py upkeep <sdlc_dir> <unit> [goal] | "
          "feature_rebase.py show <sdlc_dir> <unit> | "
-         "feature_rebase.py ack <sdlc_dir> <unit> (<sha>... | --all)")
+         "feature_rebase.py ack <sdlc_dir> <unit> (<sha>... | --all) | "
+         "feature_rebase.py restore <sdlc_dir> <unit> (--list | <stamp> --expect <tip>) | "
+         "feature_rebase.py prune <sdlc_dir> [--dry-run]")
+
+#: The exit status of `restore` and `prune` when the upkeep gate is closed: nothing was done.
+CLOSED_EXIT = 3
+
+
+def _holder(sdlc_dir):
+    """`hold(unit)` for the backup verbs: the unit's rebase lock -> a release callable, or None when the unit is busy.
+    Without `fcntl` there is no lock to take, and the verb goes ahead unserialised, as the pass does."""
+    def hold(unit):
+        if sync.fcntl is None:
+            return lambda: None
+        fd = _acquire(lock_path(sdlc_dir, unit), timeout=LOCK_TIMEOUT)
+        return None if fd is None else (lambda: _release(fd))
+    return hold
+
+
+def _finish(result):
+    """Print a verb's result as JSON -> 0 done, 1 refused or failed, 3 the gate is closed."""
+    print(json.dumps(result, indent=2, sort_keys=True))
+    if result.get("closed"):
+        print("sigma: the upkeep gate is closed, so nothing was done (docs/branching-model.md section 13c "
+              "shows how to restore by hand with plain git)", file=sys.stderr)
+        return CLOSED_EXIT
+    return 0 if result.get("outcome") in _backup().DONE else 1
+
+
+def _flags(tokens, valued, plain):
+    """-> (positionals, {flag: value}) or None when a token is a flag this verb does not take."""
+    words, found, i = [], {}, 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token in plain:
+            found[token] = True
+        elif token in valued and i + 1 < len(tokens):
+            i += 1
+            found[token] = tokens[i]
+        elif token.startswith("--"):
+            return None
+        else:
+            words.append(token)
+        i += 1
+    return words, found
+
+
+def _restore_verb(argv, state):
+    parsed = _flags(argv[4:], {"--expect"}, {"--list"})
+    words, found = parsed if parsed is not None else ([], {})
+    listing = "--list" in found
+    well_formed = (listing and not words and "--expect" not in found) or (
+        not listing and len(words) == 1 and "--expect" in found)
+    if parsed is None or not well_formed:
+        print(USAGE, file=sys.stderr)
+        return 2
+    config = state.load_config(argv[2])
+    return _finish(_backup().restore_backup(
+        config, argv[2], argv[3], None if listing else words[0], found.get("--expect"), remote=_remote(config),
+        hold=_holder(argv[2]), list_only=listing))
+
+
+def _prune_verb(argv, state):
+    parsed = _flags(argv[3:], set(), {"--dry-run"})
+    if parsed is None or parsed[0]:
+        print(USAGE, file=sys.stderr)
+        return 2
+    config = state.load_config(argv[2])
+    return _finish(_backup().prune_backups(config, argv[2], remote=_remote(config), dry_run="--dry-run" in parsed[1]))
 
 
 def main(argv):
@@ -2132,7 +2272,9 @@ def main(argv):
     `upkeep` exists as a verb, unlike `feature_sync`'s sync, because this one has a use OFF the pick
     path: a unit whose goals are all finished still wants its branch kept current, and nobody is
     picking it. `show` reports what the pass WOULD find without moving anything. `ack` (#2756)
-    records confirmed commits from `show`'s list and never rebases or pushes (see `ack`)."""
+    records confirmed commits from `show`'s list and never rebases or pushes (see `ack`). `restore` and
+    `prune` (slice 5 of the upkeep work) manage the backup refs `feature_backup` documents; both are behind the
+    upkeep gate and exit 3 while it is closed."""
     if argv[1:] in (["-h"], ["--help"]):
         print(USAGE)
         return 0
@@ -2166,6 +2308,10 @@ def main(argv):
         result = ack(argv[2], state.load_config(argv[2]), argv[3], shas, all_=all_)
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result["ok"] else 1
+    if len(argv) >= 4 and argv[1] == "restore":
+        return _restore_verb(argv, state)
+    if len(argv) >= 3 and argv[1] == "prune":
+        return _prune_verb(argv, state)
     print(USAGE, file=sys.stderr)
     return 2
 

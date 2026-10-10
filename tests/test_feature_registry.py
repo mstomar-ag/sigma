@@ -1417,6 +1417,7 @@ _DOES_NOT_FOLD = set()
 #: vocabulary. It is deliberately NOT an auto-classifier -- run the other way it would have declared
 #: all four mutants above benign, since none of them names any of those either.
 _NO_UNIT_NAME = {
+    ("feature_backup", "_load"),              # the sibling importer, once per module
     ("feature_propagate", "_symlink_guard"),  # #708: loads state.py by path; no unit name involved
     ("feature_sync", "_symlink_guard"),
     ("feature_doc", "_load"),                 # the sibling importer, once per module
