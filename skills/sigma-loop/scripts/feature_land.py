@@ -151,7 +151,7 @@ def _scratch_verify(env, tip, command):
     """Run the shared verify runner in a scratch worktree detached at `tip`. -> (ok, detail)."""
     bounded = _load("bounded_run")
     seconds = upkeep.read(env.config).settings["verify.timeout_minutes"] * 60
-    with tempfile.TemporaryDirectory(prefix="sigma-land-") as parent:
+    with tempfile.TemporaryDirectory(prefix="land-scratch-") as parent:
         tree = os.path.join(parent, "tree")
         rc, _, err = _git(env, "worktree", "add", "--detach", tree, tip)
         if rc != 0:

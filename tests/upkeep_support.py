@@ -93,7 +93,9 @@ def template_cfg():
 
 #: stem -> names of the functions shipped code has gated. One entry point so far (the upkeep pass). A later slice that gates one adds it here AND adds a trap driver in `drivers()`; two tests make
 #: forgetting either red.
-REGISTERED_ENTRY_POINTS = {"feature_upkeep_pass": {"upkeep_pass", "ack_union", "ledger_note"}}
+REGISTERED_ENTRY_POINTS = {"feature_upkeep_pass": {"upkeep_pass", "ack_union", "ledger_note"},
+                           "feature_upkeep_sched": {"scheduler_tick"},
+                           "feature_upkeep_job": {"run_job", "run_engine"}}
 
 PROBE_SOURCE = '''
 import os
@@ -148,6 +150,12 @@ def drivers(gate_module):
                 c, s, "u", "feature/u", "main", "main", 0),
             ("feature_upkeep_pass", "ack_union"): lambda c, s, e: script("feature_upkeep_pass").ack_union(
                 c, s, "u", [{"sha": "a" * 40, "patch_id": "p"}]),
+            ("feature_upkeep_sched", "scheduler_tick"): lambda c, s, e: script("feature_upkeep_sched").scheduler_tick(
+                c, s, environ=e),
+            ("feature_upkeep_job", "run_job"): lambda c, s, e: script("feature_upkeep_job").run_job(
+                c, s, ".", "u", "r", 5, environ=e),
+            ("feature_upkeep_job", "run_engine"): lambda c, s, e: script("feature_upkeep_job").run_engine(
+                c, s, ".", "u", environ=e),
             ("feature_upkeep_pass", "ledger_note"): lambda c, s, e: script("feature_upkeep_pass").ledger_note(
                 c, s, "u", "rebased", "a" * 12)}
 
