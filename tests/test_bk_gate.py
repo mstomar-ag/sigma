@@ -263,7 +263,7 @@ def test_rule_text_and_carve_out():
     assert measured == [], "the carve-out must stay out of the measured phase payloads: %r" % measured
     note = bk.support.template_cfg()["_upkeep"]
     assert "NOTHING RUNS FROM THIS BLOCK" not in note and "no feature calls yet" not in note, "the template note still says nothing runs"
-    assert note.startswith("RESERVED") and "NOTHING ELSE RUNS FROM THIS BLOCK YET" in note
+    assert not note.startswith("RESERVED") and "NOTHING ELSE RUNS FROM THIS BLOCK YET" in note
     assert "feature_rebase.py restore" in note and "feature_rebase.py prune" in note and "backup.former_prefixes" in note
     assert "pick-time rebase pass" in note and "too long" in note
     gate = (ROOT / "skills" / "sigma-loop" / "scripts" / "feature_upkeep.py").read_text(encoding="utf-8")

@@ -64,6 +64,6 @@ def test_control_pin_gaps():
 def test_note_phrases():
     """The note names both switches, the machine variable, and both typo rules."""
     note = support.template_cfg()["_upkeep"]
-    wanted = ("RESERVED", "work.rebase_upkeep", "SIGMA_UPKEEP_JOB", "the JSON boolean true", "FAILS CLOSED",
+    wanted = ("work.rebase_upkeep", "SIGMA_UPKEEP_JOB", "the JSON boolean true", "FAILS CLOSED",
               "reads as ON", "reads as OFF")
     assert [w for w in wanted if w not in note] == []

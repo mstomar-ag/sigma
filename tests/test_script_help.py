@@ -74,6 +74,7 @@ LIBRARY_ONLY = {
     "feature_upkeep_state",
     "feature_upkeep_resolution",
     "feature_upkeep_landing",
+    "feature_upkeep_pass",
 }
 
 
