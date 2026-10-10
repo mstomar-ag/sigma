@@ -54,6 +54,7 @@ _NETWORK_MODULES = frozenset({
     "socket", "ssl", "http", "urllib.request", "urllib3", "requests", "httpx", "aiohttp",
     "websocket", "websockets", "slack_sdk", "smtplib", "ftplib", "telnetlib", "xmlrpc",
     "imaplib", "poplib", "nntplib", "socketserver",
+    "anthropic",
 })
 
 #: Network binaries a child process might run.

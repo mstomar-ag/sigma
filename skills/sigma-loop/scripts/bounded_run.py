@@ -337,7 +337,7 @@ def _supervise(proc, selector, deadline, stop_path, clock):
 
 
 def run_group(command, cwd, timeout, *, shell=False, env=None, stop_path=None, merge=True, tail_bytes=TAIL_BYTES,
-              max_out_bytes=MAX_OUT_BYTES, term_grace=TERM_GRACE_SECONDS, clock=time.monotonic):
+              max_out_bytes=MAX_OUT_BYTES, term_grace=TERM_GRACE_SECONDS, clock=time.monotonic, stdin_path=None):
     """Run `command` (an argv list, or a string with shell=True) in `cwd` under a budget of `timeout` seconds, in a
     process group of its own, with stdin closed. -> Result; raises ValueError for a bad budget or grace.
 
@@ -358,12 +358,17 @@ def run_group(command, cwd, timeout, *, shell=False, env=None, stop_path=None, m
         return Result(ERROR, None, detail="could not start the lifeline process: %s" % exc)
     proc = None
     try:
+        stdin_file = None
         try:
+            stdin_file = subprocess.DEVNULL if stdin_path is None else open(stdin_path, "rb")
             proc = subprocess.Popen(command, shell=shell, cwd=None if cwd is None else str(cwd), env=env,
-                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stdin=stdin_file, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT if merge else subprocess.PIPE, start_new_session=True)
         except (OSError, ValueError) as exc:
             return Result(ERROR, None, seconds=time.monotonic() - started, detail="could not start: %s" % exc)
+        finally:
+            if stdin_path is not None and stdin_file is not None:
+                stdin_file.close()
         selector = selectors.DefaultSelector()
         sinks = [_Sink(tail_bytes, "tail")] if merge else [_Sink(max_out_bytes, "head"), _Sink(tail_bytes, "tail")]
         try:

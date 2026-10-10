@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Upkeep part B, slice 8: the resolver launcher (#949).** A new library, `feature_upkeep_launcher.py`, with no caller yet and off by default. It runs one capped headless session with an environment built from nothing, the prompt on stdin, only confirmed flags (the rest are labelled UNVERIFIED and refused), a group kill at the wall clock, a before-and-after hash of the directory, and charging: a normal run its metered cost, a killed or unmetered run the full per-run cap. Tested only against a fake executable; no real model call was made. `bounded_run.run_group` gains an optional `stdin_path`; the model SDK module joins the no-network list.
 - Upkeep part A, slice 6 wiring: the pass re-reads tips, uses the engine runner and hooks policy, writes acks, limits re-anchoring, skips deleted goal branches and writes the ledger note (#1016).
 - Upkeep part A, slice 8: user documentation and config reference for the scheduler, backups, restore and prune, the opt-in audit across every entry point, and one recorded local end-to-end run on a scratch bare remote (#924).
 - Upkeep part A, slice 7: the scheduler, the detached bounded job, outcome notes and the doctor rows (#923).
