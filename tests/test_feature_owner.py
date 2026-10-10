@@ -66,7 +66,9 @@ BOARD = "@here-owner"
 UNIT_OWNER = "@unit-owner"
 CONFIG = {"work": {"enabled": True, "remote": "origin"},
           "discovery": {"source": "github", "github": {"repo": HERE}},
-          "ledger": {"enabled": True, "actor": "stranger"}}
+          "ledger": {"enabled": True, "actor": "stranger"},
+          # these tests pin the pre-triage proposal label path; the triage path is in test_handoff (#1003)
+          "ai_filed": {"triage": {"enabled": False}}}
 
 
 def _entry(**over):

@@ -611,7 +611,9 @@ def test_park_mode_records_exactly_once_with_needs_decision_reason_class(tmp_pat
 
 
 def _file_cfg(tmp_path, extra=None, max_children=None):
-    cfg = {"goal_decompose": {"enabled": True, "mode": "file"}, "ledger": {"actor": "rae"}}
+    cfg = {"goal_decompose": {"enabled": True, "mode": "file"}, "ledger": {"actor": "rae"},
+           # pre-triage filing path pinned here; decompose children are converted by a later slice (#1003)
+           "ai_filed": {"triage": {"enabled": False}}}
     if max_children is not None:
         cfg["goal_decompose"]["max_children"] = max_children
     if extra:

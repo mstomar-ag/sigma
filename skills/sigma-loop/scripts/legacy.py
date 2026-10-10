@@ -73,7 +73,7 @@ MARKERS = frozenset({
     "sigma:approve", "sigma:block", "sigma:unblock", "sigma:keep-parked",
     "sigma:dismissed-finding", "sigma:decompose-filed", "sigma:decompose-of=",
     "sigma:decomposed-from=", "sigma:design-filed", "sigma:design-of=",
-    "sigma-qkind:",
+    "sigma-qkind:", "sigma-depth:",
 })
 
 #: For a regex that must accept either spelling of a marker's brand segment.

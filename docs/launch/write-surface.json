@@ -401,6 +401,22 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/ai_filed_counter.py",
+      "function": "bump",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "runs only when ai_filed triage is on (the default; ai_filed.triage.enabled false skips it); writes only the one bounded counter file under the state directory (atomic temp then replace, pruned by age and size); never deletes another writer's file; an unreadable counter is never overwritten",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/ai_filed_counter.py",
+      "function": "bump",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "runs only when ai_filed triage is on (the default; ai_filed.triage.enabled false skips it); writes only the one bounded counter file under the state directory (atomic temp then replace, pruned by age and size); never deletes another writer's file; an unreadable counter is never overwritten",
+      "risk": "medium"
+    },
+    {
       "path": "skills/sigma-loop/scripts/autowatch.py",
       "function": "_record_spend",
       "rule": "fs-write",

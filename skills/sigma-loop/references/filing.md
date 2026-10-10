@@ -26,24 +26,27 @@ blocker already goes through `handoff.py open`:
 `python3 "${CLAUDE_SKILL_DIR}/scripts/handoff.py" track .sdlc "$goal" --area <area> --why "<what
 you found>" --queue actionable|queued --assignee same-area|cross-area --blocks yes|no [--priority
 P0|P1|P2] [--label model:<tier>] [--title T] [--body-file F]`. All three value-flags are
-required, with no default, on purpose. **Choose `--queue queued` — on an autonomous or overnight
-run that is the DEFAULT posture for a non-blocking finding, not the exception.** It files the
-issue withholding `sdlc:goal` (proposed/needs-confirmation instead), so it does NOT enter the
-SAME pickable pool as the goal that spawned it — competing for the same concurrent-worker slots
-and wasting time that should go to the actual goal. It waits for a human to review and promote it
-come morning. **`--blocks yes` is what should drive `--queue actionable`, not a separate
-judgment call** — the ONLY things `--queue actionable` is for are (1) a genuine blocking
-dependency (`--blocks yes`), or (2) work a human EXPLICITLY asked for by name in this exact
-session (e.g. the user said "also fix X while you're in there") — never a vibe of "this seems
-important" or "this feels urgent" on an AI-discovered finding nobody asked for. If you catch
-yourself justifying `actionable` for something that isn't one of those two, it's `queued`.
+required, with no default, on purpose. **Triage decides, by default.** Unless
+`ai_filed.triage.enabled` is false, an AI-filed issue is checked against a deny-list (hard-stop
+words and shapes, secret shapes, a recorded-permission marker on the first body line) and then
+either ARMED at its bucket priority (urgent P2, routine P3, unclear P4 — always below a
+human-filed P1) or PARKED with a declared question kind. `--queue queued` means "let triage
+decide"; `--queue actionable` still runs the deny-list and arms at most as urgent as the bucket (a
+`--priority` may lower urgency, never raise it). Nothing gets the old needs-confirmation label any
+more; a leftover one stays inert. Caps stop a runaway: `ai_filed.max_per_goal`, `.max_per_run`
+and `.max_depth` park the excess. With triage switched off the old rule returns: `queued` files
+the issue withholding `sdlc:goal` for a human to promote. **`--blocks yes` is what should drive
+`--queue actionable`, not a separate judgment call** — the ONLY things `--queue actionable` is for
+are (1) a genuine blocking dependency (`--blocks yes`), or (2) work a human EXPLICITLY asked for
+by name in this exact session — never a vibe of "this seems urgent" on a finding nobody asked
+for; otherwise it is `queued`.
 Getting `--blocks` wrong in either direction is a real bug: `yes` on a merely-related finding
 incorrectly parks unrelated work; `no` on a genuine blocker leaves the current goal silently
 stuck with nothing surfacing it as the reason. **`--blocks yes --queue queued` is contradictory
 and is no longer accepted as written**: it says "real work is stalled behind this" and "nobody
 may pick this up" at once, which used to file a blocker no queue could serve while the goal it
-blocked waited for it to close — a deadlock with neither side able to move. It is now upgraded
-to `actionable` automatically, with a warning naming the reason. Pick `--queue` deliberately
+blocked waited for it to close — a deadlock with neither side able to move. It is armed
+(never queued); a deny-listed blocker is parked, and the goal it blocks waits on that park. Pick `--queue` deliberately
 anyway; a warning you learn to ignore is not a guardrail. Choose `--assignee same-area` to file it to
 yourself — you're already working this area; `--assignee cross-area` routes it through
 CODEOWNERS like `open` does. `sdlc:followup` is applied automatically to every issue this
