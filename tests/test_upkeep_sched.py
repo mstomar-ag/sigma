@@ -322,6 +322,62 @@ def test_a_note_that_cannot_be_written_is_tried_a_bounded_number_of_times(tmp_pa
     assert len(calls) == m.NOTE_ATTEMPTS, calls
 
 
+def running_record(m, sdlc):
+    doc = {"schema": m.RECORD_SCHEMA, "state": "running", "unit": "Voice", "run_id": "1-2", "noted": False, "started_at": 5}
+    assert m.write_json(sdlc, m.RECORD_REL, doc)
+
+
+def test_a_job_killed_before_its_final_record_gets_a_failed_note_on_the_next_tick(tmp_path):
+    m, sdlc, calls = sched(), project(tmp_path), []
+    running_record(m, sdlc)                                    # the job process died: record stuck at running, lock free
+    append = lambda sdlc_dir, kind, goal, config=None, **f: calls.append((kind, goal, f)) or {"id": "x"}
+    assert m.collect(open_config(), sdlc, 10 ** 10, append) == "noted"
+    assert calls == [("note", "upkeep-voice", {"ref": "upkeep:failed:none"})], calls
+    record = json.loads(pathlib.Path(sdlc, m.RECORD_REL).read_text())
+    assert record["state"] == "done" and record["outcome"] == "failed" and record["noted"] is True, record
+    assert m.collect(open_config(), sdlc, 10 ** 10, append) == "none" and len(calls) == 1      # once
+
+
+def test_a_running_record_with_the_lock_held_is_a_live_job_not_a_killed_one(tmp_path):
+    m, sdlc, calls = sched(), project(tmp_path), []
+    running_record(m, sdlc)
+    lock = pathlib.Path(sdlc, m.LOCK_REL)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    pathlib.Path(sdlc, m.BEAT_REL).touch()
+    with open(lock, "a") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        got = m.collect(open_config(), sdlc, int(pathlib.Path(sdlc, m.BEAT_REL).stat().st_mtime),
+                        lambda *a, **k: calls.append(1))
+    assert got == "running" and not calls, (got, calls)
+
+
+def test_the_budget_is_checked_inside_the_unit_not_only_between_units(tmp_path):
+    m, sdlc = sched(), project(tmp_path)
+    seen = []
+
+    def measure(name, _doc):
+        seen.append(name)
+        if name == "b":
+            raise m.OutOfTime()                                # the unit's own measurement found the budget spent
+        return drift_of(m, 0)
+
+    deps = {"list_units": lambda _s: ["a", "b", "c"], "measure": measure, "spawn": lambda *a: None}
+    out = m.scheduler_tick(open_config(), sdlc, environ=ENV, now=1_000_000, deps=deps)
+    assert seen == ["a", "b"] and out["out_of_time"] is True, (seen, out)
+    assert json.loads(pathlib.Path(sdlc, m.STATUS_REL).read_text())["cursor"] == "a"           # b is retried first next tick
+
+
+def test_make_measure_stops_before_the_git_reads_when_the_deadline_has_passed(tmp_path):
+    m, sdlc = sched(), project(tmp_path)
+    cfg = open_config()
+    measure = m.make_measure(cfg, m.feature_upkeep.read(cfg).settings, sdlc, str(tmp_path), 1_000_000, expired=lambda: True)
+    try:
+        measure("Voice", None)
+    except m.OutOfTime:
+        return
+    raise AssertionError("measure ran past an expired budget")
+
+
 # ------------------------------------------------------------------------------------------ the doctor's rows
 
 def test_health_rows_show_liveness_and_readiness_only_when_the_block_is_on(tmp_path):
