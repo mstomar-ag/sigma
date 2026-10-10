@@ -463,6 +463,9 @@
    "reason": "Directory creation only; the files inside carry their own entries.",
    "verdict": "directory",
    "vetted_writers": [
+    "skills/sigma-loop/scripts/feature_upkeep_launcher.py::_acquire_lock",
+    "skills/sigma-loop/scripts/feature_upkeep_launcher.py::reserve_machine",
+    "skills/sigma-loop/scripts/feature_upkeep_launcher.py::settle_machine",
     "skills/sigma-init/scripts/init_flow.py::main",
     "skills/sigma-init/scripts/sdlc_init.py::main",
     "skills/sigma-init/scripts/setup_wizard.py::_write_cache",
