@@ -622,11 +622,18 @@ def promote(sdlc_dir, config, numbers, source=None, run=None, apply=True, demote
             # bool (#1391 step 4). Loud, and carried in the result.
             detail += ("; the label landed but the board card did not move to %r — move it by hand "
                        "if this repo picks from the board" % column)
-        try:
-            source._issue_comment(n, (DEMOTE_COMMENT.format(proposed=proposed) if demote
-                                      else PROMOTE_COMMENT.format(goal=goal)))   # REST first (#895 3a)
-        except Exception:                               # noqa: BLE001 - audit trail is best-effort
-            pass
+        audit = (DEMOTE_COMMENT.format(proposed=proposed) if demote
+                 else PROMOTE_COMMENT.format(goal=goal))
+        if _feature("decision_record").enabled(config):          # slice 8: store record + attributed comment
+            rec = _feature("decision_record").build("demote" if demote else "promote", n, "unknown",
+                                           verb, "", "human")
+            err = _feature("decision_record").write_all(sdlc_dir, rec, config, source, text=audit)["error"]
+            detail += "; " + err if err else ""
+        else:
+            try:
+                source._issue_comment(n, audit)         # REST first (#895 3a)
+            except Exception:                           # noqa: BLE001 - audit trail is best-effort
+                pass
         out["results"].append({"number": n, "outcome": verb, "detail": detail})
     return out
 

@@ -574,9 +574,21 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
             done = by_issue.get(n)
             if done and all(a["result"] == "done" for a in done):
                 unparked.append(n)
+                text = _UNPARK_COMMENT.format(refs=", ".join(f"#{r}" for r in refs),
+                                              label=source.goal_label)
                 try:
-                    source.note(n, _UNPARK_COMMENT.format(
-                        refs=", ".join(f"#{r}" for r in refs), label=source.goal_label))
+                    dr = _load("decision_record")
+                    if dr.enabled(config):              # slice 8: autonomous record + same-id comment
+                        dr.write_all(sdlc_dir, dr.build("sweep", n, "dependency", "unpark",
+                                                        "blocker(s) closed: " + ", ".join(
+                                                            f"#{r}" for r in refs),
+                                                        dr.how_for("sweep")),
+                                     config, source, text=text, poster=source.note)
+                        continue
+                except Exception:
+                    pass
+                try:
+                    source.note(n, text)
                 except Exception:
                     pass
     return {"apply": bool(apply), "checked": len(issues), "eligible": len(resolved),
