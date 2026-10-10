@@ -1386,6 +1386,7 @@ _FOLDS = {
     ("feature_doc", "doc_path"),              # #1673 — the `<name>.md` page a person opens
     ("feature_upkeep_state", "unit_state_path"),    # #919 — the per-unit upkeep state file
     ("feature_upkeep_resolution", "store_path"),            # #945 — the per-resolution record, unit folded after the name guard
+    ("feature_land_approval", "approval_path"),  # #933 — the unit approval record and its single-use marker
 }
 
 #: Derived keys that do NOT fold — A RECORD OF OPEN DEFECTS, never a design decision. When one is
@@ -1424,6 +1425,7 @@ _NO_UNIT_NAME = {
     ("feature_doc", "_load"),                 # the sibling importer, once per module
     ("feature_frontier", "_load"),
     ("feature_labels", "_load"),
+    ("feature_land_approval", "_load"),
     ("feature_owner", "_load"),
     ("feature_propagate", "_load"),
     ("feature_rebase", "_load"),
@@ -1640,7 +1642,8 @@ def test_every_classified_unit_address_still_folds_the_way_it_is_recorded(tmp_pa
     builders = _address_builders()
     root = str(tmp_path / ".sdlc")
     (tmp_path / ".sdlc" / "features").mkdir(parents=True)
-    first = {"features_dir": pathlib.Path(root) / "features", "sdlc_dir": root, "run_id": "0123456789ab"}
+    first = {"features_dir": pathlib.Path(root) / "features", "sdlc_dir": root, "run_id": "0123456789ab",
+             "slug": "owner/repo", "head": "a" * 40}   # #933: the unit approval path also keys on slug and head
 
     def address(fn, unit):
         params = list(inspect.signature(fn).parameters)
