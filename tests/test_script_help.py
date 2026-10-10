@@ -81,6 +81,7 @@ LIBRARY_ONLY = {
     "feature_upkeep_review",
     "feature_upkeep_level2",
     "feature_upkeep_sched",
+    "hard_stop",
 }
 
 
