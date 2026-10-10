@@ -1097,6 +1097,38 @@
       "risk": "high"
     },
     {
+      "path": "skills/sigma-loop/scripts/ledger_pointer.py",
+      "function": "_publish",
+      "rule": "fs-remove",
+      "count": 2,
+      "gate": "pointer part open (records, records.pointer.enabled and the ledger all true); removes only the temp file this call created beside its target after a failed write",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/ledger_pointer.py",
+      "function": "_save_state",
+      "rule": "fs-remove",
+      "count": 2,
+      "gate": "pointer part open (records, records.pointer.enabled and the ledger all true); removes only the temp file this call created beside the local pointer state after a failed write",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/ledger_pointer.py",
+      "function": "_save_state",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "pointer part open (records, records.pointer.enabled and the ledger all true); writes only the local pointer queue and day counter under the state folder; holds ids, kinds and how only",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/ledger_pointer.py",
+      "function": "compact_pointers",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "pointer part open (records, records.pointer.enabled and the ledger all true); person-run compaction; removes only this actor's own pointer-only files from this host whose process is gone and that are older than records.pointer.compact_after_days, after their lines are in the own rollup file; never another writer's file",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/liveness_prune.py",
       "function": "_try_remove_lock",
       "rule": "fs-remove",

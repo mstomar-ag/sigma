@@ -4766,6 +4766,10 @@ def _decision_rubric_state(cfg, sdlc_dir=None):
             old = store.untracked_old(sdlc_dir, config=cfg)
             if old:
                 extra.append("%d decision records are untracked for over a day; commit them" % len(old))
+            ptr = _load_loop_script("ledger_pointer")
+            if ptr.is_open(cfg):
+                extra.append("ledger pointer on: %d ledger entry files, %d ids queued"
+                             % (ptr.pointer_file_count(sdlc_dir), ptr.queued(sdlc_dir)))
         return state + "".join("; " + e for e in extra)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
