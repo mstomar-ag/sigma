@@ -634,8 +634,9 @@ def _unit_landing_records(sdlc_dir, unit, max_records=None):
 
     READ-ONLY and keyed by the unit: the store is filed per goal (`decision_path`), so the unit's records are found
     by scanning it. The store itself is never written here. Anything that stops the scan from being a complete
-    answer is an `error` string (an unreadable folder, a symlink, a file that does not parse as a landing record,
-    more files than the ceiling), because a record that cannot be read might be this unit's."""
+    answer is an `error` string (an unreadable folder, a symlink, an unreadable file, more files than the ceiling).
+    A file that is readable but does not parse as a landing record is foreign, not evidence: it is skipped and
+    named on stderr, so one stray file cannot stop every lookup. The feature registry still names the siblings."""
     folder = pathlib.Path(sdlc_dir) / "state" / RECORD_DIRNAME
     try:
         if not folder.exists():
@@ -654,10 +655,16 @@ def _unit_landing_records(sdlc_dir, unit, max_records=None):
             if path.is_symlink():
                 return [], "landing record %s is a symbolic link" % path.name
             got = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
+        except OSError as exc:
             return [], "landing record %s could not be read (%s)" % (path.name, type(exc).__name__)
+        except ValueError as exc:
+            _note("sigma: cross-repo: ignoring %s in the landing folder: not a landing record (%s)\n"
+                  % (path.name, type(exc).__name__))
+            continue
         if not isinstance(got, dict) or not legacy.schema_is(got.get("schema"), RECORD_SCHEMA):
-            return [], "landing record %s is not a landing record this release understands" % path.name
+            _note("sigma: cross-repo: ignoring %s in the landing folder: not a landing record this release "
+                  "understands\n" % path.name)
+            continue
         if got.get("unit") == unit:
             found.append(got)
     return found, None
