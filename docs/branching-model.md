@@ -1372,9 +1372,11 @@ fully reachable and ungranted, or granted and unreachable.
 ## 13. Completion, and branch protection
 
 **Completion is human-only by default.** A person raises the `feature/<name>` → integration-branch
-PR. The loop's own merges are `sdlc/<goal-id>` → `feature/<name>`, inside one repo. Human-confirmed
-landing through `verify_merge.py` and the Slack `--unsafe-merge` path may merge `feature/<name>` onto
-`work.base`; the loop does not initiate those feature-branch landings.
+PR. The loop's own merges are `sdlc/<goal-id>` → `feature/<name>`, inside one repo. Landing
+through `verify_merge.py` (attended confirmation) and the Slack `--unsafe-merge` path may merge `feature/<name>` onto
+`work.base`; the loop does not initiate those feature-branch landings. The chat path has no confirmation of its
+own: with unit upkeep off, a non-bot message in the authorized channel is the whole request; with it on, chat landing
+runs through the landing engine and needs the same single-use unit approval made locally, and the requester is recorded.
 
 Marking a unit finished is a registry edit, not a branch deletion: **`open: false` is how a finished
 unit is marked**, because feature labels are never deleted and the entry, the shard and the `.md` are

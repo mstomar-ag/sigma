@@ -231,9 +231,9 @@ def rest_merges(calls):
     return out
 
 
-def spy_landing(monkeypatch, verify_merge, gh_api=None):
+def spy_landing(monkeypatch, verify_merge, gh_api=None, engines=()):
     """Record, and never perform, any landing. Sees the four verify_merge names, `gh_api.merge_pr` and
-    `merge_pr_pinned` when a `gh_api` is given, and -- the seam every module instance shares, so a REST merge from an
+    `merge_pr_pinned` when a `gh_api` is given, `land` and `complete` of each engine module in `engines` (#939), and -- the seam every module instance shares, so a REST merge from an
     entry nobody named still shows -- any `gh` argv that reaches `subprocess.run` (answered as a failed gh)."""
     calls = []
 
@@ -248,6 +248,10 @@ def spy_landing(monkeypatch, verify_merge, gh_api=None):
     if gh_api is not None:
         monkeypatch.setattr(gh_api, "merge_pr", named("gh_api.merge_pr"))
         monkeypatch.setattr(gh_api, "merge_pr_pinned", named("gh_api.merge_pr_pinned"))
+    for module in engines:
+        for name in ("land", "complete"):
+            if hasattr(module, name):
+                monkeypatch.setattr(module, name, named("%s.%s" % (module.__name__, name)))
     real = subprocess.run
 
     def argv_spy(args, *a, **k):

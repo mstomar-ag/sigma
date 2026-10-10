@@ -1922,7 +1922,9 @@ def test_merge_check_never_calls_any_landing_or_merge_function(tmp_path, monkeyp
     never merely "no exception was raised", which would be trivially true of a function that did
     nothing at all."""
     local, d = _repo(tmp_path)
-    calls = rest_merge_support.spy_landing(monkeypatch, sc.verify_merge)   # #935: also sees a REST merge
+    land_engine = sc._load("feature_land")
+    calls = rest_merge_support.spy_landing(monkeypatch, sc.verify_merge, engines=(land_engine,))   # #935/#939
+    monkeypatch.setattr(sc, "_engine_land", lambda: land_engine)
     monkeypatch.setattr(sc.feature_rebase, "rebase_stopped", lambda run, cwd: False)
 
     for cmd in ("exit 0", "exit 1"):
@@ -2871,3 +2873,132 @@ def test_run_restores_signal_handlers_on_every_exit_path(tmp_path, monkeypatch, 
     sc.heartbeat_path(d).write_text(json.dumps({"pid": live_other, "last_seen": time.time()}))
     assert sc.run(d, _config(), client_factory=lambda *a: _Boom()) == 1     # live holder: refused
     assert signal.getsignal(signal.SIGTERM) == before
+
+
+# --------------------------------------------------------------------------- --unsafe-merge through the landing engine (#939)
+
+_OPEN = {"upkeep": {"enabled": True}}
+
+
+class _FakeEngine:
+    """Stands in for `feature_land`: records the call, answers a canned outcome. No network, no host write."""
+
+    def __init__(self, outcome):
+        self.outcome, self.calls = outcome, []
+
+    def _load(self, name):
+        return sc._load(name)
+
+    def land(self, config, sdlc_dir, unit, **kw):
+        self.calls.append((unit, kw))
+        return dict(self.outcome)
+
+
+def _open_config():
+    cfg = _ledger_config()
+    cfg.update(_OPEN)
+    return cfg
+
+
+def test_unsafe_merge_gate_closed_is_byte_identical_and_never_touches_the_engine(tmp_path, monkeypatch):
+    """Closed gate: the reply, the ledger entries and the engine-call list equal the pre-change path (run_drive-free)."""
+    local, d = _repo(tmp_path)
+    cfg = _ledger_config()
+    cfg["verify"] = {"command": "exit 0"}
+    cfg["work"] = {"base": "main"}
+    engine_calls = []
+    monkeypatch.setattr(sc, "_engine_land", lambda: engine_calls.append("loaded"))
+    monkeypatch.setattr(sc.verify_merge, "ensure_landing_pr",
+                        lambda *a, **k: {"outcome": sc.verify_merge.CREATED, "number": 42, "why": "opened #42"})
+    monkeypatch.setattr(sc.verify_merge, "merge_pr", lambda *a, **k: {"ok": True, "why": "PR #42 merged."})
+    reply = sc._unsafe_merge_reply(d, cfg, "billing", requester="U12345")
+    assert "42" in reply and "requested by" not in reply
+    assert engine_calls == []
+    assert sc._upkeep_gate_open(cfg) is False
+
+
+def test_unsafe_merge_gate_open_calls_engine_once_without_consent_and_records_requester(tmp_path, monkeypatch):
+    local, d = _repo(tmp_path)
+    cfg = _open_config()
+    engine = _FakeEngine({"outcome": "merged"})
+    monkeypatch.setattr(sc, "_engine_land", lambda: engine)
+    reply = sc._unsafe_merge_reply(d, cfg, "billing", requester="U12345")
+    assert len(engine.calls) == 1
+    unit, kw = engine.calls[0]
+    assert unit == "billing" and kw["merge"] is True
+    assert not any("user-requested" in str(a) for a in kw["argv"])           # chat supplies no consent
+    fingerprints = sc._load("feature_land_approval").FINGERPRINTS
+    assert any(f in kw["environ"] for f in fingerprints)                      # a driven fingerprint is present
+    assert "requested by U12345" in reply
+    notes = [e for e in sc.ledger.read_all(d) if e.get("goal") == sc.claim_key("billing")]
+    assert "requested by U12345" in notes[-1]["why"]
+
+
+def test_unsafe_merge_requester_that_is_not_a_slack_id_is_recorded_as_unknown(tmp_path, monkeypatch):
+    local, d = _repo(tmp_path)
+    monkeypatch.setattr(sc, "_engine_land", lambda: _FakeEngine({"outcome": "merged"}))
+    reply = sc._unsafe_merge_reply(d, _open_config(), "billing", requester="U1\nINJECT; rm -rf")
+    assert "requested by unknown" in reply and "INJECT" not in reply
+
+
+@pytest.mark.parametrize("outcome,needle", [
+    ("merged", "landed"),
+    ("already-landed", "already landed"),
+    ("merged-with-warning", "warning"),
+    ("armed", "auto-merge is armed"),
+    ("refused:guard", "Approve the unit locally"),
+    ("refused:verify-failed", "refused"),
+    ("unconfirmed:read-back", "could not confirm"),
+    ("surprise:new", "no clear outcome"),
+])
+def test_unsafe_merge_engine_outcome_maps_to_a_reply(tmp_path, monkeypatch, outcome, needle):
+    local, d = _repo(tmp_path)
+    monkeypatch.setattr(sc, "_engine_land", lambda: _FakeEngine({"outcome": outcome, "detail": ""}))
+    reply = sc._unsafe_merge_reply(d, _open_config(), "billing", requester="U12345")
+    assert needle in reply
+
+
+def test_unsafe_merge_unknown_engine_outcome_is_never_reported_as_landed(tmp_path, monkeypatch):
+    local, d = _repo(tmp_path)
+    monkeypatch.setattr(sc, "_engine_land", lambda: _FakeEngine({"outcome": "surprise"}))
+    reply = sc._unsafe_merge_reply(d, _open_config(), "billing")
+    assert "landed" not in reply.replace("no clear outcome", "")
+
+
+def test_unsafe_merge_with_a_real_engine_and_no_approval_is_refused_and_merges_nothing(tmp_path, monkeypatch):
+    """The real engine behind the gate: no approval file exists, so nothing is merged (spy sees no merge call)."""
+    local, d = _repo(tmp_path)
+    calls = rest_merge_support.spy_landing(monkeypatch, sc.verify_merge)
+    reply = sc._unsafe_merge_reply(d, _open_config(), "billing", requester="U12345")
+    assert "refused" in reply or "could not" in reply or "no clear outcome" in reply
+    assert not any("merge" in str(c) and "pulls" in str(c) and "PUT" in str(c) for c in calls)
+
+
+def test_handle_message_event_threads_the_requester_to_the_unsafe_merge_reply(tmp_path, monkeypatch):
+    local, d = _repo(tmp_path)
+    _write_registry(d, {"billing": {"open": True}})
+    cfg = _config(channel="C1111111")
+    cfg.update(_open_config())
+    seen = []
+    monkeypatch.setattr(sc, "_unsafe_merge_reply", lambda *a, **k: seen.append(k.get("requester")) or "ok")
+    sc.handle_message_event({"channel": "C1111111", "text": "--unsafe-merge billing", "user": "U99999"}, cfg,
+                            sdlc_dir=str(d))
+    assert seen == ["U99999"]
+
+
+def test_help_text_says_unsafe_merge_needs_a_local_unit_approval_when_upkeep_is_on():
+    assert "local unit approval" in sc.HELP_TEXT
+
+
+def test_spy_records_the_engine_land_entry(monkeypatch):
+    land_engine = sc._load("feature_land")
+    calls = rest_merge_support.spy_landing(monkeypatch, sc.verify_merge, engines=(land_engine,))
+    land_engine.land({}, ".sdlc", "billing", merge=True)
+    assert calls == ["feature_land.land"]
+
+
+def test_spy_sees_engine_entries_next_to_the_verify_merge_names(monkeypatch):
+    gh_api = sc._load("gh_api")
+    calls = rest_merge_support.spy_landing(monkeypatch, sc.verify_merge, gh_api)
+    gh_api.merge_pr_pinned(None, "a/b", 1, "0" * 40)
+    assert "gh_api.merge_pr_pinned" in calls

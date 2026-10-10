@@ -171,7 +171,9 @@ merge` yourself to land it" or the real reason it isn't (a stopped rebase, a fai
 `verify.command` configured) — it never lands the merge itself, in any configuration.
 `--unsafe-merge <name>` (#2359) runs that SAME check and, if it passes, lands it immediately — the
 only thing it skips is the "merge now?" confirmation a human running `verify_merge.py land` would
-otherwise answer; a failing verify still blocks it, exactly like `--merge`. Expect
+otherwise answer; a failing verify still blocks it, exactly like `--merge`. With unit upkeep on, it goes through the
+landing engine instead and needs the same local single-use unit approval first; the reply names the requester and one of
+landed, already landed, landed with a warning, armed, refused (with the reason) or unconfirmed. Expect
 `--rebase`/`--merge`/`--unsafe-merge` all to take noticeably longer than `--drift`/`--list` (each
 does real work against an isolated worktree, not an in-process read) and to claim the unit for the
 duration — a second `--rebase`/`--merge`/`--unsafe-merge` on the SAME unit while one is already
@@ -376,7 +378,7 @@ Structured commands only — no natural-language understanding (Doubt D-2, delib
 | --- | --- |
 | `--drift` | Show the current feature-branch drift summary, computed on demand — an on-the-spot run of the same commit-delta + landing-PR check the passive drift watcher (#2311) runs on its own TTL tick, answered directly with no headless drive |
 | `--merge <name>` | Verifies `<name>` is clean and ready to land (`verify.command` run against an isolated worktree of its remote tip) — never merges it itself, in any configuration; reports "ready, go land it yourself" on a pass, or the real reason it isn't (stopped rebase, failed verify, no `verify.command` configured) |
-| `--unsafe-merge <name>` | Runs the SAME verify check as `--merge`, then LANDS it immediately if it passes — the ONE thing this skips versus running `verify_merge.py land` by hand is the "merge now? [y/N]" confirmation; a failing verify still blocks the merge, exactly like `--merge`. Use at your own discretion (#2359) |
+| `--unsafe-merge <name>` | Runs the SAME verify check as `--merge`, then LANDS it immediately if it passes — the ONE thing this skips versus running `verify_merge.py land` by hand is the "merge now? [y/N]" confirmation; a failing verify still blocks the merge, exactly like `--merge`. Use at your own discretion (#2359). With unit upkeep on: landing engine plus a local unit approval, requester recorded |
 | `--list [page]` | List open feature units, 10 per page, straight from `.sdlc/features/index.json` — title, owner, priority per unit; an out-of-range page is refused with the real page count, never a silent empty reply |
 | `--rebase <name>` | Rebase `<name>`'s `feature/<name>` branch onto `work.base` and push, unattended, inside an isolated worktree cut just for this dispatch — clean rebases are pushed with `--force-with-lease` and reported done; a real conflict is left stopped exactly where git left it and reported with the conflicted files, never resolved automatically or handed to the interactive walker |
 | `--help` | Show usage |
