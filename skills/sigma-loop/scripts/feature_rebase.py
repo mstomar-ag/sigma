@@ -488,7 +488,11 @@ def arrived_through_a_pull_request(subject):
     """Does this commit's SUBJECT carry GitHub's own trace of the pull request that landed it?
 
     See the module docstring for the evidence model and its two named limits. Returns a bool and
-    never raises -- a non-string subject is simply no evidence."""
+    never raises -- a non-string subject is simply no evidence.
+
+    ONLY THE SUBJECT IS READ, so a trailer in a commit BODY cannot change the verdict: the resolution stamp the engine
+    appends after a blank line leaves a resolved commit exactly as "arrived" as it was, and a stamp joined to the subject
+    line would read as direct. The patterns and the `\\Z` anchor are deliberately unchanged."""
     if not isinstance(subject, str):
         return False
     text = subject.strip()
@@ -536,6 +540,16 @@ def ack_path(sdlc_dir, name):
         raise registry.InvalidUnitName("%r is not a unit name, so it cannot be acked" % (name,))
     return (registry.registry_dir(sdlc_dir) / ACK_DIRNAME
             / (registry.unit_key(name) + ".json"))
+
+
+def runtime_ack_path(sdlc_dir, name):
+    """`.sdlc/state/rebase-acks/<unit>.json` -- the acks the ENGINE recomputes for the commits a resolved replay wrote
+    (upkeep part B, slice 5). Under `state/` (already ignored by `setup.RUNTIME_IGNORES`) and per machine, because a
+    replayed sha exists only after this machine's push; the tracked store above is never edited by the engine. Same name
+    guard and the same `unit_key` fold as `ack_path`. Read by `_acked`, unioned with the tracked file."""
+    if not (isinstance(name, str) and registry.is_unit_name(name)):
+        raise registry.InvalidUnitName("%r is not a unit name, so it cannot be acked" % (name,))
+    return pathlib.Path(sdlc_dir) / "state" / ACK_DIRNAME / (registry.unit_key(name) + ".json")
 
 
 def patch_id(run, cwd, sha):
@@ -592,6 +606,10 @@ def _acked(sdlc_dir, run, cwd, unit, integration_ref):
     except OSError:
         pass
     entries += _runtime_acks(sdlc_dir, unit)
+    try:
+        entries += _read_acks(runtime_ack_path(sdlc_dir, unit).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
     try:
         rel = pathlib.Path(os.path.relpath(path.resolve(), pathlib.Path(cwd).resolve())).as_posix()
     except ValueError:                    # a different drive on Windows: no repo-relative path
@@ -937,6 +955,13 @@ _BUDGET_DEFAULT = 120.0
 def guard_deadline():
     """The `_now()` instant by which every guard read of ONE push must have finished. Pass it to
     `dropped_paths` / `own_losses` so a push's several measurements share one budget."""
+    return _now() + budget_seconds()
+
+
+def budget_seconds():
+    """The seconds ONE push's guard reads may take together: `SIGMA_WATCH_CALL_TIMEOUT` when the operator set a positive
+    number, else 120. THIS VARIABLE IS THE LEVER for a unit refused on budget (D-9): raising it is an explicit operator
+    act, bounded by the number typed, polite because it applies to the next pass and starts nothing."""
     global _LEGACY
     if _LEGACY is None:
         _LEGACY = _load("legacy")
@@ -944,7 +969,7 @@ def guard_deadline():
         value = float(str(_LEGACY.getenv(_BUDGET_ENV) or _BUDGET_DEFAULT).strip())
     except ValueError:
         value = _BUDGET_DEFAULT
-    return _now() + (value if value > 0 else _BUDGET_DEFAULT)
+    return value if value > 0 else _BUDGET_DEFAULT
 
 
 def _git_read(cwd, args, deadline=None):
@@ -964,9 +989,9 @@ def _git_read(cwd, args, deadline=None):
     if deadline is not None:
         left = deadline - _now()
         if left <= 0:
-            raise RuntimeError("the guard's reads used up their total budget (%s, default %gs), so "
-                               "the check is unanswered and nothing is pushed"
-                               % (_BUDGET_ENV, _BUDGET_DEFAULT))
+            raise RuntimeError("the guard's reads used up their total budget (%s is %gs, default %gs; raise "
+                               "it to allow a slower check), so the check is unanswered and nothing is pushed"
+                               % (_BUDGET_ENV, budget_seconds(), _BUDGET_DEFAULT))
         timeout = min(timeout, left)
     try:
         proc = subprocess.run(argv, cwd=str(cwd), capture_output=True, timeout=timeout)
@@ -1331,7 +1356,7 @@ def _describe_stop(run, cwd, path, base_ref, report, unmerged):
     report["park"] = {"id": cid, "sha": sha, "subject": subject, "paths": list(unmerged), "brief": brief}
 
 
-def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, strict=False, backup=None):
+def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, strict=False, backup=None, level1=None):
     """Replay `sha` (the feature tip) onto `base_ref` in a throwaway detached worktree and push it.
 
     Returns the outcome. The `finally` is the point of the whole function: whatever happens -- a
@@ -1362,6 +1387,7 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
             report["why"] = "%s (after retry: %s)" % (_flat(first), _flat(exc))
             _drop_worktree(run, cwd, path)
             return FAILED
+    resolved = None                       # Level 1's result while a resolved replay is in flight; None otherwise
     try:
         try:
             # `--rebase-merges` (#2756). A plain rebase LINEARIZES a merge-commit landing: it drops
@@ -1401,11 +1427,18 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
                 if not unmerged:
                     report["why"] = ("the rebase stopped with no unmerged path (%s)" % report.get("why", "")).strip()
                     return FAILED
-                try:
-                    _describe_stop(run, cwd, path, base_ref, report, unmerged)
-                except Exception:         # noqa: BLE001 - a stop that cannot be described is still a CONFLICT
-                    report.pop("park", None)
-            return CONFLICT
+                if level1 is not None:
+                    resolved = _level1(run, cwd, path, base_ref, report, level1)
+                if resolved is not None and resolved.get("parked"):
+                    return CONFLICT           # refused with nothing left to describe; `report["park"]` is set
+                if resolved is None:
+                    try:
+                        _describe_stop(run, cwd, path, base_ref, report, unmerged)
+                    except Exception:     # noqa: BLE001 - a stop that cannot be described is still a CONFLICT
+                        report.pop("park", None)
+                    return CONFLICT
+            else:
+                return CONFLICT
         try:
             after = run(str(path), ["git", "rev-parse", "HEAD"]).strip()
         except Exception as exc:          # noqa: BLE001
@@ -1428,12 +1461,88 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
             report["why"] = ("bringing it forward onto %s would remove or roll back %d tracked "
                              "path(s) it has" % (base_ref, len(dropped)))
             return WOULD_DROP
+        if resolved is not None:
+            refused = _prove_level1(run, cwd, path, base_ref, sha, after, report, level1, resolved)
+            if refused:
+                return CONFLICT
+            # NOTHING RESOLVED IS EVER PUSHED WITHOUT A BACKUP REF. The legacy push has none, so a missing descriptor
+            # is a refusal here, not a fall-back.
+            if backup is None:
+                return _park_resolved(report, _prove().refusal(_prove().NO_BACKUP,
+                                                               "no backup descriptor, so a resolved replay is not pushed"))
         outcome = _pushed(run, cwd, path, branch, sha, remote, report, backup=backup)
         if outcome == REBASED:
             report["after"] = after
+            if resolved is not None:
+                report["resolved"] = {"level": 1, "run_id": resolved["run_id"], "original_tip": sha, "new_tip": after,
+                                      "files": resolved["files"], "checks": resolved["checks"],
+                                      "pairs": resolved["pairs"]}
         return outcome
     finally:
         _drop_worktree(run, cwd, path)
+
+
+# --------------------------------------------------------------------------- Level 1 (upkeep part B, slice 5)
+
+_PROVE = None
+
+
+def _prove():
+    global _PROVE
+    if _PROVE is None:
+        _PROVE = _load("feature_upkeep_prove")
+    return _PROVE
+
+
+def _park_resolved(report, item):
+    """Turn a Level 1 refusal that left no stop to describe into a parked CONFLICT: a synthetic stop record whose id is
+    derived from the unit, the refusal code and the conflicted file, so the same refusal is one finding."""
+    report["why"] = "level 1 refused (%s): %s" % (item.get("code"), item.get("detail"))
+    paths = [_prove().CHANGELOG]
+    cid = park.conflict_id(report["unit"], "", item.get("code") or "", "level1", paths)
+    report["park"] = {"id": cid, "sha": "", "subject": "", "paths": paths,
+                      "brief": "Level 1 refused (%s): %s\n" % (park.neutralise(item.get("code")),
+                                                              park.neutralise(item.get("detail")))}
+    return CONFLICT
+
+
+def _level1(run, cwd, path, base_ref, report, level1):
+    """At a conflict stop under the gate with `conflicts.resolve` on: resolve it by Level 1 -> the result dict, or None
+    when the caller must describe and park the stop as before. On a refusal the conflict is restored when it can be
+    (so the description is of the real stop) and `report["why"]` carries the code."""
+    prove = _prove()
+    if not prove.eligible(run, path):
+        return None
+    out = prove.resolve_stops(run, path, level1["union"], level1["run_id"], rebase_stopped)
+    if not out["refusal"]:
+        return {"run_id": level1["run_id"], "stops": out["stops"], "files": out["files"]}
+    report["why"] = "level 1 refused (%s): %s" % (out["refusal"].get("code"), out["refusal"].get("detail"))
+    if out.get("restorable"):
+        try:
+            run(str(path), ["git", "checkout", "--merge", "--", prove.CHANGELOG])
+        except Exception:                 # noqa: BLE001 - an unrestorable stop is described as what it is
+            pass
+        try:
+            if conflict_state.conflicted_paths(run, str(path)):
+                return None
+        except Exception:                 # noqa: BLE001
+            pass
+    _park_resolved(report, out["refusal"])
+    return {"parked": True}
+
+
+def _prove_level1(run, cwd, path, base_ref, sha, after, report, level1, resolved):
+    """After the resolved rebase completed and before any push: the proof. -> True when it refused (the unit is
+    parked, nothing pushed)."""
+    prove = _prove()
+    got = prove.prove(run, cwd, base_ref, sha, after, resolved["stops"], level1.get("verify_command"),
+                      level1.get("verify_timeout", 3600), level1.get("allow_no_verify", False), worktree=path,
+                      run_verify=level1.get("run_verify"))
+    resolved["checks"], resolved["pairs"] = got["checks"], got["pairs"]
+    if got["refusals"]:
+        _park_resolved(report, got["refusals"][0])
+        return True
+    return False
 
 
 def _pushed(run, cwd, path, branch, sha, remote, report, backup=None):
@@ -2137,6 +2246,8 @@ def clause(report):
     # WHAT HAPPENED TO THE FILING, from the measurement rather than from the wording. `issues` had
     # no consumer on the pick path either, so a finding whose issue number lived only in a report
     # field made the operator go looking for the issue the line had just told them about.
+    if report.get("resolved"):
+        said += " -- level 1 resolved the changelog conflict itself (run %s)" % report["resolved"]["run_id"]
     if report["issues"]:
         said += " -- filed as %s" % ", ".join("#%s" % one for one in report["issues"])
     if report["filing"] == ALREADY_FILED:
@@ -2276,6 +2387,69 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
         _release(lock)
 
 
+def _level1_options(config):
+    """What Level 1 needs, or None -- the gate closed, `conflicts.resolve` off, or any doubt. Pure queries: no command, no
+    file. None is today's behaviour exactly."""
+    try:
+        if not gate.enabled(config) or gate.conflict_level(config) not in ("mechanical", "agent"):
+            return None
+        settings = gate.read(config).settings
+        verify = (config.get("verify") or {}).get("command") if isinstance(config, dict) else None
+        return {"union": _work()._union_for(config), "run_id": _load("feature_upkeep_resolution").new_run_id(),
+                "verify_command": verify if isinstance(verify, str) else None,
+                "verify_timeout": int(settings["verify.timeout_minutes"]) * 60,
+                "allow_no_verify": settings["conflicts.mechanical_without_verify"] is True}
+    except Exception:                     # noqa: BLE001 - a doubtful gate reads closed
+        return None
+
+
+def _write_runtime_acks(sdlc_dir, run, cwd, unit, report):
+    """After a resolved push only: for each (original, replayed) pair whose original was acked, ack the replayed sha and
+    its patch-id in the RUNTIME file. The tracked store is not touched and the stamp is not read."""
+    acked = {str(d.get("sha")) for d in (report.get("acked") or []) if isinstance(d, dict)}
+    fresh = [{"sha": new, "patch_id": patch_id(run, cwd, new), "subject": "resolved replay of " + old[:12]}
+             for old, new in report["resolved"]["pairs"] if old in acked]
+    if not fresh:
+        return
+    path = runtime_ack_path(sdlc_dir, unit)
+    try:
+        entries = _read_acks(path.read_text(encoding="utf-8"))
+    except OSError:
+        entries = []
+    have = {e.get("sha") for e in entries}
+    entries += [e for e in fresh if e["sha"] not in have]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"unit": unit, "acked": entries}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _after_resolved_push(sdlc_dir, config, run, cwd, remote, base_ref, report):
+    """Everything that follows a resolved push that LANDED, and nothing before it: the ack recomputation, the record,
+    the ledger note, and a record comment on a prior finding. A failure here is noted, never raised -- the push cannot be
+    undone and the next pass finds the unit current."""
+    unit, got = report["unit"], report["resolved"]
+    try:
+        _write_runtime_acks(sdlc_dir, run, cwd, unit, report)
+    except Exception as exc:              # noqa: BLE001
+        _note("sigma: rebase upkeep: the acks of the resolved commits were not recorded (%s).\n" % _flat(exc))
+    try:
+        res = _load("feature_upkeep_resolution")
+        record = res.make_record(unit, got["level"], got["run_id"], got["original_tip"], got["new_tip"],
+                                 str(report.get("backup") or ""), got["files"], got["checks"])
+        written = res.write_record(sdlc_dir, record)
+        if not written.ok:
+            _note("sigma: rebase upkeep: the resolution record was not written (%s).\n" % written.reason)
+            return
+        res.ledger_note(sdlc_dir, config, record)
+        store = _read_filed(sdlc_dir, unit)
+        slots = [slot for slot in store if slot.startswith(park.SLOT_PREFIX)]
+        repo = sync.repo_slug(config, run, cwd, remote) if slots else None
+        for _slot, issue in (park.closable(store, slots) if slots else []):
+            if repo and str(issue).isdigit():
+                res.post_comment(lambda args: run(cwd, [_GH, *args]), int(issue), repo, record, sdlc_dir)
+    except Exception as exc:              # noqa: BLE001
+        _note("sigma: rebase upkeep: the resolution was not fully recorded (%s).\n" % _flat(exc))
+
+
 def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, report):
     run(cwd, ["git", "fetch", remote, base, branch])
     base_ref, feature_ref = "%s/%s" % (remote, base), "%s/%s" % (remote, branch)
@@ -2328,7 +2502,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
         backup = {"unit": unit, "clock": _WALL}
     path = worktree_path(sdlc_dir, unit)
     outcome = _rebase_feature(run, cwd, path, branch, base_ref, before, remote, report,
-                              strict=gate.enabled(config), backup=backup)
+                              strict=gate.enabled(config), backup=backup, level1=_level1_options(config))
     if outcome == CONFLICT and gate.enabled(config) and report.get("park"):
         outcome = PARKED                  # the gate is open and the stop was described before the drop
     report["outcome"] = outcome
@@ -2365,6 +2539,8 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
     if outcome != REBASED:
         return report
     _clear_blocked(sdlc_dir, unit)
+    if report.get("resolved"):
+        _after_resolved_push(sdlc_dir, config, run, cwd, remote, base_ref, report)
     _settle_parks(sdlc_dir, config, run, cwd, remote, report)
 
     entry = registry.read(registry.registry_dir(sdlc_dir)).get(unit) or {}

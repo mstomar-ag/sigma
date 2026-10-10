@@ -240,9 +240,118 @@ def ledger_note(config, sdlc_dir, unit_key, outcome, sha12, *, append=None):
     return {"ok": entry is not None, "entry": entry}
 
 
+def _value(thing):
+    return thing() if callable(thing) else thing
+
+
+def _current(run, cwd, base_tip, unit_tip):
+    """True when the base tip is already inside the unit (nothing to catch up on); False or None (could not tell) otherwise."""
+    shared = _sibling("feature_landed")
+    try:
+        answer, _, _ = shared._ancestry(_shared(), str(cwd), base_tip, unit_tip)
+    except Exception:                                       # noqa: BLE001
+        return None
+    return {"yes": True, "no": False}.get(answer)
+
+
+def _goal_pass(entry, run_replay, run_push, report):
+    """One idle goal branch. A branch whose request merged and whose remote branch is gone is a skip with a reason BEFORE any
+    replay (a replay would push, and a push would resurrect it); a refusal learned afterwards is classified the same way and
+    anything else refused is a conflict of the goal, never a skip. Evidence is re-anchored only when `reanchor_allowed`."""
+    name = str(entry.get("name"))
+    row = {"name": name, "result": "replayed", "reason": "", "reanchored": False}
+    report["goals"].append(row)
+
+    def refusal():
+        try:
+            return classify_push_refusal(pr_merged=_value(entry.get("pr_merged")),
+                                         remote_branch_exists=_value(entry.get("remote_exists")))
+        except Exception:                                   # noqa: BLE001 - could not tell is not a skip
+            return {"skip": False, "reason": ""}
+    gone = refusal()
+    if gone["skip"]:
+        row.update(result="skipped", reason=gone["reason"])
+        return
+    try:
+        outcome = entry["replay"](run_replay, run_push) or {}
+    except Exception:                                       # noqa: BLE001 - one goal never costs the pass
+        outcome = {"ok": False}
+    if outcome.get("push_refused"):
+        late = refusal()
+        if late["skip"]:
+            row.update(result="skipped", reason=late["reason"])
+        else:
+            row.update(result="refused", reason="push-refused")
+            report["conflicts"].append(name)
+        return
+    if outcome.get("ok") is not True:
+        row.update(result="failed", reason="replay-failed")
+        report["conflicts"].append(name)
+        return
+    if reanchor_allowed(outcome.get("level"), outcome.get("verify_green")) and callable(entry.get("reanchor")):
+        entry["reanchor"]()
+        row["reanchored"] = True
+
+
+def _engine(config, sdlc_dir, unit, unit_ref, base_ref, run, cwd, report, rewrite, push, direct_commits, goals, factory):
+    """The costly steps, behind the tip re-reads. `rewrite(run, tips) -> {"ok", "resolved", "acks"}` must not move the unit ref
+    (the push is the only step that does), so a moved tip is somebody else's. Sets `report["result"]` and `["reason"]`."""
+    git = run or _git
+    read = lambda: (_tip(git, cwd, unit_ref), _tip(git, cwd, base_ref))     # noqa: E731
+    unit_tip, base_tip = report["unit_tip"], report["base_tip"]
+    if _current(git, cwd, base_tip, unit_tip) is True:
+        extra = []
+        if direct_commits is not None:
+            try:
+                extra = list(direct_commits((unit_tip, base_tip)) or [])
+            except Exception:                               # noqa: BLE001
+                extra = []
+        report.update(result="skipped", reason="direct-commits-on-current-unit" if extra else "current")
+        return
+    box = {}
+
+    def step_rewrite(tips):
+        try:
+            outcome = rewrite(factory(hooks_policy(REPLAY)), tips) or {}
+        except Exception:                                   # noqa: BLE001 - a failed rewrite is a failed pass, never a push
+            outcome = {"ok": False}
+        box["rewrite"] = outcome
+        if outcome.get("acks"):
+            ack_union(config, sdlc_dir, unit, outcome["acks"])
+
+    def step_push(tips):
+        if (box.get("rewrite") or {}).get("ok") is False:   # nothing was rewritten: nothing is pushed
+            return
+        phase = RESOLVED_PUSH if (box.get("rewrite") or {}).get("resolved") else CLEAN_PUSH
+        try:
+            push(factory(hooks_policy(phase)), tips)
+        except Exception:                                   # noqa: BLE001 - a refused or failed push is a failed pass
+            box["rewrite"] = {"ok": False}
+    steps = [step_rewrite] + ([step_push] if push is not None else [])
+    checked = recheck_tips(read, steps)
+    report["restarts"] = checked["restarts"]
+    if checked["outcome"] != "ok":
+        report.update(result=checked["outcome"], reason="tips-" + checked["outcome"])
+        return
+    if (box.get("rewrite") or {}).get("ok") is False:
+        report.update(result="failed", reason="rewrite-failed")
+        return
+    report.update(result="rewritten", reason="")
+    for entry in goals or []:
+        if isinstance(entry, dict) and "replay" in entry:
+            _goal_pass(entry, factory(hooks_policy(REPLAY)), factory(hooks_policy(CLEAN_PUSH)), report)
+
+
 @feature_upkeep.gated("project")
-def upkeep_pass(config, sdlc_dir, unit, unit_ref, base_ref, base_name, now, *, run=None, cwd=".", landing_prs=None):
-    """One pass for one unit. -> {"result": "skipped"|"not-landed"|"unreadable", "reason", "unit", "unit_tip", "base_tip"}."""
+def upkeep_pass(config, sdlc_dir, unit, unit_ref, base_ref, base_name, now, *, run=None, cwd=".", landing_prs=None,
+                rewrite=None, push=None, goals=None, direct_commits=None, ledger_append=None, runner_factory=None):
+    """One pass for one unit. -> {"result": "skipped"|"not-landed"|"unreadable"|"rewritten"|"moved"|"failed", "reason", "unit",
+    "unit_tip", "base_tip"}, plus `restarts`, `goals` and `conflicts` once the engine ran.
+
+    The engine keywords are all injectable and all optional; a call with none of them is exactly the landed-unit skip.
+    `rewrite(run, tips)` and `push(run, tips)` get runners from `runner_factory` (default `engine_runner`) built with the hooks
+    policy of their phase; `goals` is a list of dicts for `_goal_pass`; `direct_commits(tips)` lists commits made straight on a
+    unit that is already current. With any of them (or `ledger_append`), the end of the pass writes the unaddressed note."""
     verdict, unit_tip, base_tip = landed(run, cwd, unit_ref, base_ref, base_name, landing_prs)
     report = {"result": NOT_LANDED, "reason": verdict, "unit": unit, "unit_tip": unit_tip, "base_tip": base_tip}
     if verdict == UNREADABLE:
@@ -251,4 +360,11 @@ def upkeep_pass(config, sdlc_dir, unit, unit_ref, base_ref, base_name, now, *, r
         report["result"] = "skipped"
         state = _sibling("feature_upkeep_state").record_outcome(sdlc_dir, unit, now, "current", unit_tip, base_tip)
         report["recorded"] = bool(getattr(state, "ok", False))
+    elif rewrite is not None:
+        report.update(goals=[], conflicts=[], restarts=0)
+        _engine(config, sdlc_dir, unit, unit_ref, base_ref, run, cwd, report, rewrite, push, direct_commits, goals,
+                runner_factory or engine_runner)
+    wired = any(x is not None for x in (rewrite, push, goals, direct_commits, ledger_append))
+    if wired and unit_tip:
+        ledger_note(config, sdlc_dir, unit, report["result"], unit_tip, append=ledger_append)
     return report

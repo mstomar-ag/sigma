@@ -505,12 +505,16 @@ def test_merge_stop_is_readable_and_the_merge_commit_pairs_by_key(tmp_path):
 
 
 # --------------------------------------------------------------------------- gate closed: nothing is wired
-def test_the_library_reads_no_config_and_nothing_imports_it_yet():
+#: The only sibling scripts that reference the library; registered, and reached solely behind the upkeep gate.
+REGISTERED_IMPORTERS = ["feature_upkeep_prove.py"]
+
+
+def test_the_library_reads_no_config_and_only_registered_scripts_import_it():
     src = (SCRIPTS / "conflict_proof.py").read_text(encoding="utf-8")
     assert "upkeep" not in src.replace("`upkeep`", "") .split('"""', 2)[2]
-    for path in SCRIPTS.glob("*.py"):
-        if path.name != "conflict_proof.py":
-            assert "conflict_proof" not in path.read_text(encoding="utf-8"), path.name
+    importers = sorted(p.name for p in SCRIPTS.glob("*.py")
+                       if p.name != "conflict_proof.py" and "conflict_proof" in p.read_text(encoding="utf-8"))
+    assert importers == REGISTERED_IMPORTERS
 
 
 def test_read_commits_survives_control_bytes_in_message_and_diff(tmp_path):

@@ -66,6 +66,7 @@ LIBRARY_ONLY = {
     "feature_landed",
     "conflict_state",
     "feature_park",
+    "feature_upkeep_prove",
     "conflict_proof",
     "unattended_git",
     "merge_queue", "tier_escalation", "board_spec", "red_green", "shell_policy", "logroll",

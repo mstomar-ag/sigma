@@ -4,10 +4,22 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- Upkeep part A, slice 6 wiring: the pass re-reads tips, uses the engine runner and hooks policy, writes acks, limits re-anchoring, skips deleted goal branches and writes the ledger note (#1016).
 - Upkeep part C, slice 5: read-back classifier and pending-landing record (#936).
 - Upkeep part C, slice 8: the landing engine's front half, `feature_land.py land <unit>`, ends in a rehearsal and never merges (#937).
 - Upkeep part C, slice 8: `feature_land_approval.peek` checks a unit approval without consuming it (#937).
 - Upkeep part C, slice 8: the PR-creating writer and the scratch-worktree removal are registered in the write surface (#937).
+- **Upkeep part B, slice 5: a changelog-only unit conflict is resolved by the heading-aware union (#947).** Behind the
+  existing upkeep opt-in and `conflicts.resolve` set to `mechanical` or `agent` only, and with no model call. A unit rebase
+  that stops on a conflict in the changelog alone is resolved, checked (no edit outside the file, no new marker or
+  whitespace finding, every original commit accounted for, then the verify command), stamped with the original author kept,
+  continued with repository hooks pointed away, and pushed only through the one atomic backup push; any refused check parks the
+  unit instead, and a resolved replay is never pushed without a backup ref. After the push the acks of the original commits
+  are recomputed for the replayed ones into a per-machine runtime file the ack reader unions in (the tracked store is never
+  edited), the resolution record and ledger note are written, and a prior finding gets the record before it is closed. The
+  guard budget refusal now names `SIGMA_WATCH_CALL_TIMEOUT` and its current value as the operator's lever. With the opt-in
+  closed every existing path is unchanged.
+
 - **Upkeep part B, slice 6: unit conflicts are parked, with one capped finding per conflict (#946).** Behind the
   existing upkeep opt-in only. A unit rebase that stops on a conflict nobody resolves now ends with the new `parked`
   outcome: nothing is pushed, a capped brief (files, commits, bytes and time; no network call; marker strings and kit paths
