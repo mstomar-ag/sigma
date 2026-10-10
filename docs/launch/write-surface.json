@@ -3343,6 +3343,30 @@
       "count": 1,
       "gate": "decision_rubric.rulebook.enabled is exactly true; writes the rulebook file by temp file and atomic replace; propose adds a proposed rule and approve (owner only) seals one; a link folder is refused",
       "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/applier.py",
+      "function": "_prune",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "decision_rubric.autonomy.applier.enabled is exactly true; removes only answered or vetoed ask files in the autonomy folder older than two days by embedded time",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/applier.py",
+      "function": "_write_atomic",
+      "rule": "fs-remove",
+      "count": 2,
+      "gate": "applier gate open; removes only the temp file this call created beside its target after a failed write",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/applier.py",
+      "function": "_write_atomic",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "decision_rubric.autonomy.applier.enabled is exactly true; writes one ask file or the tick heartbeat in the autonomy folder by temp file and atomic replace; a link folder is refused",
+      "risk": "medium"
     }
   ]
 }

@@ -638,6 +638,28 @@ def scheduler_step(p, sdlc_dir, call_timeout):
         return None
 
 
+def applier_step(p, sdlc_dir, call_timeout, config=None):
+    """Decision rubric slice 19: the act-and-tell applier, one more timed call AFTER the eight and the scheduler step, in its own
+    guard. The gate is read here from the config and nothing is spawned or logged unless it is the JSON boolean true; the call
+    goes through `run_call`, so through `run_with_timeout.py` like every other tick call. -> the summary line or ""."""
+    try:
+        config = read_config(sdlc_dir) if config is None else config
+        gate = config["decision_rubric"]["autonomy"]["applier"]["enabled"]
+        if gate is not True:
+            return ""
+    except Exception:                                # noqa: BLE001 - any shape but the open one is closed
+        return ""
+    try:
+        touch_heartbeat(p)
+        summary = run_call(p, sdlc_dir, call_timeout, "applier.py", (), "summary")
+        if summary:
+            tee(p, f"watch: {summary}")
+        return summary
+    except Exception as exc:                         # noqa: BLE001 - never abort the tick
+        log_line(p, f"watch: applier step failed (non-fatal): {type(exc).__name__}")
+        return ""
+
+
 def cleanup(p, my_pid):
     """B-28/B-29. Registered ONLY on the takeover path, after the mutex is released -- a process
     that exits as a sibling or as "already running" removes nothing.
@@ -821,6 +843,7 @@ def tick(p, sdlc_dir, call_timeout, n, config=None):
             if mode == "summary" and summary:        # B-34: an empty summary produces NO line
                 tee(p, f"watch: {summary}")
         scheduler_step(p, sdlc_dir, call_timeout)
+        applier_step(p, sdlc_dir, call_timeout)
     except Exception as exc:                         # noqa: BLE001 - B-1/B-36: absorb, never abort
         log_line(p, f"watch: tick failed (non-fatal): {type(exc).__name__}")
         print(traceback.format_exc(), file=sys.stderr, flush=True)
