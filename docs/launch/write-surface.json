@@ -929,6 +929,30 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_pass.py",
+      "function": "push",
+      "rule": "git-destructive",
+      "count": 1,
+      "gate": "upkeep.enabled (project door); one lease-guarded push of a branch tip, refspec is new-sha:refs/heads/branch, never a delete, refused when the remote branch moved",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_pass.py",
+      "function": "push",
+      "rule": "git-push",
+      "count": 1,
+      "gate": "upkeep.enabled (project door); one lease-guarded push of a branch tip, refspec is new-sha:refs/heads/branch, never a delete, refused when the remote branch moved",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_pass.py",
+      "function": "rewrite",
+      "rule": "git-destructive",
+      "count": 1,
+      "gate": "upkeep.enabled (project door, run_unit_pass is gated and so is upkeep_pass); removes only the throwaway worktree the same call created, never a branch or ref",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_upkeep_resolution.py",
       "function": "post_comment",
       "rule": "gh-api-write",
