@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Decision rubric, slice 1: measure and pin, read-only (#991).** New `skills/sigma-loop/scripts/park_mix.py` counts park events and park comments by reason class and censuses needs-confirmation issues by population (gate holds are never counted as AI-filed); `park_mix.py report <sdlc_dir>` writes nothing. Tests pin the current filing label sets. No behaviour change.
 - **Live regression entrypoint, slice 1: refusal ladder, NOT RUN rows, credential-safe logging (#884, refs #810).**
   New `evals/regression/live.py` (stdlib only). Run bare it exits 2 with one `live.py: REFUSED [no-credential]: ...`
   line on stderr, nothing on stdout, and one `sigma.regression-result/v1` NOT RUN row under
