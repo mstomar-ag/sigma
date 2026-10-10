@@ -4771,6 +4771,21 @@ def _decision_rubric_state(cfg, sdlc_dir=None):
         return "unreadable (%s)" % type(exc).__name__
 
 
+def _autonomy_state(cfg, sdlc_dir=None):
+    """Autonomy-level readout (informational, read-only, no network): one clause per kind and area."""
+    try:
+        mod = _load_loop_script("autonomy")
+        out = mod.readout(sdlc_dir if sdlc_dir is not None else ".sdlc", cfg)
+        if not out.get("enabled"):
+            return "off (default)"
+        rows = ["%s/%s level %d%s" % (r["qkind"], r["area"] or "-", r["level"], " (paused)" if r["paused"] else "")
+                for r in out["kinds"]]
+        return "on: " + ("; ".join(rows) if rows else "no kinds yet") + "; %d watch records, %d vetoes" % (
+            out["watch_records"], out["vetoes"])
+    except Exception as exc:  # a readout never fails the dashboard
+        return "unreadable (%s)" % type(exc).__name__
+
+
 _LEGACY_MODULE = []
 
 
@@ -5044,6 +5059,8 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
     ))
     rows.append(("decision rubric (OFF by default)", _decision_rubric_state(cfg, sdlc_dir),
                  'config: "decision_rubric": {"records": {"enabled": true, "repo_visibility": "private"}}'))
+    rows.append(("autonomy levels (OFF by default)", _autonomy_state(cfg, sdlc_dir),
+                 'config: "decision_rubric": {"autonomy": {"enabled": true}}'))
     return rows
 
 
