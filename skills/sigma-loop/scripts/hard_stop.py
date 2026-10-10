@@ -53,6 +53,10 @@ _PATTERNS = {
     ),
     "destroy": (
         ("destroy-rm", re.compile(r"\brm\s+(?:-\w*[rR]\w*[fF]\w*|-\w*[fF]\w*[rR]\w*|--recursive)\b")),
+        ("destroy-rm-split", re.compile(r"\brm\b(?=[^|;&\n]*\s(?:-\w*[rR]\w*|--recursive)(?:\s|$))(?=[^|;&\n]*\s(?:-\w*[fF]\w*|--force)(?:\s|$))")),
+        ("destroy-remote-branch", re.compile(r"\bgit\s+push\b[^|;&\n]*?(?:\s--delete\b|\s-d\b|\s:[^\s:]\S*)")),
+        ("destroy-branch-D", re.compile(r"\bgit\s+branch\b[^|;&\n]*?\s-\w*D\w*\b")),
+        ("destroy-find", re.compile(r"\bfind\b[^|;&\n]*?\s-delete\b")),
         ("destroy-sql", re.compile(r"\b(?:drop\s+(?:table|database|schema)|truncate\s+table)\b", _I)),
         ("destroy-infra", re.compile(r"\b(?:terraform\s+destroy|gh\s+repo\s+delete|kubectl\s+delete|git\s+clean\s+-\w*f)", _I)),
     ),
@@ -82,6 +86,8 @@ _PATTERNS = {
         ("unvetted-eval-fetch", re.compile(r"\b(?:eval|source|bash|sh)\b[^\n]*[<$]\(\s*(?:curl|wget)\b", _I)),
     ),
 }
+
+_PUSH_RX = dict(_PATTERNS["rewrite_history"])["rewrite-force-push"]
 
 # name -> {"detector": callable(text, context) -> pattern id | None, "spend_like": bool}
 _REGISTRY = {}
@@ -202,7 +208,8 @@ def is_hardstop_kind(qkind, record, config):
     return isinstance(qkind, str) and qkind in kinds
 
 
-_FLAG_VALUE = re.compile(r"(?i)(--?(?:token|password|passwd|secret|api[-_]?key|auth\w*|key)(?:[= ]|\s+))\S+")
+_FLAG_VALUE = re.compile(r"(?i)(?<!\S)(--?(?:token|password|passwd|secret|api[-_]?key|auth\w*|key|p)(?:[= ]|\s+))\S+")
+_ENV_PREFIX = re.compile(r"(?<!\S)([A-Za-z_][A-Za-z0-9_]*=)\S+")
 _OPAQUE = re.compile(r"\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{16,}\b")
 
 
@@ -215,6 +222,7 @@ def _scrub_quote(span):
     except Exception:
         return "[unquotable]"
     span = _FLAG_VALUE.sub(lambda m: m.group(1) + "[redacted]", span)
+    span = _ENV_PREFIX.sub(lambda m: m.group(1) + "[redacted]", span)
     span = _OPAQUE.sub("[redacted]", span)
     return span[:QUOTE_MAX]
 
@@ -241,13 +249,20 @@ def _push_target(tokens):
 
 
 def _own_push(text, context, registry, config):
+    """True only when every force-push segment of `text` targets an owned branch (or the context names one)."""
     branch = context.get("branch") if isinstance(context, dict) else None
-    if not branch:
+    if branch:
+        return is_own(branch, registry, config)
+    pushes = [seg for seg in re.split(r"[;&|\n]+", text) if _PUSH_RX.search(seg)]
+    if not pushes:
+        return False
+    for seg in pushes:
         try:
-            branch = _push_target(shlex.split(text))
+            if not is_own(_push_target(shlex.split(seg)), registry, config):
+                return False
         except ValueError:
             return False
-    return is_own(branch, registry, config)
+    return True
 
 
 def classify(action_text, context, config):
@@ -267,6 +282,7 @@ def _classify(text, context, config):
     registry = context.get("registry") if isinstance(context, dict) else None
     extra = hs.get("extra_patterns")
     failed = False
+    own_result = None
     for name, entry in list(_REGISTRY.items()):
         if not _class_on(name, hs):
             continue
@@ -284,11 +300,18 @@ def _classify(text, context, config):
         if not hit:
             continue
         pid, span = hit if isinstance(hit, tuple) else (hit, hit if isinstance(hit, str) else "")
-        if name == "rewrite_history" and _own_push(text, context, registry, config):
-            return Result(None, OWN_PATTERN_ID, _scrub_quote(span))
+        if name == "rewrite_history" and pid == "rewrite-force-push" and _own_push(text, context, registry, config):
+            own_result = Result(None, OWN_PATTERN_ID, _scrub_quote(span))
+            rest = dict(_PATTERNS["rewrite_history"])
+            m = rest["rewrite-filter"].search(text)
+            if not m:
+                continue
+            pid, span = "rewrite-filter", m.group(0)
         return Result(name, pid, _scrub_quote(_line_of(text, span) if span in text else span))
     if failed:
         return Result(CANNOT_TELL, "detector-error", "")
+    if own_result is not None:
+        return own_result
     try:
         shlex.split(text)
     except ValueError:
