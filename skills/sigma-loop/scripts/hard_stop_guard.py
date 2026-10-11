@@ -21,6 +21,7 @@ LEVEL-2 CAP: nothing here maps a hard-stop class to an auto-apply path; a struct
 Stdlib only; no network or process module (hard_stop pins the same).
 """
 import collections
+import contextlib
 import importlib.util
 import pathlib
 
@@ -35,6 +36,7 @@ _ALIAS = {"deploy": "production_change", "delete": "destroy", "overwrite": "rewr
           "spend": "spend", "migrate": "production_change"}
 
 _IN_GUARD = []          # non-empty while the guard performs its own park write (exempt: parking is the remedy)
+_FILING = []            # issue numbers Sigma is parking in its own filing flow right now (#1136)
 _HS = None
 
 
@@ -118,12 +120,22 @@ def _sigma_created(source, info):
     return BODY_MARKER in (info.get("body") or "")
 
 
+@contextlib.contextmanager
+def filing_park(issue):
+    """Scope in which `issue` (the one the filing flow just created) is Sigma's own: its park keeps its text."""
+    _FILING.append(str(issue))
+    try:
+        yield
+    finally:
+        _FILING.pop()
+
+
 def guard_issue_write(source, issue, op, via_guard=False, config=None):
     """-> Verdict for a destructive write to an existing `issue`. Allowed for a Sigma-labelled or Sigma-created issue;
     otherwise cannot-tell (blocked). `via_guard=True` (the guard's own park and note) is exempt, so it cannot recurse."""
     try:
         cfg = config if config is not None else getattr(source, "_hs_config", None)
-        if via_guard or _IN_GUARD or not enabled(cfg) or issue is None:
+        if via_guard or _IN_GUARD or not enabled(cfg) or issue is None or str(issue) in _FILING:
             return ALLOW
         try:
             info = source._read_issue(issue, ["labels", "body"])
