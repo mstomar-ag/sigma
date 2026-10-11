@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import types
 
 import pytest
 from skill_corpus import skill_corpus
@@ -2614,3 +2615,32 @@ def test_folded_clean_finding_adds_no_verdict_comment(tmp_path, monkeypatch):
     _fold_pack(monkeypatch)
     notes = _fold(tmp_path, "retry pool leaks connections on timeout")
     assert len(notes) == 1 and "Triage verdict" not in notes[0]
+class GuardedSource(TriageSource):
+    """Records the order of create and park and whether the filing-park scope was open at park time."""
+    def __init__(self):
+        super().__init__()
+        self.order, self.scoped = [], None
+
+    def create_dependency(self, title, body, assignee, labels=(), goal_label=True):
+        self.order.append("create")
+        return super().create_dependency(title, body, assignee, labels=labels, goal_label=goal_label)
+
+    def park(self, goal, reason, tier=None):
+        self.order.append("park")
+        self.scoped = not handoff.sources.hsg.guard_issue_write(
+            types.SimpleNamespace(_read_issue=lambda *a, **k: {"labels": [], "body": ""},
+                                  goal_label="g", parked_label="p", follow_up_label="f"),
+            goal, "park", config={"decision_rubric": {"hard_stops": {"enabled": True}}}, ).blocked
+        super().park(goal, reason, tier)
+
+
+def test_filing_park_is_scoped_own_with_priority_label_first(tmp_path):
+    """Deny-list and cap parks run inside the filing-park scope, after a create that already carried priority."""
+    r, src = _file(tmp_path, src=GuardedSource(), why="this change is irreversible once merged")
+    assert src.order == ["create", "park"] and src.scoped is True
+    assert any(l.startswith("priority:") for l in src.created["labels"])
+    assert "sigma-qkind: " in src.parked[0][1] and r["triage"]["kind"] == "park"
+    for _ in range(5):
+        _file(tmp_path)
+    r, src = _file(tmp_path, src=GuardedSource())
+    assert src.scoped is True and "cap" in src.parked[0][1]

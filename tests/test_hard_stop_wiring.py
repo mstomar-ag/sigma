@@ -264,3 +264,28 @@ def test_enforcement_doc_matches_generator():
     tests/test_enforcement_table.py)."""
     doc = (ROOT / "docs" / "enforcement.md").read_text()
     assert "decision_rubric.hard_stops.enabled" in doc
+
+
+# -- the filing-time park is Sigma's own (#1136) ----------------------------------------------------
+
+def test_filing_park_scope_exempts_only_that_issue():
+    """Red without the scope (the new issue is guarded and parked generically); a foreign issue stays guarded."""
+    s = Stub()
+    assert G.guard_issue_write(s, "7", "park").blocked
+    with G.filing_park("7"):
+        assert not G.guard_issue_write(s, "7", "park").blocked
+        assert G.guard_issue_write(s, "8", "park").blocked
+    assert G.guard_issue_write(s, "7", "park").blocked
+
+
+def test_filing_park_keeps_triage_reason_on_a_label_less_issue():
+    """Real GitHubSource.park on an issue with no Sigma label: the triage text is kept, not replaced."""
+    s = Stub()
+    s._offboard = lambda goal, comment: s.parks.append((goal, comment))
+    with sources.hsg.filing_park("7"):
+        sources.GitHubSource.park(s, "7", "Parked at filing: cap\nsigma-qkind: needs_decision")
+    assert len(s.parks) == 1 and "sigma-qkind: needs_decision" in s.parks[0][1] and "hard stop" not in s.parks[0][1]
+    s2 = Stub()
+    s2._offboard = lambda goal, comment: s2.parks.append((goal, comment))
+    sources.GitHubSource.park(s2, "7", "x")
+    assert "hard stop" in s2.parks[0][1]
