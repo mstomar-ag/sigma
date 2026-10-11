@@ -95,11 +95,11 @@ MARKER_LINE = "# public-repository adoption: run from the repository root, after
 FAKE_REPO = "acme/public-core"
 FAKE_VERIFY_CMD = "true"
 
-#: The ten lifecycle labels `_LABEL_COLORS` creates (sources.py:791-806), spelled out here so this
+#: The nine lifecycle labels `_LABEL_COLORS` creates (sources.py:791-806), spelled out here so this
 #: file stands alone and never has to import `sources.py` to know its own vocabulary.
 LIFECYCLE_LABELS = (
     "sdlc:goal", "sdlc:in-progress", "sdlc:parked", "sdlc:blocked", "sdlc:blocking",
-    "sdlc:needs-confirmation", "sdlc:needs-label", "sdlc:designed", "sdlc:needs-unit",
+    "sdlc:needs-label", "sdlc:designed", "sdlc:needs-unit",
     "sdlc:needs-triage",
 )
 

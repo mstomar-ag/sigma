@@ -1125,7 +1125,7 @@ is *invisible* to it — the census exists specifically to hunt those down.
 ## 12. Labels outside the `sdlc:` prefix — `priority:*`, `model:*`, and yours
 
 Everything above is about the `sdlc:*` lifecycle labels. Those are the only labels Sigma
-**defines**: `_ensure_labels` seeds exactly ten — the three membership labels and the seven
+**defines**: `_ensure_labels` seeds exactly nine — the three membership labels and the six
 overlays in §2 (`sdlc:designed` joined the table in #1826, `sdlc:needs-unit` in #2263,
 `sdlc:needs-triage` in #2364) — and
 nothing else. Any other label on your board is yours.

@@ -4065,6 +4065,17 @@ UNION_ROUNDS = 3          # bound on resolve->--continue rounds, mirroring BEHIN
 _D3_OURS, _D3_BASE, _D3_THEIRS, _D3_END = "<<<<<<< ", "||||||| ", "=======", ">>>>>>> "
 
 
+def _join_unblanked(ours, theirs):
+    """#1140: ours then theirs, with no blank line between the two bullet lists. A side's trailing blank
+    lines are dropped only when the other side follows with content; the last side keeps its own."""
+    if not any(ln.strip() for ln in theirs):
+        return list(ours) + list(theirs)
+    head = list(ours)
+    while head and not head[-1].strip():
+        head.pop()
+    return head + list(theirs)
+
+
 def _union_diff3(text):
     """(resolved, True) when EVERY conflict hunk is a pure two-sided INSERTION, else (None, False).
 
@@ -4232,7 +4243,7 @@ def _union_headed(text):
         else:
             cut = next((n for n, ln in enumerate(ours) if ln.startswith("## ")), None)
             if cut is None:
-                out.extend(ours); out.extend(theirs)
+                out.extend(_join_unblanked(ours, theirs))
             elif section != _HEAD_UNRELEASED:
                 return None, False
             else:

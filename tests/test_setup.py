@@ -359,7 +359,7 @@ def test_ignore_status_reports_the_mechanism(tmp_path):
 #: that reads "the core lifecycle labels got created" is checking a concrete, named list rather
 #: than "whatever the source happens to produce today".
 _CORE_LABELS = {"sdlc:goal", "sdlc:in-progress", "sdlc:parked", "sdlc:blocked", "sdlc:blocking",
-                "sdlc:needs-confirmation", "sdlc:needs-label", "sdlc:designed",
+                "sdlc:needs-label", "sdlc:designed",
                 "sdlc:needs-unit",   # #2263: the sibling overlay, same colour as sdlc:needs-label
                 "sdlc:needs-triage"}  # #2363: tier 4 of feature_classify's chain, a distinct colour
 

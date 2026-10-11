@@ -4518,13 +4518,13 @@ def test_mark_in_progress_still_fails_fast_on_a_non_transient_claim_error():
 # gate depending on it. On a fresh repo the label did not exist until someone made it by hand.
 
 
-def test_ensure_labels_creates_the_proposed_label():
+def test_ensure_labels_does_not_create_the_retired_proposed_label():
     src = _mod("sources")
     run = _recording_runner()
     src.GitHubSource({"discovery": {"source": "github", "github": {"repo": "acme/widget"}}},
                      run=run)._ensure_labels()
     created = [c[2] for c in run.calls if c[:2] == ["label", "create"]]
-    assert "sdlc:needs-confirmation" in created
+    assert "sdlc:needs-confirmation" not in created      # #1140: retired, left inert where it exists
 
 
 def test_ensure_labels_creates_every_primary_lifecycle_label():
@@ -4533,8 +4533,7 @@ def test_ensure_labels_creates_every_primary_lifecycle_label():
     src.GitHubSource({"discovery": {"source": "github", "github": {"repo": "acme/widget"}}},
                      run=run)._ensure_labels()
     created = {c[2] for c in run.calls if c[:2] == ["label", "create"]}
-    assert {"sdlc:goal", "sdlc:in-progress", "sdlc:parked", "sdlc:blocked",
-            "sdlc:needs-confirmation"} <= created
+    assert {"sdlc:goal", "sdlc:in-progress", "sdlc:parked", "sdlc:blocked"} <= created
 
 
 def test_proposed_label_defaults_to_needs_confirmation():

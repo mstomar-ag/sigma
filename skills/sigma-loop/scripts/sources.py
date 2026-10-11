@@ -893,13 +893,11 @@ BOARD_COLUMNS = (("backlog", "Backlog"), ("ready", "Ready"), ("in_progress", "In
 class GitHubSource:
     """Goals are open GitHub issues labelled `goal_label`, ordered by issue number. Status via labels;
     done closes the issue; parked labels + comments it. Talks to GitHub through `run` (default _run_gh)."""
-    # #1391 step 3a: `proposed_label` was the ONE primary lifecycle label `_ensure_labels` never
-    # created, despite doctor.py (#1354) treating it as primary and SKILL.md's whole
-    # human-promotion gate depending on it. On a fresh repo the label simply did not exist, so the
-    # gate it implements was unenforceable until somebody created it by hand.
+    # #1140: `proposed_label` (sdlc:needs-confirmation) is retired -- nothing writes it, so it is no
+    # longer created. A repo that already has it keeps it; it is still read and never removed.
     _LABEL_COLORS = (("goal_label", "0e8a16"), ("in_progress_label", "fbca04"), ("parked_label", "d93f0b"),
                      ("goal_blocked_label", "d93f0b"), ("blocking_label", "b60205"),
-                     ("proposed_label", "d4c5f9"), ("needs_label_label", "fbca04"),
+                     ("needs_label_label", "fbca04"),
                      ("designed_label", "0e8a16"),
                      # #2263: SAME colour as `needs_label_label` -- the two are the same shape (an
                      # overlay a human clears by one gesture, never /sigma-unpark), just different

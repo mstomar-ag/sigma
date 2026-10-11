@@ -142,7 +142,7 @@ def test_the_kit_creates_only_the_nine_lifecycle_labels():
     #2363) and all of them are `sdlc:*` lifecycle. Pinned against the real table `_ensure_labels`
     iterates, so the claim cannot rot into a lie the way the ledger's filename did."""
     attrs = [attr for attr, _colour in sources.GitHubSource._LABEL_COLORS]
-    assert len(attrs) == 10, attrs
+    assert len(attrs) == 9, attrs
     src = (SCRIPTS / "sources.py").read_text(encoding="utf-8")
     for attr in attrs:
         default = re.search(rf'self\.{attr} = .*?"(sdlc:[a-z-]+)"', src)

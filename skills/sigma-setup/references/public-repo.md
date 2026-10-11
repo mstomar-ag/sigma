@@ -75,15 +75,15 @@ Re-running `/sigma-setup` later keeps these values: a deliberate `false`/`"off"`
 
 ## Labels
 
-`labels` creates the ten lifecycle labels (`sdlc:goal`, `sdlc:in-progress`, `sdlc:parked`,
-`sdlc:blocked`, `sdlc:blocking`, the legacy `sdlc:needs-confirmation`, `sdlc:needs-label`, `sdlc:designed`,
+`labels` creates the nine lifecycle labels (`sdlc:goal`, `sdlc:in-progress`, `sdlc:parked`,
+`sdlc:blocked`, `sdlc:blocking`, `sdlc:needs-label`, `sdlc:designed`,
 `sdlc:needs-unit`, `sdlc:needs-triage`) and `priority:P0`–`priority:P3`. They must exist before
 anyone can file a goal, because GitHub refuses to apply a label that does not exist. It prints one
 line per label (`created`, `existed`, or `FAILED: <reason>`) and `labels ensured on <repo>` only
 when every one was measured present; if any failed it exits non-zero naming them, and `loop.py
 start` refuses to start for the same reason. An existing label is read back, never rewritten.
 
-The loop recreates any of the ten labels' EXISTENCE on its next claim, park or offboard — but only
+The loop recreates any of the nine labels' EXISTENCE on its next claim, park or offboard — but only
 that. Deleting `sdlc:in-progress` strips it from EVERY issue that currently carries it; the label
 comes back globally on the next claim/park/offboard, but an already-claimed goal stays unlabelled
 until it finishes, and until then a SECOND CLONE of this repository (same login, its own `init` plus

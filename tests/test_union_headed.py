@@ -254,3 +254,16 @@ def test_headed_output_survives_reanchor_and_done_refusal(tmp_path):
     assert state.done_refusal(str(sdlc), "77") is not None
     assert state.reanchor_content(str(sdlc), "77") is True
     assert state.done_refusal(str(sdlc), "77") is None
+
+
+# --- #1140: two Unreleased bullet lists join with no blank line between the bullets -----------------
+
+def test_union_of_two_bullet_lists_leaves_no_blank_between_bullets():
+    fn = "_union_headed"   # _union_diff3 is pinned byte-identical (see its SHA test)
+    work = _load("work")
+    text = _merged((["- **a**", ""], ["- **b**", ""]))
+    out, ok = getattr(work, fn)(text)
+    assert ok
+    lines = out.split("\n")
+    a, b = lines.index("- **a**"), lines.index("- **b**")
+    assert b == a + 1, lines
