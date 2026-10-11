@@ -481,7 +481,8 @@ def _triage_finish(sdlc_dir, config, source, plan, issue, key_goal, report):
     if plan["kind"] == "park":
         text = "Parked at filing: %s\n%s" % (plan["reason"], qkind.render_line(plan["qkind"]))
         try:
-            source.park(str(issue), text)
+            with sources.hsg.filing_park(issue):               # #1136: Sigma's own park keeps its text
+                source.park(str(issue), text)
             ledger.safe_append(sdlc_dir, "park", str(issue), config=config, stream=ledger.EVENTS,
                                reason_class="needs_decision", why=plan["reason"])
         except Exception as exc:                               # noqa: BLE001 - never block the filing
