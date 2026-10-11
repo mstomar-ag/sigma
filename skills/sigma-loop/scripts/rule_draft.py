@@ -11,7 +11,7 @@ approves and never writes a file of its own.
   (stable under re-ordering). The majority option of one part drafts the rule; the other part is
   the exam, and the draft passes only when the held-out answers also agree with it at the
   threshold. Fail closed: a held-out set smaller than `min_held_out`, a tie, a missing option
-  (public records drop the free-text choice), a hard-stop kind, a level below 2, or a pair that
+  (public records drop the free-text choice; on public visibility `list` and `draft` say so plainly and exit 1), a hard-stop kind, a level below 2, or a pair that
   already has a rule in the rulebook means NO draft.
 - Gated by both existing gates: `decision_rubric.rulebook.enabled` and `decision_rubric.autonomy.enabled`
   (and the records part for the data). Closed means inert: lists nothing, drafts nothing, writes nothing.
@@ -60,6 +60,18 @@ def _open(config):
     try:
         return (_load("rulebook").enabled(config) and _load("autonomy").enabled(config)
                 and _load("decision_store").enabled(config))
+    except Exception:
+        return False
+
+
+PUBLIC_REASON = ("cannot draft here: record visibility is public, which drops the recorded choice "
+                 "(free text), so no option can be read; draft from a repo on private visibility")
+
+
+def _public(config):
+    """True when the gates are open and records are stored on public visibility. Never raises."""
+    try:
+        return _open(config) and _load("decision_store")._visibility(config) == "public"
     except Exception:
         return False
 
@@ -126,6 +138,8 @@ def draft(sdlc_dir, qkind, area, config, now=None):
     try:
         if not _open(config):
             return _refuse("closed: rulebook, autonomy and records parts must all be enabled")
+        if _public(config):
+            return _refuse(PUBLIC_REASON)
         if not isinstance(qkind, str) or not isinstance(area, str) or _blocked(qkind, config):
             return _refuse("question kind is unknown or a hard-stop kind")
         if _load("autonomy").level(sdlc_dir, qkind, area, config) < MIN_LEVEL:
@@ -170,6 +184,9 @@ def main(argv=None):
         print("rule_draft: %s" % exc, file=sys.stderr)
         return 1
     if args.verb == "list":
+        if _public(config):
+            print("rule_draft: " + PUBLIC_REASON, file=sys.stderr)
+            return 1
         print(json.dumps(list_patterns(args.sdlc_dir, config), indent=2))
         return 0
     out = draft(args.sdlc_dir, args.qkind, args.area, config)
