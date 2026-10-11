@@ -422,6 +422,10 @@
       "role": "library"
     },
     {
+      "path": "skills/sigma-loop/scripts/rule_draft.py",
+      "role": "gesture"
+    },
+    {
       "path": "skills/sigma-loop/scripts/run_with_timeout.py",
       "role": "gesture"
     },

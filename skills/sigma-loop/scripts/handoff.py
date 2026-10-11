@@ -983,6 +983,12 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                 except Exception as exc:                        # noqa: BLE001 - never block the park
                     report["warnings"].append(
                         f"could not comment on the existing duplicate issue: {exc}")
+                if triage is not None and triage["kind"] == "park":
+                    # #1139: triage ran first; a folded finding still records its verdict here.
+                    try:
+                        source.note(str(report["issue"]), "Triage verdict for the folded finding: park (%s)" % triage["reason"])
+                    except Exception as exc:                    # noqa: BLE001 - never block the fold
+                        report["warnings"].append(f"could not record the triage verdict: {exc}")
         else:
             if candidates:
                 # weaker (merely "related") matches don't block filing -- but the caller/reviewer

@@ -8,7 +8,7 @@ a blocking value. The decision reads nothing about who filed it (login-free): `f
 
 Order: triage off -> queue; invalid buckets -> park; deny-list -> park (it can only park, even for a
 human-confirmed filing); human-confirmed -> arm at its own plan priority; else a bucket -> arm at that bucket's
-priority. Deny-list: the hard-stop classifier (default classes forced on here), configurable words, secret
+priority. Deny-list: the hard-stop classifier (default classes forced on here), configurable words, spend phrases (`triage.spend_phrases`, [] disables), secret
 shapes, and a recorded-permission marker on the first body line (the existing first-line parser).
 
 `validate_buckets(config)` -> {"ok", "buckets", "reason"}: each bucket must be P0-P4 and rank strictly below the
@@ -31,6 +31,7 @@ DEFAULT_BUCKETS = {"urgent": "P2", "routine": "P3", "unclear": "P4"}
 DEFAULT_HUMAN_PRIORITY = "P1"
 DEFAULT_DENY_WORDS = ("irreversible", "force push", "production data", "drop table", "delete all",
                       "private key", "credentials")
+DEFAULT_SPEND_PHRASES = ("paid run", "rent a GPU", "new vendor", "paid API", "cloud GPU benchmark")
 _PRIO = re.compile(r"P[0-4]")
 _SECRET = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:token|secret|password|api[_-]?key)\s*[:=]\s*\S{8,}",
                      re.IGNORECASE)
@@ -103,6 +104,13 @@ def _deny(title, body, blk):
     for w in words:
         if w and w.lower() in low:
             return "hard-stop word: " + w
+    tri = blk.get("triage") if isinstance(blk.get("triage"), dict) else {}
+    phrases = tri.get("spend_phrases")
+    if not (isinstance(phrases, (list, tuple)) and all(isinstance(w, str) for w in phrases)):
+        phrases = DEFAULT_SPEND_PHRASES
+    for ph in phrases:
+        if ph.strip() and re.search(r"\b" + r"\s+".join(map(re.escape, ph.split())) + r"\b", text, re.IGNORECASE):
+            return "spend phrase: " + ph
     if _SECRET.search(text):
         return "secret-shaped text"
     res = _load("hard_stop").classify(text, {}, {"hard_stops": {"enabled": True}})
