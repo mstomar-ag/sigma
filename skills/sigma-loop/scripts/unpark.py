@@ -497,6 +497,11 @@ def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, 
     """Post `text`. With the records part open it is posted WITH the decision record's id and the
     record is stored; closed, this is exactly `_comment` (byte-identical). Returns "" or a
     "; <error>" suffix for the caller's detail."""
+    try:                                                # #1178: a person's answer closes the applier's ask
+        _load("applier").close_for_issue(sdlc_dir, config, number, str(
+            (answers or {}).get(CLOSING_QUESTION["id"]) or gesture))
+    except Exception:                                   # noqa: BLE001 - never block the gesture
+        pass
     tried = []                                          # the comment was attempted (never post twice)
     try:
         if decision_record.enabled(config):

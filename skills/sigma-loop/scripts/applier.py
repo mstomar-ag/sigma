@@ -46,6 +46,9 @@ DEFAULTS = {"allow_silent": [], "window_minutes": 1440, "spot_check_one_in": 5,
             "max_auto_applied_per_day": 3, "stale_after_intervals": 3, "prune_after_days": 30}
 DEFAULT_INTERVAL_SECONDS = 900
 GESTURES = ("unpark", "promote")
+#: Set (process-wide, so a separately loaded copy of this module sees it) while `apply` runs its own
+#: gesture, so that gesture does not close the ask it is applying.
+_APPLYING_ENV = "SIGMA_APPLIER_APPLYING"
 
 #: Test seam: `level_fn(sdlc_dir, qkind, area, config) -> int`. None means `autonomy.level`.
 level_fn = None
@@ -186,6 +189,59 @@ def answer(sdlc_dir, aid, text, config, now):
         return ask["state"] if ask["state"] != "applied" else "veto-pending"
     except Exception:
         return None
+
+
+def _issue_key(v):
+    return str(v).lstrip("#").strip()
+
+
+def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None):
+    """Open the ask for a park that declared `qkind_`, when an approved rule matches its area.
+    Returns the ask id (an existing pending ask for the issue is reused) or None. Never raises.
+    Closed gate: None before any read. The area is read best-effort from the issue's `area:*` label
+    through `source._read_issue` (fallback `repo`); no match, a hard-stop kind or an undeclared kind
+    opens nothing."""
+    try:
+        if not enabled(config):
+            return None
+        if not isinstance(qkind_, str) or qkind_ not in _load("qkind").QKINDS:
+            return None
+        if _load("hard_stop").is_hardstop_kind(qkind_, None, config):
+            return None
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        for a in _asks(sdlc_dir):
+            if a.get("state") == "pending" and _issue_key(a.get("issue")) == _issue_key(issue):
+                return a["id"]
+        area = "repo"
+        try:
+            if source is not None:
+                data = source._read_issue(issue, ["labels"]) or {}
+                area = _load("decision_record").area_of(data.get("labels"))
+        except Exception:
+            area = "repo"
+        rb = _load("rulebook")
+        m = rb.match(qkind_, area, None, rb.load(sdlc_dir, config), config)
+        if m is None:
+            return None
+        return open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now, gesture="unpark")
+    except Exception:
+        return None
+
+
+def close_for_issue(sdlc_dir, config, issue, text, now=None):
+    """A person answered (unpark, keep-parked, promote): answer every pending ask of the issue with
+    their text, so the person wins and the tick skips it. Skipped while the applier is applying its
+    own gesture. Never raises; closed gate: nothing read."""
+    try:
+        if not enabled(config) or os.environ.get(_APPLYING_ENV) or not isinstance(text, str):
+            return None
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        for a in _asks(sdlc_dir):
+            if a.get("state") == "pending" and _issue_key(a.get("issue")) == _issue_key(issue):
+                answer(sdlc_dir, a["id"], text, config, now)
+    except Exception:
+        return None
+    return None
 
 
 def window_open(ask, config, now):
@@ -342,7 +398,11 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
             source = _load("sources").GitHubSource(config, run=run)
         issue = action["issue"]
         if action["kind"] == "promote":
-            res = _load("promote").promote(sdlc_dir, config, [issue], source=source, run=run, apply=True)
+            os.environ[_APPLYING_ENV] = "1"      # its own gesture must not close the ask it applies
+            try:
+                res = _load("promote").promote(sdlc_dir, config, [issue], source=source, run=run, apply=True)
+            finally:
+                os.environ.pop(_APPLYING_ENV, None)
             if not all(r.get("outcome") == "promoted" for r in res.get("results", [])) or not res.get("results"):
                 return "failed"
         else:

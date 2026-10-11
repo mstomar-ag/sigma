@@ -4109,8 +4109,9 @@ def _reconcile_one(sdlc_dir, config, source, goal, run, now, results):
 
 
 def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transition="park",
-            merged_pr=False, retry_close=False, housekeeping=True, qkind=None):
-    """`qkind` (#994): a declared question kind; appends one machine line to the text handed to
+            merged_pr=False, retry_close=False, housekeeping=True, qkind=None, config=None):
+    """`config` (#1178): with a declared `qkind` on a park, opens the applier's ask (closed gate: nothing).
+    `qkind` (#994): a declared question kind; appends one machine line to the text handed to
     `source.park` (and only there). None keeps the comment byte-identical.
     `housekeeping` (#465): False only from the merge-reconcile pass, which holds
     `merge-reconcile.lock`, so the worktree sweep is not run under it. NOT `merged_pr`: every ordinary
@@ -4204,6 +4205,11 @@ def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transit
             source.park(goal, park_text, tier=tier)
         else:
             source.park(goal, park_text)
+        if qkind is not None and config is not None:   # #1178: the ask opens after the park landed
+            try:
+                _load("applier").open_for_park(sdlc_dir, config, goal, qkind, source=source)
+            except Exception:                          # noqa: BLE001 - never block the park
+                pass
     # Single atomic patch (#531) -- the old load_cursor-then-save_cursor pair spanned two calls,
     # so two concurrent _record()s could each read the same pre-increment cursor and lose one.
     state.advance_cursor(sdlc_dir, f"last: {pathlib.Path(goal).name} -> {result}")
@@ -6505,9 +6511,9 @@ def _dispatch(argv):
                 return 2
         if merged_pr:
             _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],
-                    reason, retro_grade=retro_grade, merged_pr=True, qkind=qkind); return 0
+                    reason, retro_grade=retro_grade, merged_pr=True, qkind=qkind, config=config); return 0
         _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],
-                reason, retro_grade=retro_grade, qkind=qkind); return 0
+                reason, retro_grade=retro_grade, qkind=qkind, config=config); return 0
     if len(argv) >= 4 and argv[1] == "claim":       # #1962: claim a goal you already chose
         _coexist_notice(argv[2], "loop.py claim", once=True)    # #251/#314: once per run
         config = state.load_config(argv[2])

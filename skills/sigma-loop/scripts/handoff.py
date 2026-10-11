@@ -485,6 +485,10 @@ def _triage_finish(sdlc_dir, config, source, plan, issue, key_goal, report):
                 source.park(str(issue), text)
             ledger.safe_append(sdlc_dir, "park", str(issue), config=config, stream=ledger.EVENTS,
                                reason_class="needs_decision", why=plan["reason"])
+            try:                                               # #1178: open the applier's ask (gate closed: nothing)
+                _load("applier").open_for_park(sdlc_dir, config, issue, plan["qkind"], source=source)
+            except Exception:                                  # noqa: BLE001 - never block the filing
+                pass
         except Exception as exc:                               # noqa: BLE001 - never block the filing
             report["warnings"].append("could not park #%s at filing (%s): it carries no goal label and "
                                       "no parked label until a human looks at it" % (issue, exc))
