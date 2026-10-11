@@ -136,3 +136,53 @@ def test_non_parse_cannot_tell_still_parks(monkeypatch):
         return H
     monkeypatch.setattr(m, "_load", fake)
     assert m.decide("cleanup", "plain words", {}, _cfg()).kind == "park"
+
+
+SPEND_DEFAULTS = ("paid run", "rent a GPU", "new vendor", "paid API", "cloud GPU benchmark")
+
+
+def test_each_default_spend_phrase_parks_naming_it():
+    m = _mod()
+    for ph in SPEND_DEFAULTS:
+        for text in ("we should do a %s here" % ph, ("A " + ph.upper() + ".")):
+            d = m.decide("cleanup", text, {}, _cfg())
+            assert d.kind == "park" and ph.lower() in d.reason.lower(), (ph, d)
+
+
+def test_spend_phrase_in_title_parks_even_human_confirmed():
+    m = _mod()
+    d = m.decide("Try a paid API", "tidy", {"human_confirmed": True, "priority": "P1"}, _cfg())
+    assert d.kind == "park"
+
+
+def test_spend_phrases_configured_list_overrides_and_empty_disables():
+    m = _mod()
+    cfg = _cfg(triage={"enabled": True, "spend_phrases": ["buy a license"]})
+    assert m.decide("cleanup", "buy a License please", {}, cfg).kind == "park"
+    assert m.decide("cleanup", "do a paid run", {}, cfg).kind == "arm"
+    off = _cfg(triage={"enabled": True, "spend_phrases": []})
+    assert m.decide("cleanup", "do a paid run on a new vendor", {}, off).kind == "arm"
+    bad = _cfg(triage={"enabled": True, "spend_phrases": "paid run"})
+    assert m.decide("cleanup", "do a paid run", {}, bad).kind == "park"
+
+
+def test_spend_phrase_with_recorded_marker_does_not_arm_by_phrase_path():
+    # PROVISIONAL: the existing first-line marker rule is unchanged (a marker parks), so the phrase check
+    # never turns a marker issue into an arm.
+    m = _mod()
+    marker = "sigma:spend-" + "approved=lab1"
+    d = m.decide("cleanup", marker + "\nuse a paid run", {}, _cfg())
+    assert d.kind == "park" and "marker" in d.reason
+
+
+def test_near_misses_and_normal_followups_still_arm():
+    m = _mod()
+    for text in ("he paid attention to the prepaid runner", "an unpaid runtime note", "tidy a comment",
+                 "a rental agreement, the vendor list"):
+        assert m.decide("cleanup", text, {}, _cfg()).kind == "arm", text
+
+
+def test_triage_off_unchanged_for_spend_text():
+    m = _mod()
+    d = m.decide("x", "a paid run", {}, _cfg(triage={"enabled": False}))
+    assert d.kind == "queue"
