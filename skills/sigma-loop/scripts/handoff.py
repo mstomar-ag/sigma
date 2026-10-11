@@ -1240,8 +1240,8 @@ def _record_ack(sdlc_dir, config, issue, goal, state, why):
         dr = _load("decision_record")
         if not dr.enabled(config):
             return
-        dr.decision_store.append(sdlc_dir, dr.build("ack", issue or goal, "unknown", state, why,
-                                                   dr.how_for("ack")), config)
+        rec = dr.build("ack", issue or goal, "unknown", state, why, dr.how_for("ack"))
+        dr.point(sdlc_dir, dr.decision_store.append(sdlc_dir, rec, config), rec, config)
     except Exception:                                   # noqa: BLE001 - best-effort side record
         pass
 
