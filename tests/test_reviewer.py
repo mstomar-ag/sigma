@@ -305,7 +305,7 @@ def test_run_gesture_timeout_stops_the_reviewer_and_its_child(tmp_path):
         start = time.monotonic()
         got = _review_run(base, brief, tmp_path / "scratch")
         assert got.returncode == 124 and "timed out" in got.stderr
-        assert time.monotonic() - start < 5
+        assert time.monotonic() - start < 1 + 10   # timeout_seconds=1 plus a 10s load margin; the child sleeps 30s
         assert heartbeat.exists(), "control never started a child"
         before = heartbeat.read_text()
         time.sleep(0.3)

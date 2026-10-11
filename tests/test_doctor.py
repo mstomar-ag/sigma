@@ -7065,7 +7065,8 @@ def _hanging_ls_remote_repo(tmp_path, monkeypatch, cfg):
     stub.mkdir()
     git = stub / "git"
     git.write_text(f"#!{sys.executable}\nimport os, sys, time\n"
-                   "if sys.argv[1:2] == ['ls-remote']:\n    time.sleep(60)\n"
+                   "if sys.argv[1:2] == ['ls-remote']:\n"
+                   f"    open({str(tmp_path / 'ls-remote-ran')!r}, 'w').close()\n    time.sleep(60)\n"
                    f"os.execv({real_git!r}, [{real_git!r}] + sys.argv[1:])\n", encoding="utf-8")
     git.chmod(0o755)
     monkeypatch.setenv("PATH", str(stub))                 # no gh on PATH: gh rows stop at "installed"
@@ -7082,7 +7083,11 @@ def test_wizard_status_is_fast_with_a_hanging_ls_remote(tmp_path, monkeypatch):
     spec.loader.exec_module(wiz)
     start = time.monotonic()
     wiz.wizard_status(base, dismissed=set(), allow_cache=False)
-    assert time.monotonic() - start < 2
+    # Load-tolerant: the wizard's cheap path must never reach the network at all (the stub records
+    # any ls-remote it is asked to run), and the stub sleeps 60s, so waiting it out would blow the
+    # wide bound below by a margin no runner load can close.
+    assert not (tmp_path / "ls-remote-ran").exists(), "the wizard path must not call ls-remote"
+    assert time.monotonic() - start < 30
 
 
 @pytest.mark.skipif(os.name == "nt" or not shutil.which("git"), reason="POSIX stub on PATH")
@@ -7096,7 +7101,9 @@ def test_full_doctor_degrades_a_hanging_ls_remote_to_cannot_verify_within_the_bo
     start = time.monotonic()
     rows = d._preflight_rows(pathlib.Path(base), json.loads(
         (pathlib.Path(base) / "config.json").read_text()), None, shutil.which, False, False)
-    assert time.monotonic() - start < 10
+    # Bound derived from the guard (SIGMA_WATCH_CALL_TIMEOUT=2 per network call, three such calls,
+    # plus the kill grace each) with a stated margin; the stub sleeps 60s, so waiting it out fails.
+    assert time.monotonic() - start < 3 * (2 + pf._KILL_GRACE) + 10
     c = _by_name(rows)
     row = c["base branch 'main' on 'origin' (cannot verify)"]
     assert row["ok"] is False and "timed out" in row["fix"]
