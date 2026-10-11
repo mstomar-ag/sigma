@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Decision records carry an area and a declared kind (#1133, story #988).** Every record writer (unpark, keep-parked, promote, demote, ack, sweep) now sets `area` from the issue's first `area:<x>` label, else the stated value `repo`; promote and demote record `needs_decision` instead of `unknown` (PROVISIONAL, awaiting owner ratification). With `decision_rubric.records.enabled` not true nothing changes: same comment bytes, no store file (tested).
 - **PR `test` job timeout 30 -> 45 minutes (CI).** The macOS `test` job ran 24-28 minutes on recent main pushes and was cancelled at the 30-minute cap on #1052's and #1129's PR runs (annotation: "exceeded the maximum execution time of 30m0s"), so the cap no longer left headroom. The measured run times are from the Actions API; the new 45 is a margin, not a measurement. The `full` job's 90-minute cap is unchanged.
 
 ## 1.0.9 — 2026-10-11 — REST-first GitHub, the board skip in cloud sessions, and eval additions
