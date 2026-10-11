@@ -2576,3 +2576,41 @@ def test_upkeep_finding_is_armed_low(tmp_path):
         run=lambda *a, **k: "", idempotency_key="0123456789abcdef")
     assert src.created["goal_label"] is True and "priority:P4" in src.created["labels"]
     assert report["triage"]["kind"] == "arm"
+
+
+# --- #1139: triage verdict survives a duplicate fold --------------------------------------------
+
+
+def _fold_pack(monkeypatch):
+    monkeypatch.setattr(handoff, "_duplicate_search", lambda *a, **k: {
+        "schema": "brainstorm-dedup/v1",
+        "candidates": [{"ref": "77", "score": 0.91, "state": "open", "strength": "duplicate",
+                        "source": "mirror", "evidence": ["retry"]}],
+        "degraded": []})
+
+
+def _fold(tmp_path, why):
+    src = FakeSource(number="61")
+    handoff.create_tracked_issue(
+        _project(tmp_path), ON, "0009-x.md", "engine", why, same_area=True,
+        immediately_actionable=True, blocks_goal=False, source=src)
+    return [t for g, t in src.notes if g == "77"]
+
+
+def test_folded_force_push_finding_records_its_deny_verdict_on_the_target(tmp_path, monkeypatch):
+    _fold_pack(monkeypatch)
+    notes = _fold(tmp_path, "proposal: git push --force origin main to fix history")
+    assert len(notes) == 2 and "Triage verdict" in notes[1] and "park" in notes[1].lower()
+
+
+def test_folded_secret_shaped_finding_records_its_deny_verdict_on_the_target(tmp_path, monkeypatch):
+    _fold_pack(monkeypatch)
+    fake = "pass" + "word" + " = " + "x" * 20           # obviously fake, built by concatenation
+    notes = _fold(tmp_path, "config leak: " + fake)
+    assert len(notes) == 2 and "Triage verdict" in notes[1]
+
+
+def test_folded_clean_finding_adds_no_verdict_comment(tmp_path, monkeypatch):
+    _fold_pack(monkeypatch)
+    notes = _fold(tmp_path, "retry pool leaks connections on timeout")
+    assert len(notes) == 1 and "Triage verdict" not in notes[0]
