@@ -147,3 +147,46 @@ def test_cli_list_and_draft(tmp_path):
     assert r.returncode == 0 and json.loads(r.stdout)["status"] == "drafted"
     r = run("draft", sd, "needs_decision", "docs")
     assert r.returncode == 1
+
+
+def _public(cfg):
+    cfg["decision_rubric"]["records"]["repo_visibility"] = "public"
+    return cfg
+
+
+def test_public_visibility_says_plainly_it_cannot_draft(tmp_path):
+    sd = _sd(tmp_path)
+    _train(sd, _cfg(), lambda r, s: "merge")  # private store has the choices
+    cfg = _public(_cfg())
+    out = RD.draft(sd, "needs_decision", "docs", cfg, now=T0)
+    assert out["status"] == "refused" and "public" in out["reason"] and "cannot draft" in out["reason"]
+    assert not os.path.exists(os.path.join(sd, "rulebook"))
+    # a store really written under public visibility has no choice at all
+    sd2 = str(tmp_path / "p" / ".sdlc")
+    _train(sd2, cfg, lambda r, s: "merge")
+    out2 = RD.draft(sd2, "needs_decision", "docs", cfg, now=T0)
+    assert out2["status"] == "refused" and "public" in out2["reason"]
+
+
+def test_public_visibility_cli_is_explicit_not_silent(tmp_path):
+    sd, cfg = _sd(tmp_path), _public(_cfg())
+    _train(sd, cfg, lambda r, s: "merge")
+    pathlib.Path(sd, "config.json").write_text(json.dumps(cfg))
+    run = lambda *a: subprocess.run([sys.executable, str(SCRIPTS / "rule_draft.py"), *a],
+                                    capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    r = run("list", sd)
+    assert r.returncode == 1 and "public" in r.stderr and r.stdout.strip() == ""
+    r = run("draft", sd, "needs_decision", "docs")
+    assert r.returncode == 1 and "public" in json.loads(r.stdout)["reason"]
+
+
+def test_gate_closed_public_visibility_stays_inert_and_unchanged(tmp_path):
+    sd = _sd(tmp_path)
+    cfg = _public(_cfg(rulebook=False))
+    assert RD.draft(sd, "needs_decision", "docs", cfg) == {
+        "status": "refused", "reason": "closed: rulebook, autonomy and records parts must all be enabled"}
+    pathlib.Path(sd).mkdir(parents=True)
+    pathlib.Path(sd, "config.json").write_text(json.dumps(cfg))
+    r = subprocess.run([sys.executable, str(SCRIPTS / "rule_draft.py"), "list", sd],
+                       capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    assert r.returncode == 0 and json.loads(r.stdout) == [] and r.stderr == ""
