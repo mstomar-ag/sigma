@@ -211,7 +211,19 @@ non-ASCII path is not garbled on a non-UTF-8 Windows code page; and is bounded b
 that says it timed out — never "nothing dropped". These reads go through the guard's own reader, not
 the injected runner every other git call here uses.
 
-A merge-base comparison cannot do this job: the reverted commits are in the base's history, so they
+**One carve-out (#1146, PROVISIONAL, owner to ratify).** A path the replay deletes that the branch
+carries **byte-identical to the fork point** (`git merge-base <tip> <replayed head>`) only
+*inherited* it, so a base deletion of it loses none of the branch's own work and is not a finding.
+Applies to the upkeep pass only; the attended `sigma-rebase` push comparisons (below) keep refusing every deletion. Two extra guarded reads, made only when the replay deletes something: the merge-base, then one
+`git diff --raw` fork..tip; any deleted path that diff lists (added, edited, mode-changed, or either
+end of a rename) is the branch's own and is still refused. No single fork point (read fails, empty,
+several) keeps the old behaviour: every deletion is refused. Cost: the diff output is linear in the
+paths the branch itself changed (10x or 100x as many means a 10x or 100x longer listing, still one
+read), bounded by the same per-read timeout and total budget; exhausting the budget raises. This
+was measured on the test fixtures only, not on a large repository.
+
+The rest of this section uses the merge-base only for that carve-out. A merge-base comparison alone
+cannot do the revert job: the reverted commits are in the base's history, so they
 sit *below* the merge-base, and "what the branch added since the fork" is empty for exactly the
 content being lost. If any path loses content, the outcome is `would-drop`
 (`feature_rebase.WOULD_DROP`) and the pass stops:
@@ -321,8 +333,8 @@ What it does **not** flag: paths the branch deleted itself (they are not in the 
 base **renamed** to a name the branch never used (rename detection pairs them), and a base edit that
 produces a version the branch never had (the ordinary upstream edit). What it flags that is not a
 revert of the branch — each identical to one as trees, so each is refused the same way, costing an
-upkeep pass and a human decision, never data: a base that simply deleted a file the branch still
-carries; a base move that rewrites the file past git's rename similarity (it reads as a deletion);
+upkeep pass and a human decision, never data: a base that deleted a file the branch itself added
+or changed since its fork point (a file it only inherited unchanged is excused, #1146); a base move that rewrites the file past git's rename similarity (it reads as a deletion);
 and a base that reverts its *own* older change to a file the branch carries unchanged. What it
 does not see is any replay result that is a version which **never existed** — a *partial* revert
 merged with other changes, or a full base revert of a file the branch has **kept editing** since;
@@ -1986,10 +1998,14 @@ Two things about it that are easy to get wrong:
   What IS caught around it: the same revert when the branch did not edit that file again, a revert
   to a version created by a merge or in the root commit, and every push the `sigma-rebase` skill
   makes (all behind `push_branch`, §3b). It errs the other way on purpose: a plain upstream
-  deletion, a move-and-rewrite past rename similarity, and a base reverting its own older change to
+  deletion of a file the branch added or changed, a move-and-rewrite past rename similarity, and a base reverting its own older change to
   a file the branch carries are all refused like a revert, because as trees they are the same. Its
   cost grows with history: one `git log -m` over the branch tip's whole history per 200
   modified-or-renamed paths, each bounded by `SIGMA_REBASE_GUARD_TIMEOUT` and failing closed.
+  **Remaining limit of the #1146 carve-out (PROVISIONAL, owner to ratify):** a base revert of work
+  that was already on the base at the fork point now reads as *inherited* (the branch carries it
+  byte-identical to the fork point) and is NOT refused; the branch loses the content on the replay.
+  Before #1146 this was refused.
   **The conservative refusal is paid fleet-wide, per branch.** Upkeep runs per feature branch, so
   one base change the guard reads as a revert blocks upkeep on EVERY feature branch that carries
   the affected paths: a reverted dependency bump (a lock file and a manifest rolled back to a

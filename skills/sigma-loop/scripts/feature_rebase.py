@@ -1061,7 +1061,7 @@ def _history_blobs(cwd, tip, paths, deadline=None):
     return seen
 
 
-def dropped_paths(cwd, before, after, deadline=None):
+def dropped_paths(cwd, before, after, deadline=None, inherited_ok=False):
     """Paths whose content the branch tip `before` has and the replayed head `after` LOSES ->
     sorted list. Two shapes count, both measured on trees plus the branch's own history:
 
@@ -1092,6 +1092,11 @@ def dropped_paths(cwd, before, after, deadline=None):
     EDITING since -- the replay applies the branch's later edit on top of the reverted text, and
     that result is also a version that never existed. No version-identity test can see either.
 
+    INHERITED (#1146): with `inherited_ok` (upkeep's replay onto a new base, the only caller that
+    sets it) a deleted path the branch carries BYTE-IDENTICAL to the fork point is not a loss -- it
+    only inherited it (see `_inherited_unchanged`). Off elsewhere: the push-time comparisons of the
+    attended `sigma-rebase` path (#278) keep refusing every deletion.
+
     COST: one `git diff`; plus, only when the replay modified or renamed paths, one `git log -m`
     over `before`'s whole history per `_HISTORY_CHUNK` such paths, each bounded by
     `SIGMA_REBASE_GUARD_TIMEOUT`, and all of them together by `deadline` (`guard_deadline()`: the
@@ -1103,11 +1108,12 @@ def dropped_paths(cwd, before, after, deadline=None):
     push", never as "nothing was dropped"."""
     out = _git_read(cwd, ["diff", "--no-ext-diff", "--no-color", "--raw", "-z", "--no-abbrev", "-M",
                           before, after], deadline)
-    dropped, restored = set(), {}
+    dropped, restored, deleted = set(), {}, set()
     for status, old_blob, new_blob, src, dst in _raw_entries(out):
         kind = status[:1]
         if kind == "D":
             dropped.add(src)
+            deleted.add(src)
         elif kind == "R":
             restored[dst] = (new_blob, src)         # `src` is what is lost if `dst` is a restoration
         elif kind in ("M", "T"):
@@ -1119,7 +1125,36 @@ def dropped_paths(cwd, before, after, deadline=None):
         for path, (blob, lost) in restored.items():
             if blob in seen.get(path, ()):
                 dropped.add(lost)
+    if deleted and inherited_ok:
+        dropped -= _inherited_unchanged(cwd, before, after, deleted, deadline)
     return sorted(dropped)
+
+
+def _inherited_unchanged(cwd, before, after, deleted, deadline):
+    """The subset of `deleted` (paths the replay deletes) that the branch `before` carries
+    BYTE-IDENTICAL to the fork point -- it only inherited them, so a base deletion loses no work of
+    the branch's own (#1146). Two guarded reads: `merge-base before after`, then one `--raw` diff
+    fork..before; any path that diff lists (added, edited, mode-changed, or either end of a rename)
+    is the branch's own and stays dropped. No single fork point (read fails, empty, several) -> the
+    empty set, i.e. the old behaviour: every deletion stays a finding. A deadline-exhausted read
+    still RAISES, like every other read here."""
+    try:
+        forks = _git_read(cwd, ["merge-base", before, after], deadline).split()
+    except RuntimeError as err:
+        if "total budget" in str(err):
+            raise
+        return set()
+    if len(forks) != 1 or forks[0] == _git_read(cwd, ["rev-parse", "--verify", before + "^{commit}"],
+                                                deadline).strip():
+        return set()                      # `before` IS the fork point: `after` descends from it, so
+        # whatever `after` deleted is `after`'s own doing, not a base's -- no distinction to draw
+    out = _git_read(cwd, ["diff", "--no-ext-diff", "--no-color", "--raw", "-z", "--no-abbrev",
+                          "--no-renames", forks[0], before], deadline)
+    own = set()
+    for _status, _old, _new, src, dst in _raw_entries(out):
+        own.add(src)
+        own.add(dst)
+    return set(deleted) - own
 
 
 def refuse_losing_push(cwd, before, after, accepted=(), dropped=None):
@@ -1140,7 +1175,7 @@ def refuse_losing_push(cwd, before, after, accepted=(), dropped=None):
     if len(dropped) > DROPPED_LISTED:
         shown += " and %d more" % (len(dropped) - DROPPED_LISTED)
     return dropped, ("refused to push: it would remove or roll back %d tracked path(s) the branch "
-                     "has (%s) -- the base most likely holds a revert of the branch's own commits; "
+                     "has (%s) -- the base most likely holds a revert of work the branch added or changed since its fork point; "
                      "nothing was pushed and the remote branch is unchanged (see "
                      "docs/branching-model.md §3b)" % (len(dropped), shown))
 
@@ -1454,7 +1489,7 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
         # #161: and it is NOT conditional on `report["acked"]`. An ack (#2756) only let this pass
         # reach the replay; it says nothing about what the replay keeps.
         try:
-            dropped = dropped_paths(path, sha, after)
+            dropped = dropped_paths(path, sha, after, inherited_ok=True)
         except Exception as exc:          # noqa: BLE001 - unmeasured is never "nothing dropped"
             report["why"] = ("the pre/post tree comparison could not be made, so nothing was "
                              "pushed: %s" % _flat(exc))
@@ -2043,9 +2078,11 @@ def _would_drop_body(unit, branch, base, before, report):
         "The usual cause is that `%s` holds a **revert of this branch's own commits** (the work was "
         "moved off `%s` onto the branch). Git treats those commits as already present -- they are "
         "in `%s`'s history, merely reverted -- so a replay re-applies the revert and nothing "
-        "restores them. A base that simply deleted a file this branch still carries, or reverted its "
-        "own older change to one, reads the same way, and is refused for the same reason: this "
-        "pass cannot tell intent from a tree.\n\n"
+        "restores them. A base that deleted a file the branch itself added or changed since its fork "
+        "point reads the same way, and is refused for the same reason. A file the branch only "
+        "inherited unchanged from the fork point is NOT refused when the base deletes it (#1146); "
+        "the one thing that rule cannot see is a base revert of work already on the base at the "
+        "fork point.\n\n"
         "**To resolve**, a human decides which content the branch should keep:\n\n"
         "- keep the branch's work: in ONE goal branch (`sdlc/<n>`) cut from `%s`, merge `origin/%s` "
         "and re-apply the reverted commits (`git revert <the revert's sha>`), then land that goal on "

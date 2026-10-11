@@ -1629,25 +1629,29 @@ def test_the_occupied_clause_says_how_to_clear_it(tmp_path):
 
 
 def _revert_world(tmp_path):
-    """`main` carries the branch's own work (X1), the branch is cut from there and grows one landed
-    goal (F1), then `main` REVERTS X1. Returns `(world, x1_paths)`.
+    """The branch is cut from `main` and ADDS the payments module (X1, its own work, #10) plus one
+    later goal (F1, #11); `main` takes X1 over (a cherry-pick) and then REVERTS it. Returns
+    `(world, x1_paths)`. X1 is the branch's own work since the fork point (#1146: a path the branch
+    only inherited unchanged is excused when the base deletes it, so the fixture must make the
+    branch the author of the paths).
 
     Explicit branch names throughout, a bare origin, and nothing but `git` -- no shell -- so the
     fixture runs the same on Linux, macOS and Windows."""
     world = World(tmp_path).build(feature_commits=None)
-    _git(world.local, "checkout", "-q", INTEGRATION)
+    _git(world.local, "checkout", "-q", "-b", FEATURE)
     x1 = ["pay/ledger.txt", "pay/refunds.txt", "pay/deep/nested.txt"]
     for name in x1:
         _write(world.local / name, "work for %s\n" % name)
     _git(world.local, "add", *x1)
     _git(world.local, "commit", "-q", "-m", "feat: payments module (#10)")
-    _git(world.local, "push", "-q", "origin", INTEGRATION)
-    _git(world.local, "checkout", "-q", "-b", FEATURE)
+    x1_sha = _git(world.local, "rev-parse", "HEAD")
     _write(world.local / "pay" / "later.txt", "a later goal\n")
     _git(world.local, "add", "pay/later.txt")
     _git(world.local, "commit", "-q", "-m", "feat: a later payments goal (#11)")
     _git(world.local, "push", "-q", "origin", FEATURE)
     _git(world.local, "checkout", "-q", INTEGRATION)
+    _git(world.local, "cherry-pick", "-x", x1_sha)   # -x: a distinct sha, as a real copy
+    _git(world.local, "push", "-q", "origin", INTEGRATION)
     _git(world.local, "revert", "--no-edit", "HEAD")          # main's tip reverts X1
     _git(world.local, "push", "-q", "origin", INTEGRATION)
     return world, x1
@@ -1747,21 +1751,102 @@ def test_144_a_base_that_renamed_a_file_the_branch_carries_is_brought_forward(tm
     assert "renamed-seed.txt" in _tree_paths(world, world.tip(FEATURE))
 
 
-def test_144_a_base_that_deleted_a_file_the_branch_still_carries_is_refused_too(tmp_path):
-    """THE DOCUMENTED TRADE-OFF, pinned so it is a decision rather than an accident: a plain
-    upstream deletion of a file the branch carries unchanged is, as a tree, identical to the revert
-    case, so it is refused the same way. It costs an upkeep pass and a human decision, never data."""
-    m = _mod()
-    world = World(tmp_path).build()
-    _filer(m)
+def _base_deletes_seed(world):
     _git(world.local, "checkout", "-q", INTEGRATION)
     _git(world.local, "rm", "-q", "seed.txt")
     _git(world.local, "commit", "-q", "-m", "chore: drop seed")
     _git(world.local, "push", "-q", "origin", INTEGRATION)
+
+
+def test_1146_a_base_that_deleted_a_file_the_branch_only_inherited_is_brought_forward(tmp_path):
+    """FLIPPED by #1146 (was `..._still_carries_is_refused_too`, which pinned the old rule: any base
+    deletion of a path the branch carries is refused). `seed.txt` predates the fork and the branch
+    never touched it, so the branch only INHERITED it: the base deleting it loses none of the
+    branch's work, and the replay proceeds and pushes. Run on the pick-time upkeep pass."""
+    m = _mod()
+    world = World(tmp_path).build()
+    _filer(m)
+    _base_deletes_seed(world)
+    before = world.tip(FEATURE)
+    report = _upkeep(m, world)
+    assert report["outcome"] == m.REBASED and report["dropped"] == [], report
+    assert world.tip(FEATURE) != before
+    assert "seed.txt" not in _tree_paths(world, world.tip(FEATURE))
+
+
+def _branch_then_base_deletes(tmp_path, change):
+    """`seed.txt` exists at the fork; the branch applies `change(world)` to it (or adds it), pushes,
+    then the base deletes `seed.txt`/`mine.txt`."""
+    world = World(tmp_path).build()
+    _git(world.local, "checkout", "-q", FEATURE)
+    change(world)
+    _git(world.local, "commit", "-q", "-am", "feat: the branch's own change (#12)")
+    _git(world.local, "push", "-q", "origin", FEATURE)
+    sha = _git(world.local, "rev-parse", "HEAD")
+    _git(world.local, "checkout", "-q", INTEGRATION)
+    _git(world.local, "cherry-pick", "-x", sha)                  # the base holds the same work ...
+    _git(world.local, "rm", "-q", "-f", "--ignore-unmatch", "seed.txt", "mine.txt")
+    _git(world.local, "commit", "-q", "-m", "chore: ... and deletes it")
+    _git(world.local, "push", "-q", "origin", INTEGRATION)
+    return world
+
+
+def _add_mine(world):
+    _write(world.local / "mine.txt", "mine\n")
+    _git(world.local, "add", "mine.txt")
+
+
+def _edit_seed(world):
+    _write(world.local / "seed.txt", "seed, edited by the branch\n")
+
+
+@pytest.mark.parametrize("change,path", [(_add_mine, "mine.txt"), (_edit_seed, "seed.txt")])
+def test_1146_a_path_the_branch_added_or_changed_and_the_base_deleted_is_still_refused(
+        tmp_path, change, path):
+    """The carve-out is for INHERITED paths only: a path the branch added (fork point has no such
+    path) or edited since the fork is the branch's own work, and the base deleting it is refused."""
+    m = _mod()
+    world = _branch_then_base_deletes(tmp_path, change)
+    _filer(m)
+    before = world.tip(FEATURE)
+    report = _upkeep(m, world)
+    assert report["outcome"] == m.WOULD_DROP and report["dropped"] == [path], report
+    assert world.tip(FEATURE) == before
+
+
+def test_1146_no_single_fork_point_keeps_the_old_refusal(tmp_path):
+    """Fallback: when the merge-base read fails, every deletion stays a finding (old behaviour)."""
+    m = _mod()
+    world = World(tmp_path).build()
+    _filer(m)
+    _base_deletes_seed(world)
+    real = m._git_read
+
+    def no_fork(cwd, args, deadline=None):
+        if args[:1] == ["merge-base"]:
+            raise RuntimeError("no merge base")
+        return real(cwd, args, deadline)
+
+    m._git_read = no_fork
     before = world.tip(FEATURE)
     report = _upkeep(m, world)
     assert report["outcome"] == m.WOULD_DROP and report["dropped"] == ["seed.txt"], report
     assert world.tip(FEATURE) == before
+
+
+def test_1146_an_exhausted_budget_in_the_fork_reads_raises(tmp_path):
+    """The extra reads are bounded by the guard deadline and fail closed: with the budget used up the
+    comparison RAISES (upkeep then reports `failed`), never a silent 'inherited'."""
+    m = _mod()
+    world = World(tmp_path).build()
+    _base_deletes_seed(world)
+    _git(world.local, "checkout", "-q", FEATURE)
+    before = _git(world.local, "rev-parse", "origin/" + FEATURE)
+    after = _git(world.local, "rev-parse", "origin/" + INTEGRATION)
+    _git(world.local, "fetch", "-q", "origin")
+    after = _git(world.local, "rev-parse", "origin/" + INTEGRATION)
+    with pytest.raises(RuntimeError, match="total budget"):
+        m._inherited_unchanged(world.local, before, after, {"seed.txt"}, m._now() - 1)
 
 
 def test_144_the_refusal_persists_for_the_doctor_and_a_clean_pass_clears_it(tmp_path):
@@ -1775,8 +1860,8 @@ def test_144_the_refusal_persists_for_the_doctor_and_a_clean_pass_clears_it(tmp_
     # a human resolves it: the branch takes the base and re-applies the reverted work
     _git(world.local, "checkout", "-q", FEATURE)
     _git(world.local, "merge", "-q", "--no-edit", "origin/" + INTEGRATION)
-    revert = _git(world.local, "rev-parse", "origin/" + INTEGRATION)
-    _git(world.local, "revert", "--no-edit", revert)
+    # (#1146: the branch is the author of X1 and main's copy + revert nets to nothing against the
+    # fork point, so this merge already keeps X1 -- there is nothing left to re-apply)
     _git(world.local, "push", "-q", "origin", FEATURE)
     _git(world.local, "checkout", "-q", INTEGRATION)
     report = _upkeep(m, world)
@@ -1968,14 +2053,16 @@ def test_144_unicode_and_space_paths_are_named_exactly(tmp_path):
     m = _mod()
     world = World(tmp_path).build(feature_commits=None)
     names = ["pay/café ü.txt", "pay/sp ace.txt", "pay/日本.txt"]
+    _git(world.local, "checkout", "-q", "-b", FEATURE)          # the branch authors them (#1146)
     for n in names:
         _write(world.local / n, n + "\n")
     _git(world.local, "add", *names)
     _git(world.local, "commit", "-q", "-m", "feat (#10)")
-    _git(world.local, "push", "-q", "origin", INTEGRATION)
-    _git(world.local, "checkout", "-q", "-b", FEATURE)
     _git(world.local, "push", "-q", "origin", FEATURE)
+    sha = _git(world.local, "rev-parse", "HEAD")
     _git(world.local, "checkout", "-q", INTEGRATION)
+    _git(world.local, "cherry-pick", "-x", sha)
+    _git(world.local, "push", "-q", "origin", INTEGRATION)
     _git(world.local, "revert", "--no-edit", "HEAD")
     _git(world.local, "push", "-q", "origin", INTEGRATION)
     _filer(m)
@@ -2009,9 +2096,10 @@ def test_144_a_case_only_rename_on_the_base_is_brought_forward(tmp_path):
     assert report["outcome"] == m.REBASED, report
 
 
-def test_144_a_base_move_that_also_rewrites_the_file_is_refused_safely(tmp_path):
-    """THE DOCUMENTED TRADE-OFF for renames: a move that rewrites the file past git's rename
-    similarity is, as a tree, a deletion -- so it is refused like one. A blocked pass, never data."""
+def test_144_a_base_move_that_also_rewrites_the_file_is_brought_forward_when_inherited(tmp_path):
+    """CHANGED by #1146 (was `..._is_refused_safely`): a move that rewrites the file past git's
+    rename similarity is, as a tree, a deletion plus an add. The branch only INHERITED `seed.txt`
+    (unchanged since the fork), so the deletion loses none of its work and the pass proceeds."""
     m = _mod()
     world = World(tmp_path).build()
     _filer(m)
@@ -2021,10 +2109,8 @@ def test_144_a_base_move_that_also_rewrites_the_file_is_refused_safely(tmp_path)
     _write(world.local / "src" / "seed.txt", "totally rewritten\n")
     _git(world.local, "commit", "-q", "-am", "refactor")
     _git(world.local, "push", "-q", "origin", INTEGRATION)
-    before = world.tip(FEATURE)
     report = _upkeep(m, world)
-    assert report["outcome"] == m.WOULD_DROP and report["dropped"] == ["seed.txt"], report
-    assert world.tip(FEATURE) == before
+    assert report["outcome"] == m.REBASED and report["dropped"] == [], report
 
 
 def test_144_the_history_read_failing_pushes_nothing(tmp_path):
