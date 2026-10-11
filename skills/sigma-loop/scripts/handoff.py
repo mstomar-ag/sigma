@@ -1255,7 +1255,11 @@ def _record_ack(sdlc_dir, config, issue, goal, state, why, area=None):
             return
         rec = dr.build("ack", issue or goal, "unknown", state, why, dr.how_for("ack"),
                        area=area or dr.REPO_AREA)
-        dr.point(sdlc_dir, dr.decision_store.append(sdlc_dir, rec, config), rec, config)
+        would = dr._safe(dr.would_for, sdlc_dir, rec, config)
+        rid = dr.decision_store.append(sdlc_dir, rec, config)
+        dr.point(sdlc_dir, rid, rec, config)
+        if rid:
+            dr._safe(dr.record_comparison, sdlc_dir, rec, would, config)
     except Exception:                                   # noqa: BLE001 - best-effort side record
         pass
 

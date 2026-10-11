@@ -96,6 +96,61 @@ def point(sdlc_dir, rid, record, config):
         pass
 
 
+def _would_pick(sdlc_dir, record, config):
+    """The option a sealed approved rule gives, else the unique most common earlier human choice of
+    the same kind and area once `l1_min_answers` of them exist, else None."""
+    au, rb = _load("autonomy"), _load("rulebook")
+    kind, area = record.get("qkind"), record.get("area") or REPO_AREA
+    m = rb.match(kind, area, None, rb.load(sdlc_dir, config), config) if rb.enabled(config) else None
+    if m:
+        return m.option
+    earlier = [r.get("choice") for r in decision_store.list_by(sdlc_dir, config, qkind=kind)
+               if r.get("how") == "human" and (r.get("area") or REPO_AREA) == area
+               and isinstance(r.get("choice"), str) and r.get("choice")]
+    if len(earlier) < au.settings(config)["l1_min_answers"]:
+        return None
+    counts = {}
+    for c in earlier:
+        counts[c] = counts.get(c, 0) + 1
+    top = sorted(counts.values(), reverse=True)
+    if len(top) > 1 and top[0] == top[1]:
+        return None
+    return max(counts, key=counts.get)
+
+
+def _safe(fn, *args):
+    try:
+        return fn(*args)
+    except Exception:                                   # noqa: BLE001 - the watch is best-effort
+        return None
+
+
+def would_for(sdlc_dir, record, config):
+    """What the rulebook or the earlier human answers would have chosen for this record, or None.
+    Call BEFORE the record is appended so the answer is not in its own majority. Skipped (None) for a
+    non-human record, closed autonomy, or public record visibility (the watch file would carry the
+    free-text choice). Best-effort: never raises."""
+    try:
+        if record.get("how") != "human" or not _load("autonomy").enabled(config):
+            return None
+        if decision_store._visibility(config) == "public":
+            return None
+        return _would_pick(sdlc_dir, record, config)
+    except Exception:                                   # noqa: BLE001 - a watch problem never touches the gesture
+        return None
+
+
+def record_comparison(sdlc_dir, record, would, config):
+    """AFTER a successful append: write what `would` chose next to what the person chose. Never raises."""
+    try:
+        if would is None:
+            return
+        _load("autonomy").record_watch(sdlc_dir, record.get("qkind"), record.get("area") or REPO_AREA,
+                                       would, record.get("choice"), config)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 def write_all(sdlc_dir, record, config, source, text="", poster=None):
     """Store record first, then the comment (`text` followed by the fenced decision span).
 
@@ -105,8 +160,11 @@ def write_all(sdlc_dir, record, config, source, text="", poster=None):
     if not enabled(config):
         return out
     try:
+        would = _safe(would_for, sdlc_dir, record, config)
         out["id"] = decision_store.append(sdlc_dir, record, config)
         point(sdlc_dir, out["id"], record, config)
+        if out["id"]:
+            _safe(record_comparison, sdlc_dir, record, would, config)
     except Exception as exc:                            # noqa: BLE001 - reported, never raised
         out["error"] = "decision record not stored: %s" % exc
     rid = out["id"] or "(not stored)"
