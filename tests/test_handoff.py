@@ -542,6 +542,28 @@ def test_create_tracked_issue_queued_does_not_carry_the_goal_label(tmp_path):
     assert "sdlc:needs-confirmation" in src.created["labels"]
 
 
+def test_queued_filing_ensures_the_proposal_label_on_demand(tmp_path):
+    """#1140: init no longer creates sdlc:needs-confirmation, so a queued filing creates it lazily;
+    an actionable filing never touches it."""
+    class Ensuring(FakeSource):
+        ensured = []
+
+        def ensure_label(self, name, color="fbca04"):
+            self.ensured.append(name)
+    sdlc = _project(tmp_path)
+    q = Ensuring(number="63")
+    Ensuring.ensured = []
+    handoff.create_tracked_issue(
+        sdlc, ONL, "0008-x.md", "engine", "a non-urgent follow-up, not worth jumping the backlog",
+        same_area=True, immediately_actionable=False, blocks_goal=False, source=q)
+    assert Ensuring.ensured == ["sdlc:needs-confirmation"]
+    Ensuring.ensured = []
+    handoff.create_tracked_issue(
+        sdlc, ONL, "0009-y.md", "engine", "urgent follow-up",
+        same_area=True, immediately_actionable=True, blocks_goal=False, source=Ensuring(number="64"))
+    assert Ensuring.ensured == []
+
+
 def test_create_tracked_issue_degrades_when_no_backlog_source_is_configured(tmp_path, monkeypatch):
     """create_tracked_issue's own source=None fallback: sources.get_source() raising must not raise
     up through it -- the tracked issue is never opened, the ledger entry still lands, and the warning

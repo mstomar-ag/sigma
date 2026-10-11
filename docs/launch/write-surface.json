@@ -1682,7 +1682,7 @@
     },
     {
       "path": "skills/sigma-loop/scripts/sources.py",
-      "function": "_ensure_labels",
+      "function": "_create_missing_labels",
       "rule": "gh-label",
       "count": 1,
       "gate": "discovery.source == github; board writes require project.enabled",

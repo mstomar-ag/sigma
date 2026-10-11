@@ -893,8 +893,9 @@ BOARD_COLUMNS = (("backlog", "Backlog"), ("ready", "Ready"), ("in_progress", "In
 class GitHubSource:
     """Goals are open GitHub issues labelled `goal_label`, ordered by issue number. Status via labels;
     done closes the issue; parked labels + comments it. Talks to GitHub through `run` (default _run_gh)."""
-    # #1140: `proposed_label` (sdlc:needs-confirmation) is retired -- nothing writes it, so it is no
-    # longer created. A repo that already has it keeps it; it is still read and never removed.
+    # #1140: `proposed_label` (sdlc:needs-confirmation) is retired from init: it is not bootstrapped
+    # here. It is created ON DEMAND (`ensure_label`) when a queued proposal is filed by
+    # `handoff.create_tracked_issue`. A repo that already has it keeps it; it is never removed.
     _LABEL_COLORS = (("goal_label", "0e8a16"), ("in_progress_label", "fbca04"), ("parked_label", "d93f0b"),
                      ("goal_blocked_label", "d93f0b"), ("blocking_label", "b60205"),
                      ("needs_label_label", "fbca04"),
@@ -1735,17 +1736,7 @@ class GitHubSource:
         # keeps the old create-and-ignore fallback, so a missing lifecycle label still self-heals.
         if self._labels_ready:
             return
-        existing = self._existing_label_names()
-        for attr, color in self._LABEL_COLORS:
-            name = getattr(self, attr)
-            if existing is not None and name.casefold() in existing:
-                continue
-            try:
-                self._run(["label", "create", name, *self._repo_args(), "--color", color])
-                if existing is not None:
-                    existing.add(name.casefold())
-            except Exception:
-                pass
+        self._create_missing_labels([(getattr(self, attr), color) for attr, color in self._LABEL_COLORS])
         self._labels_ready = True
 
     def ensure_labels(self):
@@ -1755,6 +1746,28 @@ class GitHubSource:
         internal call sites (the hot claim/park path) need no change. See `_ensure_labels`'s own
         docstring for the mechanism and #1917 for why there is no `--force`."""
         self._ensure_labels()
+
+    def _create_missing_labels(self, pairs):
+        """The ONE `label create` site: create each (name, colour) the repo lacks (no `--force`, so an
+        existing label is never recoloured); best-effort. Returns the names created this call."""
+        existing = self._existing_label_names()
+        made = []
+        for name, color in pairs:
+            if not name or (existing is not None and name.casefold() in existing):
+                continue
+            try:
+                self._run(["label", "create", name, *self._repo_args(), "--color", color])
+                made.append(name)
+                if existing is not None:
+                    existing.add(name.casefold())
+            except Exception:
+                pass
+        return made
+
+    def ensure_label(self, name, color="fbca04"):
+        """Create ONE label on demand if the repo lacks it (#1140), via `_create_missing_labels`.
+        Returns True when it created the label this call."""
+        return bool(self._create_missing_labels([(name, color)]))
 
     def _label_endpoint(self):
         return "repos/%s/labels" % self.repo if self.repo else "repos/{owner}/{repo}/labels"

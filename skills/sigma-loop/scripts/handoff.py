@@ -885,6 +885,12 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         # never for immediately_actionable=True: an actionable issue is a real goal, not a proposal.
         if triage is None and not immediately_actionable:
             labels.append(proposed_label(config))
+            # #1140: init no longer creates this label, so create it on demand, just before use.
+            if hasattr(source, "ensure_label"):
+                try:
+                    source.ensure_label(proposed_label(config))
+                except Exception as exc:
+                    report["warnings"].append(f"could not ensure label {proposed_label(config)!r}: {exc}")
         # goal_label is passed only when it DIFFERS from create_dependency's own default (True) --
         # not "goal_label=immediately_actionable" unconditionally -- so a source implementation that
         # predates this parameter (a test double, or a future non-GitHub source) keeps working

@@ -5076,3 +5076,22 @@ def test_append_to_body_is_a_rest_patch_that_raises_and_never_blanks_on_a_degrad
     import pytest
     with pytest.raises(Exception):
         _gh(bad).append_to_body("42", "M")
+
+
+def test_ensure_label_creates_a_missing_label_once_and_skips_an_existing_one():
+    """#1140: on-demand creation of the retired-from-init proposal label."""
+    src = _mod("sources")
+    run = _recording_runner()
+    gh = src.GitHubSource({"discovery": {"source": "github"}}, run=run)
+    assert gh.ensure_label("sdlc:needs-confirmation") is True
+    creates = [c for c in run.calls if c[0:2] == ["label", "create"]]
+    assert len(creates) == 1 and "--force" not in creates[0]
+    names = json.dumps([{"name": "sdlc:needs-confirmation"}])
+    calls2 = []
+
+    def run2(args):
+        calls2.append(list(args))
+        return names if args[0] == "api" else ""
+    gh2 = src.GitHubSource({"discovery": {"source": "github"}}, run=run2)
+    assert gh2.ensure_label("sdlc:needs-confirmation") is False
+    assert not [c for c in calls2 if c[0:2] == ["label", "create"]]
