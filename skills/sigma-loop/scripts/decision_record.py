@@ -25,6 +25,7 @@ def _load(name):
 decision_store = _load("decision_store")
 blocker_scan = _load("blocker_scan")
 qkind = _load("qkind")
+ledger_pointer = _load("ledger_pointer")
 
 #: gesture -> how. The sweep is the only autonomous writer.
 GESTURES = {"unpark": "human", "keep-parked": "human", "promote": "human", "demote": "human",
@@ -87,6 +88,14 @@ def _fenced(rid, record, visibility):
     return "\n".join([blocker_scan.UNPARK_QA_START] + lines + [blocker_scan.UNPARK_QA_END])
 
 
+def point(sdlc_dir, rid, record, config):
+    """Hand a stored record to the ledger pointer writer (inert when its gate is closed). Never raises."""
+    try:
+        ledger_pointer.write_pointer(sdlc_dir, [(rid, record.get("qkind"), record.get("how"))], config)
+    except Exception:                                   # noqa: BLE001 - a ledger problem never touches the gesture
+        pass
+
+
 def write_all(sdlc_dir, record, config, source, text="", poster=None):
     """Store record first, then the comment (`text` followed by the fenced decision span).
 
@@ -97,6 +106,7 @@ def write_all(sdlc_dir, record, config, source, text="", poster=None):
         return out
     try:
         out["id"] = decision_store.append(sdlc_dir, record, config)
+        point(sdlc_dir, out["id"], record, config)
     except Exception as exc:                            # noqa: BLE001 - reported, never raised
         out["error"] = "decision record not stored: %s" % exc
     rid = out["id"] or "(not stored)"
