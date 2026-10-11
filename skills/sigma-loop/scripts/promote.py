@@ -600,7 +600,8 @@ def promote(sdlc_dir, config, numbers, source=None, run=None, apply=True, demote
         try:
             dr = _feature("decision_record")
             if dr.enabled(config):                      # slice 8: store record + attributed comment
-                rec = dr.build("demote" if demote else "promote", n, "unknown", verb, "", "human")
+                rec = dr.build("demote" if demote else "promote", n, "needs_decision", verb, "", "human",
+                               area=dr.area_of(names))
 
                 def _post(num, body):
                     tried.append(num)

@@ -25,6 +25,7 @@ def _load(name):
 decision_store = _load("decision_store")
 blocker_scan = _load("blocker_scan")
 qkind = _load("qkind")
+ledger_pointer = _load("ledger_pointer")
 
 #: gesture -> how. The sweep is the only autonomous writer.
 GESTURES = {"unpark": "human", "keep-parked": "human", "promote": "human", "demote": "human",
@@ -46,7 +47,20 @@ def _flat(text, limit=300):
     return flat if len(flat) <= limit else flat[:limit - 1].rstrip() + "…"
 
 
-def build(gesture, goal, qkind_, choice, reason, how, rule_id=None):
+#: The stated area of a record whose issue carries no `area:<x>` label: the whole repository.
+REPO_AREA = "repo"
+
+
+def area_of(labels):
+    """The first `area:<x>` label's `<x>`, else `repo`. Labels may be names or `{"name": ...}`."""
+    for label in (labels or []):
+        name = label.get("name") if isinstance(label, dict) else label
+        if isinstance(name, str) and name.startswith("area:") and name[5:].strip():
+            return name[5:].strip()
+    return REPO_AREA
+
+
+def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None):
     """A plain record dict. An unusable kind reads `unknown`; an empty choice gets a placeholder."""
     rec = {"gesture": gesture,
            "qkind": qkind_ if qkind_ in qkind.QKINDS else "unknown",
@@ -56,6 +70,8 @@ def build(gesture, goal, qkind_, choice, reason, how, rule_id=None):
            "issue": int(goal) if str(goal).isdigit() else (str(goal) if goal else None)}
     if rule_id:
         rec["rule_id"] = str(rule_id)
+    if area:
+        rec["area"] = str(area)
     return rec
 
 
@@ -72,6 +88,14 @@ def _fenced(rid, record, visibility):
     return "\n".join([blocker_scan.UNPARK_QA_START] + lines + [blocker_scan.UNPARK_QA_END])
 
 
+def point(sdlc_dir, rid, record, config):
+    """Hand a stored record to the ledger pointer writer (inert when its gate is closed). Never raises."""
+    try:
+        ledger_pointer.write_pointer(sdlc_dir, [(rid, record.get("qkind"), record.get("how"))], config)
+    except Exception:                                   # noqa: BLE001 - a ledger problem never touches the gesture
+        pass
+
+
 def write_all(sdlc_dir, record, config, source, text="", poster=None):
     """Store record first, then the comment (`text` followed by the fenced decision span).
 
@@ -82,6 +106,7 @@ def write_all(sdlc_dir, record, config, source, text="", poster=None):
         return out
     try:
         out["id"] = decision_store.append(sdlc_dir, record, config)
+        point(sdlc_dir, out["id"], record, config)
     except Exception as exc:                            # noqa: BLE001 - reported, never raised
         out["error"] = "decision record not stored: %s" % exc
     rid = out["id"] or "(not stored)"

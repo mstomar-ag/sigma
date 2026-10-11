@@ -67,6 +67,8 @@ _PATTERNS = {
     "production_change": (
         ("prod-apply", re.compile(r"\b(?:kubectl\s+(?:apply|rollout)|terraform\s+apply|helm\s+(?:upgrade|install))\b", _I)),
         ("prod-deploy", re.compile(r"\b(?:helm\s+upgrade|kubectl\s+apply|gh\s+workflow\s+run\s+\S*deploy)", _I)),
+        ("prod-service-deploy", re.compile(r"\b" + "rail" + "way" + r"\s+(?:up|redeploy)\b", _I)),
+        ("prod-iam-admin", re.compile(r"\biam\s+(?:attach|put)-(?:user|group|role)-policy\b[^|;&\n]*Administrator", _I)),
     ),
     "send_outside": (
         ("send-http", re.compile(r"\bcurl\b[^|;&]*?(?:-X\s*(?:POST|PUT|PATCH|DELETE)\b|\s(?:-d|--data\w*|-F|--form|-T|--upload-file)\b)", _I)),
@@ -75,6 +77,7 @@ _PATTERNS = {
     "access_secrets": (
         ("secrets-ssh", re.compile(r"\.ssh/(?:id_|authorized_keys|config)")),
         ("secrets-env", re.compile(r"\b(?:cat|less|more|head|tail|cp|source)\s+\S*\.env\b")),
+        ("secrets-cloud-creds", re.compile(r"\.aws/credentials\b")),
         ("secrets-cli", re.compile(r"\b(?:gh\s+auth\s+token|gh\s+secret|security\s+find-generic-password|aws\s+configure\s+get)\b", _I)),
     ),
     "tamper_oversight": (
@@ -86,6 +89,17 @@ _PATTERNS = {
         ("unvetted-eval-fetch", re.compile(r"\b(?:eval|source|bash|sh)\b[^\n]*[<$]\(\s*(?:curl|wget)\b", _I)),
     ),
 }
+
+UNKNOWN_COMMAND_DECISION = (
+    "PROVISIONAL (owner to ratify): an action not on the closed class list that Sigma cannot undo is "
+    "cannot tell (ask once); an unknown but plainly reversible or read-only command stays permitted. "
+    "Irreversible-looking unknowns are the small list below, not a general suspicion of unknown commands."
+)
+_CMD_POS = r"(?:^|[;&|\n])\s*(?:(?:sudo|env|\w+=\S*)(?:\s+-\S+)*\s+)*"
+_UNKNOWN_IRREVERSIBLE = re.compile(
+    _CMD_POS + r"(?P<c>(?:shred|mkfs(?:\.\w+)?|wipefs)\b)"
+    + r"|" + _CMD_POS + r"(?P<d>dd\b[^|;&\n]*\bof=/dev/(?:sd|nvme|disk|rdisk|hd|vd|xvd|mmcblk)\w*)"
+)
 
 _PUSH_RX = dict(_PATTERNS["rewrite_history"])["rewrite-force-push"]
 
@@ -316,4 +330,7 @@ def _classify(text, context, config):
         shlex.split(text)
     except ValueError:
         return Result(CANNOT_TELL, "parse-error", "")
+    m = _UNKNOWN_IRREVERSIBLE.search(text)
+    if m:
+        return Result(CANNOT_TELL, "unknown-irreversible", _scrub_quote((m.group("c") or m.group("d"))))
     return Result(None, None, "")

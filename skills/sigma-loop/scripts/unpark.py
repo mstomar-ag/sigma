@@ -502,7 +502,8 @@ def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, 
         if decision_record.enabled(config):
             choice = (answers or {}).get(CLOSING_QUESTION["id"]) or gesture
             rec = decision_record.build(gesture, number, _declared_kind(data), choice,
-                                        _substantive_reason(answers), decision_record.how_for(gesture))
+                                        _substantive_reason(answers), decision_record.how_for(gesture),
+                                        area=decision_record.area_of(data.get("labels")))
 
             def _post(num, body):
                 tried.append(num)
