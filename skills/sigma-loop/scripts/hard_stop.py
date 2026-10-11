@@ -95,7 +95,11 @@ UNKNOWN_COMMAND_DECISION = (
     "cannot tell (ask once); an unknown but plainly reversible or read-only command stays permitted. "
     "Irreversible-looking unknowns are the small list below, not a general suspicion of unknown commands."
 )
-_UNKNOWN_IRREVERSIBLE = re.compile(r"\b(?:shred|mkfs(?:\.\w+)?|wipefs)\b|\bdd\b[^|;&\n]*\bof=/dev/")
+_CMD_POS = r"(?:^|[;&|\n])\s*(?:(?:sudo|env|\w+=\S*)(?:\s+-\S+)*\s+)*"
+_UNKNOWN_IRREVERSIBLE = re.compile(
+    _CMD_POS + r"(?P<c>(?:shred|mkfs(?:\.\w+)?|wipefs)\b)"
+    + r"|" + _CMD_POS + r"(?P<d>dd\b[^|;&\n]*\bof=/dev/(?:sd|nvme|disk|rdisk|hd|vd|xvd|mmcblk)\w*)"
+)
 
 _PUSH_RX = dict(_PATTERNS["rewrite_history"])["rewrite-force-push"]
 
@@ -328,5 +332,5 @@ def _classify(text, context, config):
         return Result(CANNOT_TELL, "parse-error", "")
     m = _UNKNOWN_IRREVERSIBLE.search(text)
     if m:
-        return Result(CANNOT_TELL, "unknown-irreversible", _scrub_quote(m.group(0)))
+        return Result(CANNOT_TELL, "unknown-irreversible", _scrub_quote((m.group("c") or m.group("d"))))
     return Result(None, None, "")

@@ -53,12 +53,16 @@ def test_unknown_decision_is_documented():
     assert "cannot tell" in H.UNKNOWN_COMMAND_DECISION and "PROVISIONAL" in H.UNKNOWN_COMMAND_DECISION
 
 
-@pytest.mark.parametrize("cmd", ["shred -u notes.txt", "mkfs.ext4 /dev/sdb1", "dd if=/dev/zero of=/dev/sda"])
+@pytest.mark.parametrize("cmd", ["shred -u notes.txt", "mkfs.ext4 /dev/sdb1", "dd if=/dev/zero of=/dev/sda",
+    "dd if=x of=/dev/nvme0n1", "dd if=x of=/dev/disk2", "dd if=x of=/dev/rdisk2",
+    "ls && sudo wipefs -a /dev/sdb", "echo hi; shred f", "sudo -E env A=1 mkfs.ext4 /dev/sdb1", "cat x | shred -"])
 def test_unknown_irreversible_looking_is_cannot_tell(cmd):
     r = _c(cmd)
     assert (r.cls, r.pattern_id) == (H.CANNOT_TELL, "unknown-irreversible"), r
 
 
-@pytest.mark.parametrize("cmd", ["ls -la", "frobnicate --widgets", "grep -r foo .", "dd if=a.img of=b.img bs=1m"])
+@pytest.mark.parametrize("cmd", ["ls -la", "frobnicate --widgets", "grep -r foo .", "dd if=a.img of=b.img bs=1m",
+    "dd if=a of=/dev/null", "dd if=a of=/dev/stdout", "dd if=a of=/dev/stderr", "dd if=a of=/dev/fd/3",
+    "grep -r shred .", "man mkfs", "echo mkfs", "git commit -m 'wipefs and shred notes'"])
 def test_unknown_benign_is_permitted(cmd):
     assert _c(cmd).cls is None, cmd
