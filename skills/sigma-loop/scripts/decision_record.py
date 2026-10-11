@@ -47,7 +47,20 @@ def _flat(text, limit=300):
     return flat if len(flat) <= limit else flat[:limit - 1].rstrip() + "…"
 
 
-def build(gesture, goal, qkind_, choice, reason, how, rule_id=None):
+#: The stated area of a record whose issue carries no `area:<x>` label: the whole repository.
+REPO_AREA = "repo"
+
+
+def area_of(labels):
+    """The first `area:<x>` label's `<x>`, else `repo`. Labels may be names or `{"name": ...}`."""
+    for label in (labels or []):
+        name = label.get("name") if isinstance(label, dict) else label
+        if isinstance(name, str) and name.startswith("area:") and name[5:].strip():
+            return name[5:].strip()
+    return REPO_AREA
+
+
+def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None):
     """A plain record dict. An unusable kind reads `unknown`; an empty choice gets a placeholder."""
     rec = {"gesture": gesture,
            "qkind": qkind_ if qkind_ in qkind.QKINDS else "unknown",
@@ -57,6 +70,8 @@ def build(gesture, goal, qkind_, choice, reason, how, rule_id=None):
            "issue": int(goal) if str(goal).isdigit() else (str(goal) if goal else None)}
     if rule_id:
         rec["rule_id"] = str(rule_id)
+    if area:
+        rec["area"] = str(area)
     return rec
 
 

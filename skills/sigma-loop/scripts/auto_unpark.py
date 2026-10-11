@@ -574,6 +574,7 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
         by_issue = {}
         for a in unpark_results:
             by_issue.setdefault(a["issue"], []).append(a)
+        areas = {str(i.get("number")): i.get("labels") for i in issues}
         for n, refs in resolved.items():
             done = by_issue.get(n)
             if done and all(a["result"] == "done" for a in done):
@@ -591,7 +592,8 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
                         dr.write_all(sdlc_dir, dr.build("sweep", n, "dependency", "unpark",
                                                         "blocker(s) closed: " + ", ".join(
                                                             f"#{r}" for r in refs),
-                                                        dr.how_for("sweep")),
+                                                        dr.how_for("sweep"),
+                                                        area=dr.area_of(areas.get(n))),
                                      config, source, text=text, poster=_post)
                         continue
                 except Exception:

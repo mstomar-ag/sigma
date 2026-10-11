@@ -1229,18 +1229,19 @@ def acknowledge(sdlc_dir, config, issue, state, why="", goal=None, area=None):
     entry = ledger.safe_append(sdlc_dir, "ack", goal or f"issue-{issue}", config=config,
                                issue=int(issue) if str(issue).isdigit() else None,
                                state=state, why=why, area=area)
-    _record_ack(sdlc_dir, config, issue, goal, state, why)
+    _record_ack(sdlc_dir, config, issue, goal, state, why, area)
     return entry
 
 
-def _record_ack(sdlc_dir, config, issue, goal, state, why):
+def _record_ack(sdlc_dir, config, issue, goal, state, why, area=None):
     """Slice 8: with the records part open, an ack also leaves a decision record in the store (no
     issue is touched). Closed: nothing happens. Never raises -- the ledger entry is the primary."""
     try:
         dr = _load("decision_record")
         if not dr.enabled(config):
             return
-        rec = dr.build("ack", issue or goal, "unknown", state, why, dr.how_for("ack"))
+        rec = dr.build("ack", issue or goal, "unknown", state, why, dr.how_for("ack"),
+                       area=area or dr.REPO_AREA)
         dr.point(sdlc_dir, dr.decision_store.append(sdlc_dir, rec, config), rec, config)
     except Exception:                                   # noqa: BLE001 - best-effort side record
         pass
