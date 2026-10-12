@@ -391,8 +391,8 @@ def model_mode(config):
 
 def classify_model(sdlc_dir, config, cands, call, skip=()):
     """-> (rows, info). Rows like `classify`. `call is None` sends nothing (plan): uncached rows are
-    unknown and counted as would_send. Invalid answers, errors and timeouts are unknown; the table is
-    never consulted. Past the run ceiling or the candidate cap the rest stay unknown and uncached."""
+    unknown and counted as would_send. An invalid answer is unknown and cached; an error or timeout is unknown, uncached and
+    unstored (retried next run); the table is never consulted. Past the run ceiling or the candidate cap the rest stay unknown and uncached."""
     lim = _load("decision_rubric_cfg").import_limits(config)
     qkinds = _load("qkind").QKINDS
     areas = _areas(sdlc_dir)
@@ -423,7 +423,10 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
             cost = ans.get("cost_usd") if isinstance(ans, dict) else None
             ok = isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0
             info["spent"] += cost if ok else lim["max_budget_usd_per_call"]
-            if isinstance(ans, dict) and ans.get("kind") in qkinds and ans.get("area") in areas:
+            if not isinstance(ans, dict):  # no answer at all: not cached, not stored, retried next run
+                rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
+                continue
+            if ans.get("kind") in qkinds and ans.get("area") in areas:
                 kind, area = ans["kind"], ans["area"]
             cache[fp] = {"qkind": kind, "area": area}
             fresh = True

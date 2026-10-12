@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **The model classifier no longer caches an error or timeout as `unknown` (#1249).** A call that raises or returns nothing is neither cached nor stored, so the next `apply` retries that candidate; an answer outside the closed lists is still cached as `unknown`, and a failed call still counts the per-call ceiling.
 - **`decision_import.py` can classify past decisions with a small model, opt-in (#1243).** `decision_rubric.import.classifier` is `"table"` (default, unchanged) or `"model"`; with `"model"` and the records gate open, `apply` sends only the clipped question and option labels, accepts only a listed kind and area (else `unknown`), caches by fingerprint so a second run calls nothing, and stops at a per-call and per-run dollar ceiling (PROVISIONAL, reported). `plan` sends nothing.
 - **`decision_import.py --project-dir` takes a dash-leading folder name in two words (#1244).** `--project-dir -srv-demo-work-repo` now works for `scan`, `plan` and `apply`, which build one shared option set; a real option after the flag is still not swallowed.
 - **The guard's park now logs the original action text (#1240).** Where the guard has the action text (a verdict from `guard()`), its `permission_use` entry carries that exact text instead of the verdict reason, so a refused-then-parked action no longer blocks `record done`; a park with no action text (the issue-write chokepoint) keeps the reason text. A closed gate changes nothing.

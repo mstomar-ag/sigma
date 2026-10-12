@@ -91,6 +91,21 @@ def test_error_and_timeout_become_unknown(tmp_path):
         assert (rows[0]["qkind"], rows[0]["area"]) == ("unknown", "repo")
 
 
+def test_no_answer_is_not_cached_or_stored_and_a_rerun_retries(tmp_path):
+    for n, fake in enumerate((Fake(exc=RuntimeError("boom")), Fake(answer=None))):
+        sd, cfg = _sub(tmp_path, "d%d" % n), _cfg()
+        out = DI.apply(sd, cfg, [_c(5)], call=fake)
+        assert out["records"] == 0 and _recs(sd, cfg) == []
+        assert not (pathlib.Path(sd) / CACHE).exists()
+        good = Fake(GOOD)
+        assert DI.apply(sd, cfg, [_c(5)], call=good)["records"] == 1 and len(good.calls) == 1
+
+
+def test_no_answer_still_counts_the_per_call_ceiling(tmp_path):
+    rows, info = DI.classify_model(_sd(tmp_path), _cfg(), [_c(6)], Fake(exc=RuntimeError("x")))
+    assert info["sent"] == 1 and info["spent"] == DI._load("decision_rubric_cfg").import_limits(_cfg())["max_budget_usd_per_call"]
+
+
 def test_second_apply_makes_no_call_and_cannot_relabel(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg()
     DI.apply(sd, cfg, [_c(1)], call=Fake(GOOD))
