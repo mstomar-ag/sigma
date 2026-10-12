@@ -613,6 +613,14 @@ def _say_resume(target, argv):
                         "expand or end the quote on -- one of \" % $ ` !). Re-run the command you ran."))
 
 
+def _records_open(cfg):
+    """True only when decision_rubric.records.enabled is the JSON boolean true (the optional import line)."""
+    node = cfg
+    for key in ("decision_rubric", "records", "enabled"):
+        node = node.get(key) if isinstance(node, dict) else None
+    return node is True
+
+
 def main(argv):
     args = argv[1:]
     opts, target, err = parse(args)
@@ -822,6 +830,10 @@ def main(argv):
     if trust_open:
         print("  open:   verify trust - run the [trust] gesture above yourself, once per checkout; "
               "do not re-run init for it")
+    if _records_open(cfg):
+        print("Optional (never run by init): import past decisions as records; it reads only local files: "
+              + " ".join([_vd.python_command(), _vd._q(str(LOOP_SCRIPT.with_name("decision_import.py"))),
+                          "plan", _vd._q(sdlc)]))
     loop = " ".join([_vd.python_command(), _vd._q(str(LOOP_SCRIPT)), "next", _vd._q(sdlc)])
     if (cfg.get("discovery") or {}).get("source") == "github":
         print("Next: label an issue `sdlc:goal` (assigned to you), then /sigma-loop "

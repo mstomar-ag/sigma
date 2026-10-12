@@ -59,9 +59,13 @@ def _entry(raw):
     if not isinstance(levels, dict) or any(k not in KEYS or not _good(k, v) for k, v in levels.items()):
         return None
     title = raw.get("title")
-    return {"id": raw["id"], "title": title if isinstance(title, str) else "",
+    words = raw.get("match_words")
+    if words is not None and not _strs(words):
+        return None
+    extra = {"match_words": list(words)} if words else {}
+    return dict(extra, **{"id": raw["id"], "title": title if isinstance(title, str) else "",
             "areas": [_norm(a) for a in areas], "qkinds": list(qkinds) if qkinds is not None else None,
-            "levels": dict(levels)}
+            "levels": dict(levels)})
 
 
 def load(sdlc_dir):

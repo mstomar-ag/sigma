@@ -86,7 +86,7 @@ def split(ids):
 
 def _human(sdlc_dir, qkind, area, config):
     recs = _load("decision_store").list_by(sdlc_dir, config, qkind=qkind, area=area)
-    return {r["id"]: r["choice"] for r in recs if isinstance(r, dict) and r.get("how") == "human"
+    return {r["id"]: r["choice"] for r in recs if isinstance(r, dict) and r.get("how") in ("human", "imported")
             and isinstance(r.get("id"), str) and isinstance(r.get("choice"), str) and r["choice"]}
 
 

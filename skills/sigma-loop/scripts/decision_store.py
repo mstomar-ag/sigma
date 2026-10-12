@@ -28,7 +28,8 @@ except ImportError:  # no kernel lock on this host: reindex refuses rather than 
 DEFAULTS = {"store_dir": "decisions", "lock_timeout_s": 20, "archive_after_days": 180,
             "max_files_warn": 5000}
 FREE_TEXT = ("choice", "reason")
-HOW = ("autonomous", "human")
+HOW = ("autonomous", "human", "imported")
+#: `imported` marks a record read back from past work (decision_import.py), never a live answer.
 _SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 _DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 ARCHIVE_PREFIX = "archive-"

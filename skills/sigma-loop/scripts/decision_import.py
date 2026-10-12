@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scan past decisions for a later import: extract and report only, writes nothing.
+"""Scan past decisions, then plan or apply their import as decision records.
 
 Sources: Claude Code transcript files (an AskUserQuestion call paired with its answer; no other tool
 result is read), and issue-comment spans (`sigma:unpark-qa` answers and decision-record lines) when
@@ -208,6 +208,144 @@ def candidates(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=Non
     return scan(sdlc_dir, config, profile_dirs, issues, comments_fn)["candidates"]
 
 
+#: Fixed keyword table, first match wins; a candidate that already names a kind keeps it. No match: unknown.
+KIND_WORDS = (
+    ("irreversible", ("irreversible", "force push", "destructive", "delete", "drop table", "cannot be undone")),
+    ("merge_conflict", ("merge conflict", "conflict", "rebase")),
+    ("failing_check", ("failing", "ci fail", "test fail", "check fail", "red build", "flaky")),
+    ("quota", ("quota", "rate limit", "budget", "spend")),
+    ("review_cap", ("review cap", "review round", "review limit")),
+    ("no_evidence", ("no evidence", "evidence", "verify command")),
+    ("dependency", ("dependency", "depends on", "blocked by", "upgrade", "bump")),
+    ("needs_decision", ("which approach", "should we", "which option", "trade-off", "tradeoff", "decide")),
+)
+UNKNOWN = "unknown"
+REPO_AREA = "repo"
+
+
+def kind_of(cand, qkinds):
+    q = cand["question"].strip().lower()
+    if q in qkinds and q != UNKNOWN:
+        return q
+    text = " ".join([q] + [o.lower() for o in cand["options"]])
+    for kind, words in KIND_WORDS:
+        if any(w in text for w in words):
+            return kind
+    return UNKNOWN
+
+
+def area_of(cand, cats):
+    """The area name of the first category whose area name (or `match_words`) appears as a whole word."""
+    text = " ".join([cand["question"], cand["choice"], cand["reason"]] + cand["options"]).lower()
+    for c in cats:
+        for area in c["areas"]:
+            words = c.get("match_words") or [area]
+            if any(re.search(r"(?<![a-z0-9])%s(?![a-z0-9])" % re.escape(w.lower()), text) for w in words):
+                return area
+    return REPO_AREA
+
+
+def _fp(c):
+    return "imp-" + _fid("import", c["source"], c["id"])
+
+
+def _eligible(cands):
+    return [c for c in cands if not c["superseded"] and c["choice"]]
+
+
+def classify(sdlc_dir, cands):
+    qkinds = _load("qkind").QKINDS
+    cats = _load("categories").load(sdlc_dir)
+    return [dict(c, qkind=kind_of(c, qkinds), area=area_of(c, cats), fp=_fp(c)) for c in _eligible(cands)]
+
+
+def _known(sdlc_dir, config):
+    """-> (imported records by fingerprint, fingerprints that already have a watch file)."""
+    store, au = _load("decision_store"), _load("autonomy")
+    recs = {r["source"]: r for r in store.list_by(sdlc_dir, config)
+            if r.get("how") == "imported" and isinstance(r.get("source"), str)}
+    watched = {w.get("source") for w in au._facts(sdlc_dir, "watch-") if w.get("how") == "imported"}
+    return recs, watched
+
+
+def replay(rows):
+    """Rows (qkind, area, original time, fp, choice) -> {fp: would}. In time order per pair, the unique
+    majority of EARLIER answers of the pair; the first of a pair and ties have none."""
+    out, seen = {}, {}
+    for r in sorted(rows, key=lambda r: (r["when"], r["fp"])):
+        earlier = seen.setdefault((r["qkind"], r["area"]), [])
+        top = sorted(((earlier.count(x), x) for x in set(earlier)), reverse=True)
+        if top and not (len(top) > 1 and top[0][0] == top[1][0]):
+            out[r["fp"]] = top[0][1]
+        earlier.append(r["choice"])
+    return out
+
+
+def _evidence(sdlc_dir, config, cands):
+    """Everything plan and apply need: new classified rows, the replay over old and new, per pair."""
+    rows = classify(sdlc_dir, cands)
+    have, watched = _known(sdlc_dir, config)
+    new = [r for r in rows if r["fp"] not in have]
+    allrows = {r["fp"]: r for r in rows}
+    for fp, rec in have.items():
+        if isinstance(rec.get("choice"), str) and fp not in allrows:
+            allrows[fp] = {"qkind": rec.get("qkind"), "area": rec.get("area") or REPO_AREA,
+                           "when": rec.get("original_time") or "", "fp": fp, "choice": rec["choice"]}
+    for r in allrows.values():
+        r["when"] = r.get("when") or ""
+    return rows, new, replay(list(allrows.values())), allrows, watched
+
+
+def plan(sdlc_dir, config, cands):
+    """-> {"gate", "pairs": [{qkind, area, write, unknown, level}], "write", "unknown"}. Writes nothing."""
+    au = _load("autonomy")
+    rows, new, would, allrows, _w = _evidence(sdlc_dir, config, cands)
+    pairs = {}
+    for r in allrows.values():
+        p = pairs.setdefault((r["qkind"], r["area"]), {"all": 0, "comps": 0, "agree": 0, "write": 0})
+        p["all"] += 1
+        if r["fp"] in would:
+            p["comps"] += 1
+            p["agree"] += 1 if would[r["fp"]] == r["choice"] else 0
+    for r in new:
+        pairs[(r["qkind"], r["area"])]["write"] += 1
+    out = []
+    for (q, a), p in sorted(pairs.items(), key=str):
+        cfg = au._pair_settings(sdlc_dir, q, a, config)[0]
+        lvl = au._ladder(p["all"], p["comps"], (p["agree"] / p["comps"]) if p["comps"] else 0.0, cfg)
+        out.append({"qkind": q, "area": a, "write": p["write"], "unknown": p["write"] if q == UNKNOWN else 0,
+                    "level": min(lvl, au.IMPORTED_LEVEL_CAP)})
+    return {"gate": _load("decision_store").enabled(config), "pairs": out,
+            "write": len(new), "unknown": sum(1 for r in new if r["qkind"] == UNKNOWN)}
+
+
+def apply(sdlc_dir, config, cands):
+    """Write the new records, then the replayed comparisons. -> {"gate", "records", "watch", "note"}."""
+    store, au, rec = _load("decision_store"), _load("autonomy"), _load("decision_record")
+    out = {"gate": store.enabled(config), "records": 0, "watch": 0, "note": ""}
+    if not out["gate"]:
+        return out
+    rows, new, would, allrows, watched = _evidence(sdlc_dir, config, cands)
+    for r in new:
+        record = rec.build("import", r["issue"], r["qkind"], r["choice"], r["reason"], "imported", area=r["area"])
+        record.update(source=r["fp"], original_time=r["when"])
+        if store.append(sdlc_dir, record, config):
+            out["records"] += 1
+    if store._visibility(config) == "public":
+        out["note"] = "public visibility: free text dropped, no comparisons written"
+        return out
+    for fp, mine in sorted(would.items()):
+        r = allrows[fp]
+        if fp in watched or not au.enabled(config):
+            continue
+        if au.record_watch(sdlc_dir, r["qkind"], r["area"], mine, r["choice"], config,
+                           imported={"source": fp, "original_time": r["when"]}):
+            out["watch"] += 1
+    if not au.enabled(config):
+        out["note"] = "autonomy part closed: records written, no comparisons"
+    return out
+
+
 def _clip(s, n=CLIP):
     s = " ".join(str(s).split())
     return s if len(s) <= n else s[: n - 1] + "…"
@@ -220,6 +358,12 @@ def main(argv=None):
     s.add_argument("sdlc_dir")
     s.add_argument("--profile", action="append", default=[], metavar="DIR",
                    help="Claude Code profile directory (repeatable)")
+    for verb, text in (("plan", "show what apply would write (writes nothing)"),
+                       ("apply", "write the records and comparisons (idempotent)")):
+        v = sub.add_parser(verb, help=text)
+        v.add_argument("sdlc_dir")
+        v.add_argument("--profile", action="append", default=[], metavar="DIR",
+                       help="Claude Code profile directory (repeatable)")
     args = p.parse_args(argv)
     try:
         config = _load("state").load_config(args.sdlc_dir)
@@ -227,6 +371,23 @@ def main(argv=None):
         print("decision_import: %s" % exc, file=sys.stderr)
         return 1
     out = scan(args.sdlc_dir, config, args.profile or None)
+    if args.verb == "plan":
+        pl = plan(args.sdlc_dir, config, out["candidates"])
+        if not pl["gate"]:
+            print("records part is closed (decision_rubric.records.enabled): apply would write nothing")
+        for r in pl["pairs"]:
+            print("%s / %s: write %d, unknown %d, evidence alone reaches level %d" % (
+                r["qkind"], r["area"], r["write"], r["unknown"], r["level"]))
+        print("would write %d records (%d unknown); plan writes nothing" % (pl["write"], pl["unknown"]))
+        return 0
+    if args.verb == "apply":
+        res = apply(args.sdlc_dir, config, out["candidates"])
+        if not res["gate"]:
+            print("records part is closed (decision_rubric.records.enabled): nothing written")
+            return 1
+        print("wrote %d records and %d comparisons%s" % (res["records"], res["watch"],
+                                                          (" (%s)" % res["note"]) if res["note"] else ""))
+        return 0
     for name in SOURCES:
         st = out["stats"][name]
         print("%s: files_read=%d candidates=%d skipped=%d superseded=%d" % (
