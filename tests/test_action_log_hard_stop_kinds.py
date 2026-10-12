@@ -149,3 +149,24 @@ def test_guard_park_without_sdlc_dir_still_parks_and_never_raises():
 def test_skill_text_names_both_kinds():
     text = SKILL.read_text()
     assert "`log .sdlc \"$goal\" action --action" in text and "`permission_use`" in text
+
+
+def test_guard_park_carries_the_original_action_text_and_releases_the_net(tmp_path):
+    """#1240. Red against the broken control (the verdict reason written again instead of the action text)."""
+    d = _sdlc(tmp_path, OPEN)
+    src = _Src(d)
+    _log(d, "action", ACTION)
+    verdict = G.guard(ACTION, {}, OPEN)
+    assert verdict.blocked and verdict.action == ACTION
+    G.park_issue(src, "7-x.md", verdict)
+    rows = actionlog.read_goal(d, "7-x.md")
+    assert [r["kind"] for r in rows] == ["action", "permission_use"]
+    assert rows[1]["action"] == ACTION
+    assert G.record_done_net(rows, OPEN) == []
+    assert _done(d).returncode != 4
+
+
+def test_guard_park_without_action_text_keeps_the_reason(tmp_path):
+    d = _sdlc(tmp_path, OPEN)
+    G.park_issue(_Src(d), "7-x.md", G.Verdict(True, "c", "p", "q", "hard stop: c (p)"))
+    assert actionlog.read_goal(d, "7-x.md")[0]["action"] == "hard stop: c (p)"

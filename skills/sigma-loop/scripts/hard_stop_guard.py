@@ -27,7 +27,7 @@ import pathlib
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
-Verdict = collections.namedtuple("Verdict", "blocked cls pattern_id quote reason")
+Verdict = collections.namedtuple("Verdict", "blocked cls pattern_id quote reason action", defaults=("",))
 ALLOW = Verdict(False, None, None, "", "")
 
 BODY_MARKER = "Raised automatically by the SDLC loop"
@@ -106,7 +106,8 @@ def guard(action_text, context, config):
             return ALLOW      # a diff is prose, not a shell line: an unbalanced quote in it says nothing
         if res.cls != _hs().CANNOT_TELL and ctx.get("permitted") is True and _hs().is_spend_like(res.cls):
             return ALLOW      # the recorded spend permission (spend_approval) cleared a spend-like class
-        return Verdict(True, res.cls, res.pattern_id, res.quote, _reason(res))
+        return Verdict(True, res.cls, res.pattern_id, res.quote, _reason(res),
+                       action_text if isinstance(action_text, str) else "")
     except Exception:
         return Verdict(True, _hs().CANNOT_TELL, "error", "", "hard stop: cannot tell (guard error)")
 
@@ -167,7 +168,7 @@ def _log_permission_use(source, issue, verdict):
     same text. Best effort, never raises, nothing written when the source does not know its sdlc dir."""
     try:
         sdlc_dir = getattr(source, "sdlc_dir", None)
-        text = verdict.reason
+        text = getattr(verdict, "action", "") or verdict.reason   # #1240: the exact action text when the guard had it
         if sdlc_dir and issue is not None and text:
             spec = importlib.util.spec_from_file_location("actionlog", _HERE / "actionlog.py")
             al = importlib.util.module_from_spec(spec)
