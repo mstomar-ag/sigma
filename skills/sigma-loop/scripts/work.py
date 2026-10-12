@@ -2032,7 +2032,7 @@ def _upkeep_merge_trigger(sdlc_dir, config):
     try:
         if not _feature_upkeep().enabled(config):
             return
-        timeout = os.environ.get("SIGMA_WATCH_CALL_TIMEOUT") or "120"
+        timeout = legacy.getenv("SIGMA_WATCH_CALL_TIMEOUT") or "120"
         rc = _upkeep_trigger_call([sys.executable, str(_HERE / "run_with_timeout.py"), timeout,
                                    str(_HERE / "feature_upkeep_sched.py"), "decision", str(sdlc_dir)])
         if rc != 0:
