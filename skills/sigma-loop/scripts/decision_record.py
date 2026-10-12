@@ -107,7 +107,7 @@ def _would_pick(sdlc_dir, record, config):
     earlier = [r.get("choice") for r in decision_store.list_by(sdlc_dir, config, qkind=kind)
                if r.get("how") == "human" and (r.get("area") or REPO_AREA) == area
                and isinstance(r.get("choice"), str) and r.get("choice")]
-    if len(earlier) < au.settings(config)["l1_min_answers"]:
+    if len(earlier) < au._pair_settings(sdlc_dir, kind, area, config)[0]["l1_min_answers"]:
         return None
     counts = {}
     for c in earlier:
