@@ -276,3 +276,42 @@ def test_prefilter_parses_only_relevant_lines(tmp_path, monkeypatch):
     monkeypatch.setattr(m.json, "loads", lambda x, *a, **k: (calls.append(1), real(x, *a, **k))[1])
     out = m.scan(str(sdlc), {}, prof)
     assert len(out["candidates"]) == 1 and len(calls) == 2
+
+
+def test_bad_tool_use_id_does_not_lose_the_file(tmp_path):
+    m = _mod()
+    bad = []
+    for bid in (None, 7, ""):
+        bad.append(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": bid, "name": "AskUserQuestion",
+             "input": {"questions": [{"question": "Bad?", "options": []}]}}]}}))
+    lines = bad + [_ask("t1", "Good?", ["a"]), _ans("t1", "Good?", "a")]
+    sdlc, prof = _setup(tmp_path, lines)
+    out = m.scan(str(sdlc), {}, prof)
+    assert [c["question"] for c in out["candidates"]] == ["Good?"]
+
+
+def test_unknown_user_ref_is_refused_not_raised(tmp_path):
+    m = _mod()
+    sdlc, prof = _setup(tmp_path, [_ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
+    out = m.scan(str(sdlc), {}, prof, project_dirs=["~nouser_zz/x"])
+    assert [c["question"] for c in out["candidates"]] == ["Q?"]
+    assert any("~nouser_zz/x" in r for r in out["refusals"])
+
+
+def test_dot_refs_are_refused(tmp_path):
+    m = _mod()
+    sdlc, prof = _setup(tmp_path, [_ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
+    out = m.scan(str(sdlc), {}, prof, project_dirs=[".", ".."])
+    for ref in (".", ".."):
+        assert any(("'%s'" % ref) in r or (" %s " % ref) in r for r in out["refusals"])
+
+
+def test_deadline_checked_at_file_start(tmp_path):
+    m = _mod()
+    sdlc, prof = _setup(tmp_path, [_ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
+    ticks = iter([0.0] + [1000.0] * 50)
+    out = m.scan(str(sdlc), {"decision_rubric": {"import": {"time_budget_s": 5}}}, prof,
+                 clock=lambda: next(ticks))
+    assert out["candidates"] == []
+    assert any("time budget" in r for r in out["refusals"])

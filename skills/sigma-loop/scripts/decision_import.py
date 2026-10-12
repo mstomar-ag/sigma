@@ -119,8 +119,11 @@ def _scan_file(path, name, stats, room, deadline=None, clock=time.monotonic):
                         continue
                     if part.get("type") == "tool_use" and part.get("name") == "AskUserQuestion":
                         qs = (part.get("input") or {}).get("questions")
-                        pending[part.get("id")] = (n, when, qs if isinstance(qs, list) else [])
-                    elif part.get("type") == "tool_result" and part.get("tool_use_id") in pending:
+                        tid = part.get("id")
+                        if isinstance(tid, str) and tid:
+                            pending[tid] = (n, when, qs if isinstance(qs, list) else [])
+                    elif part.get("type") == "tool_result" and isinstance(part.get("tool_use_id"), str) \
+                            and part.get("tool_use_id") in pending:
                         at, asked_when, qs = pending.pop(part["tool_use_id"])
                         answers = _answers(part.get("content"))
                         for i, q in enumerate(qs):
@@ -197,7 +200,15 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
     full = False
     deadline = clock() + limits["time_budget_s"]
     timed_out = False
-    names = [_folder_name(sdlc_dir)] + [_folder_ref(r) for r in (project_dirs or limits["project_dirs"])]
+    names = [_folder_name(sdlc_dir)]
+    for r in (project_dirs or limits["project_dirs"]):
+        if not isinstance(r, str) or r.strip() in ("", ".", ".."):
+            refusals.append("project folder reference %r refused: not a usable folder name or path" % (r,))
+            continue
+        try:
+            names.append(_folder_ref(r))
+        except (RuntimeError, OSError, ValueError):
+            refusals.append("project folder reference %s unknown: cannot be resolved" % r)
     profs = _profiles(config, limits, profile_dirs)
     seen = set()
     for name in dict.fromkeys(names):
@@ -215,6 +226,9 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
                 if full or timed_out or f in seen:
                     continue
                 seen.add(f)
+                if clock() > deadline:
+                    timed_out = True
+                    continue
                 try:
                     size = f.stat().st_size
                     if size > limits["max_file_bytes"]:
