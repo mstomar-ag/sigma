@@ -142,6 +142,15 @@ def test_imported_counts_for_level_1_and_2_but_never_above(tmp_path):
     assert AU.level(sd2, "needs_decision", "repo", cfg) == 3
 
 
+def test_imported_comparisons_do_not_lift_live_answers_above_level_2(tmp_path):
+    """Live answers alone would allow level 3, but every comparison on file is a replayed one: stays at 2."""
+    sd, cfg = _sd(tmp_path), _cfg()
+    DI.apply(sd, cfg, [_c(i) for i in range(20)])
+    for _ in range(6):
+        DS.append(sd, {"how": "human", "qkind": "needs_decision", "area": "repo", "choice": "merge"}, cfg)
+    assert AU.level(sd, "needs_decision", "repo", cfg) == 2
+
+
 def test_readout_shows_imported_separately_and_absent_when_none(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg()
     DI.apply(sd, cfg, [_c(i) for i in range(3)])

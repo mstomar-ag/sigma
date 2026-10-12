@@ -197,11 +197,15 @@ def _ladder(answers, comparisons, agreement, cfg):
     return lvl if lvl >= 1 else 0
 
 
-def _capped_ladder(answers, live, comparisons, agreement, cfg):
-    """`_ladder` with imported evidence limited to IMPORTED_LEVEL_CAP: above it only live answers count."""
-    lvl = _ladder(answers, comparisons, agreement, cfg)
-    if lvl > IMPORTED_LEVEL_CAP and answers != live:
-        lvl = max(IMPORTED_LEVEL_CAP, min(lvl, _ladder(live, comparisons, agreement, cfg)))
+def _capped_ladder(answers, live, items, cfg):
+    """`_ladder` with imported evidence limited to IMPORTED_LEVEL_CAP: above it only live answers AND live
+    comparisons (watch files not marked imported) count."""
+    def rate(ws):
+        return (sum(1 for w in ws if w.get("would") == w.get("actual")) / len(ws)) if ws else 0.0
+    lvl = _ladder(answers, len(items), rate(items), cfg)
+    if lvl > IMPORTED_LEVEL_CAP:
+        own = [w for w in items if w.get("how") != "imported"]
+        lvl = max(IMPORTED_LEVEL_CAP, min(lvl, _ladder(live, len(own), rate(own), cfg)))
     return lvl
 
 
@@ -237,8 +241,7 @@ def _state(sdlc_dir, qkind, area, config):
     if by_machine:
         per = []
         for items in by_machine.values():
-            agree = sum(1 for w in items if w.get("would") == w.get("actual"))
-            per.append(_capped_ladder(answers, live, len(items), agree / len(items), cfg))
+            per.append(_capped_ladder(answers, live, items, cfg))
         lvl = min(per)
         total_agree = sum(1 for w in watch if w.get("would") == w.get("actual"))
         agreement = total_agree / len(watch)
