@@ -159,6 +159,22 @@ def park_issue(source, issue, verdict):
         pass
     finally:
         _IN_GUARD.pop()
+    _log_permission_use(source, issue, verdict)
+
+
+def _log_permission_use(source, issue, verdict):
+    """#1228: the guard's own park is the recorded stop for what it refused: one `permission_use` entry with the
+    same text. Best effort, never raises, nothing written when the source does not know its sdlc dir."""
+    try:
+        sdlc_dir = getattr(source, "sdlc_dir", None)
+        text = verdict.reason
+        if sdlc_dir and issue is not None and text:
+            spec = importlib.util.spec_from_file_location("actionlog", _HERE / "actionlog.py")
+            al = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(al)
+            al.safe_append(sdlc_dir, str(issue), "permission_use", actor="guard", action=text)
+    except Exception:
+        pass
 
 
 def blocks_issue_write(source, issue, op):

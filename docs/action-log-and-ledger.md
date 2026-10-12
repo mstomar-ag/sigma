@@ -33,8 +33,11 @@ bug, just a narrower definition of "active" than the write path above might sugg
 <id>` directly if `status` looks emptier than expected.
 
 An agent can add its own notes to the same trace — `file` / `model_choice` / `agent_dispatch` /
-`agent_done` / `note`, a closed vocabulary the CLI enforces, each with its own whitelisted fields
-(e.g. `note` takes `text`, `file` takes `path`/`op`):
+`agent_done` / `note` / `action` / `permission_use`, a closed vocabulary the CLI enforces, each with
+its own whitelisted fields (e.g. `note` takes `text`, `file` takes `path`/`op`; `action` and
+`permission_use` take a required `action` text, which the hard-stop record-done net reads: an
+`action` that classifies to a hard-stop class refuses `record done` until a `permission_use` or a
+park entry carries the same text; entries exist only with `action_log.enabled` true):
 
 ```bash
 loop.py log .sdlc 0007-cache.md note --thread slice-2 --text "found the flaky test"

@@ -157,7 +157,7 @@ INTERNAL_GATE_KINDS = ("merge", "code_review", "post_review", "test_trust",
 #: Agent-emitted kinds — reachable via the new `loop.py log` CLI verb. One exception (#2828):
 #: `loop.py escalate` writes a `model_choice` row itself, as actor `agent`, because the tier it
 #: escalates from is agent-supplied (`tier_escalation.record`).
-AGENT_KINDS = ("file", "model_choice", "agent_dispatch", "agent_done", "note")
+AGENT_KINDS = ("file", "model_choice", "agent_dispatch", "agent_done", "note", "action", "permission_use")
 AGENT_FIELDS = {
     "file": ("path", "op"),
     # #880: `signal` is WHY this tier — the literal text predict.py's regex matched ("migrat",
@@ -184,7 +184,13 @@ AGENT_FIELDS = {
     # reader, and `phase` was already a known, scrubbed, capped field via the two kinds above.
     "agent_done": ("role", "phase", "result"),
     "note": ("text",),
+    # #1228: the text of a shell step (`action`) or of a granted permission (`permission_use`). The
+    # hard-stop record-done net reads `action` from every entry; a `permission_use` (or a park) with
+    # the SAME text releases it. Required for both: append() refuses a missing or empty one.
+    "action": ("action",),
+    "permission_use": ("action",),
 }
+ACTION_KINDS = ("action", "permission_use")
 #: `file.op` restricted to these three — deliberately NOT "opened"/read: a read is investigation,
 #: not action, and reads outrun writes by roughly an order of magnitude in a typical
 #: research/implement phase (see SKILL.md's own file-logging instruction).
@@ -329,6 +335,8 @@ def append(sdlc_dir, goal, kind, actor, thread="main", now=None, **fields):
         raise ValueError(
             "agent_dispatch --role goal-slot requires --model <tier> — "
             "the resolved tier is already known at dispatch time")
+    if kind in ACTION_KINDS and not str(fields.get("action") or "").strip():
+        raise ValueError(f"{kind} requires --action <text> -- the net matches on that text")
     if not enabled(config):
         return None
     if kind not in ALL_KINDS:
