@@ -294,9 +294,9 @@ def test_bad_tool_use_id_does_not_lose_the_file(tmp_path):
 def test_unknown_user_ref_is_refused_not_raised(tmp_path):
     m = _mod()
     sdlc, prof = _setup(tmp_path, [_ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
-    out = m.scan(str(sdlc), {}, prof, project_dirs=["~nouser_zz/x"])
+    out = m.scan(str(sdlc), {}, prof, project_dirs=["~nouser_zz/x"]) # leak-scan: allow home-path an unknown ~user path the scan must refuse, not a real path
     assert [c["question"] for c in out["candidates"]] == ["Q?"]
-    assert any("~nouser_zz/x" in r for r in out["refusals"])
+    assert any("~nouser_zz/x" in r for r in out["refusals"]) # leak-scan: allow home-path an unknown ~user path the scan must refuse, not a real path
 
 
 def test_dot_refs_are_refused(tmp_path):
