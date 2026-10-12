@@ -65,18 +65,20 @@ def public_repo_warning(config, remote_is_public):
 #: `decision_rubric.import` bounds the read-only past-decision scan (`decision_import.py`). It is NOT
 #: a part and no gate reads it: a scan only reports. `comments` (default false) lets the scan read
 #: issue comments over the network; `max_issues` bounds how many issues that touches.
-IMPORT_DEFAULTS = {"max_file_bytes": 5000000, "max_candidates": 500, "max_issues": 50,
-                   "comments": False, "profile_dirs": []}
+#: `max_file_bytes` is a streaming-safe ceiling (PROVISIONAL, 500 MB); the real bound is
+#: `time_budget_s` (PROVISIONAL, 60), a total per scan, and a file it cuts short is reported partial.
+IMPORT_DEFAULTS = {"max_file_bytes": 500000000, "max_candidates": 500, "max_issues": 50,
+                   "time_budget_s": 60, "comments": False, "profile_dirs": [], "project_dirs": []}
 
 
 def import_limits(config):
     """The import bounds, total: a missing or wrong-typed key falls back to its default."""
-    out = dict(IMPORT_DEFAULTS, profile_dirs=[])
+    out = dict(IMPORT_DEFAULTS, profile_dirs=[], project_dirs=[])
     try:
         sub = config["decision_rubric"]["import"]
         if not isinstance(sub, dict):
             return out
-        for key in ("max_file_bytes", "max_candidates", "max_issues"):
+        for key in ("max_file_bytes", "max_candidates", "max_issues", "time_budget_s"):
             v = sub.get(key)
             if isinstance(v, int) and not isinstance(v, bool) and v > 0:
                 out[key] = v
@@ -85,6 +87,9 @@ def import_limits(config):
         dirs = sub.get("profile_dirs")
         if isinstance(dirs, list):
             out["profile_dirs"] = [d for d in dirs if isinstance(d, str) and d]
+        dirs = sub.get("project_dirs")
+        if isinstance(dirs, list):
+            out["project_dirs"] = [d for d in dirs if isinstance(d, str) and d]
     except Exception:
         pass
     return out
