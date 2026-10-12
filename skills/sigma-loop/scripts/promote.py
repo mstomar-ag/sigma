@@ -874,7 +874,7 @@ def _in_unit(item, unit):
         want = _feature("feature_labels").label_for(unit)
     except Exception:                                   # noqa: BLE001 - an unusable name selects nothing
         return False
-    return want in _label_names(item)
+    return want.lower() in [n.lower() for n in _label_names(item)]
 
 
 def migrate(source, config, apply=False, sdlc_dir=".sdlc", unit=None, only=None, limit=None,
@@ -908,12 +908,26 @@ def migrate(source, config, apply=False, sdlc_dir=".sdlc", unit=None, only=None,
         return rep
     rep["fetched"] = len(issues)
     rep["truncated"] = len(issues) >= cap
+    if unit is not None and not unit.strip():
+        rep["refused"] = "--unit is empty: name a unit"
+        return rep
     if unit:
         issues = [i for i in issues if _in_unit(i, unit)]
     if only:
         issues = [i for i in issues if int(i.get("number")) in only]
+    if (unit or only) and not issues:
+        rep["refused"] = "no issue matches %s: nothing to migrate" % (
+            "--unit " + unit if unit else "--only")
+        return rep
     if limit:
-        issues = issues[:limit]
+        kept, opened = [], 0
+        for i in issues:
+            if str(i.get("state") or "").lower() != "closed":
+                if opened >= limit:
+                    break
+                opened += 1
+            kept.append(i)
+        issues = kept
     rep["total"] = len(issues)
     writes = _Writes(config, clock or time.monotonic, sleep or time.sleep)
     for item in issues:

@@ -145,3 +145,53 @@ def test_loop_record_runs_judge_on_park(tmp_path, monkeypatch):
     seen.clear()
     loop._record(str(sdlc), src, "8", "parked", "why", qkind=None, config=cfg)
     assert not seen
+
+
+def test_transient_judge_failure_is_not_stored_and_is_rejudged(tmp_path):
+    sdlc, cfg = _setup(tmp_path)
+
+    def boom(prompt, model, max_budget_usd):
+        raise RuntimeError("network down")
+
+    r = _run(sdlc, cfg, boom)
+    assert r["reason"] == "call_failed" and ds.get(sdlc, 7, "Upload logs?") is None
+    f = Fake(kind="consistent")
+    r2 = _run(sdlc, cfg, f)
+    assert r2["verdict"] == "consistent" and len(f.calls) == 1
+    assert ds.get(sdlc, 7, "Upload logs?")["verdict"] == "consistent"
+
+
+def test_concurrent_writers_do_not_lose_entries(tmp_path):
+    import threading
+    sdlc, cfg = _setup(tmp_path, spend_ceiling_usd_per_day=100.0)
+    errs = []
+
+    def work(i):
+        try:
+            _run(sdlc, cfg, Fake(), q="question %d" % i, issue=i)
+        except Exception as exc:        # noqa: BLE001
+            errs.append(exc)
+
+    ts = [threading.Thread(target=work, args=(i,)) for i in range(12)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not errs
+    assert all(ds.get(sdlc, i, "question %d" % i) for i in range(12))
+
+
+def test_save_takes_the_existing_lock_helper(tmp_path, monkeypatch):
+    sdlc, cfg = _setup(tmp_path)
+    seen = []
+    import contextlib
+
+    @contextlib.contextmanager
+    def fake_lock(store, timeout):
+        seen.append(store)
+        yield True
+
+    store = ds._load("decision_store")
+    monkeypatch.setattr(ds, "_load", lambda n: store if n == "decision_store" else _mod(n))
+    monkeypatch.setattr(store, "_lock", fake_lock)
+    assert _run(sdlc, cfg, Fake()) is not None and seen

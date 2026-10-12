@@ -315,3 +315,15 @@ def test_deadline_checked_at_file_start(tmp_path):
                  clock=lambda: next(ticks))
     assert out["candidates"] == []
     assert any("time budget" in r for r in out["refusals"])
+
+
+def test_deadline_checked_by_elapsed_bytes_not_only_lines(tmp_path, monkeypatch):
+    m = _mod()
+    big = _ask("t1", "Q?" + "x" * 600000, ["a"])
+    sdlc, prof = _setup(tmp_path, [big] * 8)       # 8 lines: the line check (every 256) never fires
+    monkeypatch.setattr(m, "CHECK_BYTES", 1 << 20)
+    ticks = iter([0.0, 0.0] + [1000.0] * 50)       # budget start, file start, then past the deadline
+    out = m.scan(str(sdlc), {"decision_rubric": {"import": {"time_budget_s": 5}}}, prof,
+                 clock=lambda: next(ticks))
+    assert out["stats"]["transcript"]["partial"] == 1
+    assert any("time budget" in r for r in out["refusals"])

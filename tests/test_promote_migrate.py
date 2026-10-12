@@ -232,3 +232,34 @@ def test_plan_for_human_without_priority_parks_and_followup_clamps():
     assert isinstance(p, promote.Park)
     f = promote.plan_for({"title": "x", "body": "", "labels": ["sdlc:followup", "priority:P0"], "comments": []}, CFG)
     assert isinstance(f, promote.Arm) and f.priority in ("P2", "P3", "P4")
+
+
+def test_unit_matches_case_insensitively(tmp_path):
+    src = FakeSource()
+    src.add(1, PROPOSED, "priority:P1", "feature:Voice")
+    src.add(2, PROPOSED, "priority:P1", "feature:other")
+    for name in ("voice", "VOICE", "Voice"):
+        rep = promote.migrate(src, CFG, sdlc_dir=str(tmp_path), unit=name)
+        assert [i["number"] for i in rep["items"]] == ["1"]
+
+
+def test_empty_unit_or_only_slice_exits_nonzero_with_one_line(tmp_path, capsys):
+    src = FakeSource()
+    src.add(1, PROPOSED, "priority:P1", "feature:voice")
+    for extra in (["--unit", "nomatch"], ["--only", "99"], ["--unit", ""]):
+        rc = promote.main(["promote.py", "migrate-confirmation", str(tmp_path)] + extra, source=src)
+        out = capsys.readouterr().out.strip()
+        assert rc != 0 and len(out.splitlines()) == 1 and ("no issue" in out or "empty" in out)
+    assert src.writes == []
+
+
+def test_limit_counts_only_open_issues(tmp_path):
+    src = FakeSource()
+    src.add(1, PROPOSED, "priority:P1", state="closed")
+    src.add(2, PROPOSED, "priority:P1", state="closed")
+    src.add(3, PROPOSED, "priority:P1")
+    src.add(4, PROPOSED, "priority:P1")
+    src.add(5, PROPOSED, "priority:P1")
+    rep = promote.migrate(src, CFG, sdlc_dir=str(tmp_path), limit=2)
+    opens = [i for i in rep["items"] if i["outcome"] != "closed"]
+    assert len(opens) == 2 and [i["number"] for i in opens] == ["3", "4"]

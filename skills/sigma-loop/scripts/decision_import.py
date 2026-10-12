@@ -21,6 +21,7 @@ SAMPLE_LINES = 10
 CLIP = 60
 MAX_LINE = 8000000  # a longer single line is skipped unparsed, so memory stays bounded
 CHECK_EVERY = 256
+CHECK_BYTES = 8000000  # the deadline is also checked after this many bytes, so a few huge lines cannot outrun it
 _PAIR = re.compile(r'"((?:[^"\\]|\\.)*)"="((?:[^"\\]|\\.)*)"')
 
 
@@ -94,12 +95,15 @@ def _scan_file(path, name, stats, room, deadline=None, clock=time.monotonic):
     """-> (candidates, stopped_at_line or None). Streams the file; a line is parsed only if it holds
     the question-tool name or an id still waiting for its answer, so every other line is dropped
     unread. Only AskUserQuestion tool_use blocks and the tool_result with the same id are looked at."""
-    pending, out = {}, []
+    pending, out, since = {}, [], 0
     with open(path, "rb") as fh:
         for n, (raw, size) in enumerate(_lines(fh), 1):
             stats["bytes_read"] += size
-            if deadline is not None and n % CHECK_EVERY == 0 and clock() > deadline:
-                return out, n
+            since += size
+            if deadline is not None and (n % CHECK_EVERY == 0 or since >= CHECK_BYTES):
+                since = 0
+                if clock() > deadline:
+                    return out, n
             if raw is None:
                 stats["skipped"] += 1
                 continue

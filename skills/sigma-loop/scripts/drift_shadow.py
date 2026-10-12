@@ -19,6 +19,8 @@ import time
 _HERE = pathlib.Path(__file__).resolve().parent
 STORE = "drift-shadow.json"
 MAX_TOTAL_CHARS = 40000       # PROVISIONAL: clip for all documents together
+LOCK_TIMEOUT_S = 20           # PROVISIONAL: bounded wait for the store lock
+TRANSIENT = ("call_failed", "lock_unusable", "spend_unreadable", "ceiling_reached")   # judged again next time
 MAX_RECORDS = 200             # PROVISIONAL: the store keeps the newest N verdicts
 _SCHEMA = {"type": "object", "properties": {
     "kind": {"type": "string", "enum": ["consistent", "not_covered", "conflicts"]},
@@ -137,7 +139,14 @@ def shadow_for_park(sdlc_dir, config, issue, qkind_, question, call=None, now=No
             if v.kind == "conflicts":
                 dj = _load("drift_judge")
                 rec["document"] = next((n for n, t in docs if dj.verify_quote(v.quote, t)), None)
-        _save(sdlc_dir, _read(sdlc_dir) + [rec])
+        if rec["reason"] in TRANSIENT:
+            return rec                                  # not final: nothing stored, so the next park judges again
+        lock_dir = _path(sdlc_dir).parent / "drift-shadow.lock.d"
+        with _load("decision_store")._lock(str(lock_dir), LOCK_TIMEOUT_S) as held:
+            if not held:
+                return None                             # no lock, no write: the next park tries again
+            if get(sdlc_dir, issue, question) is None:
+                _save(sdlc_dir, _read(sdlc_dir) + [rec])
         return rec
     except Exception:
         return None
