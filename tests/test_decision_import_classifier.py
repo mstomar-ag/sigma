@@ -180,6 +180,22 @@ def test_request_is_only_clipped_question_and_labels(tmp_path):
     DI.classify_model(sd, _cfg(), [c], f)
     assert_narrow(f.calls[0][0], c["question"], c["options"])
     assert len(_data_block(f.calls[0][0]).splitlines()[0]) == 300
+    instr = f.calls[0][0].split("<<<DATA-")[0]
+    assert "billing" in instr and "repo" in instr          # the allowed areas, outside the data block
+    assert "billing" not in _data_block(f.calls[0][0])
+
+
+def test_ceiling_skipped_rows_are_not_stored_and_a_later_run_sends_them(tmp_path):
+    sd = _sd(tmp_path)
+    cands = [_c(i, q="merge conflict") for i in range(5)]
+    cfg = _cfg(max_budget_usd_per_run=0.5, max_budget_usd_per_call=0.4)
+    f = Fake(GOOD, cost=0.4)
+    out = DI.apply(sd, cfg, cands, call=f)
+    assert len(f.calls) == 2 and out["records"] == 2 and len(_recs(sd, cfg)) == 2
+    assert all(r["qkind"] != "unknown" for r in _recs(sd, cfg))
+    f2 = Fake(GOOD, cost=0.01)
+    out2 = DI.apply(sd, cfg, cands, call=f2)
+    assert len(f2.calls) == 3 and out2["records"] == 3 and len(_recs(sd, cfg)) == 5
 
 
 def test_control_a_wider_request_fails_the_width_test(tmp_path):
@@ -195,6 +211,7 @@ def test_no_free_text_in_stored_record_or_cache(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg()
     DI.apply(sd, cfg, [_c(1)], call=Fake(GOOD))
     blob = "".join(p.read_text() for p in (pathlib.Path(sd) / "state").rglob("*") if p.is_file())
+    assert "SECRETCHOICE" not in blob and "SECRETREASON" not in blob
     assert "SECRETCHOICE" not in (pathlib.Path(sd) / CACHE).read_text()
     assert "should we merge" not in (pathlib.Path(sd) / CACHE).read_text()
 
