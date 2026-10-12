@@ -101,7 +101,7 @@ One failure never stops the rest; each issue reports its own outcome.
 
 ## Migrating the retired confirmation queue
 
-`python3 "${CLAUDE_SKILL_DIR}/../sigma-loop/scripts/promote.py" migrate-confirmation .sdlc [--dry-run | --apply]`
+`python3 "${CLAUDE_SKILL_DIR}/../sigma-loop/scripts/promote.py" migrate-confirmation .sdlc [--dry-run | --apply] [--unit NAME] [--only N,N] [--limit K]`
 
 One-time move of every issue still carrying `sdlc:needs-confirmation`. **Dry run is the default and makes
 zero writes**; only `--apply` writes (giving both flags is a usage error). It pages through every labelled
