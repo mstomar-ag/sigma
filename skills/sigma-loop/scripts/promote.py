@@ -677,7 +677,7 @@ def render_promote(result):
 # `sources.fetch_issues_rest` / `source._read_issue`, writes through `source._swap_labels` (ONE mutation per
 # issue, so a parked-plus-label pair can never exist), `source._issue_comment` and `source._set_board_status`.
 # ---------------------------------------------------------------------------------------------------
-import collections, re
+import collections, re, time
 
 #: First line of the comment this verb leaves; its presence on an issue means "already explained".
 MIGRATE_MARKER = "<!-- sigma:migrate-confirmation -->"
@@ -764,7 +764,55 @@ def _migrate_cap(config):
     return cap if isinstance(cap, int) and not isinstance(cap, bool) and cap > 0 else MIGRATE_FETCH_CAP
 
 
-def _migrate_one(source, config, sdlc_dir, item, apply, rep_item):
+#: PROVISIONAL pacing defaults, all overridable under `ai_filed.migration`: at most this many issue writes
+#: in any rolling minute (a swap, a comment and a card move each count as one), and on a rate-limit answer
+#: a pause of this many seconds and at most this many pauses per write before that issue is reported failed.
+MIGRATE_WRITES_PER_MINUTE = 30
+MIGRATE_RATE_PAUSE_S = 60
+MIGRATE_RATE_PAUSES = 3
+
+
+def _migrate_int(config, key, default):
+    blk = (config or {}).get("ai_filed") if isinstance(config, dict) else None
+    mig = blk.get("migration") if isinstance(blk, dict) else None
+    v = mig.get(key) if isinstance(mig, dict) else None
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else default
+
+
+class _Writes:
+    """Paces and guards every write of one run: a rolling one-minute window of at most `per_minute`
+    writes, and a pause-and-resume on a rate-limit answer instead of failing the issue."""
+
+    def __init__(self, config, clock, sleep):
+        self.per_minute = _migrate_int(config, "max_writes_per_minute", MIGRATE_WRITES_PER_MINUTE)
+        self.pause_s = _migrate_int(config, "rate_limit_pause_s", MIGRATE_RATE_PAUSE_S)
+        self.max_pauses = _migrate_int(config, "rate_limit_max_pauses", MIGRATE_RATE_PAUSES)
+        self.clock, self.sleep, self.stamps, self.pauses = clock, sleep, collections.deque(), 0
+
+    def _wait(self):
+        now = self.clock()
+        while self.stamps and now - self.stamps[0] >= 60:
+            self.stamps.popleft()
+        if len(self.stamps) >= self.per_minute:
+            self.sleep(max(0.0, 60 - (now - self.stamps[0])))
+            self.stamps.popleft()
+            now = self.clock()
+        self.stamps.append(now)
+
+    def do(self, fn):
+        for attempt in range(self.max_pauses + 1):
+            self._wait()
+            try:
+                return fn()
+            except Exception as exc:                    # noqa: BLE001 - only a rate limit is retried
+                if attempt < self.max_pauses and _rate_limited(_why(exc)):
+                    self.pauses += 1
+                    self.sleep(self.pause_s)
+                    continue
+                raise
+
+
+def _migrate_one(source, config, sdlc_dir, item, apply, rep_item, writes=None):
     n = rep_item["number"]
     data = source._read_issue(n, ["labels", "state", "author", "body", "stateReason", "comments"])
     names = set(_label_names(data))
@@ -785,9 +833,13 @@ def _migrate_one(source, config, sdlc_dir, item, apply, rep_item):
         hold = _feature_hold(sdlc_dir, config, n, names, author)
     except Exception:                                   # noqa: BLE001 - the hold probe fails open, like apply
         hold = None
-    plan = plan_for(issue, config, unresolved, hold)
+    if source.parked_label in names:
+        plan = Park("already parked: kept parked; /sigma-unpark releases it", "needs_decision")
+    else:
+        plan = plan_for(issue, config, unresolved, hold)
     arm = isinstance(plan, Arm)
-    rep_item.update(population=pop, action="arm" if arm else "park")
+    rep_item.update(population=pop, action="arm" if arm else "park", reason=plan.reason,
+                    destination=("armed at " + plan.priority) if arm else "parked")
     add, remove = ([source.goal_label], [source.proposed_label]) if arm else \
                   ([source.parked_label], [source.proposed_label])
     if arm:
@@ -801,26 +853,43 @@ def _migrate_one(source, config, sdlc_dir, item, apply, rep_item):
     if not apply:
         rep_item.update(outcome="would-arm" if arm else "would-park", detail=detail)
         return
-    source._swap_labels(n, add=add, remove=remove)      # ONE mutation: the removal rides with the addition
+    writes = writes or _Writes(config, time.monotonic, time.sleep)
+    writes.do(lambda: source._swap_labels(n, add=add, remove=remove))   # ONE mutation: removal rides with the addition
     rep_item.update(outcome="armed" if arm else "parked", detail=detail)
     if arm and hasattr(source, "_set_board_status"):
         try:
-            source._set_board_status(n, source.col["ready"])
+            writes.do(lambda: source._set_board_status(n, source.col["ready"]))
         except Exception:                               # noqa: BLE001 - the label landed; the card is best-effort
-            rep_item["detail"] += "; board card not moved"
+            rep_item.setdefault("notes", []).append("board card not moved")
     if not any(MIGRATE_MARKER in b for b in issue["comments"]):
         try:
-            source._issue_comment(n, _migrate_comment(plan, pop))
+            writes.do(lambda: source._issue_comment(n, _migrate_comment(plan, pop)))
         except Exception:                               # noqa: BLE001 - audit line is best-effort
-            rep_item["detail"] += "; comment did not post"
+            rep_item.setdefault("notes", []).append("comment did not post")
 
 
-def migrate(source, config, apply=False, sdlc_dir=".sdlc"):
+def _in_unit(item, unit):
+    """True when the issue carries the label of unit `unit` (`feature:<name>`), the label the registry uses."""
+    try:
+        want = _feature("feature_labels").label_for(unit)
+    except Exception:                                   # noqa: BLE001 - an unusable name selects nothing
+        return False
+    return want in _label_names(item)
+
+
+def migrate(source, config, apply=False, sdlc_dir=".sdlc", unit=None, only=None, limit=None,
+            clock=None, sleep=None):
     """Report dict: `apply`, `refused` (reason or None), `error`, `total` (M: every labelled issue fetched,
     open or closed, or None when the fetch failed), `covered` (N: handled without a read or write failure),
-    `complete` (error-free, N == M, not cut off by the cap) and `items`. Dry run (`apply=False`) makes no write."""
+    `complete` (error-free, N == M, not cut off by the cap) and `items`. Dry run (`apply=False`) makes no write.
+
+    Slices: `unit` keeps issues carrying that unit's label, `only` (a set of numbers) keeps those numbers, `limit`
+    stops after that many OPEN issues; M counts the issues in the slice. After an apply the labelled set is read
+    again: `remaining` lists the open issues still carrying the label, and one inside the slice makes the run
+    incomplete (`verify_error` when that read fails)."""
     rep = {"apply": bool(apply), "refused": None, "error": "", "total": None, "covered": 0,
-           "complete": False, "truncated": False, "items": []}
+           "complete": False, "truncated": False, "items": [], "remaining": None, "verify_error": "",
+           "pauses": 0, "fetched": None}
     if not _github(source):
         rep["refused"] = "migration needs github discovery mode"
         return rep
@@ -837,20 +906,40 @@ def migrate(source, config, apply=False, sdlc_dir=".sdlc"):
     except Exception as exc:                            # noqa: BLE001 - reported, exit non-zero
         rep["error"] = _why(exc)
         return rep
-    rep["total"] = len(issues)
+    rep["fetched"] = len(issues)
     rep["truncated"] = len(issues) >= cap
+    if unit:
+        issues = [i for i in issues if _in_unit(i, unit)]
+    if only:
+        issues = [i for i in issues if int(i.get("number")) in only]
+    if limit:
+        issues = issues[:limit]
+    rep["total"] = len(issues)
+    writes = _Writes(config, clock or time.monotonic, sleep or time.sleep)
     for item in issues:
         row = {"number": str(item.get("number")), "outcome": "failed", "detail": "", "population": "", "action": ""}
         try:
             if str(item.get("state") or "").lower() == "closed":
                 row.update(outcome="closed", detail="closed: labels kept")
             else:
-                _migrate_one(source, config, sdlc_dir, item, apply, row)
+                _migrate_one(source, config, sdlc_dir, item, apply, row, writes)
         except Exception as exc:                        # noqa: BLE001 - one failure never stops the rest
             row.update(outcome="failed", detail="not migrated: %s" % _why(exc))
         rep["items"].append(row)
     rep["covered"] = sum(1 for r in rep["items"] if r["outcome"] != "failed")
+    rep["pauses"] = writes.pauses
     rep["complete"] = rep["covered"] == rep["total"] and not rep["truncated"]
+    if apply:
+        try:
+            left = sources.fetch_issues_rest(source._run, getattr(source, "repo", None), [source.proposed_label],
+                                             cap=cap, state="open")
+            rep["remaining"] = [str(i.get("number")) for i in left]
+            mine = {r["number"] for r in rep["items"]}
+            if any(n in mine for n in rep["remaining"]):
+                rep["complete"] = False
+        except Exception as exc:                        # noqa: BLE001 - an unproven result is not complete
+            rep["verify_error"] = _why(exc)
+            rep["complete"] = False
     return rep
 
 
@@ -863,10 +952,29 @@ def render_migrate(rep):
             mode, rep["error"])
     lines = ["migrate-confirmation (%s): %d issue(s)" % (mode, len(rep["items"]))]
     for r in rep["items"]:
-        lines.append("  [%s] #%s: %s" % (r["outcome"], r["number"], r["detail"]))
+        if r.get("destination"):
+            lines.append("  [%s] #%s -> %s | population: %s | reason: %s%s" % (
+                r["outcome"], r["number"], r["destination"], r["population"], r["reason"],
+                "".join("; " + n for n in r.get("notes", []))))
+        else:
+            lines.append("  [%s] #%s: %s" % (r["outcome"], r["number"], r["detail"]))
     counts = collections.Counter(r["outcome"] for r in rep["items"])
     lines.append("summary: " + (", ".join("%d %s" % (v, k) for k, v in sorted(counts.items())) or "nothing to do"))
     lines.append("covered %d of %d" % (rep["covered"], rep["total"]))
+    if rep.get("pauses"):
+        lines.append("paused %d time(s) on a rate limit" % rep["pauses"])
+    if rep.get("verify_error"):
+        lines.append("VERIFY FAILED: could not re-read the labelled set: %s" % rep["verify_error"])
+    elif rep.get("remaining") is not None:
+        mine = {r["number"] for r in rep["items"]}
+        inside = [n for n in rep["remaining"] if n in mine]
+        outside = [n for n in rep["remaining"] if n not in mine]
+        lines.append("verify: %d open issue(s) still carry the retired label" % len(rep["remaining"]) +
+                     (": " + ", ".join("#" + n for n in rep["remaining"][:20]) if rep["remaining"] else ""))
+        if inside:
+            lines.append("FAILED: %d of them were in this run" % len(inside))
+        elif outside:
+            lines.append("%d are outside this slice; run again for them" % len(outside))
     if rep["truncated"]:
         lines.append("INCOMPLETE: the fetch reached its cap; raise ai_filed.migration.max_issues and rerun")
     return "\n".join(lines)
@@ -875,11 +983,39 @@ def render_migrate(rep):
 _USAGE = ("usage: promote.py list <sdlc_dir> [--assignee X] [--json]\n"
           "       promote.py apply <sdlc_dir> <issue>... [--dry-run]\n"
           "       promote.py demote <sdlc_dir> <issue>...\n"
-          "       promote.py migrate-confirmation <sdlc_dir> [--dry-run | --apply]")
+          "       promote.py migrate-confirmation <sdlc_dir> [--dry-run | --apply] [--unit NAME] [--only N,N] [--limit K]")
 
 
 def _numbers(argv_tail):
     return [a for a in argv_tail if not str(a).startswith("--")]
+
+
+def _migrate_flags(tail):
+    """`(switches, unit, only, limit)` or None for a usage error. Switches: --dry-run, --apply (not both)."""
+    switches, unit, only, limit, i = set(), None, None, None, 0
+    try:
+        while i < len(tail):
+            a = tail[i]
+            if a in ("--dry-run", "--apply"):
+                switches.add(a)
+            elif a in ("--unit", "--only", "--limit") and i + 1 < len(tail):
+                i += 1
+                if a == "--unit":
+                    unit = tail[i]
+                elif a == "--only":
+                    only = {int(x) for x in tail[i].split(",") if x.strip()}
+                else:
+                    limit = int(tail[i])
+                    if limit < 1:
+                        return None
+            else:
+                return None
+            i += 1
+    except ValueError:
+        return None
+    if {"--dry-run", "--apply"} <= switches or (only is not None and not only):
+        return None
+    return switches, unit, only, limit
 
 
 def main(argv, run=None, source=None):
@@ -887,13 +1023,14 @@ def main(argv, run=None, source=None):
         print(_USAGE)
         return 0
     if len(argv) >= 3 and argv[1] == "migrate-confirmation":
-        flags = argv[3:]
-        if set(flags) - {"--dry-run", "--apply"} or ("--dry-run" in flags and "--apply" in flags):
+        parsed = _migrate_flags(argv[3:])
+        if parsed is None:
             print(_USAGE, file=sys.stderr)
             return 2
+        flags, unit, only, limit = parsed
         config = triage._config(argv[2])
         rep = migrate(source or sources.GitHubSource(config, run=run), config, apply="--apply" in flags,
-                      sdlc_dir=argv[2])
+                      sdlc_dir=argv[2], unit=unit, only=only, limit=limit)
         print(render_migrate(rep))
         return 2 if rep["refused"] else (0 if rep["complete"] else 1)
     if len(argv) >= 3 and argv[1] == "list":

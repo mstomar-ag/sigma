@@ -84,9 +84,9 @@ def test_other_tool_results_never_read(tmp_path):
 
 def test_malformed_skipped_and_counted(tmp_path):
     m = _mod()
-    sdlc, prof = _setup(tmp_path, ["{not json", "[1,2]", _ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
+    sdlc, prof = _setup(tmp_path, ["{AskUserQuestion", "[1,2,AskUserQuestion]", _ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
     folder = _folder(prof[0], sdlc)
-    (folder / "bad.jsonl").write_bytes(b"\xff\xfe\x00")
+    (folder / "bad.jsonl").write_bytes(b"\xff\xfeAskUserQuestion\x00\n")
     out = m.scan(str(sdlc), {}, prof)
     st = out["stats"]["transcript"]
     assert len(out["candidates"]) == 1 and st["skipped"] >= 2 and st["files_read"] >= 1
@@ -103,7 +103,7 @@ def test_caps_refuse_plainly(tmp_path):
     assert len(out["candidates"]) == 2 and any("candidate cap" in r for r in out["refusals"])
     cfg = {"decision_rubric": {"import": {"max_file_bytes": 10}}}
     out = m.scan(str(sdlc), cfg, prof)
-    assert out["candidates"] == [] and any("size cap" in r for r in out["refusals"])
+    assert out["candidates"] == [] and any("size cap" in r and "bytes" in r for r in out["refusals"])
     assert out["stats"]["transcript"]["skipped"] == 1
 
 
@@ -189,3 +189,129 @@ def test_cli_scan_counts_clipped_samples_and_writes_nothing(tmp_path):
 def test_help_exits_zero():
     r = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True, timeout=30)
     assert r.returncode == 0
+
+
+class _Clock:
+    def __init__(self, step):
+        self.t, self.step = 0.0, step
+
+    def __call__(self):
+        self.t += self.step
+        return self.t
+
+
+def test_large_synthetic_transcript_streams_and_finds_late_candidate(tmp_path):
+    m = _mod()
+    sdlc = _repo(tmp_path)
+    prof = tmp_path / "prof"
+    f = _folder(prof, sdlc) / "big.jsonl"
+    filler = json.dumps({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "zz", "content": "x" * 100000}]}})
+    with open(f, "w") as fh:
+        for _ in range(60):  # about 6 MB, over the old 5 MB cap
+            fh.write(filler + "\n")
+        fh.write(_ask("t1", "Late?", ["a"]) + "\n" + _ans("t1", "Late?", "a") + "\n")
+    assert f.stat().st_size > 5000000
+    out = m.scan(str(sdlc), {}, [str(prof)])
+    assert [c["question"] for c in out["candidates"]] == ["Late?"]
+    assert out["stats"]["transcript"]["bytes_read"] >= f.stat().st_size
+
+
+def test_time_budget_reports_partial_not_silent(tmp_path):
+    m = _mod()
+    lines = []
+    for i in range(400):
+        lines += [_ask("t%d" % i, "Q%d?" % i, ["a"]), _ans("t%d" % i, "Q%d?" % i, "a")]
+    sdlc, prof = _setup(tmp_path, lines)
+    cfg = {"decision_rubric": {"import": {"time_budget_s": 5}}}
+    out = m.scan(str(sdlc), cfg, prof, clock=_Clock(2.0))
+    assert 0 < len(out["candidates"]) < 400
+    msg = [r for r in out["refusals"] if "partially read" in r]
+    assert msg and "s1.jsonl" in msg[0] and "line" in msg[0] and "time budget" in msg[0]
+    assert out["stats"]["transcript"]["partial"] == 1
+
+
+def test_project_dir_name_path_and_missing(tmp_path):
+    m = _mod()
+    sdlc = _repo(tmp_path)
+    prof = tmp_path / "prof"
+    other = tmp_path / "parent" / "box"
+    other.mkdir(parents=True)
+    d = prof / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(other.resolve()))
+    d.mkdir(parents=True)
+    _write(d, "p.jsonl", [_ask("t1", "Parent?", ["a"]), _ans("t1", "Parent?", "a")])
+    for ref in (str(other), d.name):
+        out = m.scan(str(sdlc), {}, [str(prof)], project_dirs=[ref, "no-such-folder"])
+        assert [c["question"] for c in out["candidates"]] == ["Parent?"]
+        assert any("no-such-folder" in r and "not found" in r for r in out["refusals"])
+
+
+def test_only_the_answer_is_read_from_tool_results(tmp_path):
+    m = _mod()
+    sdlc, prof = _setup(tmp_path, [
+        _ask("t1", "Q?", ["a"]), _other("t1x"),
+        json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": TOOL_MARKER + ' "Q?"="a"'}]}})])
+    out = m.scan(str(sdlc), {}, prof)
+    assert [c["choice"] for c in out["candidates"]] == ["a"]
+    assert TOOL_MARKER not in json.dumps(out)
+
+
+def test_cli_project_dir_and_bytes_total(tmp_path):
+    sdlc, prof = _setup(tmp_path, [_ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
+    (sdlc / "config.json").write_text("{}")
+    r = subprocess.run([sys.executable, str(SCRIPT), "scan", str(sdlc), "--profile", prof[0],
+                        "--project-dir", "nope", "--project-dir", "nope2"],
+                       capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert "bytes_read=" in r.stdout and r.stdout.count("not found") == 2
+
+
+def test_prefilter_parses_only_relevant_lines(tmp_path, monkeypatch):
+    m = _mod()
+    filler = [json.dumps({"type": "user", "message": {"content": "plain text %d" % i}}) for i in range(30)]
+    sdlc, prof = _setup(tmp_path, filler + [_ask("t1", "Q?", ["a"])] + filler + [_ans("t1", "Q?", "a")])
+    calls = []
+    real = m.json.loads
+    monkeypatch.setattr(m.json, "loads", lambda x, *a, **k: (calls.append(1), real(x, *a, **k))[1])
+    out = m.scan(str(sdlc), {}, prof)
+    assert len(out["candidates"]) == 1 and len(calls) == 2
+
+
+def test_bad_tool_use_id_does_not_lose_the_file(tmp_path):
+    m = _mod()
+    bad = []
+    for bid in (None, 7, ""):
+        bad.append(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": bid, "name": "AskUserQuestion",
+             "input": {"questions": [{"question": "Bad?", "options": []}]}}]}}))
+    lines = bad + [_ask("t1", "Good?", ["a"]), _ans("t1", "Good?", "a")]
+    sdlc, prof = _setup(tmp_path, lines)
+    out = m.scan(str(sdlc), {}, prof)
+    assert [c["question"] for c in out["candidates"]] == ["Good?"]
+
+
+def test_unknown_user_ref_is_refused_not_raised(tmp_path):
+    m = _mod()
+    sdlc, prof = _setup(tmp_path, [_ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
+    out = m.scan(str(sdlc), {}, prof, project_dirs=["~nouser_zz/x"])
+    assert [c["question"] for c in out["candidates"]] == ["Q?"]
+    assert any("~nouser_zz/x" in r for r in out["refusals"])
+
+
+def test_dot_refs_are_refused(tmp_path):
+    m = _mod()
+    sdlc, prof = _setup(tmp_path, [_ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
+    out = m.scan(str(sdlc), {}, prof, project_dirs=[".", ".."])
+    for ref in (".", ".."):
+        assert any(("'%s'" % ref) in r or (" %s " % ref) in r for r in out["refusals"])
+
+
+def test_deadline_checked_at_file_start(tmp_path):
+    m = _mod()
+    sdlc, prof = _setup(tmp_path, [_ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
+    ticks = iter([0.0] + [1000.0] * 50)
+    out = m.scan(str(sdlc), {"decision_rubric": {"import": {"time_budget_s": 5}}}, prof,
+                 clock=lambda: next(ticks))
+    assert out["candidates"] == []
+    assert any("time budget" in r for r in out["refusals"])

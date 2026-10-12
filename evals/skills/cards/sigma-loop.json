@@ -134,6 +134,10 @@
       "role": "library"
     },
     {
+      "path": "skills/sigma-loop/scripts/drift_shadow.py",
+      "role": "library"
+    },
+    {
       "path": "skills/sigma-loop/scripts/drift_tick.py",
       "role": "gesture"
     },

@@ -1014,6 +1014,22 @@ create the drift this release spent its life removing.
 Doing it by hand: **remove the legacy `sdlc:needs-confirmation`, then add `sdlc:goal`.** For many
 leftovers, run `/sigma-promote migrate-confirmation` once.
 
+#### Runbook: migrating a board in slices
+
+1. Dry run (the default, zero writes): `promote.py migrate-confirmation .sdlc`. Each line names the issue, its
+   destination (`armed at P<n>` or `parked`), its population (human, follow-up, ownership hold, scope hold) and the
+   reason. It exits non-zero when the fetch hit its cap or any issue could not be read; fix that before applying.
+2. Slice it: `--unit NAME` (issues carrying that unit's label), `--only N,N,...`, `--limit K` (first K open issues).
+   Repeat the dry run with the same slice and read it.
+3. Apply the same slice: add `--apply`. Writes are paced (`ai_filed.migration.max_writes_per_minute`, default 30) and
+   a rate-limit answer pauses and retries instead of failing the rest. A write that still fails leaves that issue
+   alone and the report says `covered N of M`; rerun to finish the rest (a second run changes nothing already done).
+4. Verify: after an apply the command re-reads the labelled set and prints the open issues that still carry the
+   retired label. One inside the slice is a failure (non-zero exit); ones outside it are the next slice.
+5. Every `parked` result is a real decision for a person: run `/sigma-unpark` on it. Already-parked issues stay parked.
+
+`/sigma-doctor` counts the open issues still carrying the retired label while the triage gate is on.
+
 > ⚠️ **Adding `sdlc:goal` on its own does nothing.** The issue then carries *both* labels, and both
 > queue paths refuse it — so it looks approved and is picked by nothing. That is the single most
 > common way to create drift, and it is the intuitive gesture, which is why the command exists.

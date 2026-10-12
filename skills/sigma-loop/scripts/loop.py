@@ -4213,6 +4213,10 @@ def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transit
                 _load("applier").open_for_park(sdlc_dir, config, goal, qkind, source=source)
             except Exception:                          # noqa: BLE001 - never block the park
                 pass
+            try:                                       # #1229: drift judge, shadow only
+                _load("drift_shadow").shadow_for_park(sdlc_dir, config, goal, qkind, detail or result)
+            except Exception:                          # noqa: BLE001 - never block the park
+                pass
     # Single atomic patch (#531) -- the old load_cursor-then-save_cursor pair spanned two calls,
     # so two concurrent _record()s could each read the same pre-increment cursor and lose one.
     state.advance_cursor(sdlc_dir, f"last: {pathlib.Path(goal).name} -> {result}")
