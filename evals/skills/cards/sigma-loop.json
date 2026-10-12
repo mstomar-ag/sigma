@@ -434,6 +434,10 @@
       "role": "library"
     },
     {
+      "path": "skills/sigma-loop/scripts/decision_import.py",
+      "role": "gesture"
+    },
+    {
       "path": "skills/sigma-loop/scripts/rule_draft.py",
       "role": "gesture"
     },
