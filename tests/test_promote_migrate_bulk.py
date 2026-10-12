@@ -245,3 +245,36 @@ def test_dry_run_does_not_verify(tmp_path):
     src.add(1, PROPOSED, "priority:P1")
     rep = promote.migrate(src, CFG, apply=False, sdlc_dir=str(tmp_path))
     assert rep["remaining"] is None
+
+
+def test_stale_list_read_for_one_issue_is_settled_by_a_direct_read(tmp_path):
+    src = BulkSource()
+    for n in range(1, 4):
+        src.add(n, PROPOSED, "priority:P1")
+    real = src._run
+    state = {"calls": 0}
+
+    def lagging(args):
+        import json
+        rows = json.loads(real(args))
+        state["calls"] += 1
+        kv = dict(a.split("=", 1) for i, a in enumerate(args) if i and args[i - 1] == "-f")
+        if kv.get("state") == "open" and state["calls"] > 1:
+            rows.append({"number": 3, "title": "t", "state": "open", "body": "",
+                         "labels": [{"name": PROPOSED}]})
+        return json.dumps(rows)
+    src._run = lagging
+    c = Clock()
+    rep = promote.migrate(src, CFG, apply=True, sdlc_dir=str(tmp_path), clock=c.now, sleep=c.sleep)
+    assert PROPOSED not in src.store[3]["labels"]
+    assert rep["remaining"] == [] and rep["complete"] and not rep["verify_error"]
+
+
+def test_direct_read_still_showing_the_label_stays_incomplete(tmp_path):
+    src = BulkSource()
+    src.add(1, PROPOSED, "priority:P1")
+    src.fail_swap = {1}
+    c = Clock()
+    rep = promote.migrate(src, CFG, apply=True, sdlc_dir=str(tmp_path), clock=c.now, sleep=c.sleep)
+    assert rep["remaining"] == ["1"] and not rep["complete"]
+    assert "FAILED: 1 of them" in promote.render_migrate(rep)

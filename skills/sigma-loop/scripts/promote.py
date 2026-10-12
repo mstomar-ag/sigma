@@ -877,6 +877,14 @@ def _in_unit(item, unit):
     return want.lower() in [n.lower() for n in _label_names(item)]
 
 
+def _still_labelled(source, number):
+    """The list read can lag the label swap just made; a single-issue read is consistent. One extra read per
+    apparently remaining issue of the run; a failed read raises, so the verify reports `verify_error`."""
+    data = source._read_issue(number, ["labels"])
+    return any((l.get("name") if isinstance(l, dict) else l) == source.proposed_label
+               for l in data.get("labels") or [])
+
+
 def migrate(source, config, apply=False, sdlc_dir=".sdlc", unit=None, only=None, limit=None,
             clock=None, sleep=None):
     """Report dict: `apply`, `refused` (reason or None), `error`, `total` (M: every labelled issue fetched,
@@ -885,7 +893,7 @@ def migrate(source, config, apply=False, sdlc_dir=".sdlc", unit=None, only=None,
 
     Slices: `unit` keeps issues carrying that unit's label, `only` (a set of numbers) keeps those numbers, `limit`
     stops after that many OPEN issues; M counts the issues in the slice. After an apply the labelled set is read
-    again: `remaining` lists the open issues still carrying the label, and one inside the slice makes the run
+    again: `remaining` lists the open issues still carrying the label (a run's own issue the list shows is re-read directly), and one inside the slice makes the run
     incomplete (`verify_error` when that read fails)."""
     rep = {"apply": bool(apply), "refused": None, "error": "", "total": None, "covered": 0,
            "complete": False, "truncated": False, "items": [], "remaining": None, "verify_error": "",
@@ -947,8 +955,9 @@ def migrate(source, config, apply=False, sdlc_dir=".sdlc", unit=None, only=None,
         try:
             left = sources.fetch_issues_rest(source._run, getattr(source, "repo", None), [source.proposed_label],
                                              cap=cap, state="open")
-            rep["remaining"] = [str(i.get("number")) for i in left]
             mine = {r["number"] for r in rep["items"]}
+            rep["remaining"] = [n for n in (str(i.get("number")) for i in left)
+                                if n not in mine or _still_labelled(source, n)]
             if any(n in mine for n in rep["remaining"]):
                 rep["complete"] = False
         except Exception as exc:                        # noqa: BLE001 - an unproven result is not complete
