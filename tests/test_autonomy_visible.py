@@ -88,7 +88,7 @@ def test_unpark_line_below_level_one_has_the_count(tmp_path):
     cfg = _cfg()
     _answer(tmp_path, cfg, 7)
     assert A.learning_line(tmp_path, "needs_decision", cfg) == (
-        "the rulebook is still learning and will keep asking this kind (7 of 10 answers)")
+        "the rulebook is still learning and will keep asking this kind (7 of 10 answers in area repo)")
     assert "(0 of 10 answers)" in A.learning_line(tmp_path, "other_kind", cfg)
     _answer(tmp_path, cfg, 3)
     assert A.learning_line(tmp_path, "needs_decision", cfg) is None
@@ -109,7 +109,7 @@ def test_brief_and_render_carry_the_line_only_when_open(tmp_path):
     _answer(tmp_path, cfg, 7)
     full = dict(cfg, discovery={"source": "github", "github": {"repo": "acme/widget"}})
     on = U.brief(tmp_path, full, 5, source=_Src())
-    assert on["learning"].endswith("(7 of 10 answers)")
+    assert on["learning"].endswith("(7 of 10 answers in area repo)")
     assert "  the rulebook is still learning" in U.render_brief(on)
 
 
@@ -123,3 +123,36 @@ def test_gate_closed_is_byte_identical(tmp_path):
     b = U.brief(tmp_path, full, 5, source=_Src())
     assert "learning" not in b
     assert "learning" not in U.render_brief(b)
+
+
+def _held_by_veto(tmp_path, cfg, areas=("repo",)):
+    for a in areas:
+        _answer(tmp_path, cfg, 12, area=a)
+        _watch(tmp_path, cfg, 2, area=a)
+    rid = DS.list_by(tmp_path, cfg)[0]["id"]
+    A.veto(tmp_path, rid, cfg, machine="m1")
+
+
+def test_held_by_veto_wording_names_the_hold(tmp_path):
+    cfg = _cfg()
+    _held_by_veto(tmp_path, cfg)
+    row = A.readout(tmp_path, cfg)["kinds"][0]
+    assert (row["level"], row["paused"], row["answers"]) == (0, False, 12)
+    assert _doctor_lines(cfg, tmp_path) == [
+        "      needs_decision / repo: 12 answers is enough, held at level 0 by 1 veto, still asking"]
+    assert "of 10 answers" not in A.describe(row)
+
+
+def test_unpark_line_held_by_veto_names_the_hold_and_area(tmp_path):
+    cfg = _cfg()
+    _held_by_veto(tmp_path, cfg)
+    line = A.learning_line(tmp_path, "needs_decision", cfg)
+    assert line == ("the rulebook is holding this kind at level 0 after a veto and will keep asking "
+                    "(area repo, 12 answers)")
+
+
+def test_unpark_line_names_the_best_area_of_several(tmp_path):
+    cfg = _cfg()
+    _answer(tmp_path, cfg, 3, area="web")
+    _answer(tmp_path, cfg, 7, area="api")
+    assert A.learning_line(tmp_path, "needs_decision", cfg).endswith("(7 of 10 answers in area api)")

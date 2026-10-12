@@ -297,6 +297,9 @@ def describe(row):
         return head + HARDSTOP_TEXT
     if row["paused"]:
         return head + "paused after vetoes, still asking"
+    if row["level"] == 0 and row["answers"] >= row["answers_needed"] and row["vetoes"]:
+        return head + "%d answers is enough, held at level 0 by %d veto%s, still asking" % (
+            row["answers"], row["vetoes"], "" if row["vetoes"] == 1 else "es")
     if row["level"] == 0:
         return head + "%d of %d answers, still asking" % (row["answers"], row["answers_needed"])
     if row["next_level"] is None:
@@ -320,9 +323,14 @@ def learning_line(sdlc_dir, qkind, config):
         best = max(rows, key=lambda r: (r["level"], r["answers"]), default=None)
         if best is not None and best["level"] >= 1:
             return None
-        have = best["answers"] if best else 0
-        return "the rulebook is still learning and will keep asking this kind (%d of %d answers)" % (
-            have, settings(config)["l1_min_answers"])
+        need = settings(config)["l1_min_answers"]
+        if best is not None and best["answers"] >= need and best["vetoes"]:
+            return ("the rulebook is holding this kind at level 0 after a veto and will keep asking "
+                    "(area %s, %d answers)" % (best["area"] or "-", best["answers"]))
+        if best is None:
+            return "the rulebook is still learning and will keep asking this kind (0 of %d answers)" % need
+        return "the rulebook is still learning and will keep asking this kind (%d of %d answers in area %s)" % (
+            best["answers"], need, best["area"] or "-")
     except Exception:
         return None
 
