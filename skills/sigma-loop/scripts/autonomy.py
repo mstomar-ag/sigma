@@ -265,10 +265,66 @@ def readout(sdlc_dir, config):
         pairs = {(r.get("qkind"), _area(r.get("area"))) for r in store.list_by(sdlc_dir, config)}
         pairs |= {(f.get("qkind"), _area(f.get("area"))) for p in ("watch-", "veto-") for f in _facts(sdlc_dir, p)}
         rows = [_state(sdlc_dir, q, a, config) for q, a in sorted(pairs, key=str) if isinstance(q, str)]
+        rows = [dict(r, **_need(r, config)) for r in rows]
         return {"enabled": True, "kinds": rows, "watch_records": len(_facts(sdlc_dir, "watch-")),
                 "vetoes": len(_facts(sdlc_dir, "veto-"))}
     except Exception:
         return {"enabled": False, "error": "unreadable"}
+
+
+def _need(row, config):
+    """What the next level asks for, from the thresholds in force; all None at the top or at the cap."""
+    lvl = row["level"]
+    top = HARDSTOP_CAP if row["capped"] else 4
+    if lvl >= top:
+        return {"next_level": None, "answers_needed": None, "comparisons_needed": None, "agreement_needed": None}
+    cfg, nxt = settings(config), lvl + 1
+    if nxt == 1:
+        return {"next_level": 1, "answers_needed": cfg["l1_min_answers"], "comparisons_needed": 0,
+                "agreement_needed": None}
+    return {"next_level": nxt, "answers_needed": cfg["l%d_min_answers" % nxt],
+            "comparisons_needed": cfg["l%d_min_answers" % nxt], "agreement_needed": cfg["l%d_agreement" % nxt]}
+
+
+NO_RECORDS_LINE = "learning has not started, every question is asked"
+HARDSTOP_TEXT = "hard-stop kind, never learns beyond level 2, always asked"
+
+
+def describe(row):
+    """One plain line for a row of `readout`; the doctor and the question list share it."""
+    head = "%s / %s: " % (row["qkind"], row["area"] or "-")
+    if row["capped"]:
+        return head + HARDSTOP_TEXT
+    if row["paused"]:
+        return head + "paused after vetoes, still asking"
+    if row["level"] == 0:
+        return head + "%d of %d answers, still asking" % (row["answers"], row["answers_needed"])
+    if row["next_level"] is None:
+        return head + "level %d, nothing further to learn" % row["level"]
+    agree = "none yet" if row["agreement"] is None else "%d%%" % round(row["agreement"] * 100)
+    return head + ("level %d, level %d needs %d answers (have %d), %d comparisons (have %d), %d%% agreement (have %s)"
+                   % (row["level"], row["next_level"], row["answers_needed"], row["answers"],
+                      row["comparisons_needed"], row["comparisons"], round(row["agreement_needed"] * 100), agree))
+
+
+def learning_line(sdlc_dir, qkind, config):
+    """One line for the question list when `qkind` is below level 1 or a hard-stop kind; None when the
+    gate is closed or the kind has learned. Never raises."""
+    try:
+        out = readout(sdlc_dir, config)
+        if not out.get("enabled") or not isinstance(qkind, str):
+            return None
+        rows = [r for r in out["kinds"] if r["qkind"] == qkind]
+        if any(r["capped"] for r in rows) or _load("hard_stop").is_hardstop_kind(qkind, None, config):
+            return "%s: it never learns beyond level 2 and is always asked" % qkind
+        best = max(rows, key=lambda r: (r["level"], r["answers"]), default=None)
+        if best is not None and best["level"] >= 1:
+            return None
+        have = best["answers"] if best else 0
+        return "the rulebook is still learning and will keep asking this kind (%d of %d answers)" % (
+            have, settings(config)["l1_min_answers"])
+    except Exception:
+        return None
 
 
 def _parse_time(text):

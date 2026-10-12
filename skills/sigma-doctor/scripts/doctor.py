@@ -4905,8 +4905,9 @@ def _autonomy_state(cfg, sdlc_dir=None):
             return "off (default)"
         rows = ["%s/%s level %d%s%s" % (r["qkind"], r["area"] or "-", r["level"], " (paused)" if r["paused"] else "",
                                          _category_clause(r)) for r in out["kinds"]]
-        return "on: " + ("; ".join(rows) if rows else "no kinds yet") + "; %d watch records, %d vetoes" % (
+        head = "on: " + ("; ".join(rows) if rows else "no kinds yet") + "; %d watch records, %d vetoes" % (
             out["watch_records"], out["vetoes"])
+        return head + "".join("\n      " + l for l in ([mod.NO_RECORDS_LINE] if not rows else [mod.describe(r) for r in out["kinds"]]))
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
 

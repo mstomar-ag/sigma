@@ -362,6 +362,53 @@ def scheduler_tick(config, sdlc_dir, *, environ=None, now=None, budget=30, clock
                    noted=collected)
 
 
+def due_units(config, sdlc_dir, *, now=None, budget=30, clock=time.monotonic, deps=None):
+    """READ-ONLY look at which units the next upkeep pass would take (#1224); the session-start report, never the mechanism.
+    -> {"due": [{unit, behind, base, last_success_age, reason}], "unknown": [unit], "out_of_time": bool}, most behind first.
+    Project door only (the session shell does not carry the machine variable). Same gate reader, include and exclude lists,
+    cooldown filter, measure and due rule as `scheduler_tick`, inside the same kind of time budget; it writes nothing, not
+    even the status file. A unit whose count cannot be measured is listed under `unknown` and is never due."""
+    deps = deps or {}
+    out = {"due": [], "unknown": [], "out_of_time": False}
+    reading = feature_upkeep.read(config)
+    if not reading.enabled:
+        return out
+    now = int(time.time() if now is None else now)
+    settings = reading.settings
+    state = _sibling("feature_upkeep_state")
+    sched = state.schedule(settings)
+    root = str(pathlib.Path(sdlc_dir).resolve().parent)
+    names = selected((deps.get("list_units") or list_units)(sdlc_dir), settings["units.include"], settings["units.exclude"])
+    reads = {n: state.read_state(sdlc_dir, n, now) for n in names}
+    waiting = [n for n in names if state.decide(sched, reads[n], _Opaque, now).reason != "cooldown"]
+    deadline = clock() + budget
+    measure = deps.get("measure") or make_measure(config, settings, sdlc_dir, root, now, expired=lambda: clock() >= deadline)
+    found = []
+    for name in waiting:
+        if clock() >= deadline:
+            out["out_of_time"] = True
+            break
+        try:
+            drift = measure(name, reads[name].doc)
+        except OutOfTime:
+            out["out_of_time"] = True
+            break
+        if type(drift.behind) is not int:
+            out["unknown"].append(name)
+            continue
+        verdict = state.decide(sched, reads[name], drift, now)
+        if verdict.due:
+            success = (reads[name].doc or {}).get("last_success_at")
+            age = max(0, now - success) if isinstance(success, int) and type(success) is not bool else None
+            found.append((0, name, drift, verdict, age))
+    found.sort(key=lambda item: _rank(item[:3]))
+    base_ref = refs_of(config, "x")[0]
+    base = base_ref.split("/", 1)[-1] if base_ref else None
+    out["due"] = [{"unit": n, "behind": d.behind, "base": base, "last_success_age": a, "reason": v.reason}
+                  for _, n, d, v, a in found]
+    return out
+
+
 # ------------------------------------------------------------------------------------------ the doctor's rows
 
 def project_open(config):

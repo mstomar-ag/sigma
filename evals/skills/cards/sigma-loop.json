@@ -518,6 +518,10 @@
       "role": "gesture"
     },
     {
+      "path": "skills/sigma-loop/scripts/upkeep_session.py",
+      "role": "gesture"
+    },
+    {
       "path": "skills/sigma-loop/scripts/upstream.py",
       "role": "gesture"
     },
