@@ -430,23 +430,29 @@ def _clip(s, n=CLIP):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _add_options(v):
+    """The one option set every verb takes."""
+    v.add_argument("sdlc_dir")
+    v.add_argument("--profile", action="append", default=[], metavar="DIR",
+                   help="Claude Code profile directory (repeatable)")
+    v.add_argument("--project-dir", action="append", default=[], metavar="DIR",
+                   help="extra project folder: a folder name or a path (repeatable); "
+                        "a dash-leading name works as: --project-dir -srv-demo-work-repo")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="verb", required=True)
-    s = sub.add_parser("scan", help="report past-decision candidates (writes nothing)")
-    s.add_argument("sdlc_dir")
-    s.add_argument("--profile", action="append", default=[], metavar="DIR",
-                   help="Claude Code profile directory (repeatable)")
-    s.add_argument("--project-dir", action="append", default=[], metavar="DIR",
-                   help="extra project folder to scan: a folder name or a path (repeatable)")
-    for verb, text in (("plan", "show what apply would write (writes nothing)"),
+    for verb, text in (("scan", "report past-decision candidates (writes nothing)"),
+                       ("plan", "show what apply would write (writes nothing)"),
                        ("apply", "write the records and comparisons (idempotent)")):
-        v = sub.add_parser(verb, help=text)
-        v.add_argument("sdlc_dir")
-        v.add_argument("--profile", action="append", default=[], metavar="DIR",
-                       help="Claude Code profile directory (repeatable)")
-        v.add_argument("--project-dir", action="append", default=[], metavar="DIR",
-                       help="extra project folder to scan: a folder name or a path (repeatable)")
+        _add_options(sub.add_parser(verb, help=text))
+    argv = list(sys.argv[1:] if argv is None else argv)
+    known = set(sub.choices["scan"]._option_string_actions)
+    for i in range(len(argv) - 2, -1, -1):  # join a two-word dash-leading folder name
+        nxt = argv[i + 1]
+        if argv[i] == "--project-dir" and nxt.startswith("-") and nxt.split("=")[0] not in known:
+            argv[i:i + 2] = ["--project-dir=" + nxt]
     args = p.parse_args(argv)
     try:
         config = _load("state").load_config(args.sdlc_dir)
