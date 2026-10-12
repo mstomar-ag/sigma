@@ -171,6 +171,12 @@ def _rank(item):
     return (0 if known else 1, -(drift.behind if known else 0), item[1])
 
 
+def _drift_runner(cwd, argv):
+    """The drift module's `run(cwd, argv)` convention has argv start with `git`; the pass default runner prepends it itself."""
+    argv = list(argv)
+    return _sibling("feature_upkeep_pass")._git(cwd, argv[1:] if argv[:1] == ["git"] else argv)
+
+
 class OutOfTime(Exception):
     """Raised by a measure that found the tick's budget spent before its next git read: the unit is left unexamined."""
 
@@ -179,7 +185,7 @@ def make_measure(config, settings, sdlc_dir, root, now, expired=None):
     """-> measure(unit, doc) -> Drift, built on the bounded group-kill git runner. The two reads that do not depend on the
     unit (the shallow check and the base walk) are made once per tick. `expired()` is asked before each read, so the budget
     is enforced inside a unit's measurement, not only between units; it raises OutOfTime (each read is itself bounded)."""
-    drift_mod, pass_mod = _sibling("feature_upkeep_drift"), _sibling("feature_upkeep_pass")
+    drift_mod = _sibling("feature_upkeep_drift")
     tune, shared = drift_mod.tuning(settings), {}
 
     def check():
@@ -192,12 +198,12 @@ def make_measure(config, settings, sdlc_dir, root, now, expired=None):
         if base_ref is None:
             return drift_mod.Drift(drift_mod.UNKNOWN, drift_mod.UNKNOWN, drift_mod.UNKNOWN, drift_mod.UNKNOWN, ("no-base",))
         if "shallow" not in shared:
-            shared["shallow"] = drift_mod.is_shallow(pass_mod._git, root)
+            shared["shallow"] = drift_mod.is_shallow(_drift_runner, root)
         check()
         if "base" not in shared:
-            shared["base"] = drift_mod.walk(pass_mod._git, root, base_ref, None, drift_mod.WALK_CAP)
+            shared["base"] = drift_mod.walk(_drift_runner, root, base_ref, None, drift_mod.WALK_CAP)
         check()
-        return drift_mod.measure_unit(pass_mod._git, root, base_ref, unit_ref, tune, now,
+        return drift_mod.measure_unit(_drift_runner, root, base_ref, unit_ref, tune, now,
                                       anchor=(doc or {}).get("unit_tip"), base_walk=shared["base"], shallow=shared["shallow"])
     return measure
 

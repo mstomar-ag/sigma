@@ -405,6 +405,30 @@ def test_make_measure_stops_before_the_git_reads_when_the_deadline_has_passed(tm
     raise AssertionError("measure ran past an expired budget")
 
 
+def _git_repo(path, base_extra, unit_extra):
+    """A real repository whose remote-tracking base is `base_extra` commits ahead of its unit ref."""
+    def git(*a):
+        subprocess.run(["git", "-C", str(path)] + list(a), check=True, capture_output=True,
+                       env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
+    subprocess.run(["git", "init", "-q", "--initial-branch=main", str(path)], check=True, capture_output=True)
+    git("commit", "-q", "--allow-empty", "-m", "root")
+    git("update-ref", "refs/remotes/origin/feature/Voice", "HEAD")
+    for i in range(base_extra):
+        git("commit", "-q", "--allow-empty", "-m", "base %d" % i)
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+
+def test_make_measure_with_the_default_runner_counts_a_real_repository(tmp_path):
+    m = sched()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git_repo(repo, 3, 0)
+    cfg = open_config()
+    measure = m.make_measure(cfg, m.feature_upkeep.read(cfg).settings, project(tmp_path), str(repo), 1_000_000)
+    drift = measure("Voice", None)
+    assert drift.behind == 3 and "git-failed" not in drift.notes, drift
+
+
 # ------------------------------------------------------------------------------------------ the doctor's rows
 
 def test_health_rows_show_liveness_and_readiness_only_when_the_block_is_on(tmp_path):
