@@ -86,7 +86,9 @@ def split(ids):
 
 def _human(sdlc_dir, qkind, area, config):
     recs = _load("decision_store").list_by(sdlc_dir, config, qkind=qkind, area=area)
+    # An imported record of kind unknown has no real kind behind it (#1239): it never feeds a draft.
     return {r["id"]: r["choice"] for r in recs if isinstance(r, dict) and r.get("how") in ("human", "imported")
+            and not (r.get("how") == "imported" and r.get("qkind") == "unknown")
             and isinstance(r.get("id"), str) and isinstance(r.get("choice"), str) and r["choice"]}
 
 

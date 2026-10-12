@@ -190,3 +190,28 @@ def test_gate_closed_public_visibility_stays_inert_and_unchanged(tmp_path):
     r = subprocess.run([sys.executable, str(SCRIPTS / "rule_draft.py"), "list", sd],
                        capture_output=True, text=True, stdin=subprocess.DEVNULL)
     assert r.returncode == 0 and json.loads(r.stdout) == [] and r.stderr == ""
+
+
+def _train_how(sd, cfg, qkind, how, area="docs"):
+    ids = ["r%03d" % i for i in range(40)]
+    for rid in ids:
+        DS.append(sd, {"id": rid, "how": how, "qkind": qkind, "area": area, "choice": "merge"}, cfg, now=T0)
+    for _ in range(8):
+        AU.record_watch(sd, qkind, area, "merge", "merge", cfg, now=T0, machine="m1")
+
+
+def test_imported_unknown_records_never_feed_a_draft(tmp_path):
+    """#1239: imported records of kind unknown are skipped; live unknown and imported known are not."""
+    sd, cfg = _sd(tmp_path), _cfg()
+    _train_how(sd, cfg, "unknown", "imported")
+    assert RD._human(sd, "unknown", "docs", cfg) == {}
+    assert RD.list_patterns(sd, cfg) == []
+    # live unknown records still count as evidence (the kind itself is refused elsewhere)
+    sd2 = str(tmp_path / "b" / ".sdlc")
+    _train_how(sd2, cfg, "unknown", "human")
+    assert len(RD._human(sd2, "unknown", "docs", cfg)) == 40
+    # imported records of a known kind still draft
+    sd3 = str(tmp_path / "c" / ".sdlc")
+    _train_how(sd3, cfg, "needs_decision", "imported")
+    assert RD.draft(sd3, "needs_decision", "docs", cfg, now=T0)["status"] == "drafted"
+    assert [r["qkind"] for r in RD.list_patterns(sd3, cfg)] == ["needs_decision"]
