@@ -68,7 +68,9 @@ def public_repo_warning(config, remote_is_public):
 #: `max_file_bytes` is a streaming-safe ceiling (PROVISIONAL, 500 MB); the real bound is
 #: `time_budget_s` (PROVISIONAL, 60), a total per scan, and a file it cuts short is reported partial.
 IMPORT_DEFAULTS = {"max_file_bytes": 500000000, "max_candidates": 500, "max_issues": 50,
-                   "time_budget_s": 60, "comments": False, "profile_dirs": [], "project_dirs": []}
+                   "time_budget_s": 60, "comments": False, "profile_dirs": [], "project_dirs": [],
+                   "classifier": "table", "model": "haiku",
+                   "max_budget_usd_per_call": 0.05, "max_budget_usd_per_run": 1.0}  # budgets PROVISIONAL
 
 
 def import_limits(config):
@@ -84,6 +86,14 @@ def import_limits(config):
                 out[key] = v
         if sub.get("comments") is True:
             out["comments"] = True
+        if sub.get("classifier") == "model":
+            out["classifier"] = "model"
+        if isinstance(sub.get("model"), str) and sub["model"].strip():
+            out["model"] = sub["model"].strip()
+        for key in ("max_budget_usd_per_call", "max_budget_usd_per_run"):
+            v = sub.get(key)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < float("inf"):
+                out[key] = float(v)
         dirs = sub.get("profile_dirs")
         if isinstance(dirs, list):
             out["profile_dirs"] = [d for d in dirs if isinstance(d, str) and d]
