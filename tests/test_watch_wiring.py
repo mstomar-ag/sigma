@@ -214,3 +214,31 @@ def test_end_to_end_red_control_without_the_comparison_level_stays_one(tmp_path,
     monkeypatch.setattr(u.decision_record, "record_comparison", lambda *a, **k: None)
     _unpark_n(sd, cfg, 14, u)
     assert AU.level(sd, "needs_decision", "docs", cfg) == 1
+
+
+# 7 -- goal 1234: the comparison starter honours the category threshold -------------------------
+
+def _cats(sd, cats):
+    os.makedirs(sd, exist_ok=True)
+    with open(os.path.join(sd, "categories.json"), "w") as f:
+        json.dump({"schema": "sigma/categories@1", "categories": cats}, f)
+
+
+def test_would_uses_category_first_level_threshold(tmp_path):
+    sd, cfg = str(tmp_path / ".sdlc"), _cfg(l1=3)
+    _seed(sd, cfg, ["merge"])
+    assert DR.would_for(sd, _rec(), cfg) is None
+    _cats(sd, [{"id": "fast", "areas": ["docs"], "levels": {"l1_min_answers": 1}}])
+    assert DR.would_for(sd, _rec(), cfg) == "merge"
+    _cats(sd, [{"id": "slow", "areas": ["docs"], "levels": {"l1_min_answers": 5}}])
+    _seed(sd, cfg, ["merge"] * 2)
+    assert DR.would_for(sd, _rec(), cfg) is None
+
+
+def test_would_pair_outside_every_category_is_unchanged(tmp_path):
+    sd, cfg = str(tmp_path / ".sdlc"), _cfg(l1=3)
+    _cats(sd, [{"id": "fast", "areas": ["src"], "levels": {"l1_min_answers": 1}}])
+    _seed(sd, cfg, ["merge"], area="docs")
+    assert DR.would_for(sd, _rec(), cfg) is None
+    _seed(sd, cfg, ["merge"] * 2, area="docs")
+    assert DR.would_for(sd, _rec(), cfg) == "merge"

@@ -192,7 +192,9 @@ def _ladder(answers, comparisons, agreement, cfg):
     return lvl if lvl >= 1 else 0
 
 
-def _state(sdlc_dir, qkind, area, config):
+def _pair_settings(sdlc_dir, qkind, area, config):
+    """`(thresholds, category, has_file)` in force for the pair: the global settings with the first
+    covering category's overrides applied. The one resolution shared by the ladder and the watch."""
     cfg = settings(config)
     cat, has_file = None, False
     try:
@@ -203,6 +205,11 @@ def _state(sdlc_dir, qkind, area, config):
             cfg.update(cat["levels"])
     except Exception:
         cat = None
+    return cfg, cat, has_file
+
+
+def _state(sdlc_dir, qkind, area, config):
+    cfg, cat, has_file = _pair_settings(sdlc_dir, qkind, area, config)
     store = _load("decision_store")
     recs = [r for r in store.list_by(sdlc_dir, config, qkind=qkind) if _pair(r, qkind, area)]
     answers = sum(1 for r in recs if r.get("how") == "human")
