@@ -264,12 +264,13 @@ def brief(sdlc_dir, config, number, source=None, run=None):
 
     answered = _recorded_answers(body)
     questions = _questions_for(reason_class, reason, open_refs, answered)
+    learning = _load("autonomy").learning_line(sdlc_dir, reason_class, config)
     return {"number": str(number), "title": data.get("title") or "",
             "state": data.get("state"), "labels": sorted(names),
             "park_reason": reason, "park_reason_is_sigmas": from_sigma,
             "reason_class": reason_class, "decision_tier": tier, "tier_signal": tier_signal,
             "blockers": blockers, "prior_answers": answered,
-            "questions": questions, "degraded": []}
+            "questions": questions, "degraded": [], **({"learning": learning} if learning else {})}
 
 
 def _questions_for(reason_class, reason, open_refs, answered):
@@ -572,6 +573,8 @@ def render_brief(b):
                                             "still open" if blocker["open"] else "closed"))
     if b.get("prior_answers"):
         lines.append("  already answered: %s" % ", ".join(sorted(b["prior_answers"])))
+    if b.get("learning"):
+        lines.append("  %s" % b["learning"])
     lines.append("  questions:")
     for q in b["questions"]:
         opts = ("  [%s]" % " / ".join(q["options"])) if q.get("options") else ""
