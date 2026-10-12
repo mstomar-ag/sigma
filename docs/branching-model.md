@@ -2272,6 +2272,8 @@ Two things about it that are easy to get wrong:
   brought forward again. It costs no data — nothing is rewritten — but calling it "one upkeep pass"
   understates it: upkeep is off for that project until the template or `merge_method` changes.
 
+- **The merge trigger covers only the machine that merged** (#1225). With `upkeep.enabled` true, a successful `work.py merge` runs the scheduler's due-check once, so a unit behind that base is considered at once on that machine. Other machines are not told: they rely on the watch tick and the session-start report, and a cross-machine trigger is not built.
+
 ## 16. Feature-level priority — optional, opt-in, and recorded on the unit
 
 A unit's own individual issues each carry their own `priority:P0`–`P4` label as always (§4 is

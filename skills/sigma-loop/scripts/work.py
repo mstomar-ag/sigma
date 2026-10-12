@@ -2020,6 +2020,27 @@ def _feature_upkeep():
     return _FEATURE_UPKEEP
 
 
+def _upkeep_trigger_call(argv):
+    """The one timed process the merge trigger starts. -> its exit code. The seam tests replace."""
+    return subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+
+
+def _upkeep_merge_trigger(sdlc_dir, config):
+    """#1225: after a landing, ask the upkeep scheduler ONCE whether a unit is due (this machine only; other machines
+    rely on the watch tick). Gate first: closed means no call and no output. Runs through run_with_timeout.py so a hang
+    cannot hold the merge; any failure or timeout is logged once on stderr and never changes the merge's result."""
+    try:
+        if not _feature_upkeep().enabled(config):
+            return
+        timeout = os.environ.get("SIGMA_WATCH_CALL_TIMEOUT") or "120"
+        rc = _upkeep_trigger_call([sys.executable, str(_HERE / "run_with_timeout.py"), timeout,
+                                   str(_HERE / "feature_upkeep_sched.py"), "decision", str(sdlc_dir)])
+        if rc != 0:
+            print(f"sigma: upkeep trigger exited {rc} (non-fatal)", file=sys.stderr)
+    except Exception as exc:                # noqa: BLE001 - the merge already landed; nothing here may change its outcome
+        print(f"sigma: upkeep trigger skipped (non-fatal): {type(exc).__name__}", file=sys.stderr)
+
+
 def _cut_tip_fields(config, run, path, remote, base):
     """The goal record's cut-from tip, as the extra keys to save: `{"cut_tip": <sha>}` or `{}`.
 
@@ -6758,6 +6779,7 @@ def merge(sdlc_dir, config, goal, run=None, sleep=time.sleep):
         except Exception as exc:
             print("merge observation pending: %s" % exc, file=sys.stderr)
     actionlog.safe_append(sdlc_dir, goal, "merged", pr=rec["pr"])
+    _upkeep_merge_trigger(sdlc_dir, config)         # #1225: LAST effect; own guard, never alters the line below
     # The clause goes at the END, after `gate_detail`: SKILL.md's decision table routes on the
     # `PR #N merged (<method>) — …` opening, which stays exactly as it was.
     return f"PR #{rec['pr']} merged ({method}) — {gate_detail}{closed}{reconciled}"

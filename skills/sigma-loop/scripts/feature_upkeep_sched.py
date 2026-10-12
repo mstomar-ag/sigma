@@ -52,6 +52,8 @@ RECORD_SCHEMA = "upkeep-job/1"
 STATUS_REL = "state/upkeep/scheduler.json"      # the status file: rewritten every open tick, so its AGE is tick liveness
 RECORD_REL = "state/upkeep/job.json"            # the job's own record: running, then done (written by the job, noted by the watcher)
 LOCK_REL = "state/upkeep/job.lock"              # held (flock) for the job's whole life; the kernel frees it on any death
+LAST_START_REL = "state/upkeep/last_start.json"   # who started the last job: trigger (a merge), tick (the watcher) or pick
+STARTED_BY = ("trigger", "tick", "pick")
 BEAT_REL = "state/upkeep/job.heartbeat"         # touched from the job's poll loop
 STOP_REL = "state/upkeep.stop"                  # the operator's lever; the job never deletes it
 WATCH_STOP_REL = "state/watch.stop"             # the watcher's own stop file also stops a running job
@@ -302,10 +304,16 @@ def _status(sdlc_dir, now, **fields):
 
 
 @feature_upkeep.gated("machine")
-def scheduler_tick(config, sdlc_dir, *, environ=None, now=None, budget=30, clock=time.monotonic, deps=None):
+def scheduler_tick(config, sdlc_dir, *, environ=None, now=None, budget=30, clock=time.monotonic, deps=None,
+                   started_by="tick"):
     """One open tick (see the module docstring). -> a dict with `decision`: refused, job-running, idle (nothing due),
-    started, state-unwritable, spawn-failed. `deps` injects list_units, measure, spawn, append (tests only)."""
+    started, state-unwritable, spawn-failed. `started_by` "tick" is the watcher; any other value (the merge trigger) is a
+    quiet pass: it neither rewrites the tick status file (its age is tick liveness) nor collects outcome notes (the watcher
+    is their one writer). Both write the last-start record when they start a job. `deps` injects list_units, measure, spawn, append (tests only)."""
     deps = deps or {}
+    if started_by not in STARTED_BY:
+        raise ValueError("started_by must be one of %s" % ", ".join(STARTED_BY))
+    status = _status if started_by == "tick" else (lambda _sdlc, _now, **fields: fields)
     now = int(time.time() if now is None else now)
     gate_reading = feature_upkeep.read(config)
     settings = gate_reading.settings
@@ -313,12 +321,12 @@ def scheduler_tick(config, sdlc_dir, *, environ=None, now=None, budget=30, clock
     if bounded.group_refusal() is not None or sys.platform == "win32":
         prior = read_json(sdlc_dir, STATUS_REL) or {}
         if prior.get("refusal") != WINDOWS:                  # recorded ONCE: later ticks leave the file alone
-            _status(sdlc_dir, now, decision="refused", refusal=WINDOWS)
+            status(sdlc_dir, now, decision="refused", refusal=WINDOWS)
         return {"decision": "refused", "refusal": WINDOWS}
-    collected = collect(config, sdlc_dir, now, deps.get("append"))
+    collected = collect(config, sdlc_dir, now, deps.get("append")) if started_by == "tick" else None
     alive = job_alive(sdlc_dir, now)
     if alive != "idle" or collected == "running":
-        return _status(sdlc_dir, now, decision="job-running", job=alive, noted=collected)
+        return status(sdlc_dir, now, decision="job-running", job=alive, noted=collected)
     state, drift_mod = _sibling("feature_upkeep_state"), _sibling("feature_upkeep_drift")
     sched = state.schedule(settings)
     root = str(pathlib.Path(sdlc_dir).resolve().parent)
@@ -344,20 +352,21 @@ def scheduler_tick(config, sdlc_dir, *, environ=None, now=None, budget=30, clock
     out_of_time = examined < len(waiting)
     resume = waiting[examined - 1] if out_of_time and examined else None               # the next tick starts after this unit
     if not due:
-        return _status(sdlc_dir, now, decision="idle", examined=examined, waiting=len(waiting), out_of_time=out_of_time,
+        return status(sdlc_dir, now, decision="idle", examined=examined, waiting=len(waiting), out_of_time=out_of_time,
                        cursor=resume, noted=collected)
     due.sort(key=_rank)
     _, name, drift, verdict = due[0]
     claim = state.claim(sdlc_dir, name, sched, drift, now)
     if not claim.started:
-        return _status(sdlc_dir, now, decision="state-unwritable", unit=name, detail=claim.detail, examined=examined)
+        return status(sdlc_dir, now, decision="state-unwritable", unit=name, detail=claim.detail, examined=examined)
     run_id = "%d-%d" % (now, os.getpid())
     try:
         (deps.get("spawn") or start_job)(sdlc_dir, root, name, run_id, config, settings, environ)
     except OSError:
         state.record_outcome(sdlc_dir, name, now, "failed")        # a failed start costs the cooldown, and is counted
-        return _status(sdlc_dir, now, decision="spawn-failed", unit=name, examined=examined)
-    return _status(sdlc_dir, now, decision="started", unit=name, reason=claim.reason, run_id=run_id, examined=examined,
+        return status(sdlc_dir, now, decision="spawn-failed", unit=name, examined=examined)
+    write_json(sdlc_dir, LAST_START_REL, {"schema": "upkeep-start/1", "by": started_by, "unit": name, "run_id": run_id, "at": now})
+    return status(sdlc_dir, now, decision="started", unit=name, reason=claim.reason, run_id=run_id, examined=examined,
                    waiting=len(waiting), out_of_time=out_of_time, cursor=resume,
                    noted=collected)
 
@@ -449,6 +458,10 @@ def health(config, sdlc_dir, now=None):
         ok = age is not None and age <= stale
         rows.append(("upkeep scheduler liveness", ok, "last tick %ss ago, decision %s%s" % (
             age, status.get("decision"), "" if ok else " (older than %ss: the watcher may be down)" % stale)))
+    last = read_json(sdlc_dir, LAST_START_REL)
+    if isinstance(last, dict) and last.get("by") in STARTED_BY:
+        rows.append(("upkeep last start", True, "started by %s, unit %s, %ss ago" % (
+            last["by"], last.get("unit"), max(0, now - int(last.get("at") or now)))))
     alive = job_alive(sdlc_dir, now)
     record = read_json(sdlc_dir, RECORD_REL) or {}
     if alive == "hung":
@@ -460,3 +473,29 @@ def health(config, sdlc_dir, now=None):
     else:
         rows.append(("upkeep job", True, "none has run yet"))
     return rows
+
+
+# ------------------------------------------------------------------------------------------ the merge trigger's command
+
+def main(argv=None):
+    """`feature_upkeep_sched.py decision <sdlc_dir>`: one quiet due-check (#1225), run by the merge path through the timed
+    runner. Prints nothing and always exits 0; a closed gate does nothing at all."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] in (["-h"], ["--help"]) or len(argv) != 2 or argv[0] != "decision":
+        print("usage: feature_upkeep_sched.py decision <sdlc_dir>   (one quiet upkeep due-check; prints nothing)")
+        return 0
+    sdlc_dir = argv[1]
+    try:
+        config = json.loads(pathlib.Path(sdlc_dir, "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    try:
+        budget = int(float(os.environ.get(CALL_TIMEOUT_ENV) or 120)) // TICK_BUDGET_DIVISOR or 1
+    except ValueError:
+        budget = 30
+    scheduler_tick(config, sdlc_dir, budget=budget, started_by="trigger")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
