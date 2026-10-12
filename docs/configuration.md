@@ -36,3 +36,24 @@ Defaults below are what `/sigma-init` scaffolds (`config.json.tmpl`). Not everyt
 > For any zero-touch / unattended multi-issue run, turn `backlog_check.enabled: true` on — it is
 > what makes a human-authored, comment-only dependency marker (bypassing `hand_off()`) actually
 > honored, not just silently ignored.
+
+## Per-category autonomy thresholds
+
+The autonomy ladder reads one global set of thresholds, `decision_rubric.autonomy.levels`. A
+repository can tune them per category with the optional file `.sdlc/categories.json`, a sibling of
+`.sdlc/rulebook.json`. The file is opt-in: the template ships none, and with no file (or the autonomy
+gate closed) behaviour and output are unchanged.
+
+Schema `sigma/categories@1`: a `schema` string and a `categories` list. Each category has an `id`
+(unique), a `title`, the `areas` it covers (the repository `area:*` names, with or without the
+`area:` prefix), optional `qkinds` it is limited to, and an optional `levels` block using the same
+keys as the global one (`l1_min_answers` to `l4_min_answers`, `l2_agreement` to `l4_agreement`).
+
+Precedence, per threshold key: the global default, then the first category (in file order) whose
+`areas` contain the pair's area and whose `qkinds`, when given, contain its kind. A category
+overrides only the keys it names; a pair in no category behaves as before.
+
+The categories reader never raises. A missing file, wrong schema
+or unreadable JSON reads as no categories; an entry with a missing or duplicate id (the first wins),
+an unknown threshold key or a wrong-typed value is dropped on its own. `autonomy.readout` and the
+doctor autonomy row show the matched category and the thresholds in force once the file exists.

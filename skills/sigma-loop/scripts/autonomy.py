@@ -194,6 +194,15 @@ def _ladder(answers, comparisons, agreement, cfg):
 
 def _state(sdlc_dir, qkind, area, config):
     cfg = settings(config)
+    cat, has_file = None, False
+    try:
+        cats = _load("categories")
+        has_file = cats.exists(sdlc_dir)
+        cat = cats.resolve(sdlc_dir, qkind, area) if has_file else None
+        if cat:
+            cfg.update(cat["levels"])
+    except Exception:
+        cat = None
     store = _load("decision_store")
     recs = [r for r in store.list_by(sdlc_dir, config, qkind=qkind) if _pair(r, qkind, area)]
     answers = sum(1 for r in recs if r.get("how") == "human")
@@ -229,8 +238,12 @@ def _state(sdlc_dir, qkind, area, config):
         capped = True  # cannot tell: the safe reading
     if capped:
         lvl = min(lvl, HARDSTOP_CAP)
-    return {"qkind": qkind, "area": _area(area), "level": lvl, "answers": answers, "comparisons": len(watch),
-            "agreement": agreement, "vetoes": len(vetoes), "paused": paused, "capped": capped}
+    row = {"qkind": qkind, "area": _area(area), "level": lvl, "answers": answers, "comparisons": len(watch),
+           "agreement": agreement, "vetoes": len(vetoes), "paused": paused, "capped": capped}
+    if has_file:  # shown only when the opt-in file exists; otherwise the row is unchanged
+        row["category"] = cat["id"] if cat else None
+        row["thresholds"] = {k: cfg[k] for k in DEFAULTS}
+    return row
 
 
 def level(sdlc_dir, qkind, area, config):

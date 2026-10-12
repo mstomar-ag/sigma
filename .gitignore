@@ -20,6 +20,7 @@ __pycache__/
 !.sdlc/acceptance/
 !.sdlc/decisions/
 !.sdlc/rulebook.json
+!.sdlc/categories.json
 .sdlc/decisions/_*
 !.sdlc/evidence/
 .sdlc/evidence/*
