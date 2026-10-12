@@ -58,6 +58,10 @@
       "role": "library"
     },
     {
+      "path": "skills/sigma-loop/scripts/categories.py",
+      "role": "library"
+    },
+    {
       "path": "skills/sigma-loop/scripts/channel_notify.py",
       "role": "gesture"
     },
