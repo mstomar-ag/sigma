@@ -255,7 +255,7 @@
     },
     {
       "path": "skills/sigma-loop/scripts/feature_upkeep_sched.py",
-      "role": "library"
+      "role": "gesture"
     },
     {
       "path": "skills/sigma-loop/scripts/feature_upkeep_state.py",
