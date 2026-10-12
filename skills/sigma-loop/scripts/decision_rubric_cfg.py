@@ -60,3 +60,31 @@ def public_repo_warning(config, remote_is_public):
         return ("records.repo_visibility is private but the repository looks public; "
                 "set decision_rubric.records.repo_visibility to public")
     return None
+
+
+#: `decision_rubric.import` bounds the read-only past-decision scan (`decision_import.py`). It is NOT
+#: a part and no gate reads it: a scan only reports. `comments` (default false) lets the scan read
+#: issue comments over the network; `max_issues` bounds how many issues that touches.
+IMPORT_DEFAULTS = {"max_file_bytes": 5000000, "max_candidates": 500, "max_issues": 50,
+                   "comments": False, "profile_dirs": []}
+
+
+def import_limits(config):
+    """The import bounds, total: a missing or wrong-typed key falls back to its default."""
+    out = dict(IMPORT_DEFAULTS, profile_dirs=[])
+    try:
+        sub = config["decision_rubric"]["import"]
+        if not isinstance(sub, dict):
+            return out
+        for key in ("max_file_bytes", "max_candidates", "max_issues"):
+            v = sub.get(key)
+            if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                out[key] = v
+        if sub.get("comments") is True:
+            out["comments"] = True
+        dirs = sub.get("profile_dirs")
+        if isinstance(dirs, list):
+            out["profile_dirs"] = [d for d in dirs if isinstance(d, str) and d]
+    except Exception:
+        pass
+    return out
