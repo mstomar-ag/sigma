@@ -2773,11 +2773,15 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
         if leftovers:
             shown = ", ".join(f"#{n}" for n in leftovers[:10])
             more = f" (+{len(leftovers) - 10} more)" if len(leftovers) > 10 else ""
+            gate_on = _block(_block(cfg, "ai_filed"), "triage").get("enabled") is not False
+            how = ("Run `/sigma-promote migrate-confirmation` (dry run first, see docs/label-model.md) to move them all, or "
+                   if gate_on else "Run ")
             out.append(_chk(
                 "no issue still carries the legacy confirmation label (advisory)",
                 False,
-                f"{shown}{more} carry the legacy confirmation label. Nothing writes it any more, so "
-                "this is a leftover from an older board: the loop will never pick these. Run "
+                f"{len(leftovers)} open issue(s) ({shown}{more}) carry the legacy confirmation label. Nothing "
+                "writes it any more, so "
+                "this is a leftover from an older board: the loop will never pick these. " + how +
                 "`/sigma-promote` to approve or clear each one. Advisory only -- nothing was changed."))
 
         # #1392: blockers nothing can pick -- see `_unreachable_blocker_scan` for why
