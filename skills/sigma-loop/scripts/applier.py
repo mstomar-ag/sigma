@@ -309,7 +309,30 @@ def _applied_in_last_day(asks, now):
                and (_parse(a.get("applied_at")) or now - 2 * _DAY) > now - _DAY)
 
 
-def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True):
+def read_vetoes(sdlc_dir, config, asks, now, comments_fn):
+    """An owner's `no` comment, posted after an ask was applied and inside its window, is passed to
+    `answer` (which records the veto the next planning pass turns into an action). Any other text, a
+    non-owner or an older comment changes nothing. Never raises. PROVISIONAL: the veto period is the
+    ask's own `window_minutes` after `applied_at`."""
+    period = datetime.timedelta(minutes=settings(config)["window_minutes"])
+    for ask in asks:
+        try:
+            applied = _parse(ask.get("applied_at"))
+            if ask.get("state") != "applied" or ask.get("vetoed_at") or applied is None or now > applied + period:
+                continue
+            for c in comments_fn(ask.get("issue")) or []:
+                made = _parse(c.get("created_at"))
+                if made is None or made <= applied or str(c.get("body", "")).strip().lower() != "no":
+                    continue
+                if _load("autonomy").is_owner(c.get("author"), config):
+                    if answer(sdlc_dir, ask["id"], "no", config, now) == "veto-pending":
+                        ask["vetoed_at"] = now.isoformat()
+                    break
+        except Exception:
+            continue
+
+
+def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comments_fn=None):
     """Plan, and unless `apply_actions` is false apply, one pass. Returns the actions (dicts with a
     `result` of would, done, failed or skipped). Closed gate: `[]`, nothing read, nothing written."""
     if not enabled(config):
@@ -317,6 +340,11 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True):
     actions = []
     try:
         asks = _asks(sdlc_dir)
+        if apply_actions and any(a.get("state") == "applied" and not a.get("vetoed_at") for a in asks):
+            if comments_fn is None and (source is None or run is not None):
+                comments_fn = lambda issue: _load("sources").fetch_comments(config, issue, run=run)  # noqa: E731
+            if comments_fn is not None:
+                read_vetoes(sdlc_dir, config, asks, now, comments_fn)
         cap = settings(config)["max_auto_applied_per_day"]
         used = _applied_in_last_day(asks, now)
         rules = _load("rulebook").load(sdlc_dir, config)
@@ -388,6 +416,22 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
         if ask is None:
             return "skipped"
         if action["kind"] == "veto":
+            if source is None:
+                source = _load("sources").GitHubSource(config, run=run)
+            if not ask.get("reparked"):
+                # An applied unpark that is vetoed must not leave the work running: park it again.
+                add, remove = [source.parked_label], [source.goal_label, source.in_progress_label]
+                swap = {"action": "swap-label", "issue": ask.get("issue"), "result": None, "error": None,
+                        "detail": _load("triage")._swap_detail(add, remove), "add": add, "remove": remove}
+                if _load("triage").apply_actions(source, [swap], True)[0]["result"] != "done":
+                    return "failed"
+                ask.update(reparked=True)
+                _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
+                try:
+                    source.note(ask.get("issue"), "Vetoed by an owner: parked again, and the rule's "
+                                "autonomy level is lowered.")
+                except Exception:
+                    pass
             _load("autonomy").veto(sdlc_dir, action.get("rid"), config, now=now)
             ask.update(state="vetoed", veto_logged=True)
             _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
