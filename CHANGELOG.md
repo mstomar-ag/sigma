@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A classifier timeout in `decision_import.py` is no longer stored as unknown (#1310).** A row the model classifier gave no answer for is skipped, so a re-run retries it, and `apply` reports the count (`timed_out`); the per-call limit is `rulebook.import.timeout_s` (default 60, longer allowed), and a timeout now kills the whole process group, not only the direct child. The closed gate is unchanged.
 - **Doctor ledger rows say join, not create, when the remote ledger branch is already known (#1318).** Local tracking-ref probe, no network; when it cannot tell, the wording is unchanged.
 - **Landing a cross-repository unit is refused before the upkeep pass, any push or any PR (#1339).** `feature_land` now asks the sibling guard up front and, when the other half cannot be measured as landed, refuses with `sibling` and says to land the other half first or each half by hand; the check inside the back half stays, a supplied landed measurement passes as before, and a closed upkeep gate changes nothing.
 - **A person's `no` inside the applier window is honoured (#1332).** An owner's exact `no` on a pending ask now cancels it before the applier acts, and a veto `no` is judged by the comment's own time, so a tick that runs late (up to `stale_after_intervals` watch intervals past the veto period) still records it; a `no` made after the period is ignored.
