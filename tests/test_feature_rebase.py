@@ -445,6 +445,21 @@ def test_a_feature_carrying_a_direct_commit_is_detected_rather_than_rebased_over
     assert FEATURE in filed[0]["title"] + filed[0]["body"]
 
 
+def test_upkeep_with_no_goal_files_a_direct_commit_finding_with_goal_none(tmp_path):
+    """#1340. Landing has no goal; it must pass None, and the filing path must take that without an
+    int() error, without reading an issue named after the unit, and without a 'None' goal string."""
+    m = _mod()
+    world = World(tmp_path).build(feature_commits=(
+        ("f.txt", "f", "feat: land a goal (#11)"),
+        ("h.txt", "h", "quick fix, straight onto the branch")))
+    world.move_integration()
+    filed = _filer(m)
+    report = m.upkeep(str(world.sdlc), _cfg(), None, UNIT)
+    assert report["outcome"] == m.DIRECT_COMMITS, report
+    assert report["goal"] is None, report
+    assert len(filed) == 1 and filed[0]["goal"] is None, filed
+
+
 def test_a_squash_landing_and_a_merge_landing_both_read_as_arriving_through_a_pull_request(tmp_path):
     m = _mod()
     assert m.arrived_through_a_pull_request("feat(x): do the thing (#1526)") is True

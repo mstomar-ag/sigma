@@ -2434,7 +2434,7 @@ def clause(report):
 
 
 def _report(goal, unit, config):
-    return {"outcome": FAILED, "goal": str(goal), "unit": unit, "branch": None, "base": None,
+    return {"outcome": FAILED, "goal": None if goal is None else str(goal), "unit": unit, "branch": None, "base": None,
             "before": None, "after": None, "tip": None, "replayed": [], "conflicts": [],
             "skipped": [], "direct": [], "acked": [], "issues": [], "leftovers": [], "filing": NO_FILING,
             "dropped": [], "dropped_count": 0, "would_be": None,

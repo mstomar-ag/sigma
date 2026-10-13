@@ -243,7 +243,7 @@ def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None
         if not got["ok"]:
             return refuse("unattended-no-approval", got["reason"])
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        report = env.rebase_pass(sdlc_dir, config, unit, unit, run=None, cwd=env.cwd, remote=env.remote)
+        report = env.rebase_pass(sdlc_dir, config, None, unit, run=None, cwd=env.cwd, remote=env.remote)
         outcome = report.get("outcome") if isinstance(report, dict) else None
         if outcome not in (env.rebase.CURRENT, env.rebase.REBASED):
             return refuse("pass-" + str(outcome), "the upkeep pass did not leave the unit current")
