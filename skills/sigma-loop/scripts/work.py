@@ -866,6 +866,16 @@ def _write_review_result(sdlc_dir, manifest, resolution_path, verdict, reason):
     return {**result, "path": str(target)}
 
 
+def _write_missing_resolution(sdlc_dir, resolution_path, route):
+    """Write the resolver's route to a MISSING resolution file inside the state dir; never overwrite."""
+    path = pathlib.Path(resolution_path)
+    try:
+        if (pathlib.Path(sdlc_dir) / "state").resolve() in path.resolve().parents:
+            _create_exclusive(path, json.dumps(route, sort_keys=True).encode("utf-8"))
+    except OSError:
+        return
+
+
 def record_subagent_review(sdlc_dir, goal, manifest_path, resolution_path, verdict, reason):
     """Bind the resolver-selected Claude subagent's returned verdict to this generation.
 
@@ -875,12 +885,13 @@ def record_subagent_review(sdlc_dir, goal, manifest_path, resolution_path, verdi
     """
     review_paths(sdlc_dir, goal, manifest_path)
     manifest = json.loads(pathlib.Path(manifest_path).read_text(encoding="utf-8"))
+    reviewer = _load("reviewer")
+    route = reviewer.resolve(sdlc_dir)
+    _write_missing_resolution(sdlc_dir, resolution_path, route)
     try:
         resolution = json.loads(pathlib.Path(resolution_path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ValueError(f"invalid reviewer resolution: {exc}")
-    reviewer = _load("reviewer")
-    route = reviewer.resolve(sdlc_dir)
     if route.get("mechanism") != "subagent":
         raise ValueError("subagent handoff requires the resolver-selected subagent route")
     if any(resolution.get(field) != route.get(field) for field in ("mechanism", "host", "command")):
@@ -7928,6 +7939,10 @@ def main(argv):
             return 1
         return 0
     if len(argv) >= 4 and argv[1] in _COMMANDS:
+        if argv[1] == "pr" and "--no-tests" in argv and (
+                not _flag(argv, "--no-tests").strip() or _flag(argv, "--no-tests").startswith("--")):
+            print("usage: work.py pr <sdlc_dir> <goal> [--no-tests <reason>]", file=sys.stderr)
+            return 2
         sdlc_dir, goal = argv[2], argv[3]
         try:
             config = state.load_config(sdlc_dir)
