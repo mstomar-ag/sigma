@@ -8,6 +8,7 @@ All notable changes to Sigma are recorded here, newest first.
 - **A failed board card move no longer fails an applied unpark or veto re-park (#1302).** The label swap is the gating step; once it lands the ask is marked applied and the record and comment are written once, with `board_failed` kept on the ask so the failure stays visible.
 - **The applier carries out the rule's option (#1301).** A rule whose option reads as leaving the issue parked now leaves labels and the board card alone and still writes the record and the comment; other options unpark as before.
 - **`/sigma-doctor` warns when the configured repo or project owner differs from origin (#1314).** A `discovery.github.repo` or `project.owner` that names another repo than the origin remote gets a row naming both; a match, an unset value or an unreadable origin adds nothing.
+- **The applier carries out the rule's option (#1301).** A rule whose option reads as leaving the issue parked now leaves labels and the board card alone and still writes the record and the comment; other options unpark as before.
 - **A person's no after an applied ask reaches the veto through the real verbs (#1189).** Keep-parked and demote on an issue whose ask was applied inside its window record the veto; a failure never blocks the gesture.
 
 
