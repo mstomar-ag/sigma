@@ -563,7 +563,17 @@ def _add_options(v):
                         "a dash-leading name works as: --project-dir -srv-demo-work-repo")
 
 
-def main(argv=None):
+def list_issues(config, limits, run=None):
+    """Numbers of the goal-labelled issues (any state, newest first) whose comments the scan reads."""
+    src = _load("sources")
+    gh = (config.get("discovery") or {}).get("github") or {}
+    items = src.fetch_issues_rest(run or src._run_gh, gh.get("repo") or None,
+                                  [gh.get("goal_label", "sdlc:goal")], limits["max_issues"],
+                                  state="all", sort="updated", direction="desc")
+    return [i["number"] for i in items if isinstance(i.get("number"), int)]
+
+
+def main(argv=None, lister=None, comments_fn=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="verb", required=True)
     for verb, text in (("scan", "report past-decision candidates (writes nothing)"),
@@ -582,7 +592,14 @@ def main(argv=None):
     except Exception as exc:  # noqa: BLE001
         print("decision_import: %s" % exc, file=sys.stderr)
         return 1
-    out = scan(args.sdlc_dir, config, args.profile or None, project_dirs=args.project_dir or None)
+    issues = None
+    if _load("rulebook_cfg").import_limits(config)["comments"]:
+        try:
+            issues = (lister or list_issues)(config, _load("rulebook_cfg").import_limits(config))
+        except Exception:  # noqa: BLE001
+            issues = None
+    out = scan(args.sdlc_dir, config, args.profile or None, issues=issues, comments_fn=comments_fn,
+               project_dirs=args.project_dir or None)
     if args.verb == "plan":
         pl = plan(args.sdlc_dir, config, out["candidates"])
         if not pl["gate"]:
