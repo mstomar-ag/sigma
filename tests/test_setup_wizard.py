@@ -230,7 +230,7 @@ def test_a_dirty_cache_never_suppresses_a_real_failure(monkeypatch, tmp_path):
     calls = []
     def fake(**kwargs):
         calls.append(1)
-        return [{"name": "gh auth", "ok": False, "fix": "run: gh auth login"}]
+        return [{"name": "project layer", "ok": False, "fix": "run: gh auth login"}]
     monkeypatch.setattr(setup_wizard, "_doctor_check", fake)
 
     # a cache written moments ago recording needs_wizard=True must NOT be trusted -- re-checked
@@ -266,7 +266,7 @@ def test_a_backwards_clock_does_not_read_as_a_fresh_cache(monkeypatch, tmp_path)
     calls = []
     def fake(**kwargs):
         calls.append(1)
-        return [{"name": "gh auth", "ok": False, "fix": "run: gh auth login"}]
+        return [{"name": "project layer", "ok": False, "fix": "run: gh auth login"}]
     monkeypatch.setattr(setup_wizard, "_doctor_check", fake)
 
     setup_wizard._write_cache(str(sdlc), needs_wizard=False, now=100_000.0)
@@ -359,7 +359,7 @@ def test_236_an_unadopted_repo_never_reaches_doctor(monkeypatch, tmp_path):
 
     def _check(**kwargs):
         calls.append(kwargs)
-        return [{"name": "gh auth", "ok": False, "fix": "gh auth login"}]
+        return [{"name": "project layer", "ok": False, "fix": "gh auth login"}]
     monkeypatch.setattr(setup_wizard, "_doctor_check", _check)
     assert setup_wizard.wizard_status(str(tmp_path / ".sdlc")) == {"needs_wizard": False, "steps": []}
     assert calls == []
