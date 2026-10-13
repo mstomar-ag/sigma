@@ -66,6 +66,7 @@ def tick(sdlc_dir, config=None, run=None, now=None):
     # kernel lock (a racing `next` skips rather than recording `done` twice) and stops starting goals
     # after half of SIGMA_WATCH_CALL_TIMEOUT, the bound this very call is killed by.
     merged = loop._reconcile_awaiting_merges(sdlc_dir, config, run=run, now=now)
+    backfilled = _board_backfill(sdlc_dir, config, run)
     parts = []
     if swept:
         parts.append("%d issue(s) reconciled — %s" % (
@@ -73,7 +74,22 @@ def tick(sdlc_dir, config=None, run=None, now=None):
     if merged:
         parts.append("%d awaiting-merge goal(s) recorded — %s" % (
             len(merged), ", ".join("%s %s" % (goal, outcome) for goal, outcome, _pr in merged)))
+    if backfilled:
+        parts.append("%d board card(s) backfilled" % backfilled)
     return "; ".join(parts)
+
+
+def _board_backfill(sdlc_dir, config, run=None):
+    """#1305: the capped, rate-limit-aware board back-fill that single-issue verbs no longer do inline.
+    Closed (0, no gh call) unless the source is github with the project board enabled; never raises."""
+    try:
+        disc = config.get("discovery") or {}
+        proj = (disc.get("github") or {}).get("project") or {}
+        if disc.get("source") != "github" or not proj.get("enabled"):
+            return 0
+        return _load("sources").GitHubSource(config, run=run, sdlc_dir=sdlc_dir).backfill_board()
+    except Exception:                       # noqa: BLE001 - a watcher tick is never fatal
+        return 0
 
 
 USAGE = "usage: reconcile_tick.py [sdlc_dir]"
