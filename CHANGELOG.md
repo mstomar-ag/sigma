@@ -31,6 +31,7 @@ All notable changes to Sigma are recorded here, newest first.
 - **A park whose label write fails no longer exits 0 and leaves the issue pickable (#1303).** `loop.py record <N> parked` now falls back to REST label writes when the GraphQL swap fails, and exits non-zero with one clear message if the label still cannot be applied; other transitions are unchanged.
 - **Unpark records a decision only for a gesture that landed (#1304).** A failed label write no longer writes the decision record, and `keep-parked` or `unpark` on an issue that is not parked is refused with nothing recorded.
 - **A verb about one issue no longer back-fills the whole board (#1305).** It cards only its own issue; the watcher tick back-fills up to `project.backfill_cap` (default 20) cards per tick and skips when GraphQL remaining is under `project.backfill_min_graphql` (default 1000).
+- **The doctor's upkeep readiness row no longer claims the machine lacks the opt-in (#1316).** The row reads the variable from the doctor's own shell and the watcher records no environment, so a missing variable now reads as a check of this shell only, not as a statement about the watcher.
 
 ## 1.0.12 — 2026-10-13 — rulebook categories file, cold-start visibility, past-decision import, upkeep trigger and session report, drift judge in shadow, hard-stop net, and the confirmation-queue migration
 
