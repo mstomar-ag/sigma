@@ -385,6 +385,25 @@ def _step_registry(ctx):
     return CREATED, str(path)
 
 
+def _commit_record(ctx):
+    """#1312: when the unit already has a record, commit that one path on the current branch (never
+    a push), so other machines can see the unit. No record means no git call and no write. Never raises and never changes the
+    report: when the commit cannot be made it prints one line naming the exact command."""
+    path = None
+    try:
+        features_dir = feature_registry.registry_dir(ctx.sdlc_dir)
+        path = feature_registry.unit_path(features_dir, ctx.name)
+        if not path.is_file():
+            return                                  # no record to commit: nothing changes
+        if not ctx.run(ctx.cwd, ["git", "status", "--porcelain", "--", str(path)]).strip():
+            return                                  # already committed and unchanged
+        ctx.run(ctx.cwd, ["git", "add", "--", str(path)])
+        ctx.run(ctx.cwd, ["git", "commit", "-m", "sdlc: record unit %s" % ctx.name, "--", str(path)])
+    except Exception as exc:                        # noqa: BLE001 - a diagnostic never breaks the gesture
+        _note("sigma: define: unit record not committed (%s); run: git add -- %s && git commit "
+              "-m 'sdlc: record unit %s' -- %s\n" % (_flat(exc), path, ctx.name, path))
+
+
 #: D7: the recovery differs per step, so each failure names its own first check (the raw detail stays).
 _STEP_HINTS = {
     "branch": " -- check that `git remote -v` lists the remote and that you can push to it "
@@ -425,6 +444,7 @@ def open_unit(sdlc_dir, name, kind, *, config=None, run=None, cwd=None, remote=N
             return report
         report["steps"].append({"step": step, "outcome": outcome, "detail": detail})
     report["ok"] = True
+    _commit_record(ctx)
     return report
 
 
