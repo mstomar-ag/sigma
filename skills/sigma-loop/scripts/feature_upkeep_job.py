@@ -179,6 +179,11 @@ def _unit_pass(config, sdlc_dir, root, unit, unit_pass=None):
         return {"unit_pass": "failed"}
 
 
+# #1330: the only outcomes after which the unit pass may run; every other word (a failure, or an engine that refused or did not look:
+# disabled, busy, remote-unreadable, no-base, no-unit, not-adopted) leaves the unit alone, since the pass force-pushes with no backup.
+UNIT_PASS_OUTCOMES = frozenset({"current", "no-branch"})
+
+
 @feature_upkeep.gated("machine")
 def run_engine(config, sdlc_dir, root, unit, *, environ=None, upkeep=None, unit_pass=None):
     """The pass itself, inside the child: the engine's own entry point, called in-process, handed NO goal. Prints one JSON
@@ -195,7 +200,7 @@ def run_engine(config, sdlc_dir, root, unit, *, environ=None, upkeep=None, unit_
     line = {"outcome": report.get("outcome") or "failed", "unit_tip": tip if isinstance(tip, str) else None}
     if line["outcome"] == SKIPPED_AFTER:                  # the older pass already rewrote this unit in this run: ONE path owns it
         line["unit_pass"] = "skipped"
-    elif line["outcome"] in _sibling("feature_upkeep_state").FAILURE:   # the older pass owns direct commits and acks: a failure stops the unit pass
+    elif line["outcome"] not in UNIT_PASS_OUTCOMES:       # #1330: only an engine that looked and found nothing to do hands over to the unit pass
         line["unit_pass"] = "skipped"
     else:
         line.update(_unit_pass(config, sdlc_dir, root, unit, unit_pass))

@@ -2682,3 +2682,21 @@ def test_filing_park_is_scoped_own_with_priority_label_first(tmp_path):
         _file(tmp_path)
     r, src = _file(tmp_path, src=GuardedSource())
     assert src.scoped is True and "cap" in src.parked[0][1]
+
+
+# #1331: an upkeep finding is a report for a person, never a pickable goal, even with triage on.
+
+def test_upkeep_finding_with_triage_on_carries_no_goal_label_and_is_queued(tmp_path):
+    report, src = _file(tmp_path, upkeep_finding=True)
+    assert src.created["goal_label"] is False
+    assert handoff.PROPOSED_LABEL in src.created["labels"]
+    assert "triage" not in report and src.parked == []
+
+
+def test_upkeep_finding_keyword_off_is_byte_identical_for_every_other_caller(tmp_path):
+    for cfg in ({}, _off()):
+        _r, default = _file(tmp_path, cfg)
+        _r, explicit = _file(tmp_path, cfg, upkeep_finding=False)
+        assert default.created == explicit.created
+    _r, on = _file(tmp_path)
+    assert on.created["goal_label"] is True and handoff.PROPOSED_LABEL not in on.created["labels"]

@@ -520,7 +520,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                           same_area, immediately_actionable, blocks_goal,
                           priority=DEFAULT_PRIORITY, title=None, body=None,
                           extra_labels=(), source=None, run=None, dedup=True,
-                          upstream_run=None, target_unit=None, idempotency_key=None):
+                          upstream_run=None, target_unit=None, idempotency_key=None,
+                          upkeep_finding=False):
     """Open a tracked issue, address it, record it. The one real place the kit ever opens an issue on
     its own behalf — `hand_off()` below is a thin wrapper around this. Generalizes what used to be
     hand-off-only discipline (owner resolution, labels, the `gh` call, the ledger write, the dual
@@ -810,8 +811,10 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                     "targeted (discovery.no_dangling_goal.core, #2363)" % classified)
         # #1003: triage decides arm or park at THIS chokepoint (the follow-up and upkeep-finding writers
         # all pass through here). None = switched off: everything below is the legacy behaviour.
-        triage = _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority,
-                              immediately_actionable)
+        # #1331: an upkeep finding (default off) is a report for a person, never work: it skips triage so it
+        # cannot be armed as `sdlc:goal`, and files in the queue bucket exactly as triage-off does.
+        triage = None if upkeep_finding else _triage_plan(
+            sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, immediately_actionable)
         if triage is not None:
             text = triage["text"]
         labels = [f"priority:{priority}", f"area:{area}", *extra_labels]

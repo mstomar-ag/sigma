@@ -26,7 +26,6 @@ than a day are pruned by embedded time. The apply loop is serial and bounded by 
 No model call, no network except the two gestures through the injected source.
 """
 import datetime
-import hashlib
 import importlib.util
 import json
 import os
@@ -324,9 +323,26 @@ def _level(sdlc_dir, qkind, area, config):
     return fn(sdlc_dir, qkind, area, config) if fn else _load("autonomy").level(sdlc_dir, qkind, area, config)
 
 
-def _spot_check(aid, config):
-    n = settings(config)["spot_check_one_in"]
-    return int(hashlib.sha256(aid.encode("utf-8")).hexdigest()[:8], 16) % n == 0
+_SPOT = "spot-counter.json"
+
+
+def _spot_read(sdlc_dir):
+    """Silent-eligible applies so far per `qkind|area`; missing or unreadable reads as empty."""
+    try:
+        with open(os.path.join(_folder(sdlc_dir), _SPOT), encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items()
+            if isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool) and v >= 0}
+
+
+def _spot_check(counts, key, config):
+    """Count one more silent-eligible apply under `key` (in `counts`); True when it must comment."""
+    counts[key] = counts.get(key, 0) + 1
+    return counts[key] % settings(config)["spot_check_one_in"] == 0
 
 
 def _applied_in_last_day(asks, now):
@@ -377,6 +393,23 @@ def read_vetoes(sdlc_dir, config, asks, now, comments_fn):
             continue
 
 
+def _keys_only(config):
+    """#1342: records part open AND repo declared public; any other state is today's text."""
+    try:
+        rc = _load("rulebook_cfg")
+        return rc.load(config).part_enabled("records") and rc.visibility(config) == "public"
+    except Exception:
+        return False
+
+
+def _loud_text(m, qkind, config):
+    if _keys_only(config):   # #1342: public repo, records on: the option is free text
+        return ("Applied automatically by rule %s (%s). No answer arrived within "
+                "the window. Reply no to veto." % (m.rule_id, qkind))
+    return ("Applied automatically by rule %s (%s): %s. No answer arrived within "
+            "the window. Reply no to veto." % (m.rule_id, qkind, m.option))
+
+
 def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comments_fn=None):
     """Plan, and unless `apply_actions` is false apply, one pass. Returns the actions (dicts with a
     `result` of would, done, failed or skipped). Closed gate: `[]`, nothing read, nothing written."""
@@ -395,10 +428,16 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
         used = _applied_in_last_day(asks, now)
         rules = _load("rulebook").load(sdlc_dir, config)
         hs = _load("hard_stop")
+        stored = _spot_read(sdlc_dir)
+        counts = dict(stored)
+        eligible = []
+        loud = []   # #1361: the comment text each action would carry if its slot turns out to be a comment
         for ask in asks:
             if ask.get("state") == "applied" and ask.get("vetoed_at") and not ask.get("veto_logged"):
                 actions.append({"kind": "veto", "ask": ask["id"], "issue": ask.get("issue"),
                                 "qkind": ask.get("qkind"), "area": ask.get("area", ""), "rid": ask.get("rid")})
+                eligible.append(None)
+                loud.append("")
                 continue
             if ask.get("state") != "pending" or ask.get("answer") is not None:
                 continue  # a person's answer wins; nothing else is pending
@@ -414,17 +453,32 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 continue
             rule = next((r for r in rules if r.get("id") == m.rule_id), None)
             level = _level(sdlc_dir, qkind, area, config)
-            silent = level >= 4 and silent_allowed(qkind, config, rule) and not _spot_check(ask["id"], config)
-            text = "" if silent else ("Applied automatically by rule %s (%s): %s. No answer arrived within "
-                                      "the window. Reply no to veto." % (m.rule_id, qkind, m.option))
+            silent = False
+            key = None
+            if level >= 4 and silent_allowed(qkind, config, rule):
+                key = "%s|%s" % (qkind, area)
+                silent = not _spot_check(counts, key, config)
+            text = "" if silent else _loud_text(m, qkind, config)
             actions.append({"kind": ask.get("gesture") if ask.get("gesture") in GESTURES else "unpark",
                             "ask": ask["id"], "issue": ask.get("issue"), "qkind": qkind, "area": area,
                             "option": m.option, "rule_id": m.rule_id, "level": level, "silent": silent,
                             "text": text})
+            eligible.append(key)
+            loud.append(text if not silent else _loud_text(m, qkind, config))
             used += 1
         if apply_actions:
-            for a in actions:
+            done = dict(stored)   # only applies that landed advance the counter
+            moved = False
+            for a, key, text in zip(actions, eligible, loud):
+                if key is not None:   # #1361: the slot is decided now, from the landed count
+                    a["silent"] = (done.get(key, 0) + 1) % settings(config)["spot_check_one_in"] != 0
+                    a["text"] = "" if a["silent"] else text
                 a["result"] = apply(a, sdlc_dir, config, now, source=source, run=run)
+                if key is not None and a["result"] == "done":
+                    done[key] = done.get(key, 0) + 1
+                    moved = True
+            if moved:
+                _write_atomic(os.path.join(_folder(sdlc_dir), _SPOT), done)
         else:
             for a in actions:
                 a["result"] = "would"

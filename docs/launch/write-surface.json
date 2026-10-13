@@ -962,6 +962,14 @@
     },
     {
       "path": "skills/sigma-loop/scripts/feature_rebase.py",
+      "function": "_settle_direct",
+      "rule": "gh-api-write",
+      "count": 2,
+      "gate": "upkeep.enabled",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_rebase.py",
       "function": "_settle_parks",
       "rule": "gh-api-write",
       "count": 3,

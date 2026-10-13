@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import pathlib
+import pytest
 import subprocess
 import sys
 
@@ -623,10 +624,20 @@ def test_a_unit_the_older_pass_rebased_is_not_rewritten_again_by_the_unit_pass(t
     line = j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, unit_pass=entry,
                         upkeep=lambda *a, **k: {"outcome": "rebased", "after": H40})
     assert seen == [] and line == {"outcome": "rebased", "unit_tip": H40, "unit_pass": "skipped"}
-    for word in ("current", "no-branch", "busy"):         # nothing moved and nothing failed: the unit pass still runs
+    for word in ("current", "no-branch"):                 # the engine looked and found nothing to do: the unit pass still runs
         assert j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, unit_pass=entry,
                             upkeep=lambda *a, w=word, **k: {"outcome": w})["unit_pass"] == "rewritten"
-    assert len(seen) == 3
+    assert len(seen) == 2
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize("word", ["disabled", "busy", "remote-unreadable", "no-base", "no-unit", "not-adopted"])
+def test_an_engine_that_did_not_look_leaves_no_unit_pass_run_1330(tmp_path, capsys, word):
+    j, sdlc, seen = job(), project(tmp_path), []
+    entry = lambda *a, **k: seen.append(a) or {"result": "rewritten"}
+    line = j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, unit_pass=entry,
+                        upkeep=lambda *a, w=word, **k: {"outcome": w})
+    assert seen == [] and line["unit_pass"] == "skipped" and line["outcome"] == word
     capsys.readouterr()
 
 

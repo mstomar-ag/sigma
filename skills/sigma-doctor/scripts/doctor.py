@@ -2567,6 +2567,17 @@ def _watcher_build_rows(base, cfg):
         return []
 
 
+_PROGRESS_ON = False
+
+
+def _progress(label):
+    """#1319 (PROVISIONAL): one short stderr line before a slow check group. Off unless `main check`
+    switched it on (stderr is a tty, or --progress is passed), so captured output and every
+    other caller of check() stay byte-identical."""
+    if _PROGRESS_ON:
+        print("sigma-doctor: checking %s ..." % label, file=sys.stderr, flush=True)
+
+
 def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_dirs=None,
           installed_plugins_path=None, agents_md=None, cheap_only=False, which=None):
     """Return the setup checks relevant to this project's config; each is {name, ok, fix}.
@@ -2612,6 +2623,19 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     bad_json = _config_json_problem(base)
     if bad_json:
         out.append(_chk("config.json is valid JSON", False, bad_json))
+
+    # #1343: `gates.phase_record` absent means the gate is off, so a repo adopted before the gate existed
+    # merges and records done without phase records. Any present value (even an explicit off) is a
+    # deliberate choice and passes. Local config read only, so it also runs under `cheap_only`; a hygiene
+    # row, deliberately not in the setup wizard's allow-list.
+    if (base / "config.json").exists() and "phase_record" not in _block(cfg, "gates"):
+        out.append(_chk(
+            "phase-record gate configured", False,
+            'gates.phase_record is not set in .sdlc/config.json, so the gate is off and a goal can be '
+            'recorded done without its SDLC phases. Add `"gates": {"phase_record": {"enabled": true}}` '
+            '(it needs `action_log.enabled` true), or `{"enabled": false}` to keep it off on purpose.'))
+    elif (base / "config.json").exists():
+        out.append(_chk("phase-record gate configured", True, ""))
 
     # #1200 gap 2: informational, always ok=True -- same "state embedded in the name, no fix"
     # idiom the "companions" rows below already use (a plugin being present/absent is neither a
@@ -2703,18 +2727,24 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     # wherever work.enabled or github discovery needs them -- the same checks /sigma-init runs, so a
     # later regression is visible. Each fix comes from the FAILING check: gh absent says install it.
     if _block(cfg, "work").get("enabled") or disc.get("source") == "github":
+        _progress("git and gh access")
         out.extend(_preflight_rows(base, cfg, run, which, injected, cheap_only))
         out.extend(_graphql_capability_rows(base, cfg))     # #801: advisory, detection only
         if _block(cfg, "work").get("enabled") and not cheap_only:
+            _progress("landing rules")
             out.extend(_landing_rows(base, cfg, run, which))        # #974: branch-creation rulesets
     out.extend(_origin_mismatch_rows(base, disc, run))      # #1314
     out.extend(_watcher_build_rows(base, cfg))                # #1315
+    _progress("unit branch readiness")
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
+    _progress("resolvers")
     out.extend(_resolver_rows(base, cfg, which, cheap_only))
+    _progress("unit records")
     out.extend(_unit_record_rows(base, run, cheap_only))
     if disc.get("source") == "github":
         gh_disc = _block(disc, "github")
         if _block(gh_disc, "project").get("enabled"):
+            _progress("the project board")
             dup = _board_dup_risk(gh_disc, run)
             if dup:
                 out.append(_chk("project.number pinned (no duplicate-board risk)", False, dup))
@@ -4996,15 +5026,30 @@ def _model_max_tier(cfg):
 _STALE_RULEBOOK_KEY = "`decision_rubric` was renamed `rulebook`; it is not read"
 
 
-def _rulebook_state(cfg, sdlc_dir=None):
+def _real_repo_public(cfg, run):
+    """True/False from ONE REST read of the repository's `private` field, None when it cannot be read
+    (no gh, a failed call, an unexpected reply). Only called when records are on and a runner was given."""
+    try:
+        gh_cfg = cfg.get("gh") if isinstance(cfg, dict) else None
+        repo = (gh_cfg.get("repo") if isinstance(gh_cfg, dict) else None) or "{owner}/{repo}"
+        raw = run(["gh", "api", "repos/" + repo, "--jq", ".private"])
+        if isinstance(raw, _RawFailure):
+            return None
+        text = str(raw).strip().lower()
+        return {"false": True, "true": False}.get(text)
+    except Exception:
+        return None
+
+
+def _rulebook_state(cfg, sdlc_dir=None, run=None):
     """The readout plus one plain line when the retired config key is still present (never read)."""
-    state = _rulebook_state_core(cfg, sdlc_dir)
+    state = _rulebook_state_core(cfg, sdlc_dir, run)
     if isinstance(cfg, dict) and "decision_rubric" in cfg:
         return state + "; " + _STALE_RULEBOOK_KEY
     return state
 
 
-def _rulebook_state_core(cfg, sdlc_dir=None):
+def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
     """Rulebook readout for the features dashboard (informational, read-only, no network).
     The public signal is the public-repository profile being applied (ledger and auto-merge both off);
     it is a heuristic, so the warning says so."""
@@ -5028,6 +5073,20 @@ def _rulebook_state_core(cfg, sdlc_dir=None):
             cap = store.ceiling_warning(sdlc_dir, cfg)
             if cap:
                 extra.append(cap)
+            public_msg = "public repository with records on: answers are posted as keys only"
+            if run is None:
+                if mod.visibility(cfg) == "public":
+                    extra.append(public_msg)
+            else:
+                real = _real_repo_public(cfg, run)
+                if real is True:
+                    extra.append(public_msg + " (read from GitHub)")
+                elif real is None:
+                    # No gh or a failed read: the configured value decides, and the row says so.
+                    if mod.visibility(cfg) == "public":
+                        extra.append(public_msg)
+                    extra.append("repository visibility not read (gh unavailable or read failed); "
+                                 "using the configured value %s" % mod.visibility(cfg))
             old = store.untracked_old(sdlc_dir, config=cfg)
             if old:
                 extra.append("%d decision records are untracked for over a day; commit them" % len(old))
@@ -5360,7 +5419,7 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
         "run: python3 skills/sigma-doctor/scripts/migrate.py .sdlc (dry run), then --apply; "
         "and rename the environment variable it names to match",
     ))
-    rows.append(("rulebook (OFF by default)", _rulebook_state(cfg, sdlc_dir),
+    rows.append(("rulebook (OFF by default)", _rulebook_state(cfg, sdlc_dir, run),
                  'config: "rulebook": {"records": {"enabled": true, "repo_visibility": "private"}}'))
     rows.append(("autonomy levels (OFF by default)", _autonomy_state(cfg, sdlc_dir),
                  'config: "rulebook": {"autonomy": {"enabled": true}}'))
@@ -5369,7 +5428,7 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
     return rows
 
 
-USAGE = "usage: doctor.py check [sdlc_dir] | features [sdlc_dir] | hygiene [sdlc_dir] [repo_root]"
+USAGE = "usage: doctor.py check [sdlc_dir] [--progress] | features [sdlc_dir] | hygiene [sdlc_dir] [repo_root]"
 
 
 def main(argv):
@@ -5381,7 +5440,13 @@ def main(argv):
             print(f"  {name}: {state}\n      enable/change: {enable}")
         return 0
     if len(argv) >= 2 and argv[1] == "check":
-        checks = check(argv[2] if len(argv) > 2 else ".sdlc")
+        global _PROGRESS_ON
+        _PROGRESS_ON = "--progress" in argv or sys.stderr.isatty()
+        argv = [a for a in argv if a != "--progress"]
+        try:
+            checks = check(argv[2] if len(argv) > 2 else ".sdlc")
+        finally:
+            _PROGRESS_ON = False
         gaps = [c for c in checks if not c["ok"]]
         for c in checks:
             # #1513 review fix: show `fix` whenever it's non-empty, not just when `ok` is False.
