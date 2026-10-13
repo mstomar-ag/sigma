@@ -1966,7 +1966,9 @@ def _file_issue(sdlc_dir, config, goal, report, title, why, body, slot="", key="
         result = _handoff().create_tracked_issue(
             sdlc_dir, config, goal, AREA, why,
             same_area=True, immediately_actionable=False, blocks_goal=False,
-            title=title, body=body)
+            title=title, body=body,
+            # No goal to inherit a unit from: name the unit explicitly (`target_unit`), never read issue "None".
+            **({"target_unit": report["unit"]} if goal is None else {}))
     except Exception as exc:              # noqa: BLE001 - a filing must never break a pick
         _set_filing(report, FILING_FAILED)
         _note("sigma: rebase upkeep: %s was not filed as an issue (%s); the finding is above "
