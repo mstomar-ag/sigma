@@ -11606,3 +11606,40 @@ def test_an_unrelated_fetch_failure_gets_no_base_branch_advice(tmp_path):
     with pytest.raises(RuntimeError) as err:
         work.start(d, FEAT, "1467", run=run)
     assert "git push -u" not in str(err.value)
+
+
+def test_record_subagent_review_writes_a_missing_resolution_file(tmp_path, monkeypatch, capsys):
+    """#1346: a missing --resolution is written from the resolver (parents created), not a bare error;
+    an existing one is never overwritten."""
+    root = tmp_path / ".sdlc" / "state"; gen = root / "review-generations" / "gen"; gen.mkdir(parents=True)
+    (gen / "brief.md").write_text("brief")
+    digest = __import__("hashlib").sha256(b"brief").hexdigest()
+    manifest = root / "manifest.json"; manifest.write_text(json.dumps({
+        "generation_id": "gen", "goal": "1346", "pr": 7, "head_sha": "a" * 40,
+        "brief": "review-generations/gen/brief.md", "brief_sha256": digest,
+    }))
+    route = {"mechanism": "subagent", "host": "claude", "reason": "host dispatches subagents"}
+    original = work._load
+    monkeypatch.setattr(work, "_load", lambda name: types.SimpleNamespace(resolve=lambda _d: route)
+                        if name == "reviewer" else original(name))
+    resolution = root / "deeper" / "resolution.json"
+    argv = ["work.py", "record-subagent-review", str(tmp_path / ".sdlc"), "1346", "--manifest", str(manifest),
+            "--resolution", str(resolution), "--verdict", "approve", "--reason", "fine"]
+    assert work.main(argv) == 0
+    assert json.loads(resolution.read_text()) == route
+    capsys.readouterr()
+    resolution.write_text(json.dumps(dict(route, reason="hand written")))
+    argv[argv.index("approve")] = "block"
+    work.main(argv)
+    assert json.loads(resolution.read_text())["reason"] == "hand written"
+
+
+def test_pr_no_tests_without_a_reason_prints_usage_and_exits_2_before_any_push(tmp_path, monkeypatch, capsys):
+    """#1346."""
+    def boom(*_a, **_k):
+        raise AssertionError("pr must not run")
+    monkeypatch.setattr(work, "pr", boom)
+    for tail in (["--no-tests"], ["--no-tests", ""], ["--no-tests", "--foo"]):
+        assert work.main(["work.py", "pr", str(tmp_path / ".sdlc"), "1346"] + tail) == 2
+        err = capsys.readouterr().err
+        assert "usage: work.py pr <sdlc_dir> <goal> [--no-tests <reason>]" in err

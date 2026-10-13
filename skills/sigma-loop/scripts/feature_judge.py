@@ -204,6 +204,49 @@ def _extract_payload(envelope):
     return payload if isinstance(payload, dict) else None
 
 
+class _Done:
+    """The two fields `ask_claude` reads from a finished child (what `subprocess.run` returns)."""
+    def __init__(self, stdout, returncode):
+        self.stdout, self.returncode = stdout, returncode
+
+
+_POST_KILL_READ_S = 5.0   # bound on the pipe read after a group kill (#1353): a descendant that escaped the group can hold the pipe open
+
+
+def _kill_group(proc, posix):
+    try:
+        if posix:
+            os.killpg(os.getpgid(proc.pid), 9)
+        else:
+            proc.kill()
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _run_group(argv, timeout=60):
+    """Run `argv` in a process group of its own; on overrun SIGKILL the WHOLE group (not only the direct
+    child, #1310), reap it, and raise `subprocess.TimeoutExpired`. POSIX; elsewhere the direct child only.
+    The read after the kill has its own bound (#1353): if a descendant outside the group still holds the pipe,
+    give up on the output rather than block. Any other exit from the wait (an interrupt included) kills the
+    group and re-raises."""
+    posix = sys.platform != "win32"
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            **({"start_new_session": True} if posix else {}))
+    try:
+        out, _err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_group(proc, posix)
+        try:
+            proc.communicate(timeout=_POST_KILL_READ_S)
+        except subprocess.TimeoutExpired:
+            pass                                # partial output is abandoned; the caller sees the timeout
+        raise
+    except BaseException:
+        _kill_group(proc, posix)
+        raise
+    return _Done(out, proc.returncode)
+
+
 def ask_claude(prompt, json_schema, model="sonnet", timeout_s=60, max_budget_usd=0.50):
     """Subprocess shell-out to `claude -p`, schema-constrained, tool-denied, permission-wall-free.
     -> `(payload, cost_usd)`. NEVER RAISES: a launch failure, a timeout, a non-zero exit, a
@@ -223,7 +266,7 @@ def ask_claude(prompt, json_schema, model="sonnet", timeout_s=60, max_budget_usd
     drain or leak."""
     argv = _build_argv(prompt, json_schema, model, max_budget_usd)
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s)
+        proc = _run_group(argv, timeout=timeout_s)
     except Exception:                          # noqa: BLE001 - launch failure/timeout -> never raise
         return None, 0.0
     try:

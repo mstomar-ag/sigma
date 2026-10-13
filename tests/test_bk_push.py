@@ -41,7 +41,7 @@ def test_push_makes_both_refs(tmp_path):
     backup = "refs/sigma/backup/u/" + fb.stamp_of(bk.CLOCK)
     assert outcome == "rebased" and report["backup"] == backup, (outcome, report)
     assert world.tip() == world.head() and world.ref(backup) == old, world.refs()
-    assert len(rec.calls) == 1 and len(rec.pushes()) == 1, rec.calls
+    assert len([c for c in rec.calls if c[1] != "merge-base"]) == 1 and len(rec.pushes()) == 1, rec.calls
     assert rec.pushes()[0] == ["git", "push", "--atomic", "--force-with-lease=refs/heads/feature/u:" + old,
                                "--force-with-lease=" + backup + ":", "origin", "HEAD:refs/heads/feature/u",
                                old + ":" + backup], rec.pushes()[0]

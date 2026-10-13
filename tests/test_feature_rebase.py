@@ -446,6 +446,21 @@ def test_a_feature_carrying_a_direct_commit_is_detected_rather_than_rebased_over
     assert FEATURE in filed[0]["title"] + filed[0]["body"]
 
 
+def test_upkeep_with_no_goal_files_a_direct_commit_finding_with_goal_none(tmp_path):
+    """#1340. Landing has no goal; it must pass None, and the filing path must take that without an
+    int() error, without reading an issue named after the unit, and without a 'None' goal string."""
+    m = _mod()
+    world = World(tmp_path).build(feature_commits=(
+        ("f.txt", "f", "feat: land a goal (#11)"),
+        ("h.txt", "h", "quick fix, straight onto the branch")))
+    world.move_integration()
+    filed = _filer(m)
+    report = m.upkeep(str(world.sdlc), _cfg(), None, UNIT)
+    assert report["outcome"] == m.DIRECT_COMMITS, report
+    assert report["goal"] is None, report
+    assert len(filed) == 1 and filed[0]["goal"] is None, filed
+
+
 def test_a_squash_landing_and_a_merge_landing_both_read_as_arriving_through_a_pull_request(tmp_path):
     m = _mod()
     assert m.arrived_through_a_pull_request("feat(x): do the thing (#1526)") is True
@@ -2838,3 +2853,41 @@ def test_a_reused_or_gate_closed_direct_commit_finding_is_never_closed(tmp_path)
     sdlc, run, calls = _settle_world(tmp_path / "b", m)
     m._settle_direct(sdlc, {}, run, str(tmp_path), "origin", {"unit": UNIT, "base": "main"}, FEATURE)
     assert calls == []
+
+
+def test_a_goalless_filing_through_the_real_filer_reads_no_issue_and_still_stamps_the_unit(tmp_path, capsys):
+    """`_file_issue` with `goal=None` goes through the REAL `handoff.create_tracked_issue`: no read of an issue
+    called 'None', no int() warning on stderr, and the unit still reaches the issue as its label."""
+    m = _mod()
+    handoff = _load("handoff")
+    reads = []
+
+    class Src:
+        def fetch_body_labels(self, goal):
+            reads.append(goal)
+            raise ValueError("invalid literal for int() with base 10: %r" % (goal,))
+
+        def create_dependency(self, title, body, assignee, labels=(), goal_label=True):
+            self.created = {"title": title, "body": body, "labels": list(labels)}
+            return "55"
+
+        def attach_label(self, issue, label):
+            self.attached = (issue, label)
+            return True
+
+    src = Src()
+    real = handoff.create_tracked_issue
+    m._HANDOFF = types.SimpleNamespace(
+        create_tracked_issue=lambda *a, **k: real(*a, source=src, run=lambda *x, **y: "", **k),
+        DEFAULT_PRIORITY="P1")
+    registry = handoff._feature_registry()
+    registry.resolve_open_unit = lambda sdlc_dir, name: name
+    sdlc = tmp_path / ".sdlc"
+    (sdlc / "state").mkdir(parents=True)
+    report = {"unit": UNIT, "issues": [], "filing": None}
+    m._file_issue(str(sdlc), {}, None, report, "Some finding", "one line", "body text")
+    err = capsys.readouterr().err
+    assert reads == [] and "invalid literal" not in err and "None" not in err.replace("None of", ""), (reads, err)
+    assert "Feature: " + UNIT in src.created["body"], src.created
+    assert src.attached == ("55", "feature:" + UNIT), src.attached
+    assert "None" not in src.created["body"].replace("None of", "")

@@ -305,6 +305,10 @@ def _goal_pass(entry, run_replay, run_push, report):
         row["reanchored"] = True
 
 
+class LeaseRefused(RuntimeError):
+    """The unit push found the branch moved: the other writer keeps it. A failed pass whose reason says so (#1344)."""
+
+
 def _engine(config, sdlc_dir, unit, unit_ref, base_ref, run, cwd, report, rewrite, push, direct_commits, goals, factory):
     """The costly steps, behind the tip re-reads. `rewrite(run, tips) -> {"ok", "resolved", "acks"}` must not move the unit ref
     (the push is the only step that does), so a moved tip is somebody else's. Sets `report["result"]` and `["reason"]`."""
@@ -337,8 +341,8 @@ def _engine(config, sdlc_dir, unit, unit_ref, base_ref, run, cwd, report, rewrit
         phase = RESOLVED_PUSH if (box.get("rewrite") or {}).get("resolved") else CLEAN_PUSH
         try:
             push(factory(hooks_policy(phase)), tips)
-        except Exception:                                   # noqa: BLE001 - a refused or failed push is a failed pass
-            box["rewrite"] = {"ok": False}
+        except Exception as exc:                            # noqa: BLE001 - a refused or failed push is a failed pass
+            box["rewrite"] = {"ok": False, "why": "lease-refused" if isinstance(exc, LeaseRefused) else "rewrite-failed"}
     steps = [step_rewrite] + ([step_push] if push is not None else [])
     checked = recheck_tips(read, steps)
     report["restarts"] = checked["restarts"]
@@ -346,7 +350,7 @@ def _engine(config, sdlc_dir, unit, unit_ref, base_ref, run, cwd, report, rewrit
         report.update(result=checked["outcome"], reason="tips-" + checked["outcome"])
         return
     if (box.get("rewrite") or {}).get("ok") is False:
-        report.update(result="failed", reason="rewrite-failed")
+        report.update(result="failed", reason=(box["rewrite"].get("why") or "rewrite-failed"))
         return
     report.update(result="rewritten", reason="")
     for entry in goals or []:
@@ -421,7 +425,7 @@ def unit_callables(cwd, remote, branch):
         backup = _sibling("feature_backup")
         got = backup.push_unit(run, cwd, cwd, remote, branch[len(backup.BRANCH_PREFIX):], tips[0], source=new)
         if got.get("outcome") != backup.PUSHED:             # a lease refusal or any other word is a failed pass, never a success
-            raise RuntimeError("push not done: %s" % got.get("outcome"))
+            raise (LeaseRefused if got.get("outcome") == backup.LEASE_REFUSED else RuntimeError)("push not done: %s" % got.get("outcome"))
     return rewrite, push
 
 

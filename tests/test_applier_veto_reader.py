@@ -128,12 +128,11 @@ def test_no_after_the_veto_period_changes_nothing(tmp_path):
     assert _state(sd).get("vetoed_at") is None
 
 
-def test_ask_not_applied_changes_nothing(tmp_path):
+def test_ask_not_applied_is_not_vetoed(tmp_path):
     cfg, sd = _cfg(), str(tmp_path / ".sdlc")
     AP.open_ask(sd, 7, "needs_decision", "docs", ["merge"], cfg, T0)
-    called = []
-    AP.tick(sd, cfg, T0 + 5 * MIN, source=Src(), comments_fn=lambda i: called.append(i) or [])
-    assert called == [] and _state(sd)["state"] == "pending"
+    AP.tick(sd, cfg, T0 + 5 * MIN, source=Src(), comments_fn=lambda i: [_comment("boss", "yes", 2)])
+    assert _state(sd)["state"] == "pending" and _state(sd).get("vetoed_at") is None
 
 
 def test_closed_gate_reads_nothing(tmp_path):

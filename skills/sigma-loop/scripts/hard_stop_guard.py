@@ -50,11 +50,27 @@ def _hs():
     return _HS
 
 
+_RC = None
+
+
+def _rulebook_cfg():
+    global _RC
+    if _RC is None:
+        spec = importlib.util.spec_from_file_location("rulebook_cfg", _HERE / "rulebook_cfg.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        _RC = m
+    return _RC
+
+
 def enabled(config):
     try:
         block = config.get("rulebook") if isinstance(config, dict) else None
         hs = block.get("hard_stops") if isinstance(block, dict) else None
-        return isinstance(hs, dict) and hs.get("enabled") is True
+        if not (isinstance(hs, dict) and hs.get("enabled") is True):
+            return False
+        # #1345: a wrong-typed value anywhere in the Rulebook closes the WHOLE block (rulebook_cfg), net included.
+        return _rulebook_cfg().load(config).part_enabled("hard_stops")
     except Exception:
         return False
 
