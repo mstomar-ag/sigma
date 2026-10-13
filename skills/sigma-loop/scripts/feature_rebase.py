@@ -2442,11 +2442,20 @@ def _report(goal, unit, config):
 
 
 UNIT_BASE_WHY = "base is a unit branch; upkeep needs the default branch"
+UNIT_BASE_NOTE = "base is a unit branch"
 
 
-def is_unit_base(base):
-    """#1311: a `work.base` that is itself a unit branch is no integration branch; upkeep refuses it (default branch only)."""
-    return isinstance(base, str) and base.strip().startswith(features.BRANCH_PREFIX)
+def is_unit_base(base, remote=None):
+    """#1311: a `work.base` that is itself a unit branch is no integration branch; upkeep refuses it (default branch only).
+    #1327: also when written with the remote's name or as a full ref (`origin/feature/x`, `refs/heads/feature/x`)."""
+    if not isinstance(base, str):
+        return False
+    name, remote = base.strip(), (remote or DEFAULT_REMOTE)
+    for lead in ("refs/heads/", "refs/remotes/" + remote + "/", remote + "/"):
+        if name.startswith(lead):
+            name = name[len(lead):]
+            break
+    return name.startswith(features.BRANCH_PREFIX)
 
 
 def upkeep(sdlc_dir, config, goal, unit, run=None, cwd=None, remote=None):
@@ -2552,7 +2561,7 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
                 report["why"] = ("work.base is empty, so upkeep has no integration branch and did nothing; "
                                  "set it in .sdlc/config.json (for example to your default branch)")
             return report
-        if is_unit_base(base):
+        if is_unit_base(base, remote or _remote(config)):
             report["outcome"] = NO_BASE
             report["why"] = UNIT_BASE_WHY
             return report
