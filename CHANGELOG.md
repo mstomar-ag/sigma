@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Four loop wordings and plumbing fixes (#1346).** The engine-route landing question no longer says verification passed before anything ran (the closed path is unchanged), the managed-block regeneration message no longer asserts an edit, `record-subagent-review` writes a missing resolution file inside the state dir from the resolver (never overwriting one), and `work.py pr --no-tests` with no reason prints usage and exits 2.
 - **Imported past decisions agree on a normalised shape, not on free-text labels (#1307).** `decision_import.py` replay compares resume-or-keep, accepted-recommended and option role when a decision has options, falling back to the exact choice otherwise, so a pair can reach level 2; stored imported records gain an enumerated `shape`, and a closed rulebook gate is unchanged.
 - **A classifier timeout in `decision_import.py` is no longer stored as unknown (#1310).** A row the model classifier gave no answer for is skipped, so a re-run retries it, and `apply` reports the count (`timed_out`); the per-call limit is `rulebook.import.timeout_s` (default 60, longer allowed), and a timeout now kills the whole process group, not only the direct child. The closed gate is unchanged.
 - **Doctor ledger rows say join, not create, when the remote ledger branch is already known (#1318).** Local tracking-ref probe, no network; when it cannot tell, the wording is unchanged.
