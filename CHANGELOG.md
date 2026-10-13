@@ -5,11 +5,17 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - **Unpark records a decision only for a gesture that landed (#1304).** A failed label write no longer writes the decision record, and `keep-parked` or `unpark` on an issue that is not parked is refused with nothing recorded.
+- **The upkeep job's unit push keeps a backup and stops after a refusal (#1300).** The rewritten unit now goes through the atomic backup push, so the replaced tip is kept under `refs/sigma/backup/`; and when the older pass reports direct-commits or any other failure outcome, the unit pass is skipped (`unit_pass` reads `skipped`) while the job record keeps the older pass's real outcome. A closed gate changes nothing.
+- **`rule_draft.py approve` turns a proposed rule into an approved one (#1306).** An owner runs `approve <sdlc_dir> <rule_id>`; it refuses with one line for an unknown id, an already approved rule, a non-owner, an unresolved login or a closed gate, and stores no login.
+- **A failed board card move no longer fails an applied unpark or veto re-park (#1302).** The label swap is the gating step; once it lands the ask is marked applied and the record and comment are written once, with `board_failed` kept on the ask so the failure stays visible.
+- **The applier carries out the rule's option (#1301).** A rule whose option reads as leaving the issue parked now leaves labels and the board card alone and still writes the record and the comment; other options unpark as before.
+- **`/sigma-doctor` warns when the configured repo or project owner differs from origin (#1314).** A `discovery.github.repo` or `project.owner` that names another repo than the origin remote gets a row naming both; a match, an unset value or an unreadable origin adds nothing.
 - **A person's no after an applied ask reaches the veto through the real verbs (#1189).** Keep-parked and demote on an issue whose ask was applied inside its window record the veto; a failure never blocks the gesture.
 
 
 - **A vetoed applied ask moves the board card back to Parked (#1201).** On a board-active repo the veto re-park now moves the card as well as the labels.
 - **A follow-up matching only a mid-score closed issue is now filed (#1217).** Closed matches fold a follow-up away only at `dedup.closed_duplicate_threshold` (default 0.8); weaker ones are reported as related. Open-issue folding is unchanged.
+- **`define.py open` commits the unit record; doctor flags records other machines cannot see (#1312).** Open writes the unit's record when it has none, then commits just that path on the current branch (never a push); if it cannot write or commit, it prints the exact command. A new doctor row warns on an untracked record or a remote `feature/*` branch with no record, and appears only where `.sdlc/features/` exists.
 
 ## 1.0.12 — 2026-10-13 — rulebook categories file, cold-start visibility, past-decision import, upkeep trigger and session report, drift judge in shadow, hard-stop net, and the confirmation-queue migration
 

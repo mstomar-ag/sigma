@@ -45,7 +45,22 @@ _DAY = datetime.timedelta(days=1)
 DEFAULTS = {"allow_silent": [], "window_minutes": 1440, "spot_check_one_in": 5,
             "max_auto_applied_per_day": 3, "stale_after_intervals": 3, "prune_after_days": 30}
 DEFAULT_INTERVAL_SECONDS = 900
-GESTURES = ("unpark", "promote")
+GESTURES = ("unpark", "promote", "keep-parked")
+
+
+def option_gesture(option):
+    """The gesture a rule's option text means: `keep-parked` when it reads as leaving the issue
+    parked (a leading no/don't, or keep/leave/stay/remain/hold with 'park'), else `unpark`
+    (unknown text keeps the old meaning)."""
+    t = option.lower().replace("'", "").strip() if isinstance(option, str) else ""
+    words = t.split()
+    if not words:
+        return "unpark"
+    if words[0] in ("no", "dont", "do") and (words[0] != "do" or words[1:2] == ["not"]):
+        return "keep-parked"
+    if "park" in t and "unpark" not in t and any(w in words for w in ("keep", "leave", "stay", "remain", "hold")):
+        return "keep-parked"
+    return "unpark"
 #: Set (process-wide, so a separately loaded copy of this module sees it) while `apply` runs its own
 #: gesture, so that gesture does not close the ask it is applying.
 _APPLYING_ENV = "SIGMA_APPLIER_APPLYING"
@@ -223,7 +238,8 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None):
         m = rb.match(qkind_, area, None, rb.load(sdlc_dir, config), config)
         if m is None:
             return None
-        return open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now, gesture="unpark")
+        return open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now,
+                        gesture=option_gesture(m.option))
     except Exception:
         return None
 
@@ -427,7 +443,7 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
         if action["kind"] == "veto":
             if source is None:
                 source = _load("sources").GitHubSource(config, run=run)
-            if not ask.get("reparked"):
+            if not ask.get("reparked") and ask.get("gesture") != "keep-parked":
                 # An applied unpark that is vetoed must not leave the work running: park it again.
                 add, remove = [source.parked_label], [source.goal_label, source.in_progress_label]
                 swap = {"action": "swap-label", "issue": ask.get("issue"), "result": None, "error": None,
@@ -436,8 +452,11 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
                 if getattr(source, "board_active", False):      # #1201: the apply moved the card to Ready
                     steps.append({"action": "set-status", "issue": ask.get("issue"),
                                   "detail": source.col["parked"], "result": None, "error": None})
-                if not all(r["result"] == "done" for r in _load("triage").apply_actions(source, steps, True)):
-                    return "failed"
+                res = _load("triage").apply_actions(source, steps, True)
+                if not res or res[0]["result"] != "done":
+                    return "failed"                 # the label swap gates; the card move is best effort (#1302)
+                if not all(r["result"] == "done" for r in res):
+                    ask.update(board_failed=True)
                 ask.update(reparked=True)
                 _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
                 try:
@@ -454,6 +473,7 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
         if source is None:
             source = _load("sources").GitHubSource(config, run=run)
         issue = action["issue"]
+        board_failed = False
         if action["kind"] == "promote":
             os.environ[_APPLYING_ENV] = "1"      # its own gesture must not close the ask it applies
             try:
@@ -462,7 +482,7 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
                 os.environ.pop(_APPLYING_ENV, None)
             if not all(r.get("outcome") == "promoted" for r in res.get("results", [])) or not res.get("results"):
                 return "failed"
-        else:
+        elif action["kind"] != "keep-parked":      # #1301: keep-parked touches no label and no card
             triage = _load("triage")
             add = [source.goal_label]
             remove = [source.parked_label, source.goal_blocked_label, source.in_progress_label]
@@ -472,12 +492,16 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
             if getattr(source, "board_active", False):
                 steps.append({"action": "set-status", "issue": issue, "detail": source.col["ready"],
                               "result": None, "error": None})
-            if not all(s["result"] == "done" for s in triage.apply_actions(source, steps, True)):
-                return "failed"
+            res = triage.apply_actions(source, steps, True)
+            if not res or res[0]["result"] != "done":
+                return "failed"                     # the label swap gates; the card move is best effort (#1302)
+            board_failed = not all(s["result"] == "done" for s in res)
         # Status first (#1106): a failed write returns failed before any record or comment, so the
         # retry repeats only the idempotent gesture and never a duplicate record or comment.
         ask.update(state="applied", applied_at=now.isoformat(), rid=None, rule_id=action["rule_id"],
                    silent=bool(action["silent"]))
+        if action["kind"] != "promote" and board_failed:
+            ask.update(board_failed=True)       # visible, never retried: the swap already landed
         _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
         try:
             rec = {"how": "autonomous", "qkind": action["qkind"], "area": action.get("area", ""),
