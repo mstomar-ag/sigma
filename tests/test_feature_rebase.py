@@ -35,6 +35,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -2788,3 +2789,52 @@ def test_161_an_ack_landed_on_the_integration_branch_frees_a_checkout_that_lacks
     path.unlink()
     assert not path.exists()
     assert _upkeep(m, world)["outcome"] == m.REBASED
+
+
+# --------------------------------------------------------------------------- #1331: upkeep findings are not goals
+
+
+def test_direct_commit_finding_is_filed_as_an_upkeep_finding_without_a_predecessor_reference(tmp_path):
+    m = _mod()
+    world = World(tmp_path).build(feature_commits=(
+        ("f.txt", "f", "feat: land a goal (#11)"),
+        ("h.txt", "h", "quick fix, straight onto the branch")))
+    world.move_integration()
+    filed = _filer(m)
+    _upkeep(m, world)
+    assert filed[0]["upkeep_finding"] is True
+    assert "#2756" not in filed[0]["body"]
+    assert not re.search(r"#\d", filed[0]["body"])
+
+
+def _settle_world(tmp_path, m, reused=False):
+    sdlc = tmp_path / ".sdlc"
+    (sdlc / "state" / "features").mkdir(parents=True)
+    m._remember(str(sdlc), UNIT, "direct:" + FEATURE, "tip1")
+    m._remember(str(sdlc), UNIT, "directissue:" + FEATURE, m.park.record("tip1", 77, reused))
+    calls = []
+
+    def run(cwd, argv):
+        calls.append(argv)
+        return "{}"
+    return str(sdlc), run, calls
+
+
+def test_a_later_clean_pass_closes_the_direct_commit_finding(tmp_path):
+    m = _mod()
+    sdlc, run, calls = _settle_world(tmp_path, m)
+    report = {"unit": UNIT, "base": "main"}
+    m._settle_direct(sdlc, {"upkeep": {"enabled": True}}, run, str(tmp_path), "origin", report, FEATURE)
+    assert any("issues/77" in " ".join(a) and "state=closed" in " ".join(a) for a in calls), calls
+    assert m._read_filed(sdlc, UNIT) == {}
+
+
+def test_a_reused_or_gate_closed_direct_commit_finding_is_never_closed(tmp_path):
+    m = _mod()
+    sdlc, run, calls = _settle_world(tmp_path, m, reused=True)
+    m._settle_direct(sdlc, {"upkeep": {"enabled": True}}, run, str(tmp_path), "origin",
+                     {"unit": UNIT, "base": "main"}, FEATURE)
+    assert not any("state=closed" in " ".join(a) for a in calls)
+    sdlc, run, calls = _settle_world(tmp_path / "b", m)
+    m._settle_direct(sdlc, {}, run, str(tmp_path), "origin", {"unit": UNIT, "base": "main"}, FEATURE)
+    assert calls == []
