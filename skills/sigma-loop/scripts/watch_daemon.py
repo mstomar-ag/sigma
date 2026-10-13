@@ -86,6 +86,7 @@ mention here can never be mistaken for real wiring between the two.)
 """
 import atexit
 import importlib.util
+import json
 import os
 import pathlib
 import signal
@@ -135,6 +136,7 @@ class Paths(NamedTuple):
     stop: pathlib.Path        # state/watch.stop
     pid: pathlib.Path         # state/watch.pid
     heartbeat: pathlib.Path   # state/watch.heartbeat
+    build: pathlib.Path       # state/watch.build  (#1315: the plugin version this watcher started with)
     mutex: pathlib.Path       # state/watch.decide.lock            (a DIRECTORY)
     reclaim: pathlib.Path     # state/watch.decide.lock.reclaim    (a DIRECTORY)
 
@@ -155,6 +157,7 @@ def paths(sdlc_dir):
         # #2490 closes the rest -- doctor.py calls sync.heartbeat_path() too now, and the staleness
         # rule lives in sync.stale_after_seconds).
         heartbeat=sync.heartbeat_path(sdlc_dir),
+        build=state / "watch.build",
         mutex=state / "watch.decide.lock",
         reclaim=state / "watch.decide.lock.reclaim",
     )
@@ -545,6 +548,24 @@ def already_running(p, stale_after, now):
     return pid_alive(pid) and heartbeat_fresh(p.heartbeat, stale_after, now)
 
 
+def _write_build(p):
+    """#1315: record the plugin version this watcher process started with, so doctor can tell a
+    long-lived watcher from an older build than the installed one. Best-effort: a manifest that
+    cannot be read leaves no file, which doctor reads as an older build (the safe direction)."""
+    try:
+        manifest = pathlib.Path(__file__).resolve().parents[3] / ".claude-plugin" / "plugin.json"
+        version = str(json.loads(manifest.read_text(encoding="utf-8")).get("version") or "").strip()
+        if version:
+            p.build.write_text(version + "\n", encoding="utf-8")
+        else:
+            p.build.unlink(missing_ok=True)
+    except Exception:                        # noqa: BLE001 - a note only, never blocks the takeover
+        try:
+            p.build.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def take_over(p):
     """B-24. Both writes happen INSIDE the mutex hold, in this order. A heartbeat written only after
     the mutex is released would let a second, closely-following invocation observe "live PID, no
@@ -558,6 +579,7 @@ def take_over(p):
         _coexist().write_watch_owner(p.state, os.getpid())   # watcher this is lives beside it --
     except Exception:                        # noqa: BLE001 - written BEFORE the pid, so no reader
         pass                                 # sees our live pid unmarked; best-effort (a NOTE only)
+    _write_build(p)                          # #1315: beside the frozen pid, never inside it
     p.pid.write_text(f"{os.getpid()}\n", encoding="utf-8")   # B-25: `<pid>\n`
     p.heartbeat.touch()
 
@@ -680,6 +702,7 @@ def cleanup(p, my_pid):
     try:
         p.pid.unlink(missing_ok=True)
         p.heartbeat.unlink(missing_ok=True)
+        p.build.unlink(missing_ok=True)
     except OSError:
         pass
     try:
