@@ -620,13 +620,22 @@ def _add_options(v):
 
 
 def list_issues(config, limits, run=None):
-    """Numbers of the goal-labelled issues (any state, newest first) whose comments the scan reads."""
+    """Numbers of the goal-labelled AND parked-labelled issues (any state, newest first) whose comments the scan reads.
+
+    A parked issue lost its goal label when it was parked, and its unpark answers live there, so a second
+    REST list covers `discovery.github.parked_label` (#1355). Cost when the comments gate is on: one extra
+    list per run, bounded by the same `max_issues` cap and page size as the first; gate closed never gets here."""
     src = _load("sources")
     gh = (config.get("discovery") or {}).get("github") or {}
-    items = src.fetch_issues_rest(run or src._run_gh, gh.get("repo") or None,
-                                  [gh.get("goal_label", "sdlc:goal")], limits["max_issues"],
-                                  state="all", sort="updated", direction="desc")
-    return [i["number"] for i in items if isinstance(i.get("number"), int)]
+    seen = []
+    for label in (gh.get("goal_label", "sdlc:goal"), gh.get("parked_label", "sdlc:parked")):
+        items = src.fetch_issues_rest(run or src._run_gh, gh.get("repo") or None, [label],
+                                      limits["max_issues"], state="all", sort="updated", direction="desc")
+        for i in items:
+            n = i.get("number")
+            if isinstance(n, int) and n not in seen:
+                seen.append(n)
+    return seen
 
 
 def main(argv=None, lister=None, comments_fn=None):
@@ -652,8 +661,10 @@ def main(argv=None, lister=None, comments_fn=None):
     if _load("rulebook_cfg").import_limits(config)["comments"]:
         try:
             issues = (lister or list_issues)(config, _load("rulebook_cfg").import_limits(config))
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             issues = None
+            print("decision_import: issue lister failed, comment import skipped: %s" % (
+                " ".join(str(exc).split())[:160] or type(exc).__name__), file=sys.stderr)
     out = scan(args.sdlc_dir, config, args.profile or None, issues=issues, comments_fn=comments_fn,
                project_dirs=args.project_dir or None)
     if args.verb == "plan":
