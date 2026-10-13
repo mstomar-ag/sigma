@@ -910,3 +910,35 @@ def test_engine_route_refuses_a_pair_unit_before_any_pass_or_pr(tmp_path, capsys
     assert m._engine_route(CONFIG, str(w.sdlc), "feature/voice", lambda: True) == 1
     assert "refused:sibling" in capsys.readouterr().out
     assert w.passes == [] and w.posts() == []
+
+
+def test_engine_route_prompt_does_not_claim_verification_and_closed_prompt_is_unchanged(monkeypatch):
+    """#1346: the engine route verifies INSIDE the landing, so its question cannot say 'Verify passed';
+    the closed path's own prompt stays byte-identical."""
+    m = _mod()
+    asked = []
+    def fake_input(prompt=""):
+        asked.append(prompt)
+        return "y"
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert m._interactive_land_decide() is True
+    assert m._interactive_decide() is True
+    assert asked[0] == "Land the unit now? Verification runs first. [y/N]: "
+    assert "Verify passed" not in asked[0]
+    assert asked[1] == "Verify passed. Merge now? [y/N]: "
+
+
+def test_main_gives_the_engine_route_the_landing_prompt_and_the_closed_path_the_old_one(tmp_path, monkeypatch):
+    m = _mod()
+    seen = {}
+    monkeypatch.setattr(m.state, "load_config", lambda _d: {})
+    monkeypatch.setattr(m.rebase_brief, "resolve_branch", lambda *_a: "feature/x")
+    monkeypatch.setattr(m.rebase_brief, "resolve_base", lambda _c: "main")
+    monkeypatch.setattr(m.rebase_brief, "current_branch", lambda *_a: "feature/x")
+    monkeypatch.setattr(m.feature_rebase, "rebase_stopped", lambda *_a: False)
+    def route(config, sdlc_dir, branch, decide):
+        seen["engine"] = decide
+        return 0
+    monkeypatch.setattr(m, "_engine_route", route)
+    assert m.main(["verify_merge.py", "land", str(tmp_path / ".sdlc")]) == 0
+    assert seen["engine"] is m._interactive_land_decide
