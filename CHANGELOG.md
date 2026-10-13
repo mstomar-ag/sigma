@@ -5,6 +5,7 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - **`/sigma-doctor` warns when a running watcher started from an older build than the installed plugin (#1315).** The watcher now records its plugin version in `state/watch.build` at startup (removed with its pid on exit; the pid and heartbeat formats are unchanged); a live watcher with an older or missing build gets a row naming both builds. After updating the plugin, stop running watchers (`touch .sdlc/state/watch.stop`); the next trigger restarts them on the new build.
+- **Upkeep refuses a unit branch as `work.base` (#1311).** The scheduler offers no unit, the older pass ends `no-base`, and the unit pass is skipped, with the reason "base is a unit branch; upkeep needs the default branch"; default-branch bases and a closed gate are unchanged.
 - **The upkeep job's unit push keeps a backup and stops after a refusal (#1300).** The rewritten unit now goes through the atomic backup push, so the replaced tip is kept under `refs/sigma/backup/`; and when the older pass reports direct-commits or any other failure outcome, the unit pass is skipped (`unit_pass` reads `skipped`) while the job record keeps the older pass's real outcome. A closed gate changes nothing.
 - **`rule_draft.py approve` turns a proposed rule into an approved one (#1306).** An owner runs `approve <sdlc_dir> <rule_id>`; it refuses with one line for an unknown id, an already approved rule, a non-owner, an unresolved login or a closed gate, and stores no login.
 - **A failed board card move no longer fails an applied unpark or veto re-park (#1302).** The label swap is the gating step; once it lands the ask is marked applied and the record and comment are written once, with `board_failed` kept on the ask so the failure stays visible.
@@ -15,6 +16,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 - **A vetoed applied ask moves the board card back to Parked (#1201).** On a board-active repo the veto re-park now moves the card as well as the labels.
 - **A follow-up matching only a mid-score closed issue is now filed (#1217).** Closed matches fold a follow-up away only at `dedup.closed_duplicate_threshold` (default 0.8); weaker ones are reported as related. Open-issue folding is unchanged.
+- **`define.py open` commits the unit record; doctor flags records other machines cannot see (#1312).** Open writes the unit's record when it has none, then commits just that path on the current branch (never a push); if it cannot write or commit, it prints the exact command. A new doctor row warns on an untracked record or a remote `feature/*` branch with no record, and appears only where `.sdlc/features/` exists.
 
 ## 1.0.12 — 2026-10-13 — rulebook categories file, cold-start visibility, past-decision import, upkeep trigger and session report, drift judge in shadow, hard-stop net, and the confirmation-queue migration
 

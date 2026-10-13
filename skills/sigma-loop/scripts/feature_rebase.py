@@ -2441,6 +2441,14 @@ def _report(goal, unit, config):
             "serialised": True, "merge_method": merge_method(config), "why": "", "note": ""}
 
 
+UNIT_BASE_WHY = "base is a unit branch; upkeep needs the default branch"
+
+
+def is_unit_base(base):
+    """#1311: a `work.base` that is itself a unit branch is no integration branch; upkeep refuses it (default branch only)."""
+    return isinstance(base, str) and base.strip().startswith(features.BRANCH_PREFIX)
+
+
 def upkeep(sdlc_dir, config, goal, unit, run=None, cwd=None, remote=None):
     """THE PASS. Integration branch -> feature branch, then the feature's goal branches onto it.
 
@@ -2543,6 +2551,10 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
             if not base:
                 report["why"] = ("work.base is empty, so upkeep has no integration branch and did nothing; "
                                  "set it in .sdlc/config.json (for example to your default branch)")
+            return report
+        if is_unit_base(base):
+            report["outcome"] = NO_BASE
+            report["why"] = UNIT_BASE_WHY
             return report
         live, why = sync.live_branches(run, cwd, remote)
         if live is None:

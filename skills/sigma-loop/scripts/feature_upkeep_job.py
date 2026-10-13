@@ -170,7 +170,12 @@ def _unit_pass(config, sdlc_dir, root, unit, unit_pass=None):
 def run_engine(config, sdlc_dir, root, unit, *, environ=None, upkeep=None, unit_pass=None):
     """The pass itself, inside the child: the engine's own entry point, called in-process, handed NO goal. Prints one JSON
     line (`outcome`, `unit_tip`) as its last line of output. -> the report."""
-    upkeep = upkeep or _sibling("feature_rebase").upkeep
+    rebase = _sibling("feature_rebase")
+    if rebase.is_unit_base(rebase._safe_ref("work.base", rebase._settings(config).get("base")) or ""):
+        line = {"outcome": rebase.NO_BASE, "unit_tip": None, "unit_pass": "skipped", "reason": rebase.UNIT_BASE_WHY}   # #1311
+        print(json.dumps(line, sort_keys=True), flush=True)
+        return line
+    upkeep = upkeep or rebase.upkeep
     report = upkeep(sdlc_dir, config, None, unit, cwd=str(root))
     report = report if isinstance(report, dict) else {}
     tip = report.get("tip") or report.get("after") or report.get("unit_tip")
