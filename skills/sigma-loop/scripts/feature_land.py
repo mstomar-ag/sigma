@@ -33,6 +33,7 @@ import pathlib
 import re
 import sys
 import tempfile
+import time
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -211,12 +212,18 @@ def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None
     env = _Env(config, sdlc_dir, run, gh_run, rebase_pass, verify, now)
     approval = _load("feature_land_approval")
     landing = _load("feature_upkeep_landing")
-    if landing.read_record(sdlc_dir, unit) is not None:
-        return refuse("pending-landing", "an earlier landing of this unit left a pending record; settling it is not "
-                      "part of this verb yet")
     slug, why = env.landed.resolve_slug(config, env.run, env.cwd, env.remote)
     if not slug:
         return refuse("slug-mismatch", why)
+    left = landing.read_record(sdlc_dir, unit)
+    if left is not None and left.get("outcome") not in (landing.REFUSED, landing.MERGED_WARNING):
+        stamp = int(time.time()) if now is None else now
+        landing.settle(sdlc_dir, config, unit, lambda n: env.gh_api.view_pr(env.gh_run, n, slug),
+                       lambda sha: env.gh_api.commit_parents(env.gh_run, slug, sha), stamp)
+        left = landing.read_record(sdlc_dir, unit)
+        if left is not None and left.get("outcome") not in (landing.REFUSED, landing.MERGED_WARNING):
+            return refuse("pending-landing", "an earlier landing of this unit is still unsettled after a read-back")
+    landing.prune(sdlc_dir, config, now=now)
     base = env.rebase._safe_ref("work.base", env.rebase._settings(config).get("base")) or ""
     if not base:
         return refuse("no-base", "no integration branch is configured")
@@ -242,8 +249,12 @@ def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None
         got = approval.peek(config, sdlc_dir, unit, slug, tip, now=now)
         if not got["ok"]:
             return refuse("unattended-no-approval", got["reason"])
+    ok, why = _load("work").unit_sibling_guard(sdlc_dir, config, unit, slug, landed=landed)
+    if not ok:
+        return refuse("sibling", "%s Land the other half first, or land each half by hand; this verb does not land "
+                                 "a pair." % why)
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        report = env.rebase_pass(sdlc_dir, config, unit, unit, run=None, cwd=env.cwd, remote=env.remote)
+        report = env.rebase_pass(sdlc_dir, config, None, unit, run=None, cwd=env.cwd, remote=env.remote)
         outcome = report.get("outcome") if isinstance(report, dict) else None
         if outcome not in (env.rebase.CURRENT, env.rebase.REBASED):
             return refuse("pass-" + str(outcome), "the upkeep pass did not leave the unit current")

@@ -94,6 +94,29 @@ def ceiling_ok(config, now, spend_state=None):
         return False
 
 
+def ceiling_paused_at(config, now, spend_state):
+    """Timestamp of the record that took the rolling 24h spend to the ceiling, else None."""
+    try:
+        if not _sibling("rulebook_cfg").load(config).part_enabled("drift"):
+            return None
+        ceiling = _ceiling(config)
+        if ceiling is None or spend_state is None:
+            return None
+        records, ok = _read_records(spend_state)
+        if not ok:
+            return None
+        live = sorted(((_num(r.get("ts")) or 0.0, _num(r.get("usd")) or 0.0) for r in records
+                       if (_num(r.get("ts")) or 0.0) > now - WINDOW_S))
+        total = 0.0
+        for ts, usd in live:
+            total += usd
+            if total >= ceiling:
+                return ts
+        return None
+    except Exception:
+        return None
+
+
 def _norm(s):
     return re.sub(r"\s+", " ", s).strip().lower()
 
@@ -199,9 +222,12 @@ def _judge(question, docs, config, spend_state, call, now, nonce_fn):
             except Exception:
                 return _nj("call_failed")
             ans = ans if isinstance(ans, dict) else {}
-            usd = _num(ans.get("cost_usd"))
-            _record(spend_state, records, now, usd if usd is not None else budget)
             kind, quote = ans.get("kind"), ans.get("quote")
+            usd = _num(ans.get("cost_usd"))
+            valid = kind in ("consistent", "not_covered", "conflicts")
+            _record(spend_state, records, now, usd if valid and usd is not None else budget)
+            if not valid:                      # a timeout or killed call is not a verdict
+                return _nj("call_failed")
             if kind == "conflicts" and any(verify_quote(quote, t) for _, t in docs):
                 return Verdict("conflicts", quote, None)
             seen.append("consistent" if kind == "consistent" else "not_covered")
