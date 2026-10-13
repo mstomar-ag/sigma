@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **The unpark skill names the rule approve step (#1326).** One sentence now says `rule_draft.py draft` then `rule_draft.py approve <state-folder> <rule id>`, so an agent can find the approval verb.
 - **Upkeep refuses a unit branch as `work.base` (#1311).** The scheduler offers no unit, the older pass ends `no-base`, and the unit pass is skipped, with the reason "base is a unit branch; upkeep needs the default branch"; default-branch bases and a closed gate are unchanged.
 - **The upkeep job's unit push keeps a backup and stops after a refusal (#1300).** The rewritten unit now goes through the atomic backup push, so the replaced tip is kept under `refs/sigma/backup/`; and when the older pass reports direct-commits or any other failure outcome, the unit pass is skipped (`unit_pass` reads `skipped`) while the job record keeps the older pass's real outcome. A closed gate changes nothing.
 - **`rule_draft.py approve` turns a proposed rule into an approved one (#1306).** An owner runs `approve <sdlc_dir> <rule_id>`; it refuses with one line for an unknown id, an already approved rule, a non-owner, an unresolved login or a closed gate, and stores no login.

@@ -108,3 +108,11 @@ def test_no_person_field_after_approval(tmp_path, monkeypatch):
 def test_config_template_names_the_verb():
     text = (ROOT / "skills" / "sigma-init" / "templates" / "config.json.tmpl").read_text()
     assert "rule_draft.py approve" in text
+
+
+def test_unpark_skill_names_the_draft_then_approve_verbs():
+    """Goal 1326: the unpark skill tells an agent the verbs, in order, so approval is discoverable."""
+    text = (ROOT / "skills" / "sigma-unpark" / "SKILL.md").read_text(encoding="utf-8")
+    assert "rule_draft.py draft" in text
+    assert "rule_draft.py approve <state-folder> <rule id>" in text
+    assert text.index("rule_draft.py draft") < text.index("rule_draft.py approve")
