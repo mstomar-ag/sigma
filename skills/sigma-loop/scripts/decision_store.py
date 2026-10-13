@@ -12,10 +12,12 @@ A crash mid-write can leave a truncated file; readers skip files that do not par
 """
 import contextlib
 import datetime
+import importlib.util
 import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -334,3 +336,89 @@ def untracked_old(sdlc_dir, now=None, config=None, min_age_days=1):
             if age > min_age_days * 86400:
                 ids.append(name[:-5])
     return sorted(ids)
+
+
+_MSG = "chore: publish recorded decisions"
+
+
+def _git(root, *args):
+    return subprocess.run(["git", "-C", root] + list(args), capture_output=True, text=True, timeout=30)
+
+
+def _unit_branches(root):
+    names, units = set(), os.path.join(root, ".sdlc", "features", "units")
+    try:
+        for n in os.listdir(units):
+            with open(os.path.join(units, n), encoding="utf-8") as fh:
+                b = json.load(fh).get("branch")
+            if isinstance(b, str) and b:
+                names.add(b)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return names
+
+
+def _rulebook_rel(sdlc_dir, config):
+    try:
+        spec = importlib.util.spec_from_file_location("rulebook", os.path.join(os.path.dirname(
+            os.path.abspath(__file__)), "rulebook.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.settings(config)["path"]
+    except Exception:
+        return ".sdlc/rulebook.json"
+
+
+def publish(sdlc_dir, config):
+    """Commit (never push) the records folder, the autonomy folder and the rulebook file, and nothing else.
+
+    Returns `{"committed", "reason"}`; never raises. Skips: gate closed, `records.publish` not the JSON
+    boolean true, a goal worktree, a registered unit branch or a detached HEAD, nothing changed."""
+    def skip(reason):
+        return {"committed": False, "reason": reason}
+    if not enabled(config):
+        return skip("records-closed")
+    if _records_cfg(config).get("publish") is not True:
+        return skip("publish-off")
+    try:
+        sdlc = os.path.abspath(str(sdlc_dir))
+        root = os.path.dirname(sdlc)
+        if os.sep + os.path.join(".sdlc", "work") + os.sep in root + os.sep:
+            return skip("goal-worktree")
+        gd, cd = (_git(root, "rev-parse", "--path-format=absolute", x).stdout.strip()
+                  for x in ("--git-dir", "--git-common-dir"))
+        if not gd or gd != cd:
+            return skip("goal-worktree")
+        branch = _git(root, "symbolic-ref", "--short", "-q", "HEAD").stdout.strip()
+        if not branch or branch in _unit_branches(root):
+            return skip("unit-branch")
+        rel = os.path.relpath(sdlc, root)
+        paths = [os.path.join(rel, settings(config)["store_dir"]), os.path.join(rel, "autonomy"),
+                 _rulebook_rel(sdlc, config)]
+        paths = [p for p in paths if os.path.exists(os.path.join(root, p))]
+        if not paths or not _git(root, "status", "--porcelain", "--", *paths).stdout.strip():
+            return skip("nothing-changed")
+        if _git(root, "add", "--", *paths).returncode != 0:
+            return skip("add-failed")
+        done = _git(root, "commit", "-q", "-m", _MSG, "--", *paths)
+        return {"committed": True, "reason": "committed"} if done.returncode == 0 else skip("commit-failed")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return skip("git-unavailable")
+
+
+def main(argv):
+    if len(argv) == 3 and argv[1] == "publish":
+        try:
+            with open(os.path.join(argv[2], "config.json"), encoding="utf-8") as fh:
+                config = json.load(fh)
+        except (OSError, ValueError):
+            config = {}
+        print(json.dumps(publish(argv[2], config)))
+        return 0
+    help_asked = len(argv) > 1 and argv[1] in ("-h", "--help")
+    print("usage: decision_store.py publish <state-folder>", file=sys.stdout if help_asked else sys.stderr)
+    return 0 if help_asked else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
