@@ -2567,6 +2567,17 @@ def _watcher_build_rows(base, cfg):
         return []
 
 
+_PROGRESS_ON = False
+
+
+def _progress(label):
+    """#1319 (PROVISIONAL): one short stderr line before a slow check group. Off unless `main check`
+    switched it on (stderr is a tty, or --progress is passed), so captured output and every
+    other caller of check() stay byte-identical."""
+    if _PROGRESS_ON:
+        print("sigma-doctor: checking %s ..." % label, file=sys.stderr, flush=True)
+
+
 def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_dirs=None,
           installed_plugins_path=None, agents_md=None, cheap_only=False, which=None):
     """Return the setup checks relevant to this project's config; each is {name, ok, fix}.
@@ -2716,18 +2727,24 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     # wherever work.enabled or github discovery needs them -- the same checks /sigma-init runs, so a
     # later regression is visible. Each fix comes from the FAILING check: gh absent says install it.
     if _block(cfg, "work").get("enabled") or disc.get("source") == "github":
+        _progress("git and gh access")
         out.extend(_preflight_rows(base, cfg, run, which, injected, cheap_only))
         out.extend(_graphql_capability_rows(base, cfg))     # #801: advisory, detection only
         if _block(cfg, "work").get("enabled") and not cheap_only:
+            _progress("landing rules")
             out.extend(_landing_rows(base, cfg, run, which))        # #974: branch-creation rulesets
     out.extend(_origin_mismatch_rows(base, disc, run))      # #1314
     out.extend(_watcher_build_rows(base, cfg))                # #1315
+    _progress("unit branch readiness")
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
+    _progress("resolvers")
     out.extend(_resolver_rows(base, cfg, which, cheap_only))
+    _progress("unit records")
     out.extend(_unit_record_rows(base, run, cheap_only))
     if disc.get("source") == "github":
         gh_disc = _block(disc, "github")
         if _block(gh_disc, "project").get("enabled"):
+            _progress("the project board")
             dup = _board_dup_risk(gh_disc, run)
             if dup:
                 out.append(_chk("project.number pinned (no duplicate-board risk)", False, dup))
@@ -5384,7 +5401,7 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
     return rows
 
 
-USAGE = "usage: doctor.py check [sdlc_dir] | features [sdlc_dir] | hygiene [sdlc_dir] [repo_root]"
+USAGE = "usage: doctor.py check [sdlc_dir] [--progress] | features [sdlc_dir] | hygiene [sdlc_dir] [repo_root]"
 
 
 def main(argv):
@@ -5396,7 +5413,13 @@ def main(argv):
             print(f"  {name}: {state}\n      enable/change: {enable}")
         return 0
     if len(argv) >= 2 and argv[1] == "check":
-        checks = check(argv[2] if len(argv) > 2 else ".sdlc")
+        global _PROGRESS_ON
+        _PROGRESS_ON = "--progress" in argv or sys.stderr.isatty()
+        argv = [a for a in argv if a != "--progress"]
+        try:
+            checks = check(argv[2] if len(argv) > 2 else ".sdlc")
+        finally:
+            _PROGRESS_ON = False
         gaps = [c for c in checks if not c["ok"]]
         for c in checks:
             # #1513 review fix: show `fix` whenever it's non-empty, not just when `ok` is False.

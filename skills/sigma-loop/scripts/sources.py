@@ -1312,8 +1312,27 @@ class GitHubSource:
                 # not a blip, and retrying it would spend the whole boundary budget on one card.
                 if attempt == self._PROJECT_RETRIES - 1 or getattr(e, "no_retry", False) \
                         or not self._is_transient(e):
+                    limited = self._rate_limit_error(e, args)
+                    if limited is not None:
+                        raise limited from e
                     raise
                 time.sleep(self._RETRY_BASE * (2 ** attempt))
+
+    _RATE_LIMIT = ("rate limit", "secondary rate")
+
+    @classmethod
+    def _rate_limit_error(cls, exc, args):
+        """#1319 (PROVISIONAL): a rate-limited owner lookup comes back from `gh project` as the
+        misleading "unknown owner type". When the error text carries the rate-limit wording, return
+        one clear RuntimeError naming it; else None (the original error propagates unchanged)."""
+        if not any(m in str(exc).lower() for m in cls._RATE_LIMIT):
+            return None
+        verb = " ".join(str(a) for a in args[:2])
+        msg = ("GitHub API rate limit reached on `gh %s` (gh may report it as 'unknown owner type'); "
+               "wait for the limit to reset, then retry" % verb)
+        err = RuntimeError(msg)
+        err.hint = msg
+        return err
 
     @classmethod
     def _is_transient(cls, exc):
