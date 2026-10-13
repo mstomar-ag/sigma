@@ -388,7 +388,7 @@ def unit_callables(cwd, remote, branch):
     """-> (rewrite, push): the pass's two callables for one unit. `rewrite` replays the unit onto the base tip in a throwaway
     detached worktree (the unit ref is never moved; a conflict aborts and reads `ok: False`, nothing is resolved here) and
     remembers the new commit; `push` sends that commit to `remote` as `branch` under a lease on the tip the pass read, so a
-    branch somebody else moved is refused, never overwritten. The run it is handed carries the hooks policy of its phase."""
+    branch somebody else moved is refused, never overwritten; the replaced tip is kept as a backup ref in the same atomic push. The run it is handed carries the hooks policy of its phase."""
     for what, value in (("remote", remote), ("branch", branch)):
         if not valid_ref(value):
             raise ValueError("refusing %s %r: not a plain ref name" % (what, value))
@@ -418,8 +418,10 @@ def unit_callables(cwd, remote, branch):
         new = box.get("new")
         if not (isinstance(new, str) and _HEX.fullmatch(new)):
             raise RuntimeError("nothing rewritten to push")
-        run(cwd, ["git", "push", "--force-with-lease=refs/heads/%s:%s" % (branch, tips[0]), remote,
-                  "%s:refs/heads/%s" % (new, branch)])
+        backup = _sibling("feature_backup")
+        got = backup.push_unit(run, cwd, cwd, remote, branch[len(backup.BRANCH_PREFIX):], tips[0], source=new)
+        if got.get("outcome") != backup.PUSHED:             # a lease refusal or any other word is a failed pass, never a success
+            raise RuntimeError("push not done: %s" % got.get("outcome"))
     return rewrite, push
 
 
