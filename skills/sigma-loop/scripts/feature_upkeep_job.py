@@ -177,6 +177,8 @@ def run_engine(config, sdlc_dir, root, unit, *, environ=None, upkeep=None, unit_
     line = {"outcome": report.get("outcome") or "failed", "unit_tip": tip if isinstance(tip, str) else None}
     if line["outcome"] == SKIPPED_AFTER:                  # the older pass already rewrote this unit in this run: ONE path owns it
         line["unit_pass"] = "skipped"
+    elif line["outcome"] in _sibling("feature_upkeep_state").FAILURE:   # the older pass owns direct commits and acks: a failure stops the unit pass
+        line["unit_pass"] = "skipped"
     else:
         line.update(_unit_pass(config, sdlc_dir, root, unit, unit_pass))
     print(json.dumps(line, sort_keys=True), flush=True)
