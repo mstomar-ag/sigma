@@ -4,7 +4,11 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+<<<<<<< HEAD
 - **A failed merge call no longer blocks a unit's next landing (#1333).** `land` now settles an earlier landing record through the read-back and refuses only while one is still pending or unconfirmed; a refused or merged-with-warning record passes, stale records are pruned, and the doctor row names the real outcome and the exact `land .sdlc feature/<unit>` gesture and ignores settled records. A closed upkeep gate changes nothing.
+=======
+- **The autonomy readout and the question-list learning line use the category thresholds in force (#1317).** When `.sdlc/categories.json` has a category covering a pair, "level N needs X answers" and "of X answers" now show that category's numbers instead of the global ones; with no categories file every line is unchanged.
+>>>>>>> fork/feature/rubric-wiring
 - **The unpark skill names the rule approve step (#1326).** One sentence now says `rule_draft.py draft` then `rule_draft.py approve <state-folder> <rule id>`, so an agent can find the approval verb.
 - **Upkeep shows why a unit-branch base is refused and also refuses remote-qualified spellings (#1327).** The scheduler's drift note and the job record now say "base is a unit branch" instead of reading like an empty base, and `origin/feature/x` or `refs/heads/feature/x` as `work.base` is refused like `feature/x`; default-branch bases are unchanged.
 - **`define.py open` no longer commits the unit record on a feature branch (#1325).** When a unit branch is checked out, or the branch cannot be read, the record is still written but left uncommitted and the one-line note names the exact `git add` and `git commit` commands; any other branch commits as before.

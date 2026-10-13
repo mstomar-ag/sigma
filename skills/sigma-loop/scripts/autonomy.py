@@ -305,7 +305,7 @@ def _need(row, config):
     top = HARDSTOP_CAP if row["capped"] else 4
     if lvl >= top:
         return {"next_level": None, "answers_needed": None, "comparisons_needed": None, "agreement_needed": None}
-    cfg, nxt = settings(config), lvl + 1
+    cfg, nxt = row.get("thresholds") or settings(config), lvl + 1
     if nxt == 1:
         return {"next_level": 1, "answers_needed": cfg["l1_min_answers"], "comparisons_needed": 0,
                 "agreement_needed": None}
@@ -355,7 +355,7 @@ def learning_line(sdlc_dir, qkind, config):
         best = max(rows, key=lambda r: (r["level"], r["answers"]), default=None)
         if best is not None and best["level"] >= 1:
             return None
-        need = settings(config)["l1_min_answers"]
+        need = ((best or {}).get("thresholds") or settings(config))["l1_min_answers"]
         if best is not None and best["answers"] >= need and best["vetoes"]:
             return ("the rulebook is holding this kind at level 0 after a veto and will keep asking "
                     "(area %s, %d answers)" % (best["area"] or "-", best["answers"]))
