@@ -33,6 +33,7 @@ import pathlib
 import re
 import sys
 import tempfile
+import time
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -211,12 +212,18 @@ def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None
     env = _Env(config, sdlc_dir, run, gh_run, rebase_pass, verify, now)
     approval = _load("feature_land_approval")
     landing = _load("feature_upkeep_landing")
-    if landing.read_record(sdlc_dir, unit) is not None:
-        return refuse("pending-landing", "an earlier landing of this unit left a pending record; settling it is not "
-                      "part of this verb yet")
     slug, why = env.landed.resolve_slug(config, env.run, env.cwd, env.remote)
     if not slug:
         return refuse("slug-mismatch", why)
+    left = landing.read_record(sdlc_dir, unit)
+    if left is not None and left.get("outcome") not in (landing.REFUSED, landing.MERGED_WARNING):
+        stamp = int(time.time()) if now is None else now
+        landing.settle(sdlc_dir, config, unit, lambda n: env.gh_api.view_pr(env.gh_run, n, slug),
+                       lambda sha: env.gh_api.commit_parents(env.gh_run, slug, sha), stamp)
+        left = landing.read_record(sdlc_dir, unit)
+        if left is not None and left.get("outcome") not in (landing.REFUSED, landing.MERGED_WARNING):
+            return refuse("pending-landing", "an earlier landing of this unit is still unsettled after a read-back")
+    landing.prune(sdlc_dir, config, now=now)
     base = env.rebase._safe_ref("work.base", env.rebase._settings(config).get("base")) or ""
     if not base:
         return refuse("no-base", "no integration branch is configured")
