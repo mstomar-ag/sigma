@@ -452,8 +452,11 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
                 if getattr(source, "board_active", False):      # #1201: the apply moved the card to Ready
                     steps.append({"action": "set-status", "issue": ask.get("issue"),
                                   "detail": source.col["parked"], "result": None, "error": None})
-                if not all(r["result"] == "done" for r in _load("triage").apply_actions(source, steps, True)):
-                    return "failed"
+                res = _load("triage").apply_actions(source, steps, True)
+                if not res or res[0]["result"] != "done":
+                    return "failed"                 # the label swap gates; the card move is best effort (#1302)
+                if not all(r["result"] == "done" for r in res):
+                    ask.update(board_failed=True)
                 ask.update(reparked=True)
                 _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
                 try:
@@ -470,6 +473,7 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
         if source is None:
             source = _load("sources").GitHubSource(config, run=run)
         issue = action["issue"]
+        board_failed = False
         if action["kind"] == "promote":
             os.environ[_APPLYING_ENV] = "1"      # its own gesture must not close the ask it applies
             try:
@@ -488,12 +492,16 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
             if getattr(source, "board_active", False):
                 steps.append({"action": "set-status", "issue": issue, "detail": source.col["ready"],
                               "result": None, "error": None})
-            if not all(s["result"] == "done" for s in triage.apply_actions(source, steps, True)):
-                return "failed"
+            res = triage.apply_actions(source, steps, True)
+            if not res or res[0]["result"] != "done":
+                return "failed"                     # the label swap gates; the card move is best effort (#1302)
+            board_failed = not all(s["result"] == "done" for s in res)
         # Status first (#1106): a failed write returns failed before any record or comment, so the
         # retry repeats only the idempotent gesture and never a duplicate record or comment.
         ask.update(state="applied", applied_at=now.isoformat(), rid=None, rule_id=action["rule_id"],
                    silent=bool(action["silent"]))
+        if action["kind"] != "promote" and board_failed:
+            ask.update(board_failed=True)       # visible, never retried: the swap already landed
         _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
         try:
             rec = {"how": "autonomous", "qkind": action["qkind"], "area": action.get("area", ""),
