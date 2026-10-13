@@ -402,6 +402,14 @@ def _keys_only(config):
         return False
 
 
+def _loud_text(m, qkind, config):
+    if _keys_only(config):   # #1342: public repo, records on: the option is free text
+        return ("Applied automatically by rule %s (%s). No answer arrived within "
+                "the window. Reply no to veto." % (m.rule_id, qkind))
+    return ("Applied automatically by rule %s (%s): %s. No answer arrived within "
+            "the window. Reply no to veto." % (m.rule_id, qkind, m.option))
+
+
 def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comments_fn=None):
     """Plan, and unless `apply_actions` is false apply, one pass. Returns the actions (dicts with a
     `result` of would, done, failed or skipped). Closed gate: `[]`, nothing read, nothing written."""
@@ -423,11 +431,13 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
         stored = _spot_read(sdlc_dir)
         counts = dict(stored)
         eligible = []
+        loud = []   # #1361: the comment text each action would carry if its slot turns out to be a comment
         for ask in asks:
             if ask.get("state") == "applied" and ask.get("vetoed_at") and not ask.get("veto_logged"):
                 actions.append({"kind": "veto", "ask": ask["id"], "issue": ask.get("issue"),
                                 "qkind": ask.get("qkind"), "area": ask.get("area", ""), "rid": ask.get("rid")})
                 eligible.append(None)
+                loud.append("")
                 continue
             if ask.get("state") != "pending" or ask.get("answer") is not None:
                 continue  # a person's answer wins; nothing else is pending
@@ -448,26 +458,22 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
             if level >= 4 and silent_allowed(qkind, config, rule):
                 key = "%s|%s" % (qkind, area)
                 silent = not _spot_check(counts, key, config)
-            if silent:
-                text = ""
-            elif _keys_only(config):   # #1342: public repo, records on: the option is free text
-                text = ("Applied automatically by rule %s (%s). No answer arrived within "
-                        "the window. Reply no to veto." % (m.rule_id, qkind))
-            else:
-                text = ("Applied automatically by rule %s (%s): %s. No answer arrived within "
-                        "the window. Reply no to veto." % (m.rule_id, qkind, m.option))
+            text = "" if silent else _loud_text(m, qkind, config)
             actions.append({"kind": ask.get("gesture") if ask.get("gesture") in GESTURES else "unpark",
                             "ask": ask["id"], "issue": ask.get("issue"), "qkind": qkind, "area": area,
                             "option": m.option, "rule_id": m.rule_id, "level": level, "silent": silent,
                             "text": text})
             eligible.append(key)
+            loud.append(text if not silent else _loud_text(m, qkind, config))
             used += 1
         if apply_actions:
-            for a in actions:
-                a["result"] = apply(a, sdlc_dir, config, now, source=source, run=run)
             done = dict(stored)   # only applies that landed advance the counter
             moved = False
-            for a, key in zip(actions, eligible):
+            for a, key, text in zip(actions, eligible, loud):
+                if key is not None:   # #1361: the slot is decided now, from the landed count
+                    a["silent"] = (done.get(key, 0) + 1) % settings(config)["spot_check_one_in"] != 0
+                    a["text"] = "" if a["silent"] else text
+                a["result"] = apply(a, sdlc_dir, config, now, source=source, run=run)
                 if key is not None and a["result"] == "done":
                     done[key] = done.get(key, 0) + 1
                     moved = True
