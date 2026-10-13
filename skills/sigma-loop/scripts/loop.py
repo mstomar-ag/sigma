@@ -5195,7 +5195,8 @@ def verify_goal(sdlc_dir, goal):
     an ordered JSON array for multiple commands; single-command labels remain unchanged.
     Exit: 0 verified · 1 the command failed · 2 unsafe goal (refused before running anything) ·
     3 no command declared (honest absence) · 4 worktree behind its base and the auto-rebase could
-    not apply cleanly (refused before running anything -- #1890)."""
+    not apply cleanly (refused before running anything -- #1890) · 4 also: `verify.enforce` on and no
+    acceptance record (refused before running anything -- #1338)."""
     import hashlib, json as _json, subprocess
     # Checked FIRST, before the subprocess even runs — not just left to _evidence_path()'s own
     # guard further down, which would let an unsafe goal's proving command execute for nothing
@@ -5219,6 +5220,18 @@ def verify_goal(sdlc_dir, goal):
         ledger.safe_append(sdlc_dir, "verify", goal, config=config, stream=ledger.EVENTS,
                            ok=False, exit=3, absent=True)
         return 3
+    # #1338: the same gate `work.py pr` applies (`state.enforce_enabled`, and only where a worktree flow
+    # exists to demand the record: `work.enabled`). Without a record the
+    # evidence would be stamped with `acceptance_sha256: None`; recording one afterwards changes
+    # that digest and `state.done_refusal` then demands the whole verify again. Refuse first.
+    if acceptance_hash is None and work.enabled(config) and _enforce_enabled(config.get("verify") or {}):
+        print("REFUSED exit=4 -- verify.enforce is on and goal "
+              f"{goal!r} has no acceptance record; run `acceptance.py record .sdlc <goal> "
+              "--draft <file>` first, then verify (the proving command was not run)",
+              file=sys.stderr)
+        ledger.safe_append(sdlc_dir, "verify", goal, config=config, stream=ledger.EVENTS, exit=4)
+        actionlog.safe_append(sdlc_dir, goal, "verify_run", exit=4)
+        return 4
     # #1890: catch a worktree that has drifted behind its own base BEFORE the expensive subprocess
     # below ever runs -- #1617 (78 commits behind) and #1829 both burned a full multi-hundred-second
     # verify against stale code before a human noticed. `ensure_fresh` auto-rebases via the existing

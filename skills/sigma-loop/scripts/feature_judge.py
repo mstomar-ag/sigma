@@ -204,6 +204,33 @@ def _extract_payload(envelope):
     return payload if isinstance(payload, dict) else None
 
 
+class _Done:
+    """The two fields `ask_claude` reads from a finished child (what `subprocess.run` returns)."""
+    def __init__(self, stdout, returncode):
+        self.stdout, self.returncode = stdout, returncode
+
+
+def _run_group(argv, timeout=60):
+    """Run `argv` in a process group of its own; on overrun SIGKILL the WHOLE group (not only the direct
+    child, #1310), reap it, and raise `subprocess.TimeoutExpired`. POSIX; elsewhere the direct child only."""
+    posix = sys.platform != "win32"
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            **({"start_new_session": True} if posix else {}))
+    try:
+        out, _err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            if posix:
+                os.killpg(os.getpgid(proc.pid), 9)
+            else:
+                proc.kill()
+        except (ProcessLookupError, PermissionError):
+            pass
+        proc.communicate()
+        raise
+    return _Done(out, proc.returncode)
+
+
 def ask_claude(prompt, json_schema, model="sonnet", timeout_s=60, max_budget_usd=0.50):
     """Subprocess shell-out to `claude -p`, schema-constrained, tool-denied, permission-wall-free.
     -> `(payload, cost_usd)`. NEVER RAISES: a launch failure, a timeout, a non-zero exit, a
@@ -223,7 +250,7 @@ def ask_claude(prompt, json_schema, model="sonnet", timeout_s=60, max_budget_usd
     drain or leak."""
     argv = _build_argv(prompt, json_schema, model, max_budget_usd)
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s)
+        proc = _run_group(argv, timeout=timeout_s)
     except Exception:                          # noqa: BLE001 - launch failure/timeout -> never raise
         return None, 0.0
     try:

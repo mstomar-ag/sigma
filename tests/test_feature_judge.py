@@ -66,7 +66,7 @@ def test_argv_includes_every_must_fix_safety_flag(monkeypatch):
         captured["kwargs"] = kwargs
         return _FakeCompletedProcess(_envelope(result='{"ok": true}'))
 
-    monkeypatch.setattr(fj.subprocess, "run", fake_run)
+    monkeypatch.setattr(fj, "_run_group", fake_run)
     fj.ask_claude("classify this", {"type": "object"})
 
     argv = captured["argv"]
@@ -95,7 +95,7 @@ def test_permission_prompts_none_cannot_be_silently_dropped():
 
 
 def test_ask_claude_never_raises_on_launch_failure(monkeypatch):
-    monkeypatch.setattr(fj.subprocess, "run",
+    monkeypatch.setattr(fj, "_run_group",
                         lambda *a, **k: (_ for _ in ()).throw(OSError("no such file")))
     payload, cost = fj.ask_claude("p", {"type": "object"})
     assert payload is None and cost == 0.0
@@ -104,13 +104,13 @@ def test_ask_claude_never_raises_on_launch_failure(monkeypatch):
 def test_ask_claude_never_raises_on_timeout(monkeypatch):
     def raise_timeout(*a, **k):
         raise subprocess.TimeoutExpired(cmd="claude", timeout=60)
-    monkeypatch.setattr(fj.subprocess, "run", raise_timeout)
+    monkeypatch.setattr(fj, "_run_group", raise_timeout)
     payload, cost = fj.ask_claude("p", {"type": "object"}, timeout_s=60)
     assert payload is None and cost == 0.0
 
 
 def test_ask_claude_degrades_on_malformed_json_envelope(monkeypatch):
-    monkeypatch.setattr(fj.subprocess, "run",
+    monkeypatch.setattr(fj, "_run_group",
                         lambda *a, **k: _FakeCompletedProcess("not json at all"))
     payload, cost = fj.ask_claude("p", {"type": "object"})
     assert payload is None and cost == 0.0
@@ -120,7 +120,7 @@ def test_ask_claude_degrades_on_non_zero_exit_but_still_reports_real_cost(monkey
     """A non-zero exit does not mean zero API cost was billed -- the CLI may have spent real
     tokens before failing. `ask_claude` reads `total_cost_usd` off the envelope independently of
     exit code, so the spend ceiling this module enforces is never quietly under-fed."""
-    monkeypatch.setattr(fj.subprocess, "run", lambda *a, **k: _FakeCompletedProcess(
+    monkeypatch.setattr(fj, "_run_group", lambda *a, **k: _FakeCompletedProcess(
         _envelope(result="oops", total_cost_usd=0.37), returncode=1))
     payload, cost = fj.ask_claude("p", {"type": "object"})
     assert payload is None
@@ -131,7 +131,7 @@ def test_ask_claude_prefers_structured_output_over_result(monkeypatch):
     """LIVE-CONFIRMED shape (this slice's own real probe, 2026-09-11): the envelope carries BOTH
     `result` (a STRING) and a separate, already-parsed `structured_output` dict. The latter is
     preferred -- no re-parse needed, and it is the CLI's own validated view."""
-    monkeypatch.setattr(fj.subprocess, "run", lambda *a, **k: _FakeCompletedProcess(_envelope(
+    monkeypatch.setattr(fj, "_run_group", lambda *a, **k: _FakeCompletedProcess(_envelope(
         result='{"tier_guess": "4", "reasoning": "wrong, from result"}',
         structured_output={"tier_guess": "2", "reasoning": "right, from structured_output"})))
     payload, cost = fj.ask_claude("p", {"type": "object"})
@@ -140,14 +140,14 @@ def test_ask_claude_prefers_structured_output_over_result(monkeypatch):
 
 
 def test_ask_claude_falls_back_to_parsing_result_when_structured_output_absent(monkeypatch):
-    monkeypatch.setattr(fj.subprocess, "run", lambda *a, **k: _FakeCompletedProcess(
+    monkeypatch.setattr(fj, "_run_group", lambda *a, **k: _FakeCompletedProcess(
         _envelope(result='{"tier_guess": "2", "reasoning": "ok"}')))
     payload, cost = fj.ask_claude("p", {"type": "object"})
     assert payload == {"tier_guess": "2", "reasoning": "ok"}
 
 
 def test_ask_claude_degrades_when_result_is_not_valid_json(monkeypatch):
-    monkeypatch.setattr(fj.subprocess, "run",
+    monkeypatch.setattr(fj, "_run_group",
                         lambda *a, **k: _FakeCompletedProcess(_envelope(result="not { json")))
     payload, cost = fj.ask_claude("p", {"type": "object"})
     assert payload is None
@@ -155,7 +155,7 @@ def test_ask_claude_degrades_when_result_is_not_valid_json(monkeypatch):
 
 
 def test_ask_claude_degrades_when_result_parses_to_a_non_dict(monkeypatch):
-    monkeypatch.setattr(fj.subprocess, "run",
+    monkeypatch.setattr(fj, "_run_group",
                         lambda *a, **k: _FakeCompletedProcess(_envelope(result="[1, 2, 3]")))
     payload, cost = fj.ask_claude("p", {"type": "object"})
     assert payload is None
@@ -170,7 +170,7 @@ def test_ask_claude_real_envelope_shape_from_the_live_probe(monkeypatch):
         "total_cost_usd": 0.190484, "is_error": False, "num_turns": 2, "subtype": "success",
         "result": '{"ok":true}', "structured_output": {"ok": True}, "type": "result",
     })
-    monkeypatch.setattr(fj.subprocess, "run", lambda *a, **k: _FakeCompletedProcess(real_envelope))
+    monkeypatch.setattr(fj, "_run_group", lambda *a, **k: _FakeCompletedProcess(real_envelope))
     payload, cost = fj.ask_claude("p", {"type": "object"})
     assert payload == {"ok": True}
     assert cost == 0.190484
