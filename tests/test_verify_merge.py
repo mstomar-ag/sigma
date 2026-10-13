@@ -890,3 +890,70 @@ def test_record_merge_delivery_write_error_never_fails_a_successful_landing(tmp_
         raise OSError("read-only file system")
     monkeypatch.setattr(m, "_write_delivery", boom)
     m.record_merge(str(d), config, "feature/x", 55, "why", run=run, cwd=str(tmp_path))
+
+
+# --------------------------------------------------------------------------- the base's upkeep gate (#1341)
+
+
+def _show_runner(base_text=None, fail=False):
+    """A `(cwd, argv) -> stdout` fake answering only the read-only `git show <remote>/<base>:.sdlc/config.json`."""
+    calls = []
+
+    def run(cwd, argv):
+        calls.append(list(argv))
+        if fail:
+            raise RuntimeError("fatal: path does not exist")
+        return base_text
+
+    run.calls = calls
+    return run
+
+
+_GATE_OPEN = json.dumps({"upkeep": {"enabled": True}})
+_UNIT = "feature/x"
+
+
+def test_unit_branch_with_gate_closed_in_tree_but_open_on_base_warns(capsys):
+    m = _mod()
+    run = _show_runner(_GATE_OPEN)
+    got = m._engine_route({"work": {"base": BASE, "remote": "origin"}}, "/nonexistent", _UNIT,
+                          lambda: pytest.fail("must not ask"), run=run, cwd="/x")
+    err = capsys.readouterr().err
+    assert got is None
+    assert "upkeep" in err and "legacy" in err and "origin/main" in err
+    assert run.calls == [["git", "show", "origin/main:.sdlc/config.json"]]
+
+
+def test_gate_closed_in_both_prints_nothing(capsys):
+    m = _mod()
+    got = m._engine_route({"work": {"base": BASE}}, "/nonexistent", _UNIT, lambda: True,
+                          run=_show_runner(json.dumps({"work": {}})), cwd="/x")
+    out = capsys.readouterr()
+    assert got is None and out.err == "" and out.out == ""
+
+
+def test_unreadable_or_garbled_base_config_is_silent(capsys):
+    m = _mod()
+    for run in (_show_runner(fail=True), _show_runner("not json"), _show_runner("[1]")):
+        assert m._engine_route({"work": {"base": BASE}}, "/nonexistent", _UNIT, lambda: True,
+                               run=run, cwd="/x") is None
+    assert capsys.readouterr().err == ""
+
+
+def test_non_unit_branch_never_reads_the_base(capsys):
+    m = _mod()
+    run = _show_runner(_GATE_OPEN)
+    assert m._engine_route({"work": {"base": BASE}}, "/nonexistent", "sdlc/1", lambda: True,
+                           run=run, cwd="/x") is None
+    assert run.calls == [] and capsys.readouterr().err == ""
+
+
+def test_gate_open_in_tree_does_not_read_the_base(monkeypatch, capsys):
+    m = _mod()
+    run = _show_runner(_GATE_OPEN)
+    engine = type("E", (), {"land": staticmethod(lambda *a, **k: {"outcome": "merged"})})
+    real = m._load
+    monkeypatch.setattr(m, "_load", lambda n, d=None: engine if n == "feature_land" else real(n, d))
+    got = m._engine_route({"upkeep": {"enabled": True}}, "/nonexistent", _UNIT, lambda: True,
+                          run=run, cwd="/x")
+    assert got == 0 and run.calls == [] and capsys.readouterr().err == ""

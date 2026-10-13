@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Landing a unit branch warns when its tree has upkeep off but the base has it on (#1341).** `verify_merge.py land` reads the remote base's `.sdlc/config.json` read-only and prints one stderr warning naming the disagreement; the route is unchanged, an unreadable base config is silent, and with the gate on in the tree or off in both nothing changes.
 - **A failed merge call no longer blocks a unit's next landing (#1333).** `land` now settles an earlier landing record through the read-back and refuses only while one is still pending or unconfirmed; a refused or merged-with-warning record passes, stale records are pruned, and the doctor row names the real outcome and the exact `land .sdlc feature/<unit>` gesture and ignores settled records. A closed upkeep gate changes nothing.
 - **`decision_import.py` keeps the kind of comment-sourced decisions and one resume answer (#1309).** An unpark answer now takes the kind from the issue's `sigma-qkind` line instead of `unknown`, and `start it again now` is stored as `start it again`; with `rulebook.import.comments` off nothing changes.
 - **`decision_import.py` now reads issue comments from the command line (#1308).** With `rulebook.import.comments` on, scan, plan and apply list the goal-labelled issues and pass them to the scan; with it off nothing is fetched.

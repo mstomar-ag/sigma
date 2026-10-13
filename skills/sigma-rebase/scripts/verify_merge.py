@@ -491,11 +491,28 @@ def engine_exit_code(outcome):
     return 3 if outcome.startswith("unconfirmed") else 1
 
 
-def _engine_route(config, sdlc_dir, branch, decide):
+def _warn_if_base_gate_open(config, run, cwd):
+    """The tree's upkeep gate is closed: when the base ref's own config has it open, say so on stderr (#1341). Reads
+    `git show <remote>/<base>:.sdlc/config.json` only; any failure to read or parse is silent. Never changes the route."""
+    try:
+        remote, base = rebase_brief.resolve_remote(config), rebase_brief.resolve_base(config)
+        ref = "%s/%s" % (remote, base)
+        base_config = json.loads(run(cwd, ["git", "show", "%s:.sdlc/config.json" % ref]))
+        if isinstance(base_config, dict) and _load("feature_upkeep", _LOOP_SCRIPTS).enabled(base_config):
+            print("warning: this tree's .sdlc/config.json has upkeep off but %s has it on; landing uses the legacy "
+                  "path. Update this branch from %s to use the engine." % (ref, base), file=sys.stderr)
+    except Exception:  # noqa: BLE001 - an unreadable base config is silent
+        return
+
+
+def _engine_route(config, sdlc_dir, branch, decide, run=None, cwd=None):
     """-> an exit code when the upkeep gate is open and `branch` is a unit branch (the engine ran), else None and the
-    closed path below runs unchanged. The gate is read through `feature_upkeep` only; nothing is loaded while closed."""
+    closed path below runs unchanged. The gate is read through `feature_upkeep` only; nothing is loaded while closed.
+    With the tree's gate closed on a unit branch and `run` given, a base ref whose gate is open is warned about."""
     try:
         if not _load("feature_upkeep", _LOOP_SCRIPTS).enabled(config):
+            if run is not None and branch.startswith(UNIT_BRANCH_PREFIX):
+                _warn_if_base_gate_open(config, run, cwd)
             return None
     except Exception:  # noqa: BLE001 - a gate that cannot answer is closed
         return None
@@ -541,7 +558,7 @@ def main(argv):
         print("a rebase is still stopped in this tree -- resolve it first (see `conflict_walk.py "
               "walk`) before verifying.", file=sys.stderr)
         return 1
-    routed = _engine_route(config, sdlc_dir, branch, _interactive_decide)
+    routed = _engine_route(config, sdlc_dir, branch, _interactive_decide, run=run, cwd=cwd)
     if routed is not None:
         return routed
     report = verify_and_offer_merge(run, cwd, sdlc_dir, config, branch, base, _interactive_decide)
