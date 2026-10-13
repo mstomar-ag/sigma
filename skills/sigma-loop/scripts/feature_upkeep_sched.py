@@ -453,7 +453,8 @@ def health(config, sdlc_dir, now=None):
         rows.append(("upkeep settings", False, "invalid: " + "; ".join(verdict["problems"])))
     elif verdict["missing"]:
         rows.append(("upkeep scheduler readiness", False,
-                     "not ready on this machine, missing: " + ", ".join(verdict["missing"])))
+                     "this shell is missing: " + ", ".join(verdict["missing"])
+                     + " (a check of this shell only; the watcher's own environment is not read, so this does not show the watcher lacks it)"))
     else:
         rows.append(("upkeep scheduler readiness", True, "all opt-ins present in this shell"))
     wk = config.get("work") if isinstance(config, dict) else None
