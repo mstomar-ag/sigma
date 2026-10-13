@@ -1053,6 +1053,11 @@ def _partial_park_failure_runner(labels, rest_labels_fails=False, remove_always_
                 raise RuntimeError("gh: HTTP 502 Bad Gateway")
         if a[0] == "api" and len(a) >= 2 and a[1].endswith("/comments"):
             return json.dumps({"id": 1})                        # #895 slice 8: note()'s REST POST is no read
+        if (a[0] == "api" and len(a) >= 2 and "/issues/" in a[1] and "--method" in a
+                and a[a.index("--method") + 1] in ("POST", "DELETE")):
+            # #1303: park's REST label-write fallback (not a read). Same degraded GitHub: it fails too, so
+            # these tests still exercise the repair path (the fallback landing is test_park_label_rest_fallback).
+            raise RuntimeError("gh: HTTP 502 Bad Gateway")
         if a[0] == "api" and len(a) >= 2 and a[1].startswith("repos/") and "/issues/" in a[1]:
             stats["issue_reads"] += 1
             if rest_labels_fails:
