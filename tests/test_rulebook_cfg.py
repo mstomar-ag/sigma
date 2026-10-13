@@ -89,3 +89,25 @@ def test_new_key_opens_each_part_and_rules_is_the_sub_block():
     for p in PARTS:
         assert m.load({"rulebook": {p: {"enabled": True}}}).part_enabled(p)
     assert not m.load({"rulebook": {"rulebook": {"enabled": True}}}).part_enabled("rules")
+
+
+def test_doctor_names_a_paused_drift_judge(tmp_path):
+    import json
+    import time
+    d = _mod("skills/sigma-doctor/scripts/doctor.py")
+    sdlc = tmp_path / ".sdlc"
+    (sdlc / "state").mkdir(parents=True)
+    drift = {"enabled": True, "model": "m", "spend_ceiling_usd_per_day": 1.0}
+    cfg = {"rulebook": {"drift": drift}}
+    base = d._rulebook_state(cfg, sdlc)
+    assert "drift judge paused" not in base
+    now = time.time()
+    (sdlc / "state" / "drift-judge-spend.json").write_text(
+        json.dumps({"records": [{"ts": now - 60, "usd": 1.5}]}))
+    hhmm = time.strftime("%H:%M", time.localtime(now - 60))
+    assert d._rulebook_state(cfg, sdlc).endswith("; drift judge paused: daily ceiling reached at " + hhmm)
+    drift["spend_ceiling_usd_per_day"] = 9.0
+    assert "drift judge paused" not in d._rulebook_state(cfg, sdlc)
+    drift["spend_ceiling_usd_per_day"] = 1.0
+    drift["enabled"] = False
+    assert "drift judge paused" not in d._rulebook_state(cfg, sdlc)

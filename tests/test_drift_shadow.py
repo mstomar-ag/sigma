@@ -195,3 +195,12 @@ def test_save_takes_the_existing_lock_helper(tmp_path, monkeypatch):
     monkeypatch.setattr(ds, "_load", lambda n: store if n == "decision_store" else _mod(n))
     monkeypatch.setattr(store, "_lock", fake_lock)
     assert _run(sdlc, cfg, Fake()) is not None and seen
+
+
+def test_timeout_shaped_call_stores_nothing_and_judges_again(tmp_path):
+    sdlc, cfg = _setup(tmp_path)
+    r = _run(sdlc, cfg, Fake(kind=None))
+    assert r["verdict"] == "not_judged" and r["reason"] == "call_failed"
+    assert ds.get(sdlc, 7, "Upload logs?") is None
+    again = _run(sdlc, cfg, Fake(kind="consistent"))
+    assert again["verdict"] == "consistent"
