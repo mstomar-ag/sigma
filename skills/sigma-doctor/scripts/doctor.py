@@ -2750,183 +2750,186 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                                 "creates: " + ", ".join(n for n in unmapped if n) + " - map them in "
                                 "discovery.github.project.custom_fields (field -> option), or backfill by "
                                 "hand, else a loop-created (hand-off) issue is left blank on them."))
-        # Independent of board mirroring: auto_merge/require_review/branch-protection is a merge-gate
-        # concern, not a board one — must not be gated on project.enabled.
-        selfmerge = _self_merge_risk(gh_disc, _block(cfg, "work"), run)
-        if selfmerge:
-            out.append(_chk("an approval from someone other than the author is required before auto-merge", False, selfmerge))
+        # #1334: all of the below reads issues/PRs for hygiene rows the SessionStart wizard allow-list
+        # never uses (~30 gh calls per session start on a big repo); /sigma-doctor runs them.
+        if not cheap_only:
+            # Independent of board mirroring: auto_merge/require_review/branch-protection is a merge-gate
+            # concern, not a board one — must not be gated on project.enabled.
+            selfmerge = _self_merge_risk(gh_disc, _block(cfg, "work"), run)
+            if selfmerge:
+                out.append(_chk("an approval from someone other than the author is required before auto-merge", False, selfmerge))
 
-        # #2452: independent of work.enabled -- a human working the main checkout by hand strands a
-        # branch exactly as easily as the loop can. repo_root is base.parent, inlined the same way
-        # the secret-coverage row below does (no new variable). sdlc_dir (the follow-up fix, see
-        # `_open_unit_branch`) is `sdlc_dir` itself, unchanged from `check()`'s own parameter --
-        # the same value `_cfg(sdlc_dir)` above already reads `.sdlc/config.json` relative to.
-        stray = _stray_commits_after_merge(gh_disc, base.parent, run, sdlc_dir)
-        if stray:
-            out.append(_chk(
-                "checked-out branch has no stray commits past its own PR's merge/close", False, stray))
-
-        # #2593: every open unit's own landing PR (feature/<unit> -> base), not just the one the
-        # current checkout happens to be on -- a conflicted landing PR runs ZERO CI (GitHub cannot
-        # build a merge ref for it), reading identically to "not wired up" without this row.
-        landing = _landing_pr_unverifiable_units(sdlc_dir, gh_disc, run)
-        out.append(_chk(
-            "every open unit's landing PR is CI-verifiable (not conflicted with zero checks)",
-            landing is None, landing))
-
-        # #389: NOT gated on backlog_check.enabled (nor on the `project` block above) -- a repo with
-        # backlog_check OFF has zero auto-skip happening at all, so this is arguably more useful
-        # there (a nudge toward turning it on); a repo with it ON benefits from catching the exact
-        # blind spot that would otherwise waste a token on a goal that should have been parked.
-        dm = _dependency_marker_scan(gh_disc, bchk, run)
-        if dm is not None:
-            flagged, scanned, total = dm
-            dm_name = f"dependency markers: comments checked against body ({scanned}/{total} open goal(s))"
-            dm_fix = ("comment-only dependency marker(s), no body marker, likely silently ignored by "
-                      "precheck(): #" + ", #".join(str(n) for n in flagged[:10])
-                      + (f" (+{len(flagged) - 10} more)" if len(flagged) > 10 else "")
-                      + " -- re-file the dependency via handoff.py, or manually add a `Blocked by #N` "
-                      "line to the issue body.")
-            if bchk.get("enabled") is not True:
-                # C1 (PR #480 review): this check is deliberately NOT gated on backlog_check.enabled
-                # (see the comment above) -- but while it's off, precheck() returns "OFF" before ever
-                # reaching cross_check(), so the advice above (re-file, or add a body marker) does
-                # NOTHING yet: a body marker is ignored exactly as much as a comment-only one is. Say
-                # so, or the fix text points at an action that fixes nothing.
-                dm_fix += (' Also: backlog_check.enabled is off, so even a body marker won\'t '
-                           'currently be honored by precheck() -- set `backlog_check: {"enabled": '
-                           'true}` to fix that too.')
-            out.append(_chk(dm_name, not flagged, dm_fix))
-
-        # #1205: only a gap while blocked_label is unset -- once set, the picker already honors
-        # whatever label the repo names, so a matching label still on some issue is no longer a
-        # sign anything is inert and re-checking it would just be noise.
-        if not gh_disc.get("blocked_label"):
-            bl = _blocked_label_scan(gh_disc, run)
-            if bl:
-                bl_issues = ", ".join(f"#{n}" for n, _ in bl[:10])
-                bl_more = f" (+{len(bl) - 10} more)" if len(bl) > 10 else ""
-                bl_labels = ", ".join(sorted({label for _, label in bl}))
+            # #2452: independent of work.enabled -- a human working the main checkout by hand strands a
+            # branch exactly as easily as the loop can. repo_root is base.parent, inlined the same way
+            # the secret-coverage row below does (no new variable). sdlc_dir (the follow-up fix, see
+            # `_open_unit_branch`) is `sdlc_dir` itself, unchanged from `check()`'s own parameter --
+            # the same value `_cfg(sdlc_dir)` above already reads `.sdlc/config.json` relative to.
+            stray = _stray_commits_after_merge(gh_disc, base.parent, run, sdlc_dir)
+            if stray:
                 out.append(_chk(
-                    "blocked-ish label(s) found but discovery.github.blocked_label is unset",
-                    False,
-                    f"{bl_issues}{bl_more} carry a label that reads as a \"do not auto-pick\" "
-                    f"convention ({bl_labels}), but the label-queue picker only ever excludes "
-                    "parked_label -- set discovery.github.blocked_label to the label's exact name "
-                    "to make the picker honor it."))
+                    "checked-out branch has no stray commits past its own PR's merge/close", False, stray))
 
-        # #1391 step 5a: the CENSUS row. doctor's own scans query BY LABEL and therefore cannot see
-        # an issue whose defect is a MISSING label; the census enumerates the population instead.
-        # Read-only, fail-open, and it says so out loud when it could not read everything -- "I
-        # found nothing" and "I could not look" must never render the same.
-        try:
-            _rc = _load_loop_script("reconcile")
-            _cen = _rc.census(sdlc_dir, cfg, run=_raising_gh(run))   # #895 2c: an outage must not read as an empty census
-        except Exception:
-            _cen = None
-        if _cen and not _cen.get("skipped"):
-            _anom = {b: ns for b, ns in _cen["issues"].items() if b != _rc.CLEAN}
-            if _anom:
-                _desc = "; ".join(
-                    "%d %s (%s%s)" % (len(ns), b, ", ".join("#%s" % n for n in ns[:5]),
-                                      "…" if len(ns) > 5 else "")
-                    for b, ns in sorted(_anom.items()))
+            # #2593: every open unit's own landing PR (feature/<unit> -> base), not just the one the
+            # current checkout happens to be on -- a conflicted landing PR runs ZERO CI (GitHub cannot
+            # build a merge ref for it), reading identically to "not wired up" without this row.
+            landing = _landing_pr_unverifiable_units(sdlc_dir, gh_disc, run)
+            out.append(_chk(
+                "every open unit's landing PR is CI-verifiable (not conflicted with zero checks)",
+                landing is None, landing))
+
+            # #389: NOT gated on backlog_check.enabled (nor on the `project` block above) -- a repo with
+            # backlog_check OFF has zero auto-skip happening at all, so this is arguably more useful
+            # there (a nudge toward turning it on); a repo with it ON benefits from catching the exact
+            # blind spot that would otherwise waste a token on a goal that should have been parked.
+            dm = _dependency_marker_scan(gh_disc, bchk, run)
+            if dm is not None:
+                flagged, scanned, total = dm
+                dm_name = f"dependency markers: comments checked against body ({scanned}/{total} open goal(s))"
+                dm_fix = ("comment-only dependency marker(s), no body marker, likely silently ignored by "
+                          "precheck(): #" + ", #".join(str(n) for n in flagged[:10])
+                          + (f" (+{len(flagged) - 10} more)" if len(flagged) > 10 else "")
+                          + " -- re-file the dependency via handoff.py, or manually add a `Blocked by #N` "
+                          "line to the issue body.")
+                if bchk.get("enabled") is not True:
+                    # C1 (PR #480 review): this check is deliberately NOT gated on backlog_check.enabled
+                    # (see the comment above) -- but while it's off, precheck() returns "OFF" before ever
+                    # reaching cross_check(), so the advice above (re-file, or add a body marker) does
+                    # NOTHING yet: a body marker is ignored exactly as much as a comment-only one is. Say
+                    # so, or the fix text points at an action that fixes nothing.
+                    dm_fix += (' Also: backlog_check.enabled is off, so even a body marker won\'t '
+                               'currently be honored by precheck() -- set `backlog_check: {"enabled": '
+                               'true}` to fix that too.')
+                out.append(_chk(dm_name, not flagged, dm_fix))
+
+            # #1205: only a gap while blocked_label is unset -- once set, the picker already honors
+            # whatever label the repo names, so a matching label still on some issue is no longer a
+            # sign anything is inert and re-checking it would just be noise.
+            if not gh_disc.get("blocked_label"):
+                bl = _blocked_label_scan(gh_disc, run)
+                if bl:
+                    bl_issues = ", ".join(f"#{n}" for n, _ in bl[:10])
+                    bl_more = f" (+{len(bl) - 10} more)" if len(bl) > 10 else ""
+                    bl_labels = ", ".join(sorted({label for _, label in bl}))
+                    out.append(_chk(
+                        "blocked-ish label(s) found but discovery.github.blocked_label is unset",
+                        False,
+                        f"{bl_issues}{bl_more} carry a label that reads as a \"do not auto-pick\" "
+                        f"convention ({bl_labels}), but the label-queue picker only ever excludes "
+                        "parked_label -- set discovery.github.blocked_label to the label's exact name "
+                        "to make the picker honor it."))
+
+            # #1391 step 5a: the CENSUS row. doctor's own scans query BY LABEL and therefore cannot see
+            # an issue whose defect is a MISSING label; the census enumerates the population instead.
+            # Read-only, fail-open, and it says so out loud when it could not read everything -- "I
+            # found nothing" and "I could not look" must never render the same.
+            try:
+                _rc = _load_loop_script("reconcile")
+                _cen = _rc.census(sdlc_dir, cfg, run=_raising_gh(run))   # #895 2c: an outage must not read as an empty census
+            except Exception:
+                _cen = None
+            if _cen and not _cen.get("skipped"):
+                _anom = {b: ns for b, ns in _cen["issues"].items() if b != _rc.CLEAN}
+                if _anom:
+                    _desc = "; ".join(
+                        "%d %s (%s%s)" % (len(ns), b, ", ".join("#%s" % n for n in ns[:5]),
+                                          "…" if len(ns) > 5 else "")
+                        for b, ns in sorted(_anom.items()))
+                    out.append(_chk(
+                        "backlog label state is coherent",
+                        False,
+                        f"{_desc}. Run `python3 skills/sigma-loop/scripts/reconcile.py census .sdlc` for "
+                        "the full list. 'closed-with-state' is inert today but resurrects a false state "
+                        "if the issue is reopened; 'zero-label' issues are invisible to the picker "
+                        "entirely; 'multi-label' issues are excluded by whichever label wins."))
+                elif not _cen.get("complete"):
+                    # #1579: the reason comes from the census itself now. A query that FAILED and a
+                    # query that came back at the --limit ceiling both clear `complete` and they do not
+                    # have the same remedy, so "at least one census query failed" was about to become
+                    # a false statement of the rule on the truncation path.
+                    out.append(_chk(
+                        "backlog label census could be read in full",
+                        False,
+                        f"no anomalies were found, but {_rc._incomplete_reason(_cen)} — this is NOT a "
+                        "clean bill of health, only an incomplete read."))
+
+            # #1391 step 7: the two blocked labels collided into one string. See
+            # `_blocked_label_collision` for why this is dangerous and why doctor can only REPORT it.
+            collided = _blocked_label_collision(gh_disc)
+            if collided:
                 out.append(_chk(
-                    "backlog label state is coherent",
+                    "blocked_label and goal_blocked_label are DIFFERENT labels",
                     False,
-                    f"{_desc}. Run `python3 skills/sigma-loop/scripts/reconcile.py census .sdlc` for "
-                    "the full list. 'closed-with-state' is inert today but resurrects a false state "
-                    "if the issue is reopened; 'zero-label' issues are invisible to the picker "
-                    "entirely; 'multi-label' issues are excluded by whichever label wins."))
-            elif not _cen.get("complete"):
-                # #1579: the reason comes from the census itself now. A query that FAILED and a
-                # query that came back at the --limit ceiling both clear `complete` and they do not
-                # have the same remedy, so "at least one census query failed" was about to become
-                # a false statement of the rule on the truncation path.
+                    f"both resolve to {collided!r}, but they are two different mechanisms: "
+                    "discovery.github.blocked_label is a HUMAN-set 'do not auto-pick' hold the loop only "
+                    "reads (#1205), while goal_blocked_label is machine-managed state the loop writes and "
+                    "an auto-resume sweep is expected to CLEAR (#1350). Collided, clearing the machine "
+                    "state silently overrides a deliberate human hold. Rename one of them (and relabel the "
+                    "affected issues) before enabling any automatic reconciliation on this repo."))
+
+            # #1391 step 7: the orphan class NOTHING else can see -- carries in-progress, carries no
+            # primary lifecycle label, so neither the picker's query nor the multi-label invariant can
+            # ever return it.
+            orphans = _orphan_in_progress_scan(gh_disc, cfg, run)
+            if orphans:
+                shown = ", ".join(f"#{n}" for n in orphans[:10])
+                more = f" (+{len(orphans) - 10} more)" if len(orphans) > 10 else ""
                 out.append(_chk(
-                    "backlog label census could be read in full",
+                    "no issue carries sdlc:in-progress without a lifecycle label",
                     False,
-                    f"no anomalies were found, but {_rc._incomplete_reason(_cen)} — this is NOT a "
-                    "clean bill of health, only an incomplete read."))
+                    f"{shown}{more} carry the in-progress label but NO primary lifecycle label, so they "
+                    "are invisible to the picker (which queries by the goal label) AND to the "
+                    "multi-label invariant (which only flags issues carrying more than one). Nothing in "
+                    "the loop can find or resume them. Re-add the label that reflects their real state, "
+                    "or close them."))
 
-        # #1391 step 7: the two blocked labels collided into one string. See
-        # `_blocked_label_collision` for why this is dangerous and why doctor can only REPORT it.
-        collided = _blocked_label_collision(gh_disc)
-        if collided:
-            out.append(_chk(
-                "blocked_label and goal_blocked_label are DIFFERENT labels",
-                False,
-                f"both resolve to {collided!r}, but they are two different mechanisms: "
-                "discovery.github.blocked_label is a HUMAN-set 'do not auto-pick' hold the loop only "
-                "reads (#1205), while goal_blocked_label is machine-managed state the loop writes and "
-                "an auto-resume sweep is expected to CLEAR (#1350). Collided, clearing the machine "
-                "state silently overrides a deliberate human hold. Rename one of them (and relabel the "
-                "affected issues) before enabling any automatic reconciliation on this repo."))
+            # Rulebook slice 18: the confirmation label is legacy-only, so a leftover is advice.
+            leftovers = _legacy_confirmation_scan(gh_disc, cfg, run)
+            if leftovers:
+                shown = ", ".join(f"#{n}" for n in leftovers[:10])
+                more = f" (+{len(leftovers) - 10} more)" if len(leftovers) > 10 else ""
+                gate_on = _block(_block(cfg, "ai_filed"), "triage").get("enabled") is not False
+                how = ("Run `/sigma-promote migrate-confirmation` (dry run first, see docs/label-model.md) to move them all, or "
+                       if gate_on else "Run ")
+                out.append(_chk(
+                    "no issue still carries the legacy confirmation label (advisory)",
+                    False,
+                    f"{len(leftovers)} open issue(s) ({shown}{more}) carry the legacy confirmation label. Nothing "
+                    "writes it any more, so "
+                    "this is a leftover from an older board: the loop will never pick these. " + how +
+                    "`/sigma-promote` to approve or clear each one. Advisory only -- nothing was changed."))
 
-        # #1391 step 7: the orphan class NOTHING else can see -- carries in-progress, carries no
-        # primary lifecycle label, so neither the picker's query nor the multi-label invariant can
-        # ever return it.
-        orphans = _orphan_in_progress_scan(gh_disc, cfg, run)
-        if orphans:
-            shown = ", ".join(f"#{n}" for n in orphans[:10])
-            more = f" (+{len(orphans) - 10} more)" if len(orphans) > 10 else ""
-            out.append(_chk(
-                "no issue carries sdlc:in-progress without a lifecycle label",
-                False,
-                f"{shown}{more} carry the in-progress label but NO primary lifecycle label, so they "
-                "are invisible to the picker (which queries by the goal label) AND to the "
-                "multi-label invariant (which only flags issues carrying more than one). Nothing in "
-                "the loop can find or resume them. Re-add the label that reflects their real state, "
-                "or close them."))
+            # #1392: blockers nothing can pick -- see `_unreachable_blocker_scan` for why
+            # `sdlc:blocking` is a tie-break rather than a queue, and why this is report-only.
+            unreachable = _unreachable_blocker_scan(gh_disc, run)
+            if unreachable:
+                shown = ", ".join(f"#{n}" for n in unreachable[:10])
+                more = f" (+{len(unreachable) - 10} more)" if len(unreachable) > 10 else ""
+                out.append(_chk(
+                    "every sdlc:blocking issue is one the loop can actually pick",
+                    False,
+                    f"{shown}{more} carry sdlc:blocking but not sdlc:goal. Other work is blocked on "
+                    "them, yet no queue can serve them: sdlc:blocking only ever re-ranks issues that "
+                    "are ALREADY eligible, and the auto-unpark sweep will not resume what they block "
+                    "until they CLOSE -- so this is a deadlock, not a delay. Run `/sigma-promote` to see "
+                    "them in its `deadlocked` bucket and approve the ones that should be worked."))
 
-        # Rulebook slice 18: the confirmation label is legacy-only, so a leftover is advice.
-        leftovers = _legacy_confirmation_scan(gh_disc, cfg, run)
-        if leftovers:
-            shown = ", ".join(f"#{n}" for n in leftovers[:10])
-            more = f" (+{len(leftovers) - 10} more)" if len(leftovers) > 10 else ""
-            gate_on = _block(_block(cfg, "ai_filed"), "triage").get("enabled") is not False
-            how = ("Run `/sigma-promote migrate-confirmation` (dry run first, see docs/label-model.md) to move them all, or "
-                   if gate_on else "Run ")
-            out.append(_chk(
-                "no issue still carries the legacy confirmation label (advisory)",
-                False,
-                f"{len(leftovers)} open issue(s) ({shown}{more}) carry the legacy confirmation label. Nothing "
-                "writes it any more, so "
-                "this is a leftover from an older board: the loop will never pick these. " + how +
-                "`/sigma-promote` to approve or clear each one. Advisory only -- nothing was changed."))
-
-        # #1392: blockers nothing can pick -- see `_unreachable_blocker_scan` for why
-        # `sdlc:blocking` is a tie-break rather than a queue, and why this is report-only.
-        unreachable = _unreachable_blocker_scan(gh_disc, run)
-        if unreachable:
-            shown = ", ".join(f"#{n}" for n in unreachable[:10])
-            more = f" (+{len(unreachable) - 10} more)" if len(unreachable) > 10 else ""
-            out.append(_chk(
-                "every sdlc:blocking issue is one the loop can actually pick",
-                False,
-                f"{shown}{more} carry sdlc:blocking but not sdlc:goal. Other work is blocked on "
-                "them, yet no queue can serve them: sdlc:blocking only ever re-ranks issues that "
-                "are ALREADY eligible, and the auto-unpark sweep will not resume what they block "
-                "until they CLOSE -- so this is a deadlock, not a delay. Run `/sigma-promote` to see "
-                "them in its `deadlocked` bucket and approve the ones that should be worked."))
-
-        # #1354: the single-primary-state-label invariant (design doc §5, corrected per §10 finding
-        # 2 -- NOT "no issue has more than one sdlc:* label ever": sdlc:in-progress is an
-        # orthogonal, additive marker, excluded from this check entirely). Informational only, same
-        # "warn, never fail" convention every other row in this function already follows.
-        msl = _multi_state_label_scan(gh_disc, cfg, run)
-        if msl:
-            msl_desc = ", ".join(f"#{n} ({'/'.join(labels)})" for n, labels in msl[:10])
-            msl_more = f" (+{len(msl) - 10} more)" if len(msl) > 10 else ""
-            out.append(_chk(
-                "no issue carries more than one primary sdlc:* state label",
-                False,
-                f"{msl_desc}{msl_more} carry more than one of "
-                "{sdlc:goal, sdlc:parked, sdlc:needs-confirmation} at once "
-                "(sdlc:in-progress, sdlc:blocked, sdlc:needs-label and sdlc:needs-unit are "
-                "excluded -- they are orthogonal, additive OVERLAYS that ride alongside sdlc:goal, "
-                "not states of their own) -- remove all "
-                "but the one that reflects the issue's real current state."))
+            # #1354: the single-primary-state-label invariant (design doc §5, corrected per §10 finding
+            # 2 -- NOT "no issue has more than one sdlc:* label ever": sdlc:in-progress is an
+            # orthogonal, additive marker, excluded from this check entirely). Informational only, same
+            # "warn, never fail" convention every other row in this function already follows.
+            msl = _multi_state_label_scan(gh_disc, cfg, run)
+            if msl:
+                msl_desc = ", ".join(f"#{n} ({'/'.join(labels)})" for n, labels in msl[:10])
+                msl_more = f" (+{len(msl) - 10} more)" if len(msl) > 10 else ""
+                out.append(_chk(
+                    "no issue carries more than one primary sdlc:* state label",
+                    False,
+                    f"{msl_desc}{msl_more} carry more than one of "
+                    "{sdlc:goal, sdlc:parked, sdlc:needs-confirmation} at once "
+                    "(sdlc:in-progress, sdlc:blocked, sdlc:needs-label and sdlc:needs-unit are "
+                    "excluded -- they are orthogonal, additive OVERLAYS that ride alongside sdlc:goal, "
+                    "not states of their own) -- remove all "
+                    "but the one that reflects the issue's real current state."))
 
     if kg.get("enabled") is True:
         builder = kg.get("builder", "graphify")
@@ -5007,6 +5010,11 @@ def _rulebook_state_core(cfg, sdlc_dir=None):
             if ptr.is_open(cfg):
                 extra.append("ledger pointer on: %d ledger entry files, %d ids queued"
                              % (ptr.pointer_file_count(sdlc_dir), ptr.queued(sdlc_dir)))
+        if sdlc_dir is not None:
+            at = _load_loop_script("drift_judge").ceiling_paused_at(cfg, time.time(), sdlc_dir)
+            if at is not None:
+                extra.append("drift judge paused: daily ceiling reached at "
+                             + time.strftime("%H:%M", time.localtime(at)))
         return state + "".join("; " + e for e in extra)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__

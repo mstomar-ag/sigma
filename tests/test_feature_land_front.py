@@ -48,6 +48,7 @@ class World:
         self.settings = {"allow_merge_commit": True, "delete_branch_on_merge": False}
         self.pr_list_rc = 0
         self.git_calls, self.gh_calls, self.passes, self.verifies = [], [], [], []
+        self.goals = []
         self.view = None
         self.__dict__.update(kw)
 
@@ -84,6 +85,7 @@ class World:
 
     def rebase_pass(self, sdlc_dir, config, goal, unit, run=None, cwd=None, remote=None):
         self.passes.append(unit)
+        self.goals.append(goal)
         return {"outcome": "current"}
 
     def verify(self, command, tree, seconds):
@@ -113,6 +115,14 @@ def test_closed_gate_attempts_and_writes_nothing(tmp_path, config):
     assert out.get("closed") is True
     assert (trap.processes, trap.models, trap.network, trap.writes) == ([], [], [], [])
     assert tree(tmp_path) == before
+
+
+def test_landing_passes_no_goal_to_the_rebase_pass(tmp_path):
+    """#1340. Landing is not a goal: the pass receives goal=None, never the unit name."""
+    w = World(tmp_path)
+    w.land()
+    assert w.passes == ["voice"], w.passes
+    assert w.goals == [None], w.goals
 
 
 def test_control_gate_that_does_not_close_is_seen(tmp_path):
