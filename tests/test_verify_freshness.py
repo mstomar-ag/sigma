@@ -77,6 +77,15 @@ def _write_record(sdlc_dir, goal, worktree, branch="sdlc/test", base="main", rem
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({"worktree": str(worktree), "branch": branch, "base": base,
                              "remote": remote}))
+    _write_acceptance(sdlc_dir, goal)
+
+
+def _write_acceptance(sdlc_dir, goal):
+    """#1338: `verify_goal` under `verify.enforce` refuses without an acceptance record."""
+    a = pathlib.Path(sdlc_dir) / "acceptance" / f"{goal}.md"
+    a.parent.mkdir(parents=True, exist_ok=True)
+    a.write_text(f'---\nkind: "acceptance"\ngoal: "{goal}"\nverify_command: null\n---\n'
+                 "## Done when\n- [ ] one\n- [ ] two\n- [ ] three\n")
 
 
 def _sdlc(tmp_path, config=None):
