@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **The upkeep job's unit push keeps a backup and stops after a refusal (#1300).** The rewritten unit now goes through the atomic backup push, so the replaced tip is kept under `refs/sigma/backup/`; and when the older pass reports direct-commits or any other failure outcome, the unit pass is skipped (`unit_pass` reads `skipped`) while the job record keeps the older pass's real outcome. A closed gate changes nothing.
 - **A person's no after an applied ask reaches the veto through the real verbs (#1189).** Keep-parked and demote on an issue whose ask was applied inside its window record the veto; a failure never blocks the gesture.
 
 

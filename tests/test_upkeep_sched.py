@@ -284,10 +284,10 @@ def test_the_engine_is_handed_no_goal_so_a_filing_is_addressed_to_nobody(tmp_pat
 
     def fake(sdlc_dir, config, goal, unit, **kw):
         calls.append((goal, unit))
-        return {"outcome": "conflict", "after": H40}
+        return {"outcome": "current", "after": H40}
     line = j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, upkeep=fake,
                         unit_pass=lambda *a, **k: {"result": "rewritten"})
-    assert calls == [(None, "voice")] and line == {"outcome": "conflict", "unit_tip": H40, "unit_pass": "rewritten"}
+    assert calls == [(None, "voice")] and line == {"outcome": "current", "unit_tip": H40, "unit_pass": "rewritten"}
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == line
 
 
@@ -623,11 +623,34 @@ def test_a_unit_the_older_pass_rebased_is_not_rewritten_again_by_the_unit_pass(t
     line = j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, unit_pass=entry,
                         upkeep=lambda *a, **k: {"outcome": "rebased", "after": H40})
     assert seen == [] and line == {"outcome": "rebased", "unit_tip": H40, "unit_pass": "skipped"}
-    for word in ("current", "conflict", "lease-refused", "no-branch", "failed", "busy"):   # nothing moved: the unit pass still runs
+    for word in ("current", "no-branch", "busy"):         # nothing moved and nothing failed: the unit pass still runs
         assert j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, unit_pass=entry,
                             upkeep=lambda *a, w=word, **k: {"outcome": w})["unit_pass"] == "rewritten"
-    assert len(seen) == 6
+    assert len(seen) == 3
     capsys.readouterr()
+
+
+def test_a_failure_outcome_of_the_older_pass_stops_the_unit_pass_and_keeps_its_word(tmp_path, capsys):
+    """Goal 1300: direct-commits (and every other failure outcome) is the older pass's call; the unit pass does not run."""
+    j, sdlc, seen = job(), project(tmp_path), []
+    entry = lambda *a, **k: seen.append(a) or {"result": "rewritten"}
+    state = _sibling_state()
+    assert "direct-commits" in state.FAILURE
+    for word in state.FAILURE:
+        line = j.run_engine(open_config(), sdlc, str(tmp_path), "voice", environ=ENV, unit_pass=entry,
+                            upkeep=lambda *a, w=word, **k: {"outcome": w})
+        assert line == {"outcome": word, "unit_tip": None, "unit_pass": "skipped"}
+    assert seen == []
+    capsys.readouterr()
+
+
+def _sibling_state():
+    import importlib.util
+    path = pathlib.Path(__file__).resolve().parent.parent / "skills/sigma-loop/scripts/feature_upkeep_state.py"
+    spec = importlib.util.spec_from_file_location("feature_upkeep_state_1300", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _git(cwd, *argv):
