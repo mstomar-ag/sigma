@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A failed board card move no longer fails an applied unpark or veto re-park (#1302).** The label swap is the gating step; once it lands the ask is marked applied and the record and comment are written once, with `board_failed` kept on the ask so the failure stays visible.
 - **A person's no after an applied ask reaches the veto through the real verbs (#1189).** Keep-parked and demote on an issue whose ask was applied inside its window record the veto; a failure never blocks the gesture.
 
 
