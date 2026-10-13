@@ -5041,6 +5041,8 @@ def _rulebook_state_core(cfg, sdlc_dir=None):
             cap = store.ceiling_warning(sdlc_dir, cfg)
             if cap:
                 extra.append(cap)
+            if mod.visibility(cfg) == "public":
+                extra.append("public repository with records on: answers are posted as keys only")
             old = store.untracked_old(sdlc_dir, config=cfg)
             if old:
                 extra.append("%d decision records are untracked for over a day; commit them" % len(old))
