@@ -161,7 +161,24 @@ def _span(body, legacy, marker_start, marker_end):
     return body[at + len(sp): stop if stop != -1 else len(body)]
 
 
-def _from_comment(c, issue, legacy, bs):
+_RESUME = re.compile(r"^start it again( now)?[.!]?$", re.IGNORECASE)
+RESUME_ANSWER = "start it again"  # the one canonical spelling of the resume answer
+
+
+def _canon(choice):
+    return RESUME_ANSWER if _RESUME.match(choice.strip()) else choice
+
+
+def _declared_kind(comments):
+    """The kind of the LAST `sigma-qkind:` line among an issue's comments, or None."""
+    qk, kind = _load("qkind"), None
+    for c in comments:
+        got = qk.parse_line(c.get("body") or "") if isinstance(c, dict) else None
+        kind = got or kind
+    return kind
+
+
+def _from_comment(c, issue, legacy, bs, qkind=None):
     body = c.get("body") or ""
     span = _span(body, legacy, bs.UNPARK_QA_START, bs.UNPARK_QA_END)
     if span is None:
@@ -182,7 +199,9 @@ def _from_comment(c, issue, legacy, bs):
             ask = _text(line[1:-1])
         elif line.startswith("- **") and "** — " in line:
             out.append(_cand("unpark-qa", when, ask or _text(line[4:line.index("**", 4)]), [],
-                             _text(line.split("** — ", 1)[1]), "", issue, "%s#%d" % (cid, len(out))))
+                             _canon(_text(line.split("** — ", 1)[1])), "", issue, "%s#%d" % (cid, len(out))))
+            if qkind:
+                out[-1]["qkind"] = qkind
             ask = ""
     return out
 
@@ -268,8 +287,10 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
                 if full:
                     break
                 stats["unpark-qa"]["files_read"] += 1
-                for c in read(config, issue):
-                    for cand in _from_comment(c, issue, legacy, bs) if isinstance(c, dict) else []:
+                got = list(read(config, issue))
+                declared = _declared_kind(got)
+                for c in got:
+                    for cand in _from_comment(c, issue, legacy, bs, declared) if isinstance(c, dict) else []:
                         if len(cands) >= cap:
                             full = True
                             break
@@ -309,6 +330,8 @@ REPO_AREA = "repo"
 
 
 def kind_of(cand, qkinds):
+    if cand.get("qkind") in qkinds and cand["qkind"] != UNKNOWN:
+        return cand["qkind"]
     q = cand["question"].strip().lower()
     if q in qkinds and q != UNKNOWN:
         return q
@@ -563,7 +586,17 @@ def _add_options(v):
                         "a dash-leading name works as: --project-dir -srv-demo-work-repo")
 
 
-def main(argv=None):
+def list_issues(config, limits, run=None):
+    """Numbers of the goal-labelled issues (any state, newest first) whose comments the scan reads."""
+    src = _load("sources")
+    gh = (config.get("discovery") or {}).get("github") or {}
+    items = src.fetch_issues_rest(run or src._run_gh, gh.get("repo") or None,
+                                  [gh.get("goal_label", "sdlc:goal")], limits["max_issues"],
+                                  state="all", sort="updated", direction="desc")
+    return [i["number"] for i in items if isinstance(i.get("number"), int)]
+
+
+def main(argv=None, lister=None, comments_fn=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="verb", required=True)
     for verb, text in (("scan", "report past-decision candidates (writes nothing)"),
@@ -582,7 +615,14 @@ def main(argv=None):
     except Exception as exc:  # noqa: BLE001
         print("decision_import: %s" % exc, file=sys.stderr)
         return 1
-    out = scan(args.sdlc_dir, config, args.profile or None, project_dirs=args.project_dir or None)
+    issues = None
+    if _load("rulebook_cfg").import_limits(config)["comments"]:
+        try:
+            issues = (lister or list_issues)(config, _load("rulebook_cfg").import_limits(config))
+        except Exception:  # noqa: BLE001
+            issues = None
+    out = scan(args.sdlc_dir, config, args.profile or None, issues=issues, comments_fn=comments_fn,
+               project_dirs=args.project_dir or None)
     if args.verb == "plan":
         pl = plan(args.sdlc_dir, config, out["candidates"])
         if not pl["gate"]:
