@@ -477,6 +477,17 @@ def _interactive_decide():
         print("Please answer y or n.")
 
 
+def _interactive_land_decide():
+    """The engine route's own question: it verifies inside the landing, so nothing has passed yet."""
+    while True:
+        choice = input("Land the unit now? Verification runs first. [y/N]: ").strip().lower()
+        if choice in ("y", "yes"):
+            return True
+        if choice in ("", "n", "no"):
+            return False
+        print("Please answer y or n.")
+
+
 USAGE = "usage: verify_merge.py land <sdlc_dir> [branch]"
 
 UNIT_BRANCH_PREFIX = "feature/"
@@ -559,6 +570,7 @@ def main(argv):
               "walk`) before verifying.", file=sys.stderr)
         return 1
     routed = _engine_route(config, sdlc_dir, branch, _interactive_decide, run=run, cwd=cwd)
+    routed = _engine_route(config, sdlc_dir, branch, _interactive_land_decide)
     if routed is not None:
         return routed
     report = verify_and_offer_merge(run, cwd, sdlc_dir, config, branch, base, _interactive_decide)
