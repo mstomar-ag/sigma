@@ -101,6 +101,36 @@ def test_open_on_a_fresh_unit_writes_and_commits_its_record(tmp_path):
     assert "login" not in text and "person" not in text
 
 
+def test_open_on_a_feature_branch_writes_the_record_but_does_not_commit_it(tmp_path, capsys):
+    """#1325: the documented gesture on a fresh unit, run while a unit branch is checked out."""
+    sdlc = _repo(tmp_path)
+    _git(tmp_path, "checkout", "-q", "-b", "feature/voice")
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    report = define.open_unit(sdlc, "voice", "feature", run=_runner(tmp_path), cwd=tmp_path,
+                              base="main")
+    assert report["ok"], report
+    rel = ".sdlc/features/units/voice.json"
+    assert (tmp_path / rel).is_file()
+    assert _git(tmp_path, "rev-parse", "HEAD") == head
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1 and "git add -- " in err and "git commit -m" in err and rel in err
+
+
+def test_an_unreadable_branch_fails_closed_and_prints_the_command(tmp_path, capsys):
+    sdlc = _repo(tmp_path)
+    base = _runner(tmp_path)
+
+    def run(cwd, argv):
+        if [str(a) for a in argv][:2] == ["git", "rev-parse"]:
+            raise RuntimeError("no head")
+        return base(cwd, argv)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, base="main")
+    assert report["ok"], report
+    assert _git(tmp_path, "rev-parse", "HEAD") == head
+    assert "git commit -m" in capsys.readouterr().err
+
+
 def test_a_committed_unchanged_record_is_not_recommitted(tmp_path):
     sdlc = _repo(tmp_path)
     _record(sdlc)
