@@ -4,8 +4,9 @@
 Verbs: `list <sdlc_dir>` prints the question kind and area pairs whose derived autonomy level is at
 least 2 and whose human answers agree on one option at or above the agreement threshold. `draft
 <sdlc_dir> <qkind> <area>` builds a rule from that pair and hands it to `rulebook.propose`, so it
-lands as PROPOSED only: approval stays with the owner through `rulebook.approve`. This module never
-approves and never writes a file of its own.
+lands as PROPOSED only: approval stays with the owner through `rulebook.approve`. `approve <sdlc_dir> <rule_id>` hands one
+proposed rule to `rulebook.approve` as the invoking owner (the login is read, never stored); `draft`
+itself never approves, and this module never writes a file of its own.
 
 - Held-back exam: the pair's human answers are split deterministically by a hash of the record id
   (stable under re-ordering). The majority option of one part drafts the rule; the other part is
@@ -171,6 +172,36 @@ def draft(sdlc_dir, qkind, area, config, now=None):
         return _refuse("unreadable: %s" % type(exc).__name__)
 
 
+def _invoker(config):
+    """The authenticated login of whoever runs this, or None. Reuses `cross_repo.identity`'s one lookup."""
+    try:
+        return _load("cross_repo").identity(config).get("login")
+    except Exception:
+        return None
+
+
+def approve(sdlc_dir, rule_id, config):
+    """Approve one proposed rule as the invoking owner. -> (ok, line). Never raises. The login is not stored."""
+    try:
+        rb = _load("rulebook")
+        if not rb.enabled(config):
+            return False, "closed: rulebook rules are not enabled; nothing written"
+        rule = next((r for r in rb.load(sdlc_dir, config) if r.get("id") == rule_id), None)
+        if rule is None:
+            return False, "no valid rule with id %s" % rule_id
+        if rule.get("status") == "approved":
+            return False, "rule %s is already approved" % rule_id
+        login = _invoker(config)
+        if not login:
+            return False, "cannot resolve who is approving; rule %s stays proposed" % rule_id
+        if not _load("autonomy").is_owner(login, config):
+            return False, rb.park_line(rule_id).replace("\n", " ")
+        rb.approve(sdlc_dir, rule_id, login, config)
+        return True, rule_id
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        return False, "unreadable: %s" % type(exc).__name__
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="verb", required=True)
@@ -179,6 +210,9 @@ def main(argv=None):
     d.add_argument("sdlc_dir")
     d.add_argument("qkind")
     d.add_argument("area")
+    ap = sub.add_parser("approve", help="approve one proposed rule (owner only)")
+    ap.add_argument("sdlc_dir")
+    ap.add_argument("rule_id")
     args = p.parse_args(argv)
     try:
         config = _load("state").load_config(args.sdlc_dir)
@@ -191,6 +225,10 @@ def main(argv=None):
             return 1
         print(json.dumps(list_patterns(args.sdlc_dir, config), indent=2))
         return 0
+    if args.verb == "approve":
+        ok, line = approve(args.sdlc_dir, args.rule_id, config)
+        print(line, file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 2
     out = draft(args.sdlc_dir, args.qkind, args.area, config)
     print(json.dumps(out, indent=2))
     return 0 if out["status"] == "drafted" else 1

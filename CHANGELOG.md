@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **`rule_draft.py approve` turns a proposed rule into an approved one (#1306).** An owner runs `approve <sdlc_dir> <rule_id>`; it refuses with one line for an unknown id, an already approved rule, a non-owner, an unresolved login or a closed gate, and stores no login.
 - **A person's no after an applied ask reaches the veto through the real verbs (#1189).** Keep-parked and demote on an issue whose ask was applied inside its window record the veto; a failure never blocks the gesture.
 
 
