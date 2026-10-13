@@ -93,17 +93,17 @@ def test_a_plain_unknown_owner_type_is_left_as_it_was():
 
 # --- (3) doctor progress lines ---------------------------------------------------------------------
 
-def _doctor(tmp_path, env_extra):
+def _doctor(tmp_path, env_extra, flag=()):
     sdlc = tmp_path / ".sdlc"
     sdlc.mkdir(exist_ok=True)
-    env = {k: v for k, v in os.environ.items() if k != "SIGMA_DOCTOR_PROGRESS"}
+    env = dict(os.environ)
     env.update(env_extra)
-    return subprocess.run([sys.executable, str(SCRIPTS / "sigma-doctor/scripts/doctor.py"), "check", str(sdlc)],
+    return subprocess.run([sys.executable, str(SCRIPTS / "sigma-doctor/scripts/doctor.py"), "check", str(sdlc), *flag],
                           capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=300)
 
 
 def test_progress_lines_appear_only_when_opted_in(tmp_path):
-    on = _doctor(tmp_path, {"SIGMA_DOCTOR_PROGRESS": "1"})
+    on = _doctor(tmp_path, {}, ("--progress",))
     off = _doctor(tmp_path, {})
     assert "sigma-doctor: checking" in on.stderr
     assert "sigma-doctor: checking" not in off.stderr
@@ -112,7 +112,6 @@ def test_progress_lines_appear_only_when_opted_in(tmp_path):
 
 def test_a_tty_stderr_turns_progress_on(tmp_path, monkeypatch):
     d = _load("sigma-doctor/scripts/doctor.py", "doc1319")
-    monkeypatch.delenv("SIGMA_DOCTOR_PROGRESS", raising=False)
 
     class Tty(io.StringIO):
         def isatty(self):

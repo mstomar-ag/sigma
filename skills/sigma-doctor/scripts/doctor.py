@@ -2569,7 +2569,7 @@ _PROGRESS_ON = False
 
 def _progress(label):
     """#1319 (PROVISIONAL): one short stderr line before a slow check group. Off unless `main check`
-    switched it on (stderr is a tty, or SIGMA_DOCTOR_PROGRESS is set), so captured output and every
+    switched it on (stderr is a tty, or --progress is passed), so captured output and every
     other caller of check() stay byte-identical."""
     if _PROGRESS_ON:
         print("sigma-doctor: checking %s ..." % label, file=sys.stderr, flush=True)
@@ -2719,7 +2719,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
             out.extend(_landing_rows(base, cfg, run, which))        # #974: branch-creation rulesets
     out.extend(_origin_mismatch_rows(base, disc, run))      # #1314
     out.extend(_watcher_build_rows(base, cfg))                # #1315
-    _progress("upkeep")
+    _progress("unit branch readiness")
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
     _progress("resolvers")
     out.extend(_resolver_rows(base, cfg, which, cheap_only))
@@ -5383,7 +5383,7 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
     return rows
 
 
-USAGE = "usage: doctor.py check [sdlc_dir] | features [sdlc_dir] | hygiene [sdlc_dir] [repo_root]"
+USAGE = "usage: doctor.py check [sdlc_dir] [--progress] | features [sdlc_dir] | hygiene [sdlc_dir] [repo_root]"
 
 
 def main(argv):
@@ -5396,7 +5396,8 @@ def main(argv):
         return 0
     if len(argv) >= 2 and argv[1] == "check":
         global _PROGRESS_ON
-        _PROGRESS_ON = bool(os.environ.get("SIGMA_DOCTOR_PROGRESS")) or sys.stderr.isatty()
+        _PROGRESS_ON = "--progress" in argv or sys.stderr.isatty()
+        argv = [a for a in argv if a != "--progress"]
         try:
             checks = check(argv[2] if len(argv) > 2 else ".sdlc")
         finally:
