@@ -4,9 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-<<<<<<< HEAD
 - **The autonomy readout and the question-list learning line use the category thresholds in force (#1317).** When `.sdlc/categories.json` has a category covering a pair, "level N needs X answers" and "of X answers" now show that category's numbers instead of the global ones; with no categories file every line is unchanged.
-=======
 - **The unpark skill names the rule approve step (#1326).** One sentence now says `rule_draft.py draft` then `rule_draft.py approve <state-folder> <rule id>`, so an agent can find the approval verb.
 - **Upkeep shows why a unit-branch base is refused and also refuses remote-qualified spellings (#1327).** The scheduler's drift note and the job record now say "base is a unit branch" instead of reading like an empty base, and `origin/feature/x` or `refs/heads/feature/x` as `work.base` is refused like `feature/x`; default-branch bases are unchanged.
 - **`define.py open` no longer commits the unit record on a feature branch (#1325).** When a unit branch is checked out, or the branch cannot be read, the record is still written but left uncommitted and the one-line note names the exact `git add` and `git commit` commands; any other branch commits as before.
@@ -18,7 +16,6 @@ All notable changes to Sigma are recorded here, newest first.
 - **Human decisions and the rulebook file are published by a local commit (#1313).** With `records.publish` on, a person-run unpark or rule approval commits (never pushes) the records folder, the autonomy folder and the rulebook file, and skips goal worktrees, unit branches and a detached HEAD.
 - **The applier carries out the rule's option (#1301).** A rule whose option reads as leaving the issue parked now leaves labels and the board card alone and still writes the record and the comment; other options unpark as before.
 - **`/sigma-doctor` warns when the configured repo or project owner differs from origin (#1314).** A `discovery.github.repo` or `project.owner` that names another repo than the origin remote gets a row naming both; a match, an unset value or an unreadable origin adds nothing.
->>>>>>> fork/feature/rubric-wiring
 - **A person's no after an applied ask reaches the veto through the real verbs (#1189).** Keep-parked and demote on an issue whose ask was applied inside its window record the veto; a failure never blocks the gesture.
 
 
