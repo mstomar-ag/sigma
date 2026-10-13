@@ -2306,6 +2306,22 @@
     },
     {
       "path": "skills/sigma-loop/scripts/watch_daemon.py",
+      "function": "_write_build",
+      "rule": "fs-remove",
+      "count": 2,
+      "gate": "ungated",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/watch_daemon.py",
+      "function": "_write_build",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "ungated",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/watch_daemon.py",
       "function": "acquire_decision_mutex",
       "rule": "fs-remove",
       "count": 2,
@@ -2324,7 +2340,7 @@
       "path": "skills/sigma-loop/scripts/watch_daemon.py",
       "function": "cleanup",
       "rule": "fs-remove",
-      "count": 2,
+      "count": 3,
       "gate": "ungated",
       "risk": "high"
     },

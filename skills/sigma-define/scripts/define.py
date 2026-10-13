@@ -388,7 +388,8 @@ def _step_registry(ctx):
 def _commit_record(ctx):
     """#1312: make the unit visible to other machines. A unit with no record gets one written (the
     same `write_unit` shape the sync uses: no person or login field), then that one path is committed
-    on the current branch (never a push). Never raises and never changes the report: when the write
+    on the current branch (never a push), except on a unit branch, where it is left uncommitted and the
+    command is printed (#1325). Never raises and never changes the report: when the write
     or commit cannot be made it prints one line naming the exact command."""
     path = None
     try:
@@ -400,6 +401,10 @@ def _commit_record(ctx):
                 raise RuntimeError(report.get("refused") or "the record was not written")
         if not ctx.run(ctx.cwd, ["git", "status", "--porcelain", "--", str(path)]).strip():
             return                                  # already committed and unchanged
+        branch = ctx.run(ctx.cwd, ["git", "rev-parse", "--abbrev-ref", "HEAD"]).strip()
+        if not branch or branch.startswith(features.BRANCH_PREFIX):
+            # #1325: nobody commits directly to a unit branch (an unreadable branch fails closed).
+            raise RuntimeError("a unit branch is checked out" if branch else "the current branch is unreadable")
         ctx.run(ctx.cwd, ["git", "add", "--", str(path)])
         ctx.run(ctx.cwd, ["git", "commit", "-m", "sdlc: record unit %s" % ctx.name, "--", str(path)])
     except Exception as exc:                        # noqa: BLE001 - a diagnostic never breaks the gesture

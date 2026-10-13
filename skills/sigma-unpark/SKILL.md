@@ -132,6 +132,8 @@ exactly what this skill's own `keep-parked` decision already writes for you.
 | `unpark` | one atomic swap: `+sdlc:goal`, `−sdlc:parked`/`−sdlc:blocked` | card → `Ready` | body + comment |
 | `keep-parked` | **none** | unchanged | body + comment + `auto_unpark` opt-out marker |
 
+To turn a decision into a standing rule, run `rule_draft.py draft`, then an owner runs `rule_draft.py approve <state-folder> <rule id>`.
+
 An interrupted interview loses nothing: answers are recorded before the session can end, and `brief`
 picks up where it left off.
 
