@@ -2841,3 +2841,54 @@ def test_a_goalless_filing_through_the_real_filer_reads_no_issue_and_still_stamp
     assert "Feature: " + UNIT in src.created["body"], src.created
     assert src.attached == ("55", "feature:" + UNIT), src.attached
     assert "None" not in src.created["body"].replace("None of", "")
+
+
+# --------------------------------------------------------------------------- units.include / units.exclude at the pick (#1335)
+
+
+def _with_units(**units):
+    cfg = _cfg()
+    cfg["upkeep"] = {"enabled": True, "units": units}
+    return cfg
+
+
+def test_an_excluded_unit_is_not_brought_forward_at_the_pick(tmp_path):
+    m = _mod()
+    world = World(tmp_path).build()
+    world.move_integration()
+    old = world.tip(FEATURE)
+    report = _upkeep(m, world, config=_with_units(exclude=[UNIT]))
+    assert report["outcome"] == m.DISABLED, report
+    assert world.tip(FEATURE) == old, "an excluded unit was moved"
+
+
+def test_an_unlisted_unit_is_not_brought_forward_when_include_names_others(tmp_path):
+    m = _mod()
+    world = World(tmp_path).build()
+    world.move_integration()
+    old = world.tip(FEATURE)
+    report = _upkeep(m, world, config=_with_units(include=["other-*"]))
+    assert report["outcome"] == m.DISABLED, report
+    assert world.tip(FEATURE) == old
+
+
+def test_an_included_unit_still_moves_at_the_pick(tmp_path):
+    m = _mod()
+    world = World(tmp_path).build()
+    world.move_integration()
+    old = world.tip(FEATURE)
+    report = _upkeep(m, world, config=_with_units(include=[UNIT], exclude=["zzz"]))
+    assert report["outcome"] == m.REBASED, report
+    assert world.tip(FEATURE) != old
+
+
+def test_no_include_or_exclude_is_the_same_as_no_upkeep_block(tmp_path):
+    m = _mod()
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    a, b = World(tmp_path / "a").build(), World(tmp_path / "b").build()
+    a.move_integration()
+    b.move_integration()
+    plain = _upkeep(m, a)
+    blank = _upkeep(m, b, config=_with_units())
+    assert plain["outcome"] == blank["outcome"] == m.REBASED

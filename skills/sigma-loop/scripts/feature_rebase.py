@@ -2460,6 +2460,12 @@ def is_unit_base(base, remote=None):
     return name.startswith(features.BRANCH_PREFIX)
 
 
+def _sibling_selected(unit, settings):
+    """True when the include/exclude lists admit `unit` (same matcher the scheduler uses)."""
+    sched = _load("feature_upkeep_sched")
+    return bool(sched.selected([unit], settings["units.include"], settings["units.exclude"]))
+
+
 def upkeep(sdlc_dir, config, goal, unit, run=None, cwd=None, remote=None):
     """THE PASS. Integration branch -> feature branch, then the feature's goal branches onto it.
 
@@ -2505,6 +2511,14 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
     features_dir = registry.registry_dir(sdlc_dir)
     if not features_dir.is_dir():
         report["outcome"] = NOT_ADOPTED
+        return report
+    # #1335: the scheduler's `upkeep.units.include/exclude` filter holds at the pick too. An unadmitted
+    # unit is left alone (no fetch, no backup ref, no push); `disabled` is the neutral word for that.
+    # Defaults admit every unit, and an invalid `upkeep` block reads as defaults, so nothing changes there.
+    upkeep_settings = gate.read(config).settings
+    if not _sibling_selected(unit, upkeep_settings):
+        report["outcome"] = DISABLED
+        report["why"] = "excluded by upkeep.units.include/exclude"
         return report
 
     run = run or _run
