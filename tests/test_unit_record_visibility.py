@@ -88,17 +88,17 @@ def test_an_uncommittable_record_prints_the_command_and_still_reports_ok(tmp_pat
     assert err.count("\n") == 1 and "git add -- " in err and "git commit -m" in err
 
 
-def test_no_record_means_no_git_call_beyond_the_old_ones(tmp_path):
+def test_open_on_a_fresh_unit_writes_and_commits_its_record(tmp_path):
+    """The documented gesture: no record exists beforehand."""
     sdlc = _repo(tmp_path)
-    calls = []
-    base = _runner(tmp_path)
-
-    def run(cwd, argv):
-        calls.append([str(a) for a in argv][:2])
-        return base(cwd, argv)
-    define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, base="main")
-    assert ["git", "add"] not in calls and ["git", "commit"] not in calls
-    assert ["git", "status"] not in calls
+    report = define.open_unit(sdlc, "voice", "feature", run=_runner(tmp_path), cwd=tmp_path,
+                              base="main")
+    assert report["ok"], report
+    rel = ".sdlc/features/units/voice.json"
+    assert _git(tmp_path, "show", "--name-only", "--format=", "HEAD").split() == [rel]
+    assert _git(tmp_path, "status", "--porcelain", "--", rel).strip() == ""
+    text = (tmp_path / rel).read_text()
+    assert "login" not in text and "person" not in text
 
 
 def test_a_committed_unchanged_record_is_not_recommitted(tmp_path):

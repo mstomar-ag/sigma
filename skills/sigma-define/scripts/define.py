@@ -386,15 +386,18 @@ def _step_registry(ctx):
 
 
 def _commit_record(ctx):
-    """#1312: when the unit already has a record, commit that one path on the current branch (never
-    a push), so other machines can see the unit. No record means no git call and no write. Never raises and never changes the
-    report: when the commit cannot be made it prints one line naming the exact command."""
+    """#1312: make the unit visible to other machines. A unit with no record gets one written (the
+    same `write_unit` shape the sync uses: no person or login field), then that one path is committed
+    on the current branch (never a push). Never raises and never changes the report: when the write
+    or commit cannot be made it prints one line naming the exact command."""
     path = None
     try:
         features_dir = feature_registry.registry_dir(ctx.sdlc_dir)
         path = feature_registry.unit_path(features_dir, ctx.name)
         if not path.is_file():
-            return                                  # no record to commit: nothing changes
+            report = feature_sync.amend(ctx.sdlc_dir, ctx.name, lambda entry: entry.update(title=ctx.name))
+            if report.get("refused") or not path.is_file():
+                raise RuntimeError(report.get("refused") or "the record was not written")
         if not ctx.run(ctx.cwd, ["git", "status", "--porcelain", "--", str(path)]).strip():
             return                                  # already committed and unchanged
         ctx.run(ctx.cwd, ["git", "add", "--", str(path)])
