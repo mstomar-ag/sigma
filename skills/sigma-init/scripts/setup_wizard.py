@@ -252,6 +252,12 @@ def write_dismissed(sdlc_dir, names):
 #: trade-off, same shape of fix.
 _CACHE_TTL_SECONDS = 3600
 
+#: #1334: a result whose ONLY failing wizard row is `gh auth` may be a blip, not a state. It is
+#: cached this briefly (key `transient_until`) so a second session start makes no gh calls.
+_TRANSIENT_TTL_SECONDS = 120
+_TRANSIENT_FIX = ("could not confirm the gh login (possibly transient); "
+                  "re-run /sigma-doctor to check it")
+
 
 def _cache_path(sdlc_dir):
     return pathlib.Path(sdlc_dir) / "state" / "setup-wizard-cache.json"
@@ -279,7 +285,7 @@ def _read_cache(sdlc_dir):
     return None
 
 
-def _write_cache(sdlc_dir, needs_wizard, now=None):
+def _write_cache(sdlc_dir, needs_wizard, now=None, transient=False):
     """No-ops entirely in a repo that has not adopted Sigma -- see `_adopted`."""
     if not _adopted(sdlc_dir):
         return
@@ -287,9 +293,25 @@ def _write_cache(sdlc_dir, needs_wizard, now=None):
     try:
         _cache_path(sdlc_dir).parent.mkdir(parents=True, exist_ok=True)
         _cache_path(sdlc_dir).write_text(
-            json.dumps({"checked_at": now, "needs_wizard": needs_wizard}), encoding="utf-8")
+            json.dumps(dict({"checked_at": now, "needs_wizard": needs_wizard},
+                            **({"transient_until": now + _TRANSIENT_TTL_SECONDS}
+                               if transient else {}))), encoding="utf-8")
     except OSError:
         pass
+
+
+def _only_auth_failing(checks):
+    bad = [c["name"] for c in checks if not c["ok"] and c["name"] in _MODES]
+    return bad == ["gh auth"]
+
+
+def _transient_result(dismissed):
+    """#1334: never advise `gh auth login` from the session hook on one failed check."""
+    if "gh auth" in dismissed:
+        return {"needs_wizard": False, "steps": []}
+    mode, degraded = _classify("gh auth")
+    return {"needs_wizard": True,
+            "steps": [{"name": "gh auth", "fix": _TRANSIENT_FIX, "mode": mode, "degraded": degraded}]}
 
 
 def wizard_status(sdlc_dir, run=None, dismissed=None, allow_cache=True, now=None):
@@ -318,10 +340,23 @@ def wizard_status(sdlc_dir, run=None, dismissed=None, allow_cache=True, now=None
         if (cached is not None and cached["needs_wizard"] is False
                 and 0 <= (now - cached["checked_at"]) < _CACHE_TTL_SECONDS):
             return {"needs_wizard": False, "steps": []}
+        until = cached.get("transient_until") if cached is not None else None
+        if (isinstance(until, (int, float)) and not isinstance(until, bool)
+                and 0 <= (now - cached["checked_at"]) and now < until):
+            if dismissed is None:
+                dismissed = read_dismissed(sdlc_dir)
+            return _transient_result(dismissed)
 
     if dismissed is None:
         dismissed = read_dismissed(sdlc_dir)
     checks = _doctor_check(sdlc_dir=sdlc_dir, run=run)
+    if _only_auth_failing(checks):
+        checks = _doctor_check(sdlc_dir=sdlc_dir, run=run)      # #1334: one retry of a blip
+        if _only_auth_failing(checks):
+            result = _transient_result(dismissed)
+            if allow_cache:
+                _write_cache(sdlc_dir, result["needs_wizard"], now=now, transient=True)
+            return result
     steps = []
     for c in checks:
         # `not in _MODES` is the allow-list gate (see `_MODES`): only the seven explicitly-authored
