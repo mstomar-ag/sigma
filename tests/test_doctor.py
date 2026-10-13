@@ -7610,7 +7610,6 @@ def test_pick_path_gate_state_board_skipped_when_graphql_unavailable(monkeypatch
     assert called == []
 
 
-<<<<<<< HEAD
 # --- ledger wording: "join" when the remote ledger branch is already known (#1318) -------------
 
 _OLD_INIT_FIX = ("run /sigma-ledger — one command creates the ops branch, seeds your file + TEAM.md, "
@@ -7623,7 +7622,6 @@ def _probe_runner(known):
     def run(args):
         if "rev-parse" in args and "refs/remotes/origin/sdlc-ledger" in args:
             return "abc123\n" if known else ""
-=======
 _SSH = "git" + "@github.com:"
 _SSH_ALIAS = "git" + "@github.com-alias:"
 
@@ -7633,12 +7631,10 @@ def _origin_runner(url):
     def run(args):
         if args[:1] == ["git"] and "get-url" in args:
             return url
->>>>>>> fork/feature/rubric-wiring
         return ""
     return run
 
 
-<<<<<<< HEAD
 def test_ledger_rows_say_join_when_the_remote_branch_exists():
     d = _doc()
     with tempfile.TemporaryDirectory() as t:
@@ -7660,7 +7656,6 @@ def test_ledger_rows_keep_exact_wording_when_the_branch_is_unknown():
             assert c["fix"] == _OLD_INIT_FIX
             rows = {n: s for n, s, _ in d.features(base, run=run)}
             assert rows["team ledger"] == _OLD_STATE
-=======
 def _mismatch_rows(cfg, url, tmp_path):
     d = _doc()
     base = _sdlc(tmp_path, cfg)
@@ -7752,4 +7747,3 @@ def test_matching_build_dead_pid_stale_heartbeat_or_no_state_add_no_row(tmp_path
     assert _stale_build_rows(_watcher_state(tmp_path / "b", build="0.0.1", pid=2 ** 22 + 12345)) == []
     assert _stale_build_rows(_watcher_state(tmp_path / "c", build="0.0.1", fresh=False)) == []
     assert _stale_build_rows(pathlib.Path(_sdlc(tmp_path / "d", {}))) == []
->>>>>>> fork/feature/rubric-wiring
