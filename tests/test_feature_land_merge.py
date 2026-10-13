@@ -62,6 +62,9 @@ class MWorld(World):
             self.pending_at_call = landing_mod().record_path(self.sdlc, "voice").exists()
             if self.mode == "conflict":
                 raise RuntimeError("HTTP 409: Head branch was modified")
+            if self.mode == "bad_gateway":
+                self.mode = "ok"                  # a one-shot host fault: the next call goes through
+                raise RuntimeError("HTTP 502: Bad Gateway")
             self.merged = self.mode in ("ok", "lost", "lost_unread")
             if self.mode.startswith("lost"):
                 raise OSError("connection reset")
@@ -263,7 +266,7 @@ def test_lost_acknowledgment_unreadable_is_unconfirmed_and_pending_stays(tmp_pat
     out = w.merge()
     assert out["outcome"] == "unconfirmed:readback-failed"
     assert pending(w)["outcome"] == "unconfirmed"      # unsettled: the record stays
-    assert w.land()["outcome"] == "refused:pending-landing"
+    assert w.land()["outcome"] == "refused:pending-landing"      # settle read it back and it is still unreadable
 
 
 def test_base_moved_after_the_read_is_merged_with_warning(tmp_path):
@@ -420,3 +423,16 @@ def test_verify_merge_open_gate_routes_and_maps_outcomes(capsys):
     assert vm._engine_route(CONFIG, ".sdlc", "sdlc/938", lambda: True) is None       # not a unit branch: old path
     assert vm._engine_route(CONFIG, ".sdlc", "feature/voice", lambda: False) == 0    # declined: nothing runs
     assert len(calls) == 3
+
+
+# ------------------------------------------------------------------------------------------------ #1333 end to end
+
+def test_failed_merge_then_a_clean_land_merges_and_leaves_no_doctor_row(tmp_path):
+    w = MWorld(tmp_path, mode="bad_gateway")
+    first = w.merge()
+    assert first["outcome"].startswith("refused:") and pending(w)["outcome"] == "refused"
+    assert landing_mod().doctor_row(w.sdlc, CONFIG, 10) is None      # a settled record is not a stuck landing
+    second = w.merge()
+    assert second["outcome"] == "merged" and len(w.puts) == 2
+    assert pending(w) is None
+    assert landing_mod().doctor_row(w.sdlc, CONFIG, 10) is None
