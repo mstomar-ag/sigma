@@ -423,7 +423,11 @@ def apply(action, sdlc_dir, config, now, source=None, run=None):
                 add, remove = [source.parked_label], [source.goal_label, source.in_progress_label]
                 swap = {"action": "swap-label", "issue": ask.get("issue"), "result": None, "error": None,
                         "detail": _load("triage")._swap_detail(add, remove), "add": add, "remove": remove}
-                if _load("triage").apply_actions(source, [swap], True)[0]["result"] != "done":
+                steps = [swap]
+                if getattr(source, "board_active", False):      # #1201: the apply moved the card to Ready
+                    steps.append({"action": "set-status", "issue": ask.get("issue"),
+                                  "detail": source.col["parked"], "result": None, "error": None})
+                if not all(r["result"] == "done" for r in _load("triage").apply_actions(source, steps, True)):
                     return "failed"
                 ask.update(reparked=True)
                 _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
