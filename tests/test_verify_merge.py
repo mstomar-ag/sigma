@@ -1001,7 +1001,7 @@ def test_main_gives_the_engine_route_the_landing_prompt_and_the_closed_path_the_
     monkeypatch.setattr(m.rebase_brief, "resolve_base", lambda _c: "main")
     monkeypatch.setattr(m.rebase_brief, "current_branch", lambda *_a: "feature/x")
     monkeypatch.setattr(m.feature_rebase, "rebase_stopped", lambda *_a: False)
-    def route(config, sdlc_dir, branch, decide):
+    def route(config, sdlc_dir, branch, decide, **_kw):
         seen["engine"] = decide
         return 0
     monkeypatch.setattr(m, "_engine_route", route)

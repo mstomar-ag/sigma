@@ -569,8 +569,7 @@ def main(argv):
         print("a rebase is still stopped in this tree -- resolve it first (see `conflict_walk.py "
               "walk`) before verifying.", file=sys.stderr)
         return 1
-    routed = _engine_route(config, sdlc_dir, branch, _interactive_decide, run=run, cwd=cwd)
-    routed = _engine_route(config, sdlc_dir, branch, _interactive_land_decide)
+    routed = _engine_route(config, sdlc_dir, branch, _interactive_land_decide, run=run, cwd=cwd)
     if routed is not None:
         return routed
     report = verify_and_offer_merge(run, cwd, sdlc_dir, config, branch, base, _interactive_decide)
