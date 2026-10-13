@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Session start is bounded, cheap, and honest about a failed gh login check (#1334).** The SessionStart hook now has a 20 s timeout; its wizard check no longer runs the ~30 issue-list hygiene scans (those stay in `/sigma-doctor`); a failed `gh auth` check is retried once, cached for 2 minutes, and reported as "could not confirm the gh login" instead of "run gh auth login". Measured with a stubbed runner on a github-mode config: 33 gh/git calls before, 4 after (not measured against a live large repo).
 - **The unpark skill names the rule approve step (#1326).** One sentence now says `rule_draft.py draft` then `rule_draft.py approve <state-folder> <rule id>`, so an agent can find the approval verb.
 - **Upkeep shows why a unit-branch base is refused and also refuses remote-qualified spellings (#1327).** The scheduler's drift note and the job record now say "base is a unit branch" instead of reading like an empty base, and `origin/feature/x` or `refs/heads/feature/x` as `work.base` is refused like `feature/x`; default-branch bases are unchanged.
 - **`define.py open` no longer commits the unit record on a feature branch (#1325).** When a unit branch is checked out, or the branch cannot be read, the record is still written but left uncommitted and the one-line note names the exact `git add` and `git commit` commands; any other branch commits as before.
