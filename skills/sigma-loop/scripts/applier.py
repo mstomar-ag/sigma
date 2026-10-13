@@ -26,7 +26,6 @@ than a day are pruned by embedded time. The apply loop is serial and bounded by 
 No model call, no network except the two gestures through the injected source.
 """
 import datetime
-import hashlib
 import importlib.util
 import json
 import os
@@ -324,9 +323,26 @@ def _level(sdlc_dir, qkind, area, config):
     return fn(sdlc_dir, qkind, area, config) if fn else _load("autonomy").level(sdlc_dir, qkind, area, config)
 
 
-def _spot_check(aid, config):
-    n = settings(config)["spot_check_one_in"]
-    return int(hashlib.sha256(aid.encode("utf-8")).hexdigest()[:8], 16) % n == 0
+_SPOT = "spot-counter.json"
+
+
+def _spot_read(sdlc_dir):
+    """Silent-eligible applies so far per `qkind|area`; missing or unreadable reads as empty."""
+    try:
+        with open(os.path.join(_folder(sdlc_dir), _SPOT), encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items()
+            if isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool) and v >= 0}
+
+
+def _spot_check(counts, key, config):
+    """Count one more silent-eligible apply under `key` (in `counts`); True when it must comment."""
+    counts[key] = counts.get(key, 0) + 1
+    return counts[key] % settings(config)["spot_check_one_in"] == 0
 
 
 def _applied_in_last_day(asks, now):
@@ -404,10 +420,14 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
         used = _applied_in_last_day(asks, now)
         rules = _load("rulebook").load(sdlc_dir, config)
         hs = _load("hard_stop")
+        stored = _spot_read(sdlc_dir)
+        counts = dict(stored)
+        eligible = []
         for ask in asks:
             if ask.get("state") == "applied" and ask.get("vetoed_at") and not ask.get("veto_logged"):
                 actions.append({"kind": "veto", "ask": ask["id"], "issue": ask.get("issue"),
                                 "qkind": ask.get("qkind"), "area": ask.get("area", ""), "rid": ask.get("rid")})
+                eligible.append(None)
                 continue
             if ask.get("state") != "pending" or ask.get("answer") is not None:
                 continue  # a person's answer wins; nothing else is pending
@@ -423,7 +443,11 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 continue
             rule = next((r for r in rules if r.get("id") == m.rule_id), None)
             level = _level(sdlc_dir, qkind, area, config)
-            silent = level >= 4 and silent_allowed(qkind, config, rule) and not _spot_check(ask["id"], config)
+            silent = False
+            key = None
+            if level >= 4 and silent_allowed(qkind, config, rule):
+                key = "%s|%s" % (qkind, area)
+                silent = not _spot_check(counts, key, config)
             if silent:
                 text = ""
             elif _keys_only(config):   # #1342: public repo, records on: the option is free text
@@ -436,10 +460,19 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                             "ask": ask["id"], "issue": ask.get("issue"), "qkind": qkind, "area": area,
                             "option": m.option, "rule_id": m.rule_id, "level": level, "silent": silent,
                             "text": text})
+            eligible.append(key)
             used += 1
         if apply_actions:
             for a in actions:
                 a["result"] = apply(a, sdlc_dir, config, now, source=source, run=run)
+            done = dict(stored)   # only applies that landed advance the counter
+            moved = False
+            for a, key in zip(actions, eligible):
+                if key is not None and a["result"] == "done":
+                    done[key] = done.get(key, 0) + 1
+                    moved = True
+            if moved:
+                _write_atomic(os.path.join(_folder(sdlc_dir), _SPOT), done)
         else:
             for a in actions:
                 a["result"] = "would"
