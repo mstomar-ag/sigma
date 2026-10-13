@@ -58,6 +58,7 @@ decision_tier = _load("decision_tier")
 qkind = _load("qkind")            # #994: a kind declared on the park comment
 gate_hold = _load("gate_hold")    # #1005: the hold guard shared with promote
 decision_record = _load("decision_record")   # slice 8: store record + attributed comment
+rulebook_cfg = _load("rulebook_cfg")         # #1342: public records keep free text out of issue text
 loop = _load("loop")
 
 #: The fixed heading of the recorded block, in the body and in the comment alike. Deliberately free
@@ -340,18 +341,34 @@ def _recorded_answers(body):
     return out
 
 
-def render_block(answers, questions_asked=()):
+PRIVATE_VALUE = "recorded privately"
+
+
+def _keys_only(config):
+    """#1342: True only with the records part open AND the repo declared public. Anything else
+    (gate closed, private, no config) keeps today's output byte for byte."""
+    try:
+        return (config is not None and rulebook_cfg.load(config).part_enabled("records")
+                and rulebook_cfg.visibility(config) == "public")
+    except Exception:                                   # noqa: BLE001 - total: fall back to today's text
+        return False
+
+
+def render_block(answers, questions_asked=(), config=None):
     """The fenced record, identical in the body and in the comment so the two can never disagree.
 
     `questions_asked` carries the question TEXT alongside each id, so a reader six weeks later sees
     what was actually asked rather than a bare key -- the answers are only meaningful next to them.
+    With `config` public and records on (#1342) each value is `recorded privately`; the key and the
+    question text stay.
     """
+    keys_only = _keys_only(config)
     asked = {q["id"]: q["ask"] for q in (questions_asked or [])}
     lines = [backlog_check.UNPARK_QA_START, QA_HEADING, ""]
     for key, value in answers.items():
         if key in asked:
             lines.append("_%s_" % asked[key])
-        lines.append("- **%s** — %s" % (key, " ".join(str(value).split())))
+        lines.append("- **%s** — %s" % (key, PRIVATE_VALUE if keys_only else " ".join(str(value).split())))
     lines += ["", backlog_check.UNPARK_QA_END]
     return "\n".join(lines)
 
@@ -427,7 +444,7 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
                                           gesture="unpark")
         if held:
             return {"number": n, "decision": decision, "outcome": "failed", "detail": held}
-    block = render_block(answers, questions_asked)
+    block = render_block(answers, questions_asked, config)
     # #1393: `proposed_label` joins the removal set. An issue can be BOTH awaiting approval and
     # parked (a proposal a human parked rather than ruled on), and an unpark that only dropped
     # `sdlc:parked` would leave `sdlc:goal` + `sdlc:needs-confirmation` -- the half-promoted state,
@@ -456,7 +473,8 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         # parked" here is making exactly the decision that comment exists to record, so the
         # automatic sweep must see it in the form it already knows how to read.
         err = _comment_decision(sdlc_dir, config, source, n, block + "\n\n"
-                                + auto_unpark.keep_parked_comment(_one_line(_substantive_reason(answers))),
+                                + auto_unpark.keep_parked_comment(_one_line(
+                                    PRIVATE_VALUE if _keys_only(config) else _substantive_reason(answers))),
                                 "keep-parked", answers, data)
         _append_block(source, n, data.get("body") or "", block)
         return {"number": n, "decision": decision, "outcome": "kept-parked",
