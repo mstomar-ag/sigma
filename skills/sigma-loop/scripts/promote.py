@@ -689,9 +689,8 @@ _FOLLOWUP_LABEL = "sdlc:followup"
 #: PROVISIONAL: the most labelled issues one run will read; a fetch that reaches it reports itself incomplete.
 #: Override with `ai_filed.migration.max_issues`.
 MIGRATE_FETCH_CAP = 10000
-_PRIORITY = re.compile(r"priority:(P[0-4])$")
 
-Arm = collections.namedtuple("Arm", "priority reason qkind")
+Arm = collections.namedtuple("Arm", "reason qkind")
 Park = collections.namedtuple("Park", "reason qkind")
 
 
@@ -716,15 +715,10 @@ def classify_population(issue):
     return "human"
 
 
-def _own_priority(issue):
-    found = [m.group(1) for m in (_PRIORITY.match(n) for n in _label_names(issue)) if m]
-    return min(found) if found else None
-
-
 def plan_for(issue, config, unresolved=(), hold=None):
     """`Arm` or `Park` for one labelled issue. `unresolved` is the blocker refs not confirmed CLOSED, `hold`
     the gate-hold sentence or None (both from the `apply` predicates). Never arms past a hold, a blocker,
-    or the deny-list; a human proposal keeps its own priority, an AI-filed one gets the bucket's."""
+    or the deny-list. A migration never reads, sets or blocks on a `priority:*` label."""
     pop = classify_population(issue)
     if pop == "ownership_hold":
         return Park("ownership hold: a non-owner filing; the unit owner decides through the registry", "owner_hold")
@@ -735,24 +729,20 @@ def plan_for(issue, config, unresolved=(), hold=None):
     if hold:
         return Park("gate hold: " + str(hold), "needs_decision")
     ft = _feature("file_triage")
-    mine = _own_priority(issue)
     title, body = issue.get("title") or "", issue.get("body") or ""
     if pop == "human":
-        d = ft.decide(title, body, {"human_confirmed": True, "priority": mine}, config)
+        d = ft.decide(title, body, {"human_confirmed": True, "priority": "P3"}, config)
     else:
         d = ft.decide(title, body, {}, config)
     if d.kind != "arm":
         return Park(d.reason, "needs_decision")
-    pri = d.priority
-    if pop == "followup" and mine and int(mine[1]) >= int(pri[1]):
-        pri = mine                                       # PROVISIONAL: never raise an existing priority
-    return Arm(pri, d.reason, None)
+    return Arm("human-confirmed filing" if pop == "human" else d.reason, None)
 
 
 def _migrate_comment(plan, pop):
     if isinstance(plan, Arm):
-        return ("%s\nMigrated off the retired confirmation queue: armed for the loop at %s (population: %s; %s). "
-                "Pick-time guards still apply." % (MIGRATE_MARKER, plan.priority, pop, plan.reason))
+        return ("%s\nMigrated off the retired confirmation queue: armed for the loop (population: %s; %s). "
+                "Pick-time guards still apply." % (MIGRATE_MARKER, pop, plan.reason))
     return ("%s\nMigrated off the retired confirmation queue: parked (population: %s; %s). Run /sigma-unpark "
             "to release it.\n%s" % (MIGRATE_MARKER, pop, plan.reason, _feature("qkind").render_line(plan.qkind)))
 
@@ -839,17 +829,13 @@ def _migrate_one(source, config, sdlc_dir, item, apply, rep_item, writes=None):
         plan = plan_for(issue, config, unresolved, hold)
     arm = isinstance(plan, Arm)
     rep_item.update(population=pop, action="arm" if arm else "park", reason=plan.reason,
-                    destination=("armed at " + plan.priority) if arm else "parked")
+                    destination="armed" if arm else "parked")
     add, remove = ([source.goal_label], [source.proposed_label]) if arm else \
                   ([source.parked_label], [source.proposed_label])
-    if arm:
-        if plan.priority != _own_priority(issue):
-            add.append("priority:" + plan.priority)
-            remove += [x for x in sorted(names) if _PRIORITY.match(x)]
-    elif source.goal_label in names:
+    if not arm and source.goal_label in names:
         remove.append(source.goal_label)                # a half-promoted pair is repaired by the park
     add = [l for l in add if l not in names]
-    detail = "%s (%s; %s)" % ("arm at " + plan.priority if arm else "park", pop, plan.reason)
+    detail = "%s (%s; %s)" % ("arm" if arm else "park", pop, plan.reason)
     if not apply:
         rep_item.update(outcome="would-arm" if arm else "would-park", detail=detail)
         return

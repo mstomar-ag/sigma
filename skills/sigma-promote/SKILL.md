@@ -15,7 +15,7 @@ empty path. Claude keeps its provided value.
 Detailed selection triggers: [selection](references/selection.md).
 
 There is no confirmation queue any more. Sigma files what it finds already decided: triage arms an
-AI-filed issue (`sdlc:goal` at a bucket priority) or parks it with a declared question kind. The old
+AI-filed issue (`sdlc:goal`) or parks it with a declared question kind. The old
 `sdlc:needs-confirmation` label is legacy: nothing writes it unless `ai_filed.triage.enabled` is
 false, and a leftover one is inert.
 
@@ -112,8 +112,8 @@ when the listing fails, or when the fetch hit its cap (`ai_filed.migration.max_i
 |---|---|---|
 | ownership hold | the ownership flag comment | parked (`owner_hold`) |
 | scope hold | the scope-expansion flag comment | parked (`scope_hold`) |
-| follow-up | the `sdlc:followup` label | the rubric bucket priority; a lower existing priority is kept |
-| human-typed | none of the above | armed at its own priority, parked when it has none |
+| follow-up | the `sdlc:followup` label | armed; its `priority:*` label is never touched |
+| human-typed | none of the above | armed; its `priority:*` label is never touched or required |
 
 Every arm goes through the same deny-list as filing, and a park results from any open `Blocked by:`
 reference or gate hold (the predicates `apply` uses). Arm and park are each ONE atomic label swap that also

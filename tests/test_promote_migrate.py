@@ -119,7 +119,7 @@ def test_apply_comments_which_and_why(tmp_path):
     assert sorted(n for n, _ in src.comments) == [1, 2, 3]
     by = dict(src.comments)
     assert promote.MIGRATE_MARKER in by[1] and "armed" in by[1] and "followup" in by[1]
-    assert "armed" in by[2] and "P1" in by[2] and "human" in by[2]
+    assert "armed" in by[2] and "P1" not in by[2] and "priority" not in by[2] and "human" in by[2]
     assert "parked" in by[3] and "owner_hold" in by[3] and "ownership" in by[3]
     assert GOAL in src.store[1]["labels"] and GOAL in src.store[2]["labels"]
     assert PARKED in src.store[3]["labels"]
@@ -227,11 +227,26 @@ def test_classify_population():
     assert c({"labels": ["x"], "comments": []}) == "human"
 
 
-def test_plan_for_human_without_priority_parks_and_followup_clamps():
+def test_plan_for_arms_without_a_priority_and_never_carries_one():
     p = promote.plan_for({"title": "x", "body": "", "labels": [], "comments": []}, CFG)
-    assert isinstance(p, promote.Park)
+    assert isinstance(p, promote.Arm) and not hasattr(p, "priority")
     f = promote.plan_for({"title": "x", "body": "", "labels": ["sdlc:followup", "priority:P0"], "comments": []}, CFG)
-    assert isinstance(f, promote.Arm) and f.priority in ("P2", "P3", "P4")
+    assert isinstance(f, promote.Arm) and not hasattr(f, "priority")
+
+
+def test_apply_keeps_p1_p3_and_missing_priority_exactly(tmp_path):
+    src = FakeSource()
+    src.add(1, PROPOSED, "priority:P1", title="human idea", body="please add a flag")
+    src.add(2, PROPOSED, "priority:P3", "sdlc:followup", title="tidy the docs", body="cleanup of old text")
+    src.add(3, PROPOSED, title="human idea", body="please add a flag")
+    src.add(4, PROPOSED, "priority:P1", title="gated", comments=[promote_markers()[0] + " held"])
+    rep = promote.migrate(src, CFG, apply=True, sdlc_dir=str(tmp_path))
+    out = {int(r["number"]): r["outcome"] for r in rep["items"]}
+    assert out == {1: "armed", 2: "armed", 3: "armed", 4: "parked"}
+    assert set(src.store[1]["labels"]) == {GOAL, "priority:P1"}
+    assert set(src.store[2]["labels"]) == {GOAL, "priority:P3", "sdlc:followup"}
+    assert set(src.store[3]["labels"]) == {GOAL}
+    assert set(src.store[4]["labels"]) == {PARKED, "priority:P1"}
 
 
 def test_unit_matches_case_insensitively(tmp_path):

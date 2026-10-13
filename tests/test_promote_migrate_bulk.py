@@ -55,7 +55,7 @@ def _matrix():
     FUP = dict(title="tidy the docs", body="cleanup of old text")
     return {
         1: ([P, "priority:P1"], HUMAN, "armed"),                                   # human, plain
-        2: ([P], HUMAN, "parked"),                                                 # human, no priority
+        2: ([P], HUMAN, "armed"),                                                  # human, no priority
         3: ([P, "priority:P2", "sdlc:followup"], FUP, "armed"),                    # follow-up
         4: ([P, "sdlc:followup"], FUP, "armed"),                                   # follow-up, no priority
         5: ([P, "priority:P1"], dict(HUMAN, comments=[promote._OWNER_MARKER]), "parked"),      # ownership hold
@@ -95,7 +95,7 @@ def _assert_matrix(src, rep, spec, before):
         assert PROPOSED not in now, n
         assert (GOAL in now) != (PARKED in now), (n, now)          # exactly one membership label
         assert (GOAL in now) == (want == "armed"), n
-        keep = {l for l in before[n] if l not in (PROPOSED, GOAL, PARKED) and not l.startswith("priority:")}
+        keep = {l for l in before[n] if l not in (PROPOSED, GOAL, PARKED)}      # priority labels included
         assert keep <= now, (n, keep - now)                         # unit and every other label kept
 
 
@@ -167,7 +167,7 @@ def test_dry_run_prints_destination_population_reason_and_exits_nonzero_when_unr
     src.unreadable.add(2)
     rc = promote.main(["promote.py", "migrate-confirmation", str(tmp_path), "--only", "1,2"], source=src)
     out = capsys.readouterr().out
-    assert "#1 -> armed at P1 | population: human | reason:" in out
+    assert "#1 -> armed | population: human | reason:" in out
     assert rc == 1 and "covered 1 of 2" in out and src.writes == []
 
 
