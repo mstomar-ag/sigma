@@ -5,6 +5,7 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - **Doctor ledger rows say join, not create, when the remote ledger branch is already known (#1318).** Local tracking-ref probe, no network; when it cannot tell, the wording is unchanged.
+- **`decision_import.py` keeps the kind of comment-sourced decisions and one resume answer (#1309).** An unpark answer now takes the kind from the issue's `sigma-qkind` line instead of `unknown`, and `start it again now` is stored as `start it again`; with `rulebook.import.comments` off nothing changes.
 - **`decision_import.py` now reads issue comments from the command line (#1308).** With `rulebook.import.comments` on, scan, plan and apply list the goal-labelled issues and pass them to the scan; with it off nothing is fetched.
 - **The autonomy readout and the question-list learning line use the category thresholds in force (#1317).** When `.sdlc/categories.json` has a category covering a pair, "level N needs X answers" and "of X answers" now show that category's numbers instead of the global ones; with no categories file every line is unchanged.
 - **The unpark skill names the rule approve step (#1326).** One sentence now says `rule_draft.py draft` then `rule_draft.py approve <state-folder> <rule id>`, so an agent can find the approval verb.
