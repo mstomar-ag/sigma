@@ -615,11 +615,13 @@ def promote(sdlc_dir, config, numbers, source=None, run=None, apply=True, demote
                 source._issue_comment(n, audit)         # REST first (#895 3a)
             except Exception:                           # noqa: BLE001 - audit trail is best-effort
                 pass
-        if not demote:
-            try:                                        # #1178: the person promoted it, so their ask is answered
+        try:                                            # #1178: the person promoted it, so their ask is answered
+            if demote:                                  # #1189: a demote after an applied promote is a no
+                _load("applier").close_for_issue(sdlc_dir, config, n, "demote", refuse=True)
+            else:
                 _load("applier").close_for_issue(sdlc_dir, config, n, "promote")
-            except Exception:                           # noqa: BLE001 - never block the gesture
-                pass
+        except Exception:                               # noqa: BLE001 - never block the gesture
+            pass
         out["results"].append({"number": n, "outcome": verb, "detail": detail})
     return out
 

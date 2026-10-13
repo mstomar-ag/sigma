@@ -228,17 +228,26 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None):
         return None
 
 
-def close_for_issue(sdlc_dir, config, issue, text, now=None):
+def close_for_issue(sdlc_dir, config, issue, text, now=None, refuse=False):
     """A person answered (unpark, keep-parked, promote): answer every pending ask of the issue with
     their text, so the person wins and the tick skips it. Skipped while the applier is applying its
-    own gesture. Never raises; closed gate: nothing read."""
+    own gesture. `refuse` (#1189): the gesture is a person's no (keep parked, demote), so an ask
+    already applied and still inside its veto window is routed to the veto. Never raises; closed
+    gate: nothing read."""
     try:
         if not enabled(config) or os.environ.get(_APPLYING_ENV) or not isinstance(text, str):
             return None
         now = now or datetime.datetime.now(datetime.timezone.utc)
         for a in _asks(sdlc_dir):
-            if a.get("state") == "pending" and _issue_key(a.get("issue")) == _issue_key(issue):
+            if _issue_key(a.get("issue")) != _issue_key(issue):
+                continue
+            if a.get("state") == "pending":
                 answer(sdlc_dir, a["id"], text, config, now)
+            elif refuse and a.get("state") == "applied" and not a.get("vetoed_at"):
+                applied = _parse(a.get("applied_at"))
+                period = datetime.timedelta(minutes=settings(config)["window_minutes"])
+                if applied is not None and now <= applied + period:
+                    answer(sdlc_dir, a["id"], "no", config, now)
     except Exception:
         return None
     return None

@@ -245,3 +245,73 @@ def test_a_raising_applier_never_blocks_the_unpark(tmp_path):
     run = _runner(views={"5": _view(comments=[_park("needs a call")])})
     res = u.resolve(sd, cfg, 5, {"decision": "start it again"}, "unpark", run=run)
     assert res["outcome"] != "failed", res
+
+
+# ------------------------------------------------------------- #1189: a no after an applied ask
+
+def _applied_ask(sd, cfg, issue=5, gesture="unpark", age=None):
+    aid = _open_plain(sd, cfg, issue=issue, gesture=gesture)
+    ask = _asks(sd)[0]
+    when = datetime.datetime.now(datetime.timezone.utc) - (age or datetime.timedelta(0))
+    ask.update(state="applied", applied_at=when.isoformat(), rid=None, rule_id="r1", silent=False)
+    AP._write_atomic(AP._ask_path(sd, aid), ask)
+    return aid
+
+
+def test_keep_parked_after_an_applied_ask_routes_to_the_veto(tmp_path):
+    sd, cfg, _ = _setup(tmp_path)
+    cfg.update(_gh_config())
+    _applied_ask(sd, cfg)
+    run = _runner(views={"5": _view(comments=[_park("needs a call")])})
+    res = _mod("unpark").resolve(sd, cfg, 5, {"decision": "leave it"}, "keep-parked", run=run)
+    assert res["outcome"] == "kept-parked"
+    ask = _asks(sd)[0]
+    assert ask["state"] == "applied" and ask.get("vetoed_at")      # veto recorded; the tick acts on it
+
+
+def test_demote_after_an_applied_promote_routes_to_the_veto(tmp_path):
+    sd, cfg, _ = _setup(tmp_path)
+    cfg.update(_gh_config())
+    _applied_ask(sd, cfg, gesture="promote")
+    run = _runner(views={"5": _view(labels=("sdlc:goal",))})
+    _mod("promote").promote(sd, cfg, [5], run=run, demote=True)
+    assert _asks(sd)[0].get("vetoed_at")
+
+
+def test_a_plain_unpark_or_a_late_no_does_not_veto(tmp_path):
+    sd, cfg, _ = _setup(tmp_path)
+    cfg.update(_gh_config())
+    _applied_ask(sd, cfg)
+    AP.close_for_issue(sd, cfg, 5, "start it again")
+    assert not _asks(sd)[0].get("vetoed_at")
+    AP.close_for_issue(sd, cfg, 5, "no", refuse=True)              # in window: vetoed
+    assert _asks(sd)[0].get("vetoed_at")
+    sd2, cfg2, _ = _setup(tmp_path / "late")
+    _applied_ask(sd2, cfg2, age=datetime.timedelta(days=3))
+    AP.close_for_issue(sd2, cfg2, 5, "no", refuse=True)
+    assert not _asks(sd2)[0].get("vetoed_at")
+
+
+def test_a_raising_veto_never_blocks_keep_parked(tmp_path):
+    sd, cfg, _ = _setup(tmp_path)
+    cfg.update(_gh_config())
+    _applied_ask(sd, cfg)
+    u = _mod("unpark")
+    real = u._load
+
+    def boom(name):
+        if name == "applier":
+            raise RuntimeError("broken")
+        return real(name)
+    u._load = boom
+    run = _runner(views={"5": _view(comments=[_park("needs a call")])})
+    res = u.resolve(sd, cfg, 5, {"decision": "leave it"}, "keep-parked", run=run)
+    assert res["outcome"] == "kept-parked"
+
+
+def test_a_closed_gate_no_changes_nothing(tmp_path):
+    sd, cfg, _ = _setup(tmp_path)
+    _applied_ask(sd, cfg)
+    cfg["rulebook"]["autonomy"]["applier"]["enabled"] = False
+    AP.close_for_issue(sd, cfg, 5, "no", refuse=True)
+    assert not _asks(sd)[0].get("vetoed_at")

@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A person's no after an applied ask reaches the veto through the real verbs (#1189).** Keep-parked and demote on an issue whose ask was applied inside its window record the veto; a failure never blocks the gesture.
+
 ## 1.0.12 — 2026-10-13 — rulebook categories file, cold-start visibility, past-decision import, upkeep trigger and session report, drift judge in shadow, hard-stop net, and the confirmation-queue migration
 
 - **The upkeep scheduler's drift measurement works with its default git runner (#1258).** The scheduler handed the drift module a runner that prepended `git` to arguments that already began with `git`, so every real measurement failed as `git-failed` and the watch tick, session-start report and merge trigger never found a due unit; one adapter now reconciles the two conventions. The pick-time pass is unchanged.

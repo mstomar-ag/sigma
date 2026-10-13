@@ -500,7 +500,7 @@ def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, 
     "; <error>" suffix for the caller's detail."""
     try:                                                # #1178: a person's answer closes the applier's ask
         _load("applier").close_for_issue(sdlc_dir, config, number, str(
-            (answers or {}).get(CLOSING_QUESTION["id"]) or gesture))
+            (answers or {}).get(CLOSING_QUESTION["id"]) or gesture), refuse=gesture == "keep-parked")
     except Exception:                                   # noqa: BLE001 - never block the gesture
         pass
     tried = []                                          # the comment was attempted (never post twice)
