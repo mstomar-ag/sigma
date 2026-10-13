@@ -270,6 +270,53 @@ def test_tip_that_moves_once_restarts_from_the_pass(tmp_path):
     assert out["outcome"] == "rehearsal" and len(w.passes) == 2 and out["head"] == NEWTIP
 
 
+# ---------------------------------------------------------------------------------------------- cross-repo pair
+
+def pair_unit(w):
+    """Register `voice` as a pair with a second repository."""
+    spec = importlib.util.spec_from_file_location("fl_reg", SCRIPTS / "feature_registry.py")
+    reg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reg)
+    reg.write_unit(reg.registry_dir(str(w.sdlc)), "voice", {"repos": {
+        SLUG: {"branch": "feature/voice", "goals": [1]}, "acme/other": {"branch": "feature/voice", "goals": [2]}}})
+
+
+def test_pair_unit_is_refused_before_the_pass_or_any_push(tmp_path):
+    """#1339. The other half cannot be measured here, so nothing is rebased, pushed or opened."""
+    w = World(tmp_path)
+    pair_unit(w)
+    out = w.land(merge=True)
+    assert out["outcome"] == "refused:sibling", out
+    assert "Land the other half first" in out["detail"] and "by hand" in out["detail"]
+    assert w.passes == [] and w.verifies == [] and w.posts() == []
+
+
+def test_pair_unit_with_a_landed_measurement_runs_as_before(tmp_path):
+    w = World(tmp_path)
+    pair_unit(w)
+    out = w.land(landed=lambda repo, branch: True)
+    assert out["outcome"] == "rehearsal" and w.passes == ["voice"]
+
+
+def test_pair_unit_whose_other_half_is_unlanded_is_refused_up_front(tmp_path):
+    w = World(tmp_path)
+    pair_unit(w)
+    assert w.land(landed=lambda repo, branch: False)["outcome"] == "refused:sibling" and w.passes == []
+
+
+def test_non_pair_unit_is_unchanged(tmp_path):
+    w = World(tmp_path)
+    assert w.land()["outcome"] == "rehearsal" and w.passes == ["voice"]
+
+
+def test_pair_unit_with_the_gate_closed_stays_closed(tmp_path):
+    w = World(tmp_path)
+    pair_unit(w)
+    before = tree(tmp_path)
+    out = w.land(config={})
+    assert out.get("closed") is True and tree(tmp_path) == before
+
+
 # ---------------------------------------------------------------------------------------------- unattended
 
 def approve(w, head, now=0):

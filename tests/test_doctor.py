@@ -7714,3 +7714,42 @@ def test_matching_build_dead_pid_stale_heartbeat_or_no_state_add_no_row(tmp_path
     assert _stale_build_rows(_watcher_state(tmp_path / "b", build="0.0.1", pid=2 ** 22 + 12345)) == []
     assert _stale_build_rows(_watcher_state(tmp_path / "c", build="0.0.1", fresh=False)) == []
     assert _stale_build_rows(pathlib.Path(_sdlc(tmp_path / "d", {}))) == []
+
+
+# --- ledger wording: "join" when the remote ledger branch is already known (#1318) -------------
+
+_OLD_INIT_FIX = ("run /sigma-ledger — one command creates the ops branch, seeds your file + TEAM.md, "
+                 "and pushes")
+_OLD_STATE = "ON but NOT set up — run /sigma-ledger to create + push the ops branch"
+
+
+def _probe_runner(known):
+    """Fake runner answering the local remote-tracking-ref probe: `known` = the ref exists."""
+    def run(args):
+        if "rev-parse" in args and "refs/remotes/origin/sdlc-ledger" in args:
+            return "abc123\n" if known else ""
+        return ""
+    return run
+
+
+def test_ledger_rows_say_join_when_the_remote_branch_exists():
+    d = _doc()
+    with tempfile.TemporaryDirectory() as t:
+        base = _sdlc(t, {"ledger": {"enabled": True}})
+        c = _by_name(d.check(base, run=_probe_runner(True)))["team ledger initialized"]
+        assert c["ok"] is False and "joins the existing ops branch" in c["fix"]
+        assert "creates the ops branch" not in c["fix"]
+        rows = {n: s for n, s, _ in d.features(base, run=_probe_runner(True))}
+        assert "join the existing ops branch" in rows["team ledger"]
+        assert "create + push" not in rows["team ledger"]
+
+
+def test_ledger_rows_keep_exact_wording_when_the_branch_is_unknown():
+    d = _doc()
+    with tempfile.TemporaryDirectory() as t:
+        base = _sdlc(t, {"ledger": {"enabled": True}})
+        for run in (_probe_runner(False), _runner()):
+            c = _by_name(d.check(base, run=run))["team ledger initialized"]
+            assert c["fix"] == _OLD_INIT_FIX
+            rows = {n: s for n, s, _ in d.features(base, run=run)}
+            assert rows["team ledger"] == _OLD_STATE
