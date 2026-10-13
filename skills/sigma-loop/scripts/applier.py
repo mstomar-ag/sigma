@@ -334,25 +334,45 @@ def _applied_in_last_day(asks, now):
                and (_parse(a.get("applied_at")) or now - 2 * _DAY) > now - _DAY)
 
 
+def _owner_no(comments, since, until, config, strict):
+    """True when an owner's exact `no` was created after `since` (at or after when not `strict`) and,
+    when `until` is given, by `until`. Judged by the comment's own time."""
+    for c in comments or []:
+        made = _parse(c.get("created_at"))
+        if made is None or str(c.get("body", "")).strip().lower() != "no":
+            continue
+        if (made <= since if strict else made < since) or (until is not None and made > until):
+            continue
+        if _load("autonomy").is_owner(c.get("author"), config):
+            return True
+    return False
+
+
 def read_vetoes(sdlc_dir, config, asks, now, comments_fn):
-    """An owner's `no` comment, posted after an ask was applied and inside its window, is passed to
-    `answer` (which records the veto the next planning pass turns into an action). Any other text, a
-    non-owner or an older comment changes nothing. Never raises. PROVISIONAL: the veto period is the
-    ask's own `window_minutes` after `applied_at`."""
-    period = datetime.timedelta(minutes=settings(config)["window_minutes"])
+    """An owner's `no` comment is passed to `answer`. On a pending ask (created at or after it opened)
+    it cancels the ask; on an applied ask (posted after `applied_at` and by `applied_at` + window) it
+    records the veto the next planning pass turns into an action. The veto is judged by the comment's
+    time, so a late tick still counts it; reading stops `stale_after_intervals` watch intervals past the
+    period. Any other text, a non-owner or an older comment changes nothing. Never raises. PROVISIONAL:
+    the veto period is the ask's own `window_minutes` after `applied_at`."""
+    cfg = settings(config)
+    period = datetime.timedelta(minutes=cfg["window_minutes"])
+    grace = datetime.timedelta(seconds=_interval(config) * cfg["stale_after_intervals"])
     for ask in asks:
         try:
-            applied = _parse(ask.get("applied_at"))
-            if ask.get("state") != "applied" or ask.get("vetoed_at") or applied is None or now > applied + period:
+            if ask.get("state") == "pending" and ask.get("answer") is None:
+                opened = _parse(ask.get("opened"))
+                if opened is not None and _owner_no(comments_fn(ask.get("issue")), opened, None, config, False):
+                    if answer(sdlc_dir, ask["id"], "no", config, now) == "answered":
+                        ask.update(answer="no", answered_at=now.isoformat(), state="answered")
                 continue
-            for c in comments_fn(ask.get("issue")) or []:
-                made = _parse(c.get("created_at"))
-                if made is None or made <= applied or str(c.get("body", "")).strip().lower() != "no":
-                    continue
-                if _load("autonomy").is_owner(c.get("author"), config):
-                    if answer(sdlc_dir, ask["id"], "no", config, now) == "veto-pending":
-                        ask["vetoed_at"] = now.isoformat()
-                    break
+            applied = _parse(ask.get("applied_at"))
+            if ask.get("state") != "applied" or ask.get("vetoed_at") or applied is None \
+                    or now > applied + period + grace:
+                continue
+            if _owner_no(comments_fn(ask.get("issue")), applied, applied + period, config, True):
+                if answer(sdlc_dir, ask["id"], "no", config, now) == "veto-pending":
+                    ask["vetoed_at"] = now.isoformat()
         except Exception:
             continue
 
@@ -374,7 +394,8 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
     actions = []
     try:
         asks = _asks(sdlc_dir)
-        if apply_actions and any(a.get("state") == "applied" and not a.get("vetoed_at") for a in asks):
+        if apply_actions and any((a.get("state") == "applied" and not a.get("vetoed_at"))
+                                 or (a.get("state") == "pending" and a.get("answer") is None) for a in asks):
             if comments_fn is None and (source is None or run is not None):
                 comments_fn = lambda issue: _load("sources").fetch_comments(config, issue, run=run)  # noqa: E731
             if comments_fn is not None:

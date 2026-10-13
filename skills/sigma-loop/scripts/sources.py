@@ -1129,6 +1129,7 @@ class GitHubSource:
         # #719's field-wins rule and may be CREATED by the loop. Anyone else's board: the loop never
         # creates the field and never rewrites a label from it (`_priority_owned`).
         self.mirror_priority = self._project_cfg.get("mirror_priority") is True
+        self._backfilled = 0             # #1305: card writes made by the current `_sync_backlog`
         self._created_board_now = False  # `_ensure_board` created the board in THIS run
         self._priority_label_writes = True  # may `_mirror_priority` rewrite a label from the field?
         self._issue_labels = {}          # {issue number -> labels}, from `_sync_backlog`'s one read
@@ -3933,7 +3934,7 @@ class GitHubSource:
         if not self.board_active:
             return False
         try:
-            if not self._ensure_board(exclude=goal):
+            if not self._ensure_board(exclude=goal, sync=False):
                 return False
             item_id = self._item_id(int(goal))
             name, opt = self._status_option(status_name)
@@ -3974,7 +3975,7 @@ class GitHubSource:
         if not self.board_active or not (self._custom_fields or self.priority_field):
             return
         try:
-            if not self._ensure_board(exclude=goal):
+            if not self._ensure_board(exclude=goal, sync=False):
                 return
             # Resolve the board FIRST, then decide whether there is anything to stamp. Checking
             # `_priority_field_id` (which only exists after the board is read) before carding is
@@ -4179,11 +4180,13 @@ class GitHubSource:
         name = self.repo.split("/")[-1] if self.repo else "project"
         return self._project_cfg.get("title") or f"{name} — SDLC"
 
-    def _ensure_board(self, exclude=None):
+    def _ensure_board(self, exclude=None, sync=True):
         """Find-or-create the board + its status field once per run; seed the backlog as Todo.
         Returns True only when the board is fully wired. Idempotent and attempt-once on hard failure.
         #895 slice 5: skipped (False) when the board is configured but GraphQL is unavailable; the
-        `project_enabled and` keeps a direct call on a config-off source byte-identical to before."""
+        `project_enabled and` keeps a direct call on a config-off source byte-identical to before.
+        #1305: `sync=False` (every single-issue caller) skips the full-board back-fill, so a verb about
+        one issue touches only its own card; `backfill_board` is the capped, watcher-driven path."""
         if self.project_enabled and not self.board_active:
             return False
         if self._board_ready or self._board_attempted:
@@ -4212,7 +4215,7 @@ class GitHubSource:
                 pass   # linking is cosmetic; items reference issues by URL regardless
         self._ensure_status_field(owner, number, created_now)
         self._load_items(owner, number)
-        if self._field_id:
+        if self._field_id and sync:
             self._sync_backlog(owner, number, exclude)
         self._board_ready = bool(self._field_id)
         return self._board_ready
@@ -4453,7 +4456,32 @@ class GitHubSource:
         return ('query=mutation { updateProjectV2Field(input: {fieldId: %s, singleSelectOptions: [%s]}) '
                 '{ projectV2Field { ... on ProjectV2SingleSelectField { id } } } }' % (q(field_id), opts))
 
-    def _sync_backlog(self, owner, number, exclude):
+    def backfill_board(self, cap=None):
+        """#1305: card up to `cap` open goal issues missing from the board; -> cards written.
+        The only bounded home of the full-board back-fill (the watcher tick calls it). `cap` defaults to
+        `project.backfill_cap` (PROVISIONAL 20; 0 = off). Writes nothing when the board is off or GraphQL
+        remaining is below `project.backfill_min_graphql` (PROVISIONAL 1000) or cannot be read: fail
+        closed, the next tick retries."""
+        if not self.board_active:
+            return 0
+        if cap is None:
+            cap = self._project_cfg.get("backfill_cap", 20)
+        if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+            return 0
+        floor = self._project_cfg.get("backfill_min_graphql", 1000)
+        try:
+            remaining = json.loads(self._run(["api", "rate_limit"]))["resources"]["graphql"]["remaining"]
+            if int(remaining) < int(floor):
+                return 0
+        except Exception:
+            return 0
+        if not self._ensure_board(sync=False):
+            return 0
+        self._backfilled = 0
+        self._sync_backlog(self._proj_owner(), self._project_number, None, cap=cap)
+        return self._backfilled
+
+    def _sync_backlog(self, owner, number, exclude, cap=None):
         """Seed the board with any open goal issue not yet carded (as Todo), except the one being
         actively transitioned. Cards already on the board keep their status — sync never clobbers.
 
@@ -4492,6 +4520,10 @@ class GitHubSource:
             if n is None or str(n) == str(exclude):
                 continue
             was_new = int(n) not in on_board
+            if cap is not None and self._backfilled >= cap and (
+                    was_new or not self._item_status.get(int(n))
+                    or (seed_name != backlog_name and self._item_status.get(int(n)) == backlog_name)):
+                continue                  # #1305: this tick's card-write budget is spent
             item_id = self._item_id(n)
             if not (item_id and seed):
                 continue
@@ -4528,6 +4560,7 @@ class GitHubSource:
                 # correctly by accident (no recorded status reads as forgiving); this makes both
                 # halves correct for the same reason instead of one being an accident.
                 self._item_status[int(n)] = seed_name
+                self._backfilled += 1
             self._mirror_priority(int(n), it.get("labels"), item_id)
         self._promote_blockers(issues)
 
