@@ -259,7 +259,7 @@ def _remote_ref(run, cwd, remote, ref):
 # --------------------------------------------------------------------------- the push: leased branch update plus backup
 
 
-def _atomic_leased_push(run, cwd, remote, branch, unit, expect, source, stamp):
+def _atomic_leased_push(run, cwd, remote, branch, unit, expect, source, stamp, keep=True):
     """THE ONE PLACE a leased branch update and a new backup ref travel together, in one `--atomic` push.
 
     `source` is pushed to `branch` under a lease on `expect`; `expect` (the tip being replaced) is pushed to the new
@@ -280,6 +280,8 @@ def _atomic_leased_push(run, cwd, remote, branch, unit, expect, source, stamp):
                  remote,
                  "%s:refs/heads/%s" % (source, branch),
                  "%s:refs/sigma/backup/%s/%s" % (expect, unit, stamp)]
+    if not keep:                          # #1344: no backup ref, one leased update
+        push_argv = push_argv[:2] + [push_argv[3]] + push_argv[5:7]
     try:
         run(cwd, push_argv)
     except Exception as exc:              # noqa: BLE001
@@ -300,6 +302,18 @@ def _classify(run, read_cwd, remote, branch, unit, expect, stamp, why):
     return _result(FAILED, tip=tip, backup=backup, why=why)
 
 
+def _is_fast_forward(run, cwd, expect, source):
+    """True only when git says `expect` is an ancestor of `source` (so the push replaces nothing); any doubt reads False."""
+    if not (isinstance(expect, str) and _SHA_RE.fullmatch(expect) and isinstance(source, str)
+            and (source == "HEAD" or _SHA_RE.fullmatch(source))):
+        return False
+    try:
+        run(str(cwd), ["git", "merge-base", "--is-ancestor", expect, source])
+        return True
+    except Exception:                     # noqa: BLE001
+        return False
+
+
 def push_unit(run, cwd, read_cwd, remote, unit, expect, *, source="HEAD", clock=None):
     """Push `source` (run in `cwd`) to `feature/<unit>` under a lease on `expect`, and keep `expect` as a backup ref in
     the same atomic push: both land or neither does. `read_cwd` is where the remote is read back after a refusal.
@@ -310,12 +324,13 @@ def push_unit(run, cwd, read_cwd, remote, unit, expect, *, source="HEAD", clock=
         return _result(problem[0], why=problem[1])
     stamp = stamp_of(_now(clock))
     branch = BRANCH_PREFIX + unit
+    keep = not _is_fast_forward(run, cwd, expect, source)   # #1344: a pure fast-forward replaces nothing; the lease stays
     try:
-        ok, why = _atomic_leased_push(run, str(cwd), remote, branch, unit, expect, source, stamp)
+        ok, why = _atomic_leased_push(run, str(cwd), remote, branch, unit, expect, source, stamp, keep)
     except Refused as refused:
         return _result(refused.code, why=refused.why)
     if ok:
-        return _result(PUSHED, backup=ref_name(unit, stamp), stamp=stamp, expected=expect)
+        return _result(PUSHED, backup=ref_name(unit, stamp) if keep else None, stamp=stamp, expected=expect)
     return _classify(run, str(read_cwd), remote, branch, unit, expect, stamp, why)
 
 

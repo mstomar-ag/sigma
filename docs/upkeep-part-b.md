@@ -13,7 +13,7 @@ exactly as before: the unit branch is left untouched, nothing is pushed, and an 
 | --- | --- |
 | off | the default; a conflict parks, as it did before part B |
 | mechanical | Level 1: a conflict confined to the changelog is resolved by the heading-aware union, proved, stamped and pushed once through the atomic backup push; anything else parks |
-| agent | Level 2: a source conflict goes to a capped, headless resolver; a second, independent session reviews the result; a failed proof or a blocking verdict parks and pushes nothing |
+| agent | NOT AVAILABLE YET (no resolver is wired; it behaves as `off`). Level 2: a source conflict goes to a capped, headless resolver; a second, independent session reviews the result; a failed proof or a blocking verdict parks and pushes nothing |
 
 A parked conflict is one finding. Before filing, the pass reads the open issues once and, if one already carries the same
 conflict id in its title, files nothing and comments on it at most once a day (a counter and the time; the count is kept in
@@ -34,6 +34,10 @@ Level 2 is **unreachable in the shipped engine**: its plan is supplied by a seam
 credential route and the spend caps are not read from configuration. Setting `conflicts.resolve` to `agent` therefore
 changes nothing today beyond making the doctor show its resolver and reviewer rows (see
 `skills/sigma-doctor/references/resolver-readiness.md`), which fail by design until those are chosen.
+
+A merge made outside the loop is noticed at the next watcher tick (up to the watch interval); only
+`work.py merge` starts a pass at once, and only with `SIGMA_UPKEEP_JOB=1` in that shell. A pure fast-forward push keeps no
+backup ref (nothing is replaced); the lease still applies.
 
 Every resolution leaves a record under `.sdlc/state/upkeep/resolutions`, and the rewritten commits carry a
 `sigma-resolution:` trailer naming the level and the run.

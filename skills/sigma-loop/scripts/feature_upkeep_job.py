@@ -173,7 +173,8 @@ def _unit_pass(config, sdlc_dir, root, unit, unit_pass=None):
         call = unit_pass or _sibling("feature_upkeep_pass").run_unit_pass
         got = call(config, str(sdlc_dir), unit, "refs/remotes/%s/%s" % (remote, branch), "refs/remotes/%s/%s" % (remote, base),
                    base, int(time.time()), remote=remote, branch=branch, cwd=str(root))
-        return {"unit_pass": got.get("result") if isinstance(got, dict) else "failed"}
+        got = got if isinstance(got, dict) else {}
+        return dict({"unit_pass": got.get("result") or "failed"}, **({"lease": True} if got.get("reason") == "lease-refused" else {}))
     except Exception:                                     # noqa: BLE001 - maintenance never costs the line
         return {"unit_pass": "failed"}
 
@@ -198,6 +199,8 @@ def run_engine(config, sdlc_dir, root, unit, *, environ=None, upkeep=None, unit_
         line["unit_pass"] = "skipped"
     else:
         line.update(_unit_pass(config, sdlc_dir, root, unit, unit_pass))
+        if line.pop("lease", False):                      # #1344: a correct refusal is recorded as one, not as a failure
+            line["outcome"] = "lease-refused"
     print(json.dumps(line, sort_keys=True), flush=True)
     return line
 
@@ -214,8 +217,15 @@ def build_parser():
     return parser
 
 
+def _windows():
+    return sys.platform == "win32"
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if _windows():                                        # #1344: the scheduler and the doctor refuse; so does a direct run
+        print("feature_upkeep_job.py: refused: background upkeep is not supported on Windows", file=sys.stderr)
+        return 2
     try:
         config = json.loads(pathlib.Path(args.sdlc).joinpath("config.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
