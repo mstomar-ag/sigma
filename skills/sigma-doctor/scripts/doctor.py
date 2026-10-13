@@ -3026,7 +3026,12 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     # clone; before that a teammate's `init` finds nothing to fetch. Flag it as a real setup gap with
     # the one command that fixes it — `/sigma-ledger` runs `sync.py bootstrap` (create + seed + push).
     if _block(cfg, "ledger").get("enabled") is True:
+        # #1318: bootstrap JOINS a remote ledger branch the clone already knows; say so then.
+        joins = (not (base / "ledger" / ".git").exists()
+                 and _remote_ledger_branch_known(base, cfg, run))
         out.append(_chk("team ledger initialized", (base / "ledger" / ".git").exists(),
+                        "run /sigma-ledger — one command joins the existing ops branch, seeds your file + TEAM.md, and pushes"
+                        if joins else
                         "run /sigma-ledger — one command creates the ops branch, seeds your file + TEAM.md, and pushes"))
 
     # #2698: the same shape one channel over. Knowledge-graph analysis notes share an ops branch
@@ -3728,7 +3733,22 @@ def _ledger_delivery_state(base, cfg, now=None):
     return " — BEHIND: %s; %s%s" % ("; ".join(parts), watcher, blind)
 
 
-def _ledger_feature_state(base, cfg, now=None):
+def _remote_ledger_branch_known(base, cfg, run):
+    """#1318. True only when the clone already holds the remote ledger branch's tracking ref. A local
+    `rev-parse` -- no network, no fetch -- so a clone that never fetched it, a failed probe or a
+    missing `run` all read False, and callers keep the create-wording. Never raises."""
+    if run is None:
+        return False
+    try:
+        sync = _load_loop_script("sync")
+        ref = "refs/remotes/%s/%s" % (sync.remote(cfg), sync.branch(cfg))
+        root = pathlib.Path(base).resolve().parent
+        return bool(str(run(["git", "-C", str(root), "rev-parse", "--verify", "--quiet", ref]) or "").strip())
+    except Exception:                       # noqa: BLE001 - "could not tell" is not "exists"
+        return False
+
+
+def _ledger_feature_state(base, cfg, now=None, run=None):
     """Dashboard line for the ledger. 'enabled' alone isn't 'working' — the ops branch still has to be
     created + pushed once, so an enabled ledger with NOTHING yet (no worktree and no entries) reports
     the gap and its one-command fix instead of a count that would imply it's live. Once it has a
@@ -3744,6 +3764,8 @@ def _ledger_feature_state(base, cfg, now=None):
     n = _ledger_entries(base)
     published = (base / "ledger" / ".git").exists()
     if n == 0 and not published:
+        if _remote_ledger_branch_known(base, cfg, run):
+            return "ON but NOT set up — run /sigma-ledger to join the existing ops branch"
         return "ON but NOT set up — run /sigma-ledger to create + push the ops branch"
     if not published:
         # #1391 step 7: entry COUNT was masking the thing that actually matters. `.sdlc/ledger` is
@@ -5219,7 +5241,7 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
          _blocking_priority_override_feature_state(cfg),
          'config: "discovery": {"blocking_priority_override": true} — github discovery mode only'),
         ("team ledger",
-         _ledger_feature_state(base, cfg),
+         _ledger_feature_state(base, cfg, run=run),
          'config: "ledger": {"enabled": true}, then /sigma-ledger to create + push it'),
         ("daemon stop-files (state/*.stop)",
          _stop_file_state(base),
