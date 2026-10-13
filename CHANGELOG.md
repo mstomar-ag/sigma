@@ -4,7 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-- **A park whose label write fails no longer exits 0 and leaves the issue pickable (#1303).** `loop.py record <N> parked` now falls back to REST label writes when the GraphQL swap fails, and exits non-zero with one clear message if the label still cannot be applied; other transitions are unchanged.
+- **`decision_import.py` keeps the kind of comment-sourced decisions and one resume answer (#1309).** An unpark answer now takes the kind from the issue's `sigma-qkind` line instead of `unknown`, and `start it again now` is stored as `start it again`; with `rulebook.import.comments` off nothing changes.
 - **`decision_import.py` now reads issue comments from the command line (#1308).** With `rulebook.import.comments` on, scan, plan and apply list the goal-labelled issues and pass them to the scan; with it off nothing is fetched.
 - **The autonomy readout and the question-list learning line use the category thresholds in force (#1317).** When `.sdlc/categories.json` has a category covering a pair, "level N needs X answers" and "of X answers" now show that category's numbers instead of the global ones; with no categories file every line is unchanged.
 - **The unpark skill names the rule approve step (#1326).** One sentence now says `rule_draft.py draft` then `rule_draft.py approve <state-folder> <rule id>`, so an agent can find the approval verb.
@@ -24,6 +24,7 @@ All notable changes to Sigma are recorded here, newest first.
 - **A vetoed applied ask moves the board card back to Parked (#1201).** On a board-active repo the veto re-park now moves the card as well as the labels.
 - **A follow-up matching only a mid-score closed issue is now filed (#1217).** Closed matches fold a follow-up away only at `dedup.closed_duplicate_threshold` (default 0.8); weaker ones are reported as related. Open-issue folding is unchanged.
 - **`define.py open` commits the unit record; doctor flags records other machines cannot see (#1312).** Open writes the unit's record when it has none, then commits just that path on the current branch (never a push); if it cannot write or commit, it prints the exact command. A new doctor row warns on an untracked record or a remote `feature/*` branch with no record, and appears only where `.sdlc/features/` exists.
+- **A park whose label write fails no longer exits 0 and leaves the issue pickable (#1303).** `loop.py record <N> parked` now falls back to REST label writes when the GraphQL swap fails, and exits non-zero with one clear message if the label still cannot be applied; other transitions are unchanged.
 
 ## 1.0.12 — 2026-10-13 — rulebook categories file, cold-start visibility, past-decision import, upkeep trigger and session report, drift judge in shadow, hard-stop net, and the confirmation-queue migration
 
