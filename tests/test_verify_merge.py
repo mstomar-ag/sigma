@@ -890,3 +890,23 @@ def test_record_merge_delivery_write_error_never_fails_a_successful_landing(tmp_
         raise OSError("read-only file system")
     monkeypatch.setattr(m, "_write_delivery", boom)
     m.record_merge(str(d), config, "feature/x", 55, "why", run=run, cwd=str(tmp_path))
+
+
+def test_engine_route_refuses_a_pair_unit_before_any_pass_or_pr(tmp_path, capsys):
+    """#1339, through the documented gesture's engine route: exit 1, the refusal printed, no pass, no PR."""
+    from test_feature_land_front import World, CONFIG, load as load_front
+    from test_feature_land_front import pair_unit
+    m = _mod()
+    w = World(tmp_path)
+    pair_unit(w)
+    engine = load_front()
+
+    class Engine:
+        def land(self, config, sdlc_dir, unit, **kw):
+            return engine.land(config, w.sdlc, unit, run=w.run, gh_run=w.gh, rebase_pass=w.rebase_pass,
+                               verify=w.verify, **kw)
+    real = m._load
+    m._load = lambda name, directory=None: Engine() if name == "feature_land" else real(name, directory)
+    assert m._engine_route(CONFIG, str(w.sdlc), "feature/voice", lambda: True) == 1
+    assert "refused:sibling" in capsys.readouterr().out
+    assert w.passes == [] and w.posts() == []

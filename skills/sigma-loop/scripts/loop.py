@@ -4113,8 +4113,11 @@ def _reconcile_one(sdlc_dir, config, source, goal, run, now, results):
 
 
 def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transition="park",
-            merged_pr=False, retry_close=False, housekeeping=True, qkind=None, config=None):
-    """`config` (#1178): with a declared `qkind` on a park, opens the applier's ask (closed gate: nothing).
+            merged_pr=False, retry_close=False, housekeeping=True, qkind=None, config=None,
+            park_failed=None):
+    """`park_failed` (#1303): a list the CLI `record` verb passes; one item is appended when the source
+    reports its park label write did NOT land (`park()` returned exactly False). None = no change.
+    `config` (#1178): with a declared `qkind` on a park, opens the applier's ask (closed gate: nothing).
     `qkind` (#994): a declared question kind; appends one machine line to the text handed to
     `source.park` (and only there). None keeps the comment byte-identical.
     `housekeeping` (#465): False only from the merge-reconcile pass, which holds
@@ -4206,9 +4209,11 @@ def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transit
         if qkind is not None:                      # #994: the declared kind rides inside the text
             park_text = park_text + "\n" + _load("qkind").render_line(qkind)
         if tier is not None and "tier" in inspect.signature(source.park).parameters:
-            source.park(goal, park_text, tier=tier)
+            landed = source.park(goal, park_text, tier=tier)
         else:
-            source.park(goal, park_text)
+            landed = source.park(goal, park_text)
+        if landed is False and park_failed is not None:
+            park_failed.append(goal)
         if qkind is not None and config is not None:   # #1178: the ask opens after the park landed
             try:
                 _load("applier").open_for_park(sdlc_dir, config, goal, qkind, source=source)
@@ -5190,7 +5195,8 @@ def verify_goal(sdlc_dir, goal):
     an ordered JSON array for multiple commands; single-command labels remain unchanged.
     Exit: 0 verified · 1 the command failed · 2 unsafe goal (refused before running anything) ·
     3 no command declared (honest absence) · 4 worktree behind its base and the auto-rebase could
-    not apply cleanly (refused before running anything -- #1890)."""
+    not apply cleanly (refused before running anything -- #1890) · 4 also: `verify.enforce` on and no
+    acceptance record (refused before running anything -- #1338)."""
     import hashlib, json as _json, subprocess
     # Checked FIRST, before the subprocess even runs — not just left to _evidence_path()'s own
     # guard further down, which would let an unsafe goal's proving command execute for nothing
@@ -5214,6 +5220,18 @@ def verify_goal(sdlc_dir, goal):
         ledger.safe_append(sdlc_dir, "verify", goal, config=config, stream=ledger.EVENTS,
                            ok=False, exit=3, absent=True)
         return 3
+    # #1338: the same gate `work.py pr` applies (`state.enforce_enabled`, and only where a worktree flow
+    # exists to demand the record: `work.enabled`). Without a record the
+    # evidence would be stamped with `acceptance_sha256: None`; recording one afterwards changes
+    # that digest and `state.done_refusal` then demands the whole verify again. Refuse first.
+    if acceptance_hash is None and work.enabled(config) and _enforce_enabled(config.get("verify") or {}):
+        print("REFUSED exit=4 -- verify.enforce is on and goal "
+              f"{goal!r} has no acceptance record; run `acceptance.py record .sdlc <goal> "
+              "--draft <file>` first, then verify (the proving command was not run)",
+              file=sys.stderr)
+        ledger.safe_append(sdlc_dir, "verify", goal, config=config, stream=ledger.EVENTS, exit=4)
+        actionlog.safe_append(sdlc_dir, goal, "verify_run", exit=4)
+        return 4
     # #1890: catch a worktree that has drifted behind its own base BEFORE the expensive subprocess
     # below ever runs -- #1617 (78 commits behind) and #1829 both burned a full multi-hundred-second
     # verify against stale code before a human noticed. `ensure_fresh` auto-rebases via the existing
@@ -6609,11 +6627,21 @@ def _dispatch(argv):
                       f"for {argv[3]} -- run `work.py pr` first, or record done/parked/failed",
                       file=sys.stderr)
                 return 2
+        park_failed = []
         if merged_pr:
             _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],
-                    reason, retro_grade=retro_grade, merged_pr=True, qkind=qkind, config=config); return 0
-        _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],
-                reason, retro_grade=retro_grade, qkind=qkind, config=config); return 0
+                    reason, retro_grade=retro_grade, merged_pr=True, qkind=qkind, config=config,
+                    park_failed=park_failed)
+        else:
+            _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],
+                    reason, retro_grade=retro_grade, qkind=qkind, config=config,
+                    park_failed=park_failed)
+        if park_failed:       # #1303: the park comment landed but the label did not -- not a success
+            print(f"loop.py record: PARK NOT APPLIED for {argv[3]}: the park label write failed "
+                  "(GraphQL and REST) -- the issue is still pickable; retry the record once the "
+                  "GitHub API budget recovers", file=sys.stderr)
+            return 1
+        return 0
     if len(argv) >= 4 and argv[1] == "claim":       # #1962: claim a goal you already chose
         _coexist_notice(argv[2], "loop.py claim", once=True)    # #251/#314: once per run
         config = state.load_config(argv[2])

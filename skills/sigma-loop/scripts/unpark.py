@@ -387,11 +387,10 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
       `unpark`      -- ONE atomic swap (`+goal_label`, `-parked_label`/`-goal_blocked_label`), then
                        the board card to `ready`, then the record in the body AND as a comment.
 
-    ORDER, and why: the record is written BEFORE the label swap on the keep-parked path (nothing
-    depends on it) but AFTER on the unpark path, so a failure between them leaves a goal that is
-    pickable-with-context rather than one whose context landed and whose unpark did not. Both
-    failure directions cost a redo; neither loses the answers, because the comment is posted on
-    both paths.
+    ORDER, and why: keep-parked changes no label, so its record is the gesture. On the unpark path
+    the decision record is written only AFTER the label swap landed (#1304); a failed swap keeps the
+    typed answers (plain comment + body) but records no decision. An issue that is not parked is
+    refused on both paths and records nothing.
 
     Returns `{"number", "decision", "outcome", "detail"}` -- `outcome` is
     `unparked`/`kept-parked`/`would`/`failed`."""
@@ -413,6 +412,13 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
                 "detail": "#%s is closed — reopen it first if it should be worked" % n}
 
     names = _names(data)
+    if source.parked_label not in names and source.goal_blocked_label not in names:
+        # #1304: a gesture on a goal that is not parked changes nothing, so it records nothing --
+        # a "kept-parked" or "start it again" record for it would teach the Rulebook a decision
+        # that never happened.
+        return {"number": n, "decision": decision, "outcome": "failed",
+                "detail": "#%s is not parked (no %s or %s label) — nothing was recorded"
+                          % (n, source.parked_label, source.goal_blocked_label)}
     if decision == "unpark" and gate_hold.declared_gate_kind(
             [c.get("body") or "" for c in (data.get("comments") or [])]):
         # #1005: the hold guard `/sigma-promote` already has. A gate hold is released by a registry edit,
@@ -456,27 +462,17 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         return {"number": n, "decision": decision, "outcome": "kept-parked",
                 "detail": "answers recorded; the automatic sweep will leave it alone" + err}
 
-    if not add and not remove:
-        # Nothing to swap -- but the answers are still worth recording, and this is not a failure.
-        err = _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data)
-        _append_block(source, n, data.get("body") or "", block)
-        return {"number": n, "decision": decision, "outcome": "unparked",
-                "detail": "#%s was already pickable — answers recorded" % n + err}
     try:
         source._swap_labels(n, add=add, remove=remove)
     except Exception as exc:                            # noqa: BLE001 - reported, never raised
-        # Review bug_001: record the answers ANYWAY. This path used to return straight out, which
-        # discarded an interview a human had just typed — and contradicted this function's own
-        # docstring promise that "neither loses the answers, because the comment is posted on both
-        # paths". The label write is the retryable half; the answers are not, and re-asking a person
-        # the same five questions because GitHub returned a 502 is the one cost here that cannot be
-        # automated away. Recording first also makes the retry cheap: `brief` reads the block back,
-        # so the second attempt has nothing left to ask.
-        err = _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data)
+        # Review bug_001: keep the typed answers (comment + body block) so a retry asks nothing.
+        # #1304: but the DECISION did not happen, so no decision record, store file or applier
+        # close is written; those come only from the landed path below.
+        _comment(source, n, block)
         _append_block(source, n, data.get("body") or "", block)
         return {"number": n, "decision": decision, "outcome": "failed",
                 "detail": "label write did not land: %s — the answers were recorded, so re-running "
-                          "this will not ask them again" % exc + err}
+                          "this will not ask them again" % exc}
     detail = triage._swap_detail(add, remove)
     if not source._set_board_status(n, source.col["ready"]) and source.board_active:
         detail += ("; the label landed but the board card did not move to %r — move it by hand if "

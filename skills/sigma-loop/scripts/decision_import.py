@@ -161,7 +161,24 @@ def _span(body, legacy, marker_start, marker_end):
     return body[at + len(sp): stop if stop != -1 else len(body)]
 
 
-def _from_comment(c, issue, legacy, bs):
+_RESUME = re.compile(r"^start it again( now)?[.!]?$", re.IGNORECASE)
+RESUME_ANSWER = "start it again"  # the one canonical spelling of the resume answer
+
+
+def _canon(choice):
+    return RESUME_ANSWER if _RESUME.match(choice.strip()) else choice
+
+
+def _declared_kind(comments):
+    """The kind of the LAST `sigma-qkind:` line among an issue's comments, or None."""
+    qk, kind = _load("qkind"), None
+    for c in comments:
+        got = qk.parse_line(c.get("body") or "") if isinstance(c, dict) else None
+        kind = got or kind
+    return kind
+
+
+def _from_comment(c, issue, legacy, bs, qkind=None):
     body = c.get("body") or ""
     span = _span(body, legacy, bs.UNPARK_QA_START, bs.UNPARK_QA_END)
     if span is None:
@@ -182,7 +199,9 @@ def _from_comment(c, issue, legacy, bs):
             ask = _text(line[1:-1])
         elif line.startswith("- **") and "** — " in line:
             out.append(_cand("unpark-qa", when, ask or _text(line[4:line.index("**", 4)]), [],
-                             _text(line.split("** — ", 1)[1]), "", issue, "%s#%d" % (cid, len(out))))
+                             _canon(_text(line.split("** — ", 1)[1])), "", issue, "%s#%d" % (cid, len(out))))
+            if qkind:
+                out[-1]["qkind"] = qkind
             ask = ""
     return out
 
@@ -268,8 +287,10 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
                 if full:
                     break
                 stats["unpark-qa"]["files_read"] += 1
-                for c in read(config, issue):
-                    for cand in _from_comment(c, issue, legacy, bs) if isinstance(c, dict) else []:
+                got = list(read(config, issue))
+                declared = _declared_kind(got)
+                for c in got:
+                    for cand in _from_comment(c, issue, legacy, bs, declared) if isinstance(c, dict) else []:
                         if len(cands) >= cap:
                             full = True
                             break
@@ -309,6 +330,8 @@ REPO_AREA = "repo"
 
 
 def kind_of(cand, qkinds):
+    if cand.get("qkind") in qkinds and cand["qkind"] != UNKNOWN:
+        return cand["qkind"]
     q = cand["question"].strip().lower()
     if q in qkinds and q != UNKNOWN:
         return q
@@ -338,11 +361,13 @@ def _eligible(cands):
     return [c for c in cands if not c["superseded"] and c["choice"]]
 
 
-def default_call(prompt, model, max_budget_usd):
-    """The drift judge's invocation path (`feature_judge.ask_claude`); no key is read here."""
-    payload, cost = _load("feature_judge").ask_claude(prompt, _SCHEMA, model=model,
+def default_call(prompt, model, max_budget_usd, timeout_s=60):
+    """The drift judge's invocation path (`feature_judge.ask_claude`); no key is read here. No answer at all (a timeout,
+    a failure) is None, so the row is skipped and retried next run (#1310), not stored as unknown."""
+    payload, cost = _load("feature_judge").ask_claude(prompt, _SCHEMA, model=model, timeout_s=timeout_s,
                                                       max_budget_usd=max_budget_usd)
-    payload = payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return None
     return {"kind": payload.get("kind"), "area": payload.get("area"), "cost_usd": cost}
 
 
@@ -400,7 +425,7 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
     areas = _areas(sdlc_dir)
     cache = _cache_read(sdlc_dir)
     info = {"model": lim["model"], "run_ceiling": lim["max_budget_usd_per_run"], "cached": 0, "sent": 0,
-            "would_send": 0, "spent": 0.0, "stopped_after": None}
+            "would_send": 0, "spent": 0.0, "stopped_after": None, "timed_out": 0}
     rows, fresh = [], False
     for c in (x for x in _eligible(cands) if _fp(x) not in skip):
         fp = _fp(c)
@@ -426,6 +451,7 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
             ok = isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0
             info["spent"] += cost if ok else lim["max_budget_usd_per_call"]
             if not isinstance(ans, dict):  # no answer at all: not cached, not stored, retried next run
+                info["timed_out"] += 1
                 rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
                 continue
             if ans.get("kind") in qkinds and ans.get("area") in areas:
@@ -547,10 +573,14 @@ def apply(sdlc_dir, config, cands, call=None):
     if not out["gate"]:
         return out
     info = {}
+    if call is None:
+        tmo = _load("rulebook_cfg").import_limits(config)["timeout_s"]
+        call = lambda p, m, b: default_call(p, m, b, timeout_s=tmo)  # noqa: E731
     rows, new, would, allrows, watched = _evidence(
-        sdlc_dir, config, cands, (call or default_call) if model_mode(config) else None, info)
+        sdlc_dir, config, cands, call if model_mode(config) else None, info)
     if info:
         out["stopped_after"] = info["stopped_after"]
+        out["timed_out"] = info["timed_out"]
         out["model"] = info
     for r in new:
         record = rec.build("import", r["issue"], r["qkind"], r["choice"], r["reason"], "imported", area=r["area"])
@@ -649,6 +679,9 @@ def main(argv=None, lister=None, comments_fn=None):
         if res.get("stopped_after") is not None:
             print("ceiling stopped the run after %d model calls: the rest stay unclassified, run apply again" % (
                 res["stopped_after"]))
+        if res.get("timed_out"):
+            print("%d rows got no answer (timeout or failure): not stored, run apply again to retry them" % (
+                res["timed_out"]))
         return 0
     for name in SOURCES:
         st = out["stats"][name]
