@@ -2482,6 +2482,34 @@ def _kg_last_attempt(path):
     return f"{age} ago, FAILED: {detail}"
 
 
+def _origin_mismatch_rows(base, disc, run):
+    """#1314: warn when discovery.github.repo (or project.owner) names a different repo/owner than origin.
+    Silent when they match, when unset, or when origin has no readable owner/name. Local git read only."""
+    try:
+        gh = _block(disc, "github")
+        repo = str(gh.get("repo") or "").strip()
+        owner = str(_block(gh, "project").get("owner") or "").strip()
+        if not repo and not owner:
+            return []
+        url = str(run(["git", "-C", str(base.parent), "remote", "get-url", "origin"]) or "").strip()
+        slug = _load_loop_script("feature_sync").slug_from_remote_url(url) if url else None
+        if not slug:
+            return []
+        problems = []
+        if repo and repo.lower() != slug.lower():
+            problems.append("discovery.github.repo is %s but origin is %s" % (repo, slug))
+        if owner and not owner.startswith("@") and owner.lower() != slug.split("/")[0].lower():
+            problems.append("discovery.github.project.owner is %s but origin's owner is %s"
+                            % (owner, slug.split("/")[0]))
+        if not problems:
+            return []
+        return [_chk("configured repo matches origin", False,
+                     "; ".join(problems) + ". Correct the config, or ignore if this checkout is a "
+                     "deliberate fork.")]
+    except Exception:                        # noqa: BLE001 - a detector that cannot run says nothing
+        return []
+
+
 def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_dirs=None,
           installed_plugins_path=None, agents_md=None, cheap_only=False, which=None):
     """Return the setup checks relevant to this project's config; each is {name, ok, fix}.
@@ -2622,6 +2650,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
         out.extend(_graphql_capability_rows(base, cfg))     # #801: advisory, detection only
         if _block(cfg, "work").get("enabled") and not cheap_only:
             out.extend(_landing_rows(base, cfg, run, which))        # #974: branch-creation rulesets
+    out.extend(_origin_mismatch_rows(base, disc, run))      # #1314
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
     out.extend(_resolver_rows(base, cfg, which, cheap_only))
     if disc.get("source") == "github":

@@ -7608,3 +7608,67 @@ def test_pick_path_gate_state_board_skipped_when_graphql_unavailable(monkeypatch
     assert state.startswith("board skipped: GraphQL unavailable")
     assert "board_migrate" not in state
     assert called == []
+
+
+_SSH = "git" + "@github.com:"
+_SSH_ALIAS = "git" + "@github.com-alias:"
+
+
+# #1314: a configured repo / project owner that differs from the origin remote.
+def _origin_runner(url):
+    def run(args):
+        if args[:1] == ["git"] and "get-url" in args:
+            return url
+        return ""
+    return run
+
+
+def _mismatch_rows(cfg, url, tmp_path):
+    d = _doc()
+    base = _sdlc(tmp_path, cfg)
+    checks = d.check(base, run=_origin_runner(url), cheap_only=True)
+    return [c for c in checks if c["name"].startswith("configured repo matches origin")]
+
+
+def _gh_cfg(repo=None, owner=None):
+    gh = {}
+    if repo is not None:
+        gh["repo"] = repo
+    if owner is not None:
+        gh["project"] = {"owner": owner}
+    return {"discovery": {"source": "github", "github": gh}}
+
+
+def test_repo_differing_from_origin_warns_naming_both(tmp_path):
+    rows = _mismatch_rows(_gh_cfg(repo="acme/widgets"), _SSH + "other/gadgets.git", tmp_path)
+    assert len(rows) == 1 and rows[0]["ok"] is False
+    assert "acme/widgets" in rows[0]["fix"] and "other/gadgets" in rows[0]["fix"]
+    assert "discovery.github.repo" in rows[0]["fix"]
+
+
+def test_project_owner_differing_from_origin_owner_warns(tmp_path):
+    rows = _mismatch_rows(_gh_cfg(repo="acme/widgets", owner="elsewhere"),
+                          "https://github.com/acme/widgets.git", tmp_path)
+    assert len(rows) == 1 and rows[0]["ok"] is False
+    assert "elsewhere" in rows[0]["fix"] and "acme" in rows[0]["fix"]
+    assert "project.owner" in rows[0]["fix"]
+
+
+@pytest.mark.parametrize("url", [_SSH + "acme/widgets.git", "https://github.com/acme/widgets.git",
+                                 "https://github.com/Acme/Widgets", _SSH_ALIAS + "acme/widgets.git"])
+def test_matching_origin_forms_add_no_warning(url, tmp_path):
+    assert _mismatch_rows(_gh_cfg(repo="acme/widgets", owner="acme"), url, tmp_path) == []
+
+
+def test_unset_repo_or_unparsable_origin_adds_no_warning(tmp_path):
+    assert _mismatch_rows(_gh_cfg(), _SSH + "other/gadgets.git", tmp_path) == []
+    assert _mismatch_rows(_gh_cfg(repo="acme/widgets"), "", tmp_path / "a") == []
+    assert _mismatch_rows(_gh_cfg(repo="acme/widgets", owner="@me"), "not a url", tmp_path / "b") == []
+
+
+def test_matching_config_leaves_other_rows_unchanged(tmp_path):
+    d = _doc()
+    cfg = _gh_cfg(repo="acme/widgets")
+    on = [c["name"] for c in d.check(_sdlc(tmp_path / "a", cfg), run=_origin_runner(_SSH + "acme/widgets.git"), cheap_only=True)]
+    off = [c["name"] for c in d.check(_sdlc(tmp_path / "b", cfg), run=_origin_runner(""), cheap_only=True)]
+    assert on == off
