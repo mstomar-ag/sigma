@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A verb about one issue no longer back-fills the whole board (#1305).** It cards only its own issue; the watcher tick back-fills up to `project.backfill_cap` (default 20) cards per tick and skips when GraphQL remaining is under `project.backfill_min_graphql` (default 1000).
 - **A person's no after an applied ask reaches the veto through the real verbs (#1189).** Keep-parked and demote on an issue whose ask was applied inside its window record the veto; a failure never blocks the gesture.
 
 

@@ -187,6 +187,12 @@ def _pw_label_swap(a, labels_by_issue, calls=None, repo=None):
     return "{}"
 
 
+def _synced(gh):
+    """#1305: single-issue verbs no longer back-fill the board; the watcher's `backfill_board` does."""
+    gh.backfill_board(cap=10 ** 6)
+    return gh
+
+
 def project_world(projects=None, fields=None, items=None, issues=None):
     """In-memory `gh` simulator: records calls, mutates an in-memory board, returns gh-shaped JSON."""
     state = {"projects": [dict(p) for p in (projects or [])],
@@ -198,6 +204,8 @@ def project_world(projects=None, fields=None, items=None, issues=None):
     state.setdefault("issue_labels", {})
 
     def run(a):
+        if a[:2] == ["api", "rate_limit"]:      # #1305: REST budget read the watcher back-fill gates on
+            return json.dumps({"resources": {"graphql": {"remaining": 5000, "limit": 5000}}})
         swap = _pw_label_swap(a, state["issue_labels"], calls=calls,
                               repo=next((c[c.index("--repo") + 1] for c in calls
                                          if "--repo" in c), None))
@@ -316,7 +324,7 @@ def test_first_transition_creates_board_field_and_syncs_backlog():
               {"number": 7, "labels": [{"name": "sdlc:goal"}]}]
     run = project_world(projects=[], issues=issues)
     gh = src.GitHubSource(_cfg(project={"enabled": True}), run=run)
-    gh.mark_in_progress("5")
+    _synced(gh).mark_in_progress("5")
     v = _verbs(run)
     assert any(c.startswith("project create") for c in v)                       # no board existed -> create
     assert any("api graphql" in c and "updateProjectV2Field" in c and "QC" in c and "Blocked" in c
@@ -331,7 +339,7 @@ def test_first_transition_creates_board_field_and_syncs_backlog():
     # so everything it cards is already queued. An ADOPTED board has no `Ready` option and still gets
     # `s_backlog` here — asserted separately in test_sync_still_uses_backlog_on_a_board_with_no_ready_option.
     e = _edits(run)
-    assert {"item": "PVTI_5", "option": "s_in_progress"}.items() <= next(x for x in e if x["item"] == "PVTI_5").items()
+    assert {"item": "PVTI_5", "option": "s_in_progress"}.items() <= [x for x in e if x["item"] == "PVTI_5"][-1].items()
     assert any(x["item"] == "PVTI_7" and x["option"] == "s_ready" for x in e)
     assert all(x["field"] == "F_status" and x["project"] == "PVT_new" for x in e)  # the BUILT-IN Status field
 
@@ -346,7 +354,7 @@ def test_backlog_sync_pages_from_the_oldest_end_like_next_pending():
     src = _mod("sources")
     run = project_world(projects=[], issues=[{"number": 5, "labels": [{"name": "sdlc:goal"}]}])
     gh = src.GitHubSource(_cfg(project={"enabled": True}), run=run)
-    gh.mark_in_progress("5")
+    _synced(gh).mark_in_progress("5")
     listings = [c for c in run.calls if _is_issues_list_call(c)
                 and _rest_field(c, "state") == "open"]
     assert listings, "no open-goal listing was issued at all"
@@ -362,7 +370,7 @@ def test_backlog_sync_never_uses_the_graphql_search_field():
     src = _mod("sources")
     run = project_world(projects=[], issues=[{"number": 5, "labels": [{"name": "sdlc:goal"}]}])
     gh = src.GitHubSource(_cfg(project={"enabled": True}), run=run)
-    gh.mark_in_progress("5")
+    _synced(gh).mark_in_progress("5")
     assert not any(len(c) > 1 and c[0] == "issue" and c[1] == "list" for c in run.calls)
     assert any(c and c[0] == "api" and str(c[1]).endswith("/issues") for c in run.calls)
     assert not any("--search" in c for c in run.calls if _is_issues_list_call(c))
@@ -932,7 +940,7 @@ def test_sync_backlog_cards_goal_issues_past_the_old_200_cap():
                         fields=[STATUS_FILLED], items=[], issues=issues)
     gh = src.GitHubSource(_board(), run=run)
     gh._RETRY_BASE = 0
-    gh.mark_in_progress("5")
+    _synced(gh).mark_in_progress("5")
     added = {int(_arg(c, "--url").rsplit("/", 1)[-1])
              for c in run.calls if c[:2] == ["project", "item-add"]}
     assert 250 in added and 201 in added, "goal issues past #200 were never carded"
@@ -1215,7 +1223,7 @@ def test_sync_cards_goal_issues_as_ready_because_they_are_by_definition_queued()
     Filing those under a column named Backlog is what made the board unreadable."""
     run = _queue_world(items=[], issues=[_pissue(5), _pissue(7)])
     gh = _src(run)
-    gh.mark_in_progress("5")
+    _synced(gh).mark_in_progress("5")
     e = _edits(run)
     assert any(x["item"] == "PVTI_7" and x["option"] == "s_ready" for x in e)
     assert any(x["item"] == "PVTI_5" and x["option"] == "s_in_progress" for x in e)
@@ -1224,7 +1232,7 @@ def test_sync_cards_goal_issues_as_ready_because_they_are_by_definition_queued()
 def test_sync_still_uses_backlog_on_a_board_with_no_ready_option():
     run = _queue_world(items=[], issues=[_pissue(5), _pissue(7)], fields=STATUS_FILLED)
     gh = _src(run)
-    gh.mark_in_progress("5")
+    _synced(gh).mark_in_progress("5")
     assert any(x["item"] == "PVTI_7" and x["option"] == "s_backlog" for x in _edits(run))
 
 
@@ -1240,7 +1248,7 @@ def test_sync_seeds_a_carded_issue_whose_status_is_blank():
     which matches on `status == ready_name`, and uncounted by _warn_unseeded, which only counts
     cards sitting in Backlog. Nothing in the system even reported it."""
     run = _queue_world(items=[_card(7, None)], issues=[_pissue(5), _pissue(7)])
-    _src(run).mark_in_progress("5")
+    _synced(_src(run)).mark_in_progress("5")
     assert any(x["item"] == "PVTI_7" and x["option"] == "s_ready" for x in _edits(run))
 
 
@@ -1437,7 +1445,7 @@ def test_sync_mirrors_the_label_onto_the_field():
                         fields=[STATUS_FILLED, SDLC_PRIORITY_FIELD],
                         items=[_pcard(7, status="Ready")],
                         issues=[_pissue(7, "priority:P2")])
-    src.GitHubSource(_board(), run=run).mark_in_progress("5")
+    _synced(src.GitHubSource(_board(), run=run)).mark_in_progress("5")
     assert {"item": "PVTI_7", "option": "p_p2"} in _prio_edits(run)
 
 
@@ -1470,7 +1478,7 @@ def test_the_most_urgent_label_is_mirrored_when_an_issue_carries_several():
                         fields=[STATUS_FILLED, SDLC_PRIORITY_FIELD],
                         items=[_pcard(7, status="Ready")],
                         issues=[_pissue(7, "priority:P1", "priority:P0")])
-    src.GitHubSource(_board(), run=run).mark_in_progress("5")
+    _synced(src.GitHubSource(_board(), run=run)).mark_in_progress("5")
     assert {"item": "PVTI_7", "option": "p_p0"} in _prio_edits(run)
 
 
@@ -1498,7 +1506,7 @@ def test_sync_skips_the_priority_write_on_a_card_stranded_at_done(capsys):
                         fields=[STATUS_FILLED, SDLC_PRIORITY_FIELD],
                         items=[_pcard(7, status="Done")],
                         issues=[_pissue(7, "priority:P2")])
-    src.GitHubSource(_board(), run=run).mark_in_progress("5")
+    _synced(src.GitHubSource(_board(), run=run)).mark_in_progress("5")
     assert _prio_edits(run) == []
     err = capsys.readouterr().err
     assert "#7" in err and "Done" in err
@@ -1512,7 +1520,7 @@ def test_a_ready_card_next_to_a_stranded_one_still_gets_its_priority_written():
                         fields=[STATUS_FILLED, SDLC_PRIORITY_FIELD],
                         items=[_pcard(7, status="Done"), _pcard(11, status="Ready")],
                         issues=[_pissue(7, "priority:P2"), _pissue(11, "priority:P1")])
-    src.GitHubSource(_board(), run=run).mark_in_progress("5")
+    _synced(src.GitHubSource(_board(), run=run)).mark_in_progress("5")
     assert {"item": "PVTI_11", "option": "p_p1"} in _prio_edits(run)
     assert not any(e["item"] == "PVTI_7" for e in _prio_edits(run))
 
@@ -1847,7 +1855,7 @@ def test_sync_brings_a_drifted_LABEL_into_line_with_the_field():
     leave the label saying P2, or issue search and local mode disagree with the queue."""
     run = _pworld([_ready(7, "P0", ("sdlc:goal", "priority:P2"))],
                   issues=[_pissue(7, "priority:P2")])
-    _src(run).mark_in_progress("5")
+    _synced(_src(run)).mark_in_progress("5")
     edits = [" ".join(c) for c in run.calls if c[:2] == ["issue", "edit"]]
     # #895 slice 3a: the add and the remove are now two sequential REST calls (add FIRST), not one edit
     assert any("--add-label priority:P0" in e for e in edits) and any("--remove-label priority:P2" in e for e in edits)
@@ -1865,7 +1873,7 @@ def test_sync_warns_loudly_when_the_field_overwrites_a_disagreeing_label(capsys)
     legitimate, documented steady-state choice); it only makes the correction visible."""
     run = _pworld([_ready(7, "P0", ("sdlc:goal", "priority:P2"))],
                   issues=[_pissue(7, "priority:P2")])
-    _src(run).mark_in_progress("5")
+    _synced(_src(run)).mark_in_progress("5")
     err = capsys.readouterr().err
     assert "7" in err and "P0" in err and "P2" in err
 
@@ -1938,7 +1946,7 @@ def test_field_wins_via_an_alias_writes_the_canonical_label_not_the_alias_spelli
     which would defeat the "one vocabulary" point of the feature."""
     run = _pworld([_ready(7, "Critical", ("sdlc:goal", "priority:P2"))],
                   issues=[_pissue(7, "priority:P2")])
-    _src_aliases(run, {"critical": "P0"}).mark_in_progress("5")
+    _synced(_src_aliases(run, {"critical": "P0"})).mark_in_progress("5")
     edits = [" ".join(c) for c in run.calls if c[:2] == ["issue", "edit"]]
     # #895 slice 3a: the add and the remove are now two sequential REST calls (add FIRST), not one edit
     assert any("--add-label priority:P0" in e for e in edits) and any("--remove-label priority:P2" in e for e in edits)
@@ -1957,7 +1965,7 @@ def test_sync_fills_an_alias_only_field_from_the_label_via_reverse_lookup():
                                 "content": {"number": 7}}],
                         issues=[_pissue(7, "priority:P0")])
     aliases = {"critical": "P0", "high": "P1", "medium": "P2", "low": "P3"}
-    _src_aliases(run, aliases).mark_in_progress("5")
+    _synced(_src_aliases(run, aliases)).mark_in_progress("5")
     edits = [{"item": _arg(c, "--id"), "option": _arg(c, "--single-select-option-id")}
             for c in run.calls if c[:2] == ["project", "item-edit"]
             and _arg(c, "--field-id") == "F_priority"]
@@ -1975,7 +1983,7 @@ def test_sync_agreeing_field_and_label_warns_nothing(capsys):
 
 def test_sync_fills_an_empty_field_from_the_label():
     run = _pworld([_ready(7, None, ("sdlc:goal", "priority:P2"))], issues=[_pissue(7, "priority:P2")])
-    _src(run).mark_in_progress("5")
+    _synced(_src(run)).mark_in_progress("5")
     assert {"item": "PVTI_7", "option": "p_p2"} in _prio_edits(run)
 
 
@@ -2194,7 +2202,7 @@ def test_mode_unset_is_byte_identical_to_before_the_feature_existed():
     cfg = {"discovery": {"source": "github", "github": {"repo": "acme/widget", "project": p}}}
     gh = _mod("sources").GitHubSource(cfg, run=run)
     gh._RETRY_BASE = 0
-    gh.mark_in_progress("9")
+    _synced(gh).mark_in_progress("9")
     listings = [c for c in run.calls if _is_issues_list_call(c) and _rest_field(c, "state") == "open"]
     assert len(listings) == 1, "expected exactly one open-goal listing, no extra calls from the mode"
     assert not any(c[:2] == ["issue", "comment"] for c in run.calls)
@@ -2215,7 +2223,7 @@ def test_mode_smart_promotes_a_blocker_with_no_other_unblocked_work_at_the_depen
              _gissue(5, "priority:P2")]                             # B: blocks A, own rank P2
     run = _promo_world(issues)
     gh = _promo_src(run, mode="smart")
-    gh.mark_in_progress("9")
+    _synced(gh).mark_in_progress("9")
     edits = [" ".join(c) for c in run.calls if c[:2] == ["issue", "edit"]]
     assert any("issue edit 5" in e and "--add-label priority:P0" in e for e in edits)
     assert any("issue edit 5" in e and "--remove-label priority:P2" in e for e in edits)
@@ -2225,7 +2233,7 @@ def test_mode_smart_promotion_comment_matches_the_spec_wording_exactly():
     issues = [_gissue(9, "priority:P0", body="Blocked by: #5"), _gissue(5, "priority:P2")]
     run = _promo_world(issues)
     gh = _promo_src(run, mode="smart")
-    gh.mark_in_progress("9")
+    _synced(gh).mark_in_progress("9")
     comments = [c for c in run.calls if c[:2] == ["issue", "comment"] and c[2] == "5"]
     assert comments, "no comment was posted on the promoted blocker"
     body = comments[0][comments[0].index("--body") + 1]
@@ -2237,7 +2245,7 @@ def test_mode_always_promotion_comment_has_no_other_unblocked_work_clause():
              _gissue(5, "priority:P2")]
     run = _promo_world(issues)
     gh = _promo_src(run, mode="always")
-    gh.mark_in_progress("9")
+    _synced(gh).mark_in_progress("9")
     comments = [c for c in run.calls if c[:2] == ["issue", "comment"] and c[2] == "5"]
     assert comments
     body = comments[0][comments[0].index("--body") + 1]
@@ -2249,7 +2257,7 @@ def test_promotion_from_no_priority_label_at_all_says_unprioritised():
     issues = [_gissue(9, "priority:P0", body="Blocked by: #5"), _gissue(5)]   # 5 carries no priority label
     run = _promo_world(issues)
     gh = _promo_src(run, mode="always")
-    gh.mark_in_progress("9")
+    _synced(gh).mark_in_progress("9")
     comments = [c for c in run.calls if c[:2] == ["issue", "comment"] and c[2] == "5"]
     assert comments
     body = comments[0][comments[0].index("--body") + 1]
@@ -2276,7 +2284,7 @@ def test_mode_always_promotes_even_when_the_dependent_has_other_unblocked_work()
              _gissue(5, "priority:P2")]
     run = _promo_world(issues)
     gh = _promo_src(run, mode="always")
-    gh.mark_in_progress("9")
+    _synced(gh).mark_in_progress("9")
     edits = [" ".join(c) for c in run.calls if c[:2] == ["issue", "edit"]]
     assert any("issue edit 5" in e and "--add-label priority:P0" in e for e in edits)
 
@@ -2301,7 +2309,7 @@ def test_transitive_chain_propagates_through_the_promoted_not_original_rank():
              _gissue(10, "priority:P4")]
     run = _promo_world(issues)
     gh = _promo_src(run, mode="always")
-    gh.mark_in_progress("30")
+    _synced(gh).mark_in_progress("30")
     edits = [" ".join(c) for c in run.calls if c[:2] == ["issue", "edit"]]
     assert any("issue edit 20" in e and "--add-label priority:P0" in e for e in edits)
     assert any("issue edit 10" in e and "--add-label priority:P0" in e for e in edits)
@@ -2313,7 +2321,7 @@ def test_a_blocking_cycle_does_not_hang_and_warns(capsys):
              _gissue(9, "priority:P3", body="Blocked by: #5")]
     run = _promo_world(issues)
     gh = _promo_src(run, mode="always")
-    gh.mark_in_progress("5")           # must return promptly, not hang or raise
+    _synced(gh).mark_in_progress("5")           # must return promptly, not hang or raise
     err = capsys.readouterr().err
     assert "cycle" in err.lower()
 
@@ -2345,7 +2353,7 @@ def test_promotion_also_writes_the_board_priority_field_when_present():
     run = _promo_world(issues, cards=[_ready(5, "P2"), _ready(9, "P0")],
                        fields=[STATUS_FILLED_READY, SDLC_PRIORITY_FIELD])
     gh = _promo_src(run, mode="smart")
-    gh.mark_in_progress("9")
+    _synced(gh).mark_in_progress("9")
     prio_edits = [{"item": _arg(c, "--id"), "option": _arg(c, "--single-select-option-id")}
                   for c in run.calls if c[:2] == ["project", "item-edit"]
                   and _arg(c, "--field-id") == "F_sdlc_priority"]
@@ -2362,7 +2370,7 @@ def test_promotion_skips_the_field_write_on_a_blocker_stranded_at_done(capsys):
     run = _promo_world(issues, cards=[_pcard(5, status="Done"), _ready(9, "P0")],
                        fields=[STATUS_FILLED_READY, SDLC_PRIORITY_FIELD])
     gh = _promo_src(run, mode="smart")
-    gh.mark_in_progress("9")
+    _synced(gh).mark_in_progress("9")
     prio_edits = [{"item": _arg(c, "--id"), "option": _arg(c, "--single-select-option-id")}
                   for c in run.calls if c[:2] == ["project", "item-edit"]
                   and _arg(c, "--field-id") == "F_sdlc_priority"]
@@ -2386,7 +2394,7 @@ def test_ledger_handoff_channel_promotes_a_blocker_with_no_body_marker_at_all():
         issues = [_gissue(9, "priority:P0"), _gissue(5, "priority:P2")]
         run = _promo_world(issues)
         gh = _promo_src(run, mode="smart", sdlc_dir=str(base))
-        gh.mark_in_progress("9")
+        _synced(gh).mark_in_progress("9")
         edits = [" ".join(c) for c in run.calls if c[:2] == ["issue", "edit"]]
         assert any("issue edit 5" in e and "--add-label priority:P0" in e for e in edits)
 
@@ -2397,7 +2405,7 @@ def test_without_sdlc_dir_the_ledger_channel_is_silently_unavailable_but_markers
     issues = [_gissue(9, "priority:P0", body="Blocked by: #5"), _gissue(5, "priority:P2")]
     run = _promo_world(issues)
     gh = _promo_src(run, mode="smart", sdlc_dir=None)
-    gh.mark_in_progress("9")             # must not raise despite no sdlc_dir
+    _synced(gh).mark_in_progress("9")             # must not raise despite no sdlc_dir
     edits = [" ".join(c) for c in run.calls if c[:2] == ["issue", "edit"]]
     assert any("issue edit 5" in e and "--add-label priority:P0" in e for e in edits)
 
@@ -2431,7 +2439,7 @@ def test_a_broken_ledger_read_degrades_to_the_explicit_marker_channel_alone(monk
     run = _promo_world(issues)
     gh = src_mod.GitHubSource(_promo_cfg(), run=run, sdlc_dir="/nonexistent/.sdlc")
     gh._RETRY_BASE = 0
-    gh.mark_in_progress("9")             # must not raise despite the ledger read blowing up
+    _synced(gh).mark_in_progress("9")             # must not raise despite the ledger read blowing up
     edits = [" ".join(c) for c in run.calls if c[:2] == ["issue", "edit"]]
     assert any("issue edit 5" in e and "--add-label priority:P0" in e for e in edits)
 
@@ -2448,7 +2456,7 @@ def test_a_broken_promotion_pass_does_not_break_the_rest_of_the_sync(monkeypatch
     run = _promo_world(issues)
     gh = src_mod.GitHubSource(_promo_cfg(), run=run)
     gh._RETRY_BASE = 0
-    gh.mark_in_progress("9")             # must not raise
+    _synced(gh).mark_in_progress("9")             # must not raise
     # #5's own board status was still seeded by _sync_backlog's per-issue loop, unaffected
     assert any(e["item"] == "PVTI_5" and e["option"] == "s_ready" for e in _edits(run))
 
@@ -2469,7 +2477,7 @@ def test_one_blockers_write_failure_does_not_stop_another_blockers_promotion():
     flaky.state = base.state
 
     gh = _promo_src(flaky, mode="always")
-    gh.mark_in_progress("9")             # must not raise despite #5's edit blowing up
+    _synced(gh).mark_in_progress("9")             # must not raise despite #5's edit blowing up
     edits = [" ".join(c) for c in base.calls if c[:2] == ["issue", "edit"]]
     assert any("issue edit 7" in e and "--add-label priority:P0" in e for e in edits)
 
@@ -2504,7 +2512,7 @@ def test_a_comment_failure_after_a_successful_label_write_is_loud_and_distinct(c
     flaky.state = base.state
 
     gh = _promo_src(flaky, mode="always")
-    gh.mark_in_progress("9")             # must not raise despite #5's comment blowing up
+    _synced(gh).mark_in_progress("9")             # must not raise despite #5's comment blowing up
 
     # The label write still landed -- that part is expected and can't be prevented.
     edits = [" ".join(c) for c in base.calls if c[:2] == ["issue", "edit"]]
@@ -2554,7 +2562,7 @@ def test_promotion_ignores_a_same_tier_issue_whose_card_is_not_actually_in_the_r
     run = _promo_world(issues, cards=[_pcard(921, status="Ready"), _pcard(922, status="Ready"),
                                       _pcard(923, status="In Progress")])
     gh = _promo_src(run, mode="smart")
-    gh.mark_in_progress("921")
+    _synced(gh).mark_in_progress("921")
     edits = [" ".join(c) for c in run.calls if c[:2] == ["issue", "edit"]]
     assert any("issue edit 922" in e and "--add-label priority:P0" in e for e in edits)
     comments = [c for c in run.calls if c[:2] == ["issue", "comment"] and c[2] == "922"]
@@ -2602,7 +2610,7 @@ def test_a_three_node_blocking_cycle_names_every_member_not_just_the_reentry_poi
              _gissue(7, "priority:P4", body="Blocked by: #5")]
     run = _promo_world(issues)
     gh = _promo_src(run, mode="always")
-    gh.mark_in_progress("5")           # must return promptly, not hang or raise
+    _synced(gh).mark_in_progress("5")           # must return promptly, not hang or raise
     err = capsys.readouterr().err
     for n in ("5", "7", "9"):
         assert ("#%s" % n) in err, err
@@ -2625,7 +2633,7 @@ def test_smart_mode_eligibility_uses_a_dependents_promoted_rank_not_its_raw_one(
              _gissue(7, "priority:P3")]                      # sibling at B's RAW tier only
     run = _promo_world(issues, cards=[_pcard(7, status="Ready")])
     gh = _promo_src(run, mode="smart")
-    gh.mark_in_progress("9")
+    _synced(gh).mark_in_progress("9")
     edits = [" ".join(c) for c in run.calls if c[:2] == ["issue", "edit"]]
     assert any("issue edit 5" in e and "--add-label priority:P0" in e for e in edits), \
         "B should still promote to P0 (blocks A directly, nothing else competes at P0)"
