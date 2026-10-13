@@ -64,3 +64,50 @@ def test_the_older_pass_does_not_rewrite_a_unit_onto_another_unit_branch(tmp_pat
     assert report["outcome"] == m.NO_BASE, report
     assert "unit branch" in report["why"] and "default branch" in report["why"], report
     assert world.tip(R.FEATURE) == before
+
+
+# ---- #1327: the refusal is visible, and qualified spellings of a unit base are refused too
+
+QUALIFIED = ("origin/feature/other", "refs/heads/feature/other", "refs/remotes/origin/feature/other")
+
+
+def test_a_remote_qualified_or_full_ref_unit_base_is_refused_and_default_branch_names_are_not():
+    rebase = R._mod()
+    for base in (UNIT_BASE,) + QUALIFIED:
+        assert rebase.is_unit_base(base), base
+    for base in ("main", "origin/main", "refs/heads/main", "refs/remotes/origin/main", "my-feature/x", "featured", "release/feature-x", ""):
+        assert not rebase.is_unit_base(base), base
+
+
+def test_the_scheduler_and_the_engine_refuse_every_qualified_spelling():
+    sched = T.sched()
+    for base in QUALIFIED:
+        assert sched.refs_of(_config(base), "voice") == (None, None), base
+
+
+def test_the_scheduler_drift_note_says_unit_base_and_differs_from_no_base():
+    m = T.sched()
+    measure = lambda base: m.make_measure(_config(base), m.feature_upkeep.read(_config(base)).settings, "s", "r", 1_000_000)
+    unit = measure(UNIT_BASE)("voice", None)
+    empty = measure("")("voice", None)
+    assert unit.notes == ("base is a unit branch",) and empty.notes == ("no-base",)
+
+
+def test_the_job_record_carries_the_refusal_reason_next_to_the_outcome(tmp_path):
+    j, sdlc = T.job(), T.project(tmp_path)
+    line = {"outcome": "no-base", "unit_tip": None, "unit_pass": "skipped", "reason": "base is a unit branch; upkeep needs the default branch"}
+    cmd = [T.sys.executable, "-c", "import json;print(json.dumps(%r))" % line]
+    j.run_job(T.open_config(), sdlc, str(tmp_path / "proj"), "voice", "r1", 30, environ=T.ENV, command=cmd)
+    record = json.loads(open(str(sdlc) + "/state/upkeep/job.json").read())
+    assert record["outcome"] == "no-base" and "base is a unit branch" in record["reason"]
+    plain = T.project(tmp_path / "b")
+    j.run_job(T.open_config(), plain, str(tmp_path / "proj"), "voice", "r1", 30, environ=T.ENV, command=T.ok_command())
+    assert "reason" not in json.loads(open(str(plain) + "/state/upkeep/job.json").read())
+
+
+def test_the_engine_refuses_a_qualified_unit_base_without_calling_either_pass(tmp_path, capsys):
+    for base in QUALIFIED:
+        line = T.job().run_engine(_config(base), T.project(tmp_path), str(tmp_path), "voice", environ=T.ENV,
+                                  upkeep=lambda *a, **k: 1 / 0, unit_pass=lambda *a, **k: 1 / 0)
+        assert line["outcome"] == "no-base" and "base is a unit branch" in line["reason"], base
+    capsys.readouterr()

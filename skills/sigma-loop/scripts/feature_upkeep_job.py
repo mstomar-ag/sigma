@@ -85,6 +85,16 @@ def _record(sdlc_dir, doc):
     return sched.write_json(sdlc_dir, sched.RECORD_REL, doc)
 
 
+def _reason_of(result, bounded):
+    """#1327: the child's `reason` text, kept next to the outcome in the job record; None when it said none. Never raises."""
+    try:
+        doc = json.loads((result.out or "").strip().splitlines()[-1]) if result.outcome == bounded.OK else None
+    except (ValueError, IndexError):
+        return None
+    reason = doc.get("reason") if isinstance(doc, dict) else None
+    return reason[:200] if isinstance(reason, str) and reason else None
+
+
 def _outcome_of(result, bounded):
     """-> (outcome word, unit_tip or None) from the child's Result. Words in the state vocabulary pass through; anything else
     the engine did not say is `failed`; a stop or timeout keeps its own word for the note."""
@@ -125,7 +135,7 @@ def run_job(config, sdlc_dir, root, unit, run_id, cap, *, environ=None, command=
         _record(sdlc_dir, dict(head, state="running", started_at=int(time.time())))
         beat_path = sched.path_of(sdlc_dir, sched.BEAT_REL)
         _touch(beat_path)
-        outcome, tip = "failed", None                     # what a crash inside this block leaves behind
+        outcome, tip, reason = "failed", None, None       # what a crash inside this block leaves behind
         try:
             argv = command or [sys.executable, "-I", str(pathlib.Path(__file__).resolve()), "--engine", "--sdlc", str(sdlc_dir),
                                "--root", str(root), "--unit", unit,
@@ -136,8 +146,10 @@ def run_job(config, sdlc_dir, root, unit, run_id, cap, *, environ=None, command=
                                        stop_path=stop, merge=False,
                                        clock=beat or BeatingClock(lambda: _touch(beat_path), base=clock))
             outcome, tip = _outcome_of(result, bounded)
+            reason = _reason_of(result, bounded)
         finally:
-            _record(sdlc_dir, dict(head, state="done", outcome=outcome, unit_tip=tip, finished_at=int(time.time())))
+            _record(sdlc_dir, dict(head, state="done", outcome=outcome, unit_tip=tip, finished_at=int(time.time()),
+                                   **({"reason": reason} if reason else {})))
             if outcome in state.OUTCOMES:
                 state.record_outcome(sdlc_dir, unit, int(time.time()), outcome, tip if tip and len(tip) in (40, 64) else None)
             elif outcome == "timeout":
@@ -171,7 +183,7 @@ def run_engine(config, sdlc_dir, root, unit, *, environ=None, upkeep=None, unit_
     """The pass itself, inside the child: the engine's own entry point, called in-process, handed NO goal. Prints one JSON
     line (`outcome`, `unit_tip`) as its last line of output. -> the report."""
     rebase = _sibling("feature_rebase")
-    if rebase.is_unit_base(rebase._safe_ref("work.base", rebase._settings(config).get("base")) or ""):
+    if rebase.is_unit_base(rebase._safe_ref("work.base", rebase._settings(config).get("base")) or "", rebase._remote(config)):
         line = {"outcome": rebase.NO_BASE, "unit_tip": None, "unit_pass": "skipped", "reason": rebase.UNIT_BASE_WHY}   # #1311
         print(json.dumps(line, sort_keys=True), flush=True)
         return line
