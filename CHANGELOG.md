@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A classifier timeout in `decision_import.py` is no longer stored as unknown (#1310).** A row the model classifier gave no answer for is skipped, so a re-run retries it, and `apply` reports the count (`timed_out`); the per-call limit is `rulebook.import.timeout_s` (default 60, longer allowed), and a timeout now kills the whole process group, not only the direct child. The closed gate is unchanged.
 - **`decision_import.py` now reads issue comments from the command line (#1308).** With `rulebook.import.comments` on, scan, plan and apply list the goal-labelled issues and pass them to the scan; with it off nothing is fetched.
 - **The autonomy readout and the question-list learning line use the category thresholds in force (#1317).** When `.sdlc/categories.json` has a category covering a pair, "level N needs X answers" and "of X answers" now show that category's numbers instead of the global ones; with no categories file every line is unchanged.
 - **The unpark skill names the rule approve step (#1326).** One sentence now says `rule_draft.py draft` then `rule_draft.py approve <state-folder> <rule id>`, so an agent can find the approval verb.
