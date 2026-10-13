@@ -1863,6 +1863,7 @@ _REGISTRY_ADJACENT_WRITERS = {
                "`state/backup/` (and its own owner/notice markers)",
     "feature_propagate": "writes a SIBLING repository's record through the host API, destination "
                          "wins every field, and refuses a sibling record in the previous schema",
+    "decision_store": "reads the unit records only to refuse a publish on a registered unit branch; its writes are a local commit limited to the records, autonomy and rulebook paths, never a unit or index record",
     "work": "names `.sdlc/features/units/` only to allow-list it in the secret-file check",
     # #514: `recover --discard` renames Sigma's OWN recovery copy under `state/backup/`; every write
     # of the sheet itself goes through `write_index` (classified above).

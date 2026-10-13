@@ -17,6 +17,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -415,9 +416,9 @@ def main(argv):
         print(json.dumps(publish(argv[2], config)))
         return 0
     help_asked = len(argv) > 1 and argv[1] in ("-h", "--help")
-    print("usage: decision_store.py publish <sdlc-dir>", file=None if help_asked else __import__("sys").stderr)
+    print("usage: decision_store.py publish <sdlc-dir>", file=sys.stdout if help_asked else sys.stderr)
     return 0 if help_asked else 2
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(__import__("sys").argv))
+    raise SystemExit(main(sys.argv))
