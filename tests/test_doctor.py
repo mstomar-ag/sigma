@@ -3073,7 +3073,7 @@ def test_check_never_flags_queue_source_label_as_a_pass_fail_gap(tmp_path):
 def _hyg(d, project_md=None, north_star=None):
     base = pathlib.Path(d) / ".sdlc"
     (base / "context").mkdir(parents=True)
-    (base / "config.json").write_text("{}")
+    (base / "config.json").write_text('{"gates": {"phase_record": {"enabled": true}}}')  # #1343: keep the row green
     if project_md is not None:
         (base / "project.md").write_text(project_md)
     if north_star is not None:
