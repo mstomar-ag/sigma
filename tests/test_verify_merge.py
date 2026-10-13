@@ -892,7 +892,6 @@ def test_record_merge_delivery_write_error_never_fails_a_successful_landing(tmp_
     m.record_merge(str(d), config, "feature/x", 55, "why", run=run, cwd=str(tmp_path))
 
 
-<<<<<<< HEAD
 # --------------------------------------------------------------------------- the base's upkeep gate (#1341)
 
 
@@ -958,7 +957,6 @@ def test_gate_open_in_tree_does_not_read_the_base(monkeypatch, capsys):
     got = m._engine_route({"upkeep": {"enabled": True}}, "/nonexistent", _UNIT, lambda: True,
                           run=run, cwd="/x")
     assert got == 0 and run.calls == [] and capsys.readouterr().err == ""
-=======
 def test_engine_route_refuses_a_pair_unit_before_any_pass_or_pr(tmp_path, capsys):
     """#1339, through the documented gesture's engine route: exit 1, the refusal printed, no pass, no PR."""
     from test_feature_land_front import World, CONFIG, load as load_front
@@ -977,4 +975,3 @@ def test_engine_route_refuses_a_pair_unit_before_any_pass_or_pr(tmp_path, capsys
     assert m._engine_route(CONFIG, str(w.sdlc), "feature/voice", lambda: True) == 1
     assert "refused:sibling" in capsys.readouterr().out
     assert w.passes == [] and w.posts() == []
->>>>>>> fork/feature/rubric-wiring
