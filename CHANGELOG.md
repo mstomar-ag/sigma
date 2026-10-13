@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **The applier carries out the rule's option (#1301).** A rule whose option reads as leaving the issue parked now leaves labels and the board card alone and still writes the record and the comment; other options unpark as before.
 - **A person's no after an applied ask reaches the veto through the real verbs (#1189).** Keep-parked and demote on an issue whose ask was applied inside its window record the veto; a failure never blocks the gesture.
 
 
