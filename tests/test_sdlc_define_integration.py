@@ -243,7 +243,7 @@ def test_the_blocked_by_edges_still_parse_after_stamping(tmp_path):
 
 
 def test_a_plan_whose_issues_are_filed_is_queued_and_never_started(tmp_path):
-    """Since the decision rubric (slice 17) `compile_plan` arms a plan issue at its own plan priority unless the
+    """Since the rulebook (slice 17) `compile_plan` arms a plan issue at its own plan priority unless the
     deny-list parks it -- locally, `status: pending`, never the retired `proposed` state. Step 9 of this skill
     ("start now, or leave it on the board") is still a QUESTION: arming queues the goal, it does not start it, so
     opening a unit must not start work by itself."""

@@ -125,7 +125,7 @@ def _github_counts(gh_cfg, run, config=None):
     pending = open `sdlc:goal` minus those active-in-progress. done/failed don't map to a single
     open-issue label in github mode, so they stay 0.
 
-    LEGACY-ONLY (decision-rubric slice 18): the confirmation label is no longer written -- a filed
+    LEGACY-ONLY (rulebook slice 18): the confirmation label is no longer written -- a filed
     follow-up is already a goal -- so `proposed` counts LEFTOVERS from old boards only, and is 0 on
     a clean repo. The label name is read as a legacy alias (`handoff.proposed_label(config)`).
 

@@ -344,7 +344,7 @@ def test_sdlc_implement_still_cites_the_north_star_inline_rather_than_reading_it
         "_GROUNDING, and this pin is the wrong guard for it")
 
 
-# --- #993 (decision rubric slice 3): per-document resolution -----------------------------------
+# --- #993 (rulebook slice 3): per-document resolution -----------------------------------
 
 def test_resolve_doc_types_each_state_and_refuses_escape(tmp_path):
     (tmp_path / "docs").mkdir()

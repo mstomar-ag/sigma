@@ -1,4 +1,4 @@
-"""Slice 14 of the decision rubric: the pure file triage core."""
+"""Slice 14 of the rulebook: the pure file triage core."""
 import ast
 import importlib.util
 import json

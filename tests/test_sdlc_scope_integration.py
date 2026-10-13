@@ -176,7 +176,7 @@ def test_single_issue_plan_grounded_in_a_resolved_target_becomes_a_real_local_go
         assert len(files) == 1
         text = _read(files[0])
         assert "Config editor UI" in text
-        assert "status: pending" in text                   # armed at filing (rubric slice 17): queued, never the retired proposed state
+        assert "status: pending" in text                   # armed at filing (rulebook slice 17): queued, never the retired proposed state
         assert "Labels: priority:P2" in text and "needs-confirmation" not in text
 
 
@@ -271,7 +271,7 @@ def test_compiled_report_flows_into_start_now_self_computes_the_real_wave_schedu
 
         schema_num, ui_num = int(report["issues"]["schema"]), int(report["issues"]["ui"])
         assert result["workflow"]["waves"] == [[schema_num], [ui_num]]
-        assert result["promoted"] == [schema_num, ui_num]    # the issues were armed at filing (rubric slice 17); promote reports them
+        assert result["promoted"] == [schema_num, ui_num]    # the issues were armed at filing (rulebook slice 17); promote reports them
         assert any("github discovery mode" in w for w in result["warnings"])
         assert result["plan_file"] and pathlib.Path(result["plan_file"]).exists()
         plan_md = _read(result["plan_file"])

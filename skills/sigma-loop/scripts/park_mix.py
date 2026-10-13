@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Park-mix reader and confirmation-label census (#991, decision-rubric slice 1). READ-ONLY.
+"""Park-mix reader and confirmation-label census (#991, rulebook slice 1). READ-ONLY.
 
 It measures; it gates nothing. Three readers, all pure over their inputs:
 

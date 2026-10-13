@@ -1,4 +1,4 @@
-"""Slice 6 of the decision rubric: the pure hard-stop classifier (`hard_stop.py`), unwired."""
+"""Slice 6 of the rulebook: the pure hard-stop classifier (`hard_stop.py`), unwired."""
 import ast
 import importlib.util
 import pathlib

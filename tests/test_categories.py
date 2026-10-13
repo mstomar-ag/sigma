@@ -23,7 +23,7 @@ DOC = _mod(ROOT / "skills" / "sigma-doctor" / "scripts" / "doctor.py")
 def _cfg():
     lv = {"l1_min_answers": 2, "l2_min_answers": 4, "l2_agreement": 0.75, "l3_min_answers": 8,
           "l3_agreement": 0.9, "l4_min_answers": 16, "l4_agreement": 0.99}
-    return {"decision_rubric": {"records": {"enabled": True}, "autonomy": {"enabled": True, "levels": lv}}}
+    return {"rulebook": {"records": {"enabled": True}, "autonomy": {"enabled": True, "levels": lv}}}
 
 
 def _write(sd, cats, schema="sigma/categories@1"):
@@ -91,7 +91,7 @@ def test_readout_and_doctor_show_category(tmp_path):
 def test_closed_gate_is_unchanged_even_with_a_file(tmp_path):
     cfg = _cfg()
     _write(tmp_path, [{"id": "slow", "areas": ["docs"]}])
-    cfg["decision_rubric"]["autonomy"]["enabled"] = False
+    cfg["rulebook"]["autonomy"]["enabled"] = False
     assert A.readout(tmp_path, cfg) == {"enabled": False}
     assert DOC._autonomy_state(cfg, tmp_path) == "off (default)"
 

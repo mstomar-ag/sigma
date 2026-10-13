@@ -23,7 +23,7 @@ D = _mod("doctor", DOCTOR)
 
 def _cfg(enabled=True):
     au = {"enabled": enabled, "levels": {"l1_min_answers": 10, "l2_min_answers": 30, "l2_agreement": 0.9}}
-    return {"decision_rubric": {"records": {"enabled": True}, "autonomy": au}}
+    return {"rulebook": {"records": {"enabled": True}, "autonomy": au}}
 
 
 def _answer(sd, cfg, n, qkind="needs_decision", area="repo"):

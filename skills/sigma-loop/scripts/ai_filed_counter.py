@@ -1,4 +1,4 @@
-"""Bounded counter and depth stamp for AI-filed issues (decision rubric, slice 15, #1003). Library only.
+"""Bounded counter and depth stamp for AI-filed issues (rulebook, slice 15, #1003). Library only.
 
 `create_tracked_issue` asks `over_cap` before it files, and `bump`s after it has. The file lives under the
 state directory (`ai_filed.counter_path`), holds `{"entries": [{"run", "goal", "t"}]}`, and is bounded two

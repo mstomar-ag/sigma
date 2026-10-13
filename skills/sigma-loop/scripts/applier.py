@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Levels 3 and 4: the act-and-tell applier tick (decision rubric, slice 19 of story 988).
+"""Levels 3 and 4: the act-and-tell applier tick (rulebook, slice 19 of story 988).
 
 One more watch tick. A parked question that nobody answered inside its window is answered by the
 approved rule that already pre-fills it, and the rule id is told on the issue. Everything here is
-OFF unless `decision_rubric.autonomy.applier.enabled` is the JSON boolean true AND the autonomy and
+OFF unless `rulebook.autonomy.applier.enabled` is the JSON boolean true AND the autonomy and
 rulebook parts are open; closed, `tick` returns `[]` and writes nothing, and the watch step spawns
 nothing.
 
@@ -63,7 +63,7 @@ def _load(name):
 
 def _sub(config):
     try:
-        sub = config["decision_rubric"]["autonomy"]["applier"]
+        sub = config["rulebook"]["autonomy"]["applier"]
         return sub if isinstance(sub, dict) else {}
     except Exception:
         return {}

@@ -1,6 +1,6 @@
-"""Chokepoint wiring of the hard-stop classifier (decision rubric slice 10). Library only; no CLI.
+"""Chokepoint wiring of the hard-stop classifier (rulebook slice 10). Library only; no CLI.
 
-Every function is a no-op while `decision_rubric.hard_stops.enabled` is not the JSON boolean true: it returns an
+Every function is a no-op while `rulebook.hard_stops.enabled` is not the JSON boolean true: it returns an
 allowing Verdict before reading anything, so a chokepoint that calls it makes exactly the calls it made before.
 
   guard(action_text, context, config) -> Verdict   classify one concrete action at a Sigma-owned chokepoint
@@ -52,7 +52,7 @@ def _hs():
 
 def enabled(config):
     try:
-        block = config.get("decision_rubric") if isinstance(config, dict) else None
+        block = config.get("rulebook") if isinstance(config, dict) else None
         hs = block.get("hard_stops") if isinstance(block, dict) else None
         return isinstance(hs, dict) and hs.get("enabled") is True
     except Exception:
@@ -65,7 +65,7 @@ def is_own(branch, registry, config):
 
 def _effective(config, only=None):
     """The config the classifier sees: the legacy alias folded in, and `only` restricting the classes."""
-    block = dict(config["decision_rubric"])
+    block = dict(config["rulebook"])
     hs = dict(block["hard_stops"])
     classes = dict(hs["classes"]) if isinstance(hs.get("classes"), dict) else {}
     gates = config.get("gates") if isinstance(config, dict) else None
@@ -82,7 +82,7 @@ def _effective(config, only=None):
                 classes[name] = True
     hs["classes"] = classes
     block["hard_stops"] = hs
-    return {"decision_rubric": block}
+    return {"rulebook": block}
 
 
 def _reason(res):

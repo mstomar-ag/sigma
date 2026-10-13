@@ -639,12 +639,12 @@ def scheduler_step(p, sdlc_dir, call_timeout):
 
 
 def applier_step(p, sdlc_dir, call_timeout, config=None):
-    """Decision rubric slice 19: the act-and-tell applier, one more timed call AFTER the eight and the scheduler step, in its own
+    """Rulebook slice 19: the act-and-tell applier, one more timed call AFTER the eight and the scheduler step, in its own
     guard. The gate is read here from the config and nothing is spawned or logged unless it is the JSON boolean true; the call
     goes through `run_call`, so through `run_with_timeout.py` like every other tick call. -> the summary line or ""."""
     try:
         config = read_config(sdlc_dir) if config is None else config
-        gate = config["decision_rubric"]["autonomy"]["applier"]["enabled"]
+        gate = config["rulebook"]["autonomy"]["applier"]["enabled"]
         if gate is not True:
             return ""
     except Exception:                                # noqa: BLE001 - any shape but the open one is closed

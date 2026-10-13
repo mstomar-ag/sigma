@@ -27,8 +27,8 @@ def _cfg(rulebook=True, autonomy=True, draft=None):
     rb = {"enabled": rulebook}
     if draft is not None:
         rb["draft"] = draft
-    return {"decision_rubric": {
-        "records": {"enabled": True}, "rulebook": rb,
+    return {"rulebook": {
+        "records": {"enabled": True}, "rules": rb,
         "autonomy": {"enabled": autonomy, "owners": ["boss"],
                      "levels": {"l1_min_answers": 2, "l2_min_answers": 4, "l2_agreement": 0.75}}}}
 
@@ -150,7 +150,7 @@ def test_cli_list_and_draft(tmp_path):
 
 
 def _public(cfg):
-    cfg["decision_rubric"]["records"]["repo_visibility"] = "public"
+    cfg["rulebook"]["records"]["repo_visibility"] = "public"
     return cfg
 
 

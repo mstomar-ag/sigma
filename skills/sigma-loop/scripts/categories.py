@@ -3,7 +3,7 @@
 
 The optional file `.sdlc/categories.json` (schema `sigma/categories@1`) groups repository areas into
 categories. A category may carry a `levels` block with the same keys as
-`decision_rubric.autonomy.levels`; precedence is the global levels first, then the first matching
+`rulebook.autonomy.levels`; precedence is the global levels first, then the first matching
 category, key by key. Fail-safe: nothing here raises. A wrong schema reads as no categories; an
 invalid entry (missing or duplicate id, unknown threshold key, wrong-typed value) is dropped alone.
 

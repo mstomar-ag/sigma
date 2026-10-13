@@ -1,4 +1,4 @@
-"""Hard-stop classifier core (decision rubric, slice 6, #995). Pure library, UNWIRED: nothing imports it yet.
+"""Hard-stop classifier core (rulebook, slice 6, #995). Pure library, UNWIRED: nothing imports it yet.
 
 `classify(action_text, context, config)` maps one concrete action text to a Result(cls, pattern_id, quote):
 `cls` is a hard-stop class, None (nothing matched, or the gate is closed, or the action is Sigma's own),
@@ -10,7 +10,7 @@ never lower it (order: None < "cannot-tell" < any class).
 Classes: six default-on (`spend`, `destroy`, `rewrite_history`, `production_change`, `send_outside`,
 `access_secrets`) and two default-off (`tamper_oversight`, `unvetted_execution`), each a config toggle
 `hard_stops.classes.<name>`. The gate is `hard_stops.enabled`, exact JSON true; anything else classifies
-nothing. `config` may be the `decision_rubric` block itself or a dict holding it under that key (PROVISIONAL
+nothing. `config` may be the `rulebook` block itself or a dict holding it under that key (PROVISIONAL
 until the wiring slice fixes the shape). Patterns are shape-based and deliberately conservative.
 
 EXTENSION POINT: `register_class(name, detector, spend_like=False)` adds a class. `detector(action_text,
@@ -162,7 +162,7 @@ def raise_to(prior, declared):
 def _block(config):
     if not isinstance(config, dict):
         return {}
-    inner = config.get("decision_rubric")
+    inner = config.get("rulebook")
     cfg = inner if isinstance(inner, dict) else config
     hs = cfg.get("hard_stops")
     return hs if isinstance(hs, dict) else {}

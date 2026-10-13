@@ -1,4 +1,4 @@
-"""Slice 13 of the decision rubric: the rulebook file and the propose-approve flow."""
+"""Slice 13 of the rulebook: the rulebook file and the propose-approve flow."""
 import ast
 import datetime
 import importlib.util
@@ -29,7 +29,7 @@ QK = _mod("qkind")
 def _cfg(enabled=True, **extra):
     rb = {"enabled": enabled}
     rb.update(extra)
-    return {"decision_rubric": {"rulebook": rb, "autonomy": {"owners": ["boss"]}}}
+    return {"rulebook": {"rules": rb, "autonomy": {"owners": ["boss"]}}}
 
 
 def _draft(**kw):
@@ -138,7 +138,7 @@ def test_unknown_rule_cannot_be_approved(tmp_path):
 
 def test_closed_gate_does_nothing(tmp_path):
     sd = _sdlc(tmp_path)
-    for cfg in (_cfg(enabled=False), {}, _cfg(enabled="true"), {"decision_rubric": []}):
+    for cfg in (_cfg(enabled=False), {}, _cfg(enabled="true"), {"rulebook": []}):
         assert R.propose(sd, _draft(), cfg, now=NOW) is None
         assert R.import_rules(sd, [_draft()], cfg, now=NOW) == []
         assert R.load(sd, cfg) == []
@@ -222,7 +222,7 @@ def test_match_honours_configured_hardstop_kind(tmp_path):
     R.approve(sd, rid, "boss", cfg, now=NOW)
     rules = R.load(sd, cfg)
     assert R.match("needs_decision", "docs", None, rules, cfg) is not None
-    cfg["decision_rubric"]["hard_stops"] = {"hardstop_kinds": ["needs_decision"]}
+    cfg["rulebook"]["hard_stops"] = {"hardstop_kinds": ["needs_decision"]}
     assert R.match("needs_decision", "docs", None, rules, cfg) is None
     assert R.prefill(sd, "needs_decision", "docs", None, cfg) is None
 

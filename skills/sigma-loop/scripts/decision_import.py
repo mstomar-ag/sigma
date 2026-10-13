@@ -3,7 +3,7 @@
 
 Sources: Claude Code transcript files (an AskUserQuestion call paired with its answer; no other tool
 result is read), and issue-comment spans (`sigma:unpark-qa` answers and decision-record lines) when
-`decision_rubric.import.comments` is true. No model is called unless `decision_rubric.import.classifier` is \"model\". Usage: decision_import.py scan SDLC_DIR [--profile DIR ...] [--project-dir DIR ...]
+`rulebook.import.comments` is true. No model is called unless `rulebook.import.classifier` is \"model\". Usage: decision_import.py scan SDLC_DIR [--profile DIR ...] [--project-dir DIR ...]
 """
 import argparse
 import hashlib
@@ -200,7 +200,7 @@ def _mark_superseded(cands):
 def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, project_dirs=None,
          clock=time.monotonic):
     """-> {"candidates", "stats", "refusals"}. Never raises on bad input; reads only."""
-    cfgmod = _load("decision_rubric_cfg")
+    cfgmod = _load("rulebook_cfg")
     limits = cfgmod.import_limits(config)
     stats = {s: {"files_read": 0, "candidates": 0, "skipped": 0, "superseded": 0,
                                  "bytes_read": 0, "partial": 0} for s in SOURCES}
@@ -278,9 +278,9 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
         except Exception:
             stats["unpark-qa"]["skipped"] += 1
     if timed_out:
-        refusals.append("time budget reached: remaining transcript files were not read, raise decision_rubric.import.time_budget_s")
+        refusals.append("time budget reached: remaining transcript files were not read, raise rulebook.import.time_budget_s")
     if full:
-        refusals.append("candidate cap of %d reached: scan stopped, raise decision_rubric.import.max_candidates" % cap)
+        refusals.append("candidate cap of %d reached: scan stopped, raise rulebook.import.max_candidates" % cap)
     _mark_superseded(cands)
     for c in cands:
         stats[c["source"]]["candidates"] += 1
@@ -385,7 +385,7 @@ def _cache_save(sdlc_dir, classes):
 
 
 def model_mode(config):
-    return _load("decision_rubric_cfg").import_limits(config)["classifier"] == "model" \
+    return _load("rulebook_cfg").import_limits(config)["classifier"] == "model" \
         and _load("decision_store").enabled(config)
 
 
@@ -393,7 +393,7 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
     """-> (rows, info). Rows like `classify`. `call is None` sends nothing (plan): uncached rows are
     unknown and counted as would_send. An invalid answer is unknown and cached; an error or timeout is unknown, uncached and
     unstored (retried next run); the table is never consulted. Past the run ceiling or the candidate cap the rest stay unknown and uncached."""
-    lim = _load("decision_rubric_cfg").import_limits(config)
+    lim = _load("rulebook_cfg").import_limits(config)
     qkinds = _load("qkind").QKINDS
     areas = _areas(sdlc_dir)
     cache = _cache_read(sdlc_dir)
@@ -584,7 +584,7 @@ def main(argv=None):
     if args.verb == "plan":
         pl = plan(args.sdlc_dir, config, out["candidates"])
         if not pl["gate"]:
-            print("records part is closed (decision_rubric.records.enabled): apply would write nothing")
+            print("records part is closed (rulebook.records.enabled): apply would write nothing")
         for r in pl["pairs"]:
             print("%s / %s: write %d, unknown %d, evidence alone reaches level %d" % (
                 r["qkind"], r["area"], r["write"], r["unknown"], r["level"]))
@@ -597,7 +597,7 @@ def main(argv=None):
     if args.verb == "apply":
         res = apply(args.sdlc_dir, config, out["candidates"])
         if not res["gate"]:
-            print("records part is closed (decision_rubric.records.enabled): nothing written")
+            print("records part is closed (rulebook.records.enabled): nothing written")
             return 1
         print("wrote %d records and %d comparisons%s" % (res["records"], res["watch"],
                                                           (" (%s)" % res["note"]) if res["note"] else ""))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Question-kind declaration for a park (decision rubric, slice 4 of story 988).
+"""Question-kind declaration for a park (rulebook, slice 4 of story 988).
 
 Today the kind of a parked goal is GUESSED from its free text (`loop._reason_class`). This module
 lets the parking agent DECLARE the kind instead: `loop.py record <dir> <goal> parked "<text>"

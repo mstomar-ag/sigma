@@ -1,8 +1,8 @@
-"""Record writers' shared core (decision rubric, slice 8 of story 988; library only; no main).
+"""Record writers' shared core (rulebook, slice 8 of story 988; library only; no main).
 
 A human gesture (unpark, keep-parked, promote, ack) or the automatic sweep writes ONE decision record
 to the repository's store (`decision_store`) and ONE attributed issue comment that carries the same
-id. Everything here is inert unless `decision_rubric.records.enabled` is the JSON boolean true; a
+id. Everything here is inert unless `rulebook.records.enabled` is the JSON boolean true; a
 caller whose gate is closed keeps its old code path and its old bytes.
 
 Attribution is by gesture and `how` (`human` or `autonomous`), never by person: no login is read or

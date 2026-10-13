@@ -614,9 +614,9 @@ def _say_resume(target, argv):
 
 
 def _records_open(cfg):
-    """True only when decision_rubric.records.enabled is the JSON boolean true (the optional import line)."""
+    """True only when rulebook.records.enabled is the JSON boolean true (the optional import line)."""
     node = cfg
-    for key in ("decision_rubric", "records", "enabled"):
+    for key in ("rulebook", "records", "enabled"):
         node = node.get(key) if isinstance(node, dict) else None
     return node is True
 

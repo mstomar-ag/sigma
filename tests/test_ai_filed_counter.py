@@ -1,4 +1,4 @@
-"""Decision rubric slice 15: the bounded counter of AI-filed issues."""
+"""Rulebook slice 15: the bounded counter of AI-filed issues."""
 import importlib.util
 import json
 import pathlib

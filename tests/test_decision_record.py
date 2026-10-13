@@ -1,4 +1,4 @@
-"""Decision rubric slice 8: record writers (decision_record + unpark, promote, ack, sweep)."""
+"""Rulebook slice 8: record writers (decision_record + unpark, promote, ack, sweep)."""
 import json, pathlib, importlib.util
 
 import test_unpark as tu
@@ -15,7 +15,7 @@ def _mod(name):
 
 def _on(cfg, **records):
     cfg = dict(cfg)
-    cfg["decision_rubric"] = {"records": {"enabled": True, **records}}
+    cfg["rulebook"] = {"records": {"enabled": True, **records}}
     return cfg
 
 

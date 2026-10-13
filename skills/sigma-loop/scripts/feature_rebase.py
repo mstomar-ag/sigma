@@ -173,7 +173,7 @@ def _load(name):
 
 
 features = _load("features")
-hsg = _load("hard_stop_guard")      # decision rubric slice 10: a no-op until hard_stops.enabled is true
+hsg = _load("hard_stop_guard")      # rulebook slice 10: a no-op until hard_stops.enabled is true
 _safe_ref = state_safe_ref = _load("state").safe_ref     # #710: ONE validator for config-supplied git names
 registry = _load("feature_registry")
 sync = _load("feature_sync")

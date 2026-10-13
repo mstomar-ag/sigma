@@ -15,13 +15,13 @@ def _mod(name):
     return m
 
 
-DI, DS, CFG = _mod("decision_import"), _mod("decision_store"), _mod("decision_rubric_cfg")
+DI, DS, CFG = _mod("decision_import"), _mod("decision_store"), _mod("rulebook_cfg")
 CACHE = "state/decision-import-classes.json"
 
 
 def _cfg(classifier="model", records=True, **extra):
     imp = dict(extra, classifier=classifier)
-    return {"decision_rubric": {"records": {"enabled": records, "repo_visibility": "private"},
+    return {"rulebook": {"records": {"enabled": records, "repo_visibility": "private"},
                                 "autonomy": {"enabled": False}, "import": imp}}
 
 
@@ -103,7 +103,7 @@ def test_no_answer_is_not_cached_or_stored_and_a_rerun_retries(tmp_path):
 
 def test_no_answer_still_counts_the_per_call_ceiling(tmp_path):
     rows, info = DI.classify_model(_sd(tmp_path), _cfg(), [_c(6)], Fake(exc=RuntimeError("x")))
-    assert info["sent"] == 1 and info["spent"] == DI._load("decision_rubric_cfg").import_limits(_cfg())["max_budget_usd_per_call"]
+    assert info["sent"] == 1 and info["spent"] == DI._load("rulebook_cfg").import_limits(_cfg())["max_budget_usd_per_call"]
 
 
 def test_second_apply_makes_no_call_and_cannot_relabel(tmp_path):

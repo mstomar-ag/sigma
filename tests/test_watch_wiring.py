@@ -26,8 +26,8 @@ def _cfg(autonomy=True, records=True, visibility=None, l1=3, l2=12, rulebook=Tru
     rec = {"enabled": records}
     if visibility:
         rec["repo_visibility"] = visibility
-    return {"decision_rubric": {
-        "records": rec, "rulebook": {"enabled": rulebook},
+    return {"rulebook": {
+        "records": rec, "rules": {"enabled": rulebook},
         "autonomy": {"enabled": autonomy, "owners": ["boss"],
                      "levels": {"l1_min_answers": l1, "l2_min_answers": l2, "l2_agreement": 0.9}}}}
 

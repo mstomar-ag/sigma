@@ -1,4 +1,4 @@
-"""#994 (decision rubric slice 4): the question-kind declaration on a park."""
+"""#994 (rulebook slice 4): the question-kind declaration on a park."""
 import importlib.util, json, pathlib, subprocess, sys, tempfile
 
 from test_loop import _loop, _telemetry_backlog, S

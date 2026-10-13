@@ -6464,7 +6464,7 @@ def _dispatch(argv):
         # _enforce_enabled (not a strict `is True`): F17/#342 — `enforce: 1` / `"true"` must not
         # silently skip this gate just because they aren't the literal bool `True`.
         if argv[4] == "done" and _load("hard_stop_guard").enabled(config):
-            # decision rubric slice 10: the downstream net. A logged action that matches a hard-stop class and has
+            # rulebook slice 10: the downstream net. A logged action that matches a hard-stop class and has
             # no recorded permission-use or park is refused. Closed (the default), this block is never entered.
             unrecorded = _load("hard_stop_guard").record_done_net(_load("actionlog").read_goal(argv[2], argv[3]), config)
             if unrecorded:

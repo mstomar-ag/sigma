@@ -754,8 +754,8 @@ def test_main_errors_on_missing_target():
     assert mod.main(["sdlc_init.py", "/no/such/dir/really"]) == 1
 
 
-def test_scaffolded_config_carries_the_decision_rubric_block_closed():
+def test_scaffolded_config_carries_the_rulebook_block_closed():
     with _git_tmpdir() as tmp:
         _generated(tmp, "--cursor")
         cfg = json.loads((pathlib.Path(tmp) / ".sdlc" / "config.json").read_text(encoding="utf-8"))
-    assert cfg["decision_rubric"]["records"]["enabled"] is False
+    assert cfg["rulebook"]["records"]["enabled"] is False

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""One offline end-to-end run of every part of the decision rubric on a throwaway repository.
+"""One offline end-to-end run of every part of the rulebook on a throwaway repository.
 
 USAGE
-    python3 tools/rubric_e2e.py run [REPO] [--switches on|off|baseline]
-    python3 tools/rubric_e2e.py --help
+    python3 tools/rulebook_e2e.py run [REPO] [--switches on|off|baseline]
+    python3 tools/rulebook_e2e.py --help
 
 WHAT IT DOES. Creates REPO (a path that does not exist yet or is an empty directory; with no REPO,
 a fresh directory under the system temp dir), runs `git init` there, then drives six parts with fake
@@ -13,11 +13,11 @@ level), judge (the drift judge with a fake model call), triage (the filing deny-
 and migration (the retired-queue verb against an in-memory source). Nothing touches the network,
 `gh` or a model, and nothing is ever deleted: the directory is left in place so you can look at it.
 
-SWITCHES. `on` opens every decision_rubric part; `off` writes every part as disabled; `baseline`
-supplies no decision_rubric block at all. The run prints one `DIGEST` line, a hash of every file the
+SWITCHES. `on` opens every rulebook part; `off` writes every part as disabled; `baseline`
+supplies no rulebook block at all. The run prints one `DIGEST` line, a hash of every file the
 run left in REPO plus every write the fake source saw (generated ids and times are masked). The
 claim under test: the `off` digest equals the `baseline` digest, so a closed gate changes nothing.
-Triage and migration are not rubric switches (triage is `ai_filed.triage.enabled`, on by default), so
+Triage and migration are not rulebook switches (triage is `ai_filed.triage.enabled`, on by default), so
 they run the same way in all three modes.
 
 EXIT. 0 when every step held, 1 when a step failed, 2 on a usage error or a refused directory.
@@ -35,8 +35,8 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "skills" / "sigma-loop" / "scripts"
 MODES = ("on", "off", "baseline")
-PARTS = ("records", "hard_stops", "autonomy", "drift", "rulebook")
-SENTINEL = ".rubric-e2e"
+PARTS = ("records", "hard_stops", "autonomy", "drift", "rules")
+SENTINEL = ".rulebook-e2e"
 QUOTE = "Releases are cut only by the repository owner."
 _MASK = re.compile(r"\d{8}T\d{6}-[0-9a-f]{8}|\d{4}-\d\d-\d\dT[\d:.+\-]+|watch-[0-9A-Za-z_.\-]+")
 
@@ -57,7 +57,7 @@ def config_for(mode):
     block["autonomy"]["applier"] = {"enabled": False}
     if on:
         block["drift"].update(model="fake-model", spend_ceiling_usd_per_day=1.0)
-    cfg["decision_rubric"] = block
+    cfg["rulebook"] = block
     return cfg
 
 
@@ -202,13 +202,13 @@ def run(repo_path=None, switches="on"):
     """Run every part once. Returns {"log", "digest", "failed", "repo"}. Never deletes anything."""
     if switches not in MODES:
         raise ValueError("switches must be one of %s" % (MODES,))
-    repo = pathlib.Path(repo_path) if repo_path else pathlib.Path(tempfile.mkdtemp(prefix="rubric-e2e-"))
+    repo = pathlib.Path(repo_path) if repo_path else pathlib.Path(tempfile.mkdtemp(prefix="rulebook-e2e-"))
     repo.mkdir(parents=True, exist_ok=True)
     if any(repo.iterdir()):
         raise FileExistsError("%s is not empty; give a new or empty directory" % repo)
     repo = repo.resolve()
     subprocess.run(["git", "init", "-q", str(repo)], check=True, stdin=subprocess.DEVNULL, capture_output=True)
-    (repo / SENTINEL).write_text("throwaway repository for tools/rubric_e2e.py\n", encoding="utf-8")
+    (repo / SENTINEL).write_text("throwaway repository for tools/rulebook_e2e.py\n", encoding="utf-8")
     (repo / ".sdlc").mkdir()
     cfg = config_for(switches)
     log, failed, src, results = ["switches: %s repo: %s" % (switches, repo)], [], FakeSource(), {}
@@ -242,7 +242,7 @@ def main(argv):
         if a == "--switches" and rest:
             mode = rest.pop(0)
         elif a.startswith("-") or repo is not None:
-            print("usage: rubric_e2e.py run [REPO] [--switches on|off|baseline]", file=sys.stderr)
+            print("usage: rulebook_e2e.py run [REPO] [--switches on|off|baseline]", file=sys.stderr)
             return 2
         else:
             repo = a

@@ -98,7 +98,7 @@
       "role": "library"
     },
     {
-      "path": "skills/sigma-loop/scripts/decision_rubric_cfg.py",
+      "path": "skills/sigma-loop/scripts/rulebook_cfg.py",
       "role": "library"
     },
     {

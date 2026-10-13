@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate holds as ordinary parks (decision rubric slice 16 of story 988). Library only: no main.
+"""Gate holds as ordinary parks (rulebook slice 16 of story 988). Library only: no main.
 
 The two pick gates (`feature_propagate` for a scope expansion, `feature_owner` for an ownership
 refusal) used to hand a goal to a human by writing the confirmation label. With AI-filed triage on

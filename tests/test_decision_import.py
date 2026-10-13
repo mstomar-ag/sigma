@@ -98,10 +98,10 @@ def test_caps_refuse_plainly(tmp_path):
     for i in range(3):
         lines += [_ask("t%d" % i, "Q%d?" % i, ["a"]), _ans("t%d" % i, "Q%d?" % i, "a")]
     sdlc, prof = _setup(tmp_path, lines)
-    cfg = {"decision_rubric": {"import": {"max_candidates": 2}}}
+    cfg = {"rulebook": {"import": {"max_candidates": 2}}}
     out = m.scan(str(sdlc), cfg, prof)
     assert len(out["candidates"]) == 2 and any("candidate cap" in r for r in out["refusals"])
-    cfg = {"decision_rubric": {"import": {"max_file_bytes": 10}}}
+    cfg = {"rulebook": {"import": {"max_file_bytes": 10}}}
     out = m.scan(str(sdlc), cfg, prof)
     assert out["candidates"] == [] and any("size cap" in r and "bytes" in r for r in out["refusals"])
     assert out["stats"]["transcript"]["skipped"] == 1
@@ -139,7 +139,7 @@ def _fake_comments(calls):
 def test_comment_sources_via_injected_reader(tmp_path):
     m = _mod()
     sdlc = _repo(tmp_path)
-    cfg = {"decision_rubric": {"import": {"comments": True}}}
+    cfg = {"rulebook": {"import": {"comments": True}}}
     calls = []
     out = m.scan(str(sdlc), cfg, [], issues=[7], comments_fn=_fake_comments(calls))
     by = {c["source"]: c for c in out["candidates"]}
@@ -154,14 +154,14 @@ def test_comment_sources_via_injected_reader(tmp_path):
 
 
 def test_import_limits_defaults_and_bad_types():
-    cfg = importlib.util.spec_from_file_location("c", ROOT / "skills/sigma-loop/scripts/decision_rubric_cfg.py")
+    cfg = importlib.util.spec_from_file_location("c", ROOT / "skills/sigma-loop/scripts/rulebook_cfg.py")
     mod = importlib.util.module_from_spec(cfg)
     cfg.loader.exec_module(mod)
     d = mod.import_limits({})
     assert d["max_file_bytes"] > 0 and d["max_candidates"] > 0 and d["comments"] is False
-    assert mod.import_limits({"decision_rubric": {"import": "x"}}) == d
-    assert mod.import_limits({"decision_rubric": {"import": {"max_candidates": "9"}}}) == d
-    assert mod.import_limits({"decision_rubric": {"import": {"max_candidates": 5}}})["max_candidates"] == 5
+    assert mod.import_limits({"rulebook": {"import": "x"}}) == d
+    assert mod.import_limits({"rulebook": {"import": {"max_candidates": "9"}}}) == d
+    assert mod.import_limits({"rulebook": {"import": {"max_candidates": 5}}})["max_candidates"] == 5
 
 
 def _tree(root):
@@ -223,7 +223,7 @@ def test_time_budget_reports_partial_not_silent(tmp_path):
     for i in range(400):
         lines += [_ask("t%d" % i, "Q%d?" % i, ["a"]), _ans("t%d" % i, "Q%d?" % i, "a")]
     sdlc, prof = _setup(tmp_path, lines)
-    cfg = {"decision_rubric": {"import": {"time_budget_s": 5}}}
+    cfg = {"rulebook": {"import": {"time_budget_s": 5}}}
     out = m.scan(str(sdlc), cfg, prof, clock=_Clock(2.0))
     assert 0 < len(out["candidates"]) < 400
     msg = [r for r in out["refusals"] if "partially read" in r]
@@ -311,7 +311,7 @@ def test_deadline_checked_at_file_start(tmp_path):
     m = _mod()
     sdlc, prof = _setup(tmp_path, [_ask("t1", "Q?", ["a"]), _ans("t1", "Q?", "a")])
     ticks = iter([0.0] + [1000.0] * 50)
-    out = m.scan(str(sdlc), {"decision_rubric": {"import": {"time_budget_s": 5}}}, prof,
+    out = m.scan(str(sdlc), {"rulebook": {"import": {"time_budget_s": 5}}}, prof,
                  clock=lambda: next(ticks))
     assert out["candidates"] == []
     assert any("time budget" in r for r in out["refusals"])
@@ -323,7 +323,7 @@ def test_deadline_checked_by_elapsed_bytes_not_only_lines(tmp_path, monkeypatch)
     sdlc, prof = _setup(tmp_path, [big] * 8)       # 8 lines: the line check (every 256) never fires
     monkeypatch.setattr(m, "CHECK_BYTES", 1 << 20)
     ticks = iter([0.0, 0.0] + [1000.0] * 50)       # budget start, file start, then past the deadline
-    out = m.scan(str(sdlc), {"decision_rubric": {"import": {"time_budget_s": 5}}}, prof,
+    out = m.scan(str(sdlc), {"rulebook": {"import": {"time_budget_s": 5}}}, prof,
                  clock=lambda: next(ticks))
     assert out["stats"]["transcript"]["partial"] == 1
     assert any("time budget" in r for r in out["refusals"])

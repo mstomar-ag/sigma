@@ -181,7 +181,7 @@ def _load(name):
 
 
 legacy = _load("legacy")
-hsg = _load("hard_stop_guard")      # decision rubric slice 10: a no-op until hard_stops.enabled is true
+hsg = _load("hard_stop_guard")      # rulebook slice 10: a no-op until hard_stops.enabled is true
 discovery = _load("discovery")
 state = _load("state")
 frontmatter = _load("frontmatter")   # LocalSource.fetch_title_body's title/body split (#519)

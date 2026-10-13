@@ -1,4 +1,4 @@
-"""Slice 9 of the decision rubric: the ledger pointer (batched, unaddressed, compactable)."""
+"""Slice 9 of the rulebook: the ledger pointer (batched, unaddressed, compactable)."""
 import importlib.util
 import json
 import os
@@ -22,7 +22,7 @@ def _mod(name):
 def _cfg(pointer=None, ledger=True, records=True, extra=None):
     ptr = {"enabled": True}
     ptr.update(pointer or {})
-    cfg = {"decision_rubric": {"records": {"enabled": records, "pointer": ptr}},
+    cfg = {"rulebook": {"records": {"enabled": records, "pointer": ptr}},
            "ledger": {"enabled": ledger, "actor": "writer-a"}}
     cfg.update(extra or {})
     return cfg
@@ -114,7 +114,7 @@ def test_pointer_is_unaddressed(tmp_path):
 def test_ledger_off_writes_zero_bytes(tmp_path):
     lp = _mod("ledger_pointer")
     for cfg in (_cfg(ledger=False), _cfg(records=False), _cfg({"enabled": False}),
-                _cfg({"enabled": "true"}), {}, {"decision_rubric": 3}):
+                _cfg({"enabled": "true"}), {}, {"rulebook": 3}):
         before = _tree(tmp_path)
         assert lp.write_pointer(tmp_path, _ids("r1"), cfg, now=T0) is None
         assert lp.compact_pointers(tmp_path, now=T0, config=cfg) == 0
@@ -197,9 +197,9 @@ def test_lost_pointer_loses_no_record(tmp_path, monkeypatch):
 
 def test_template_documents_the_pointer_keys():
     tmpl = (ROOT / "skills" / "sigma-init" / "templates" / "config.json.tmpl").read_text(encoding="utf-8")
-    block = json.loads(tmpl)["decision_rubric"]["records"]["pointer"]
+    block = json.loads(tmpl)["rulebook"]["records"]["pointer"]
     assert block == {"enabled": False, "max_writes_per_day": 1, "compact_after_days": 14}
-    note = json.loads(tmpl)["_decision_rubric"]
+    note = json.loads(tmpl)["_rulebook"]
     for key in ("pointer", "max_writes_per_day", "compact_after_days"):
         assert "`%s`" % key in note
 
@@ -214,5 +214,5 @@ def test_doctor_reports_pointer_file_count(tmp_path):
     cfg = _cfg()
     lp.write_pointer(tmp_path, _ids("r1", "r2"), cfg, now=T0)
     lp.write_pointer(tmp_path, _ids("r3"), cfg, now=T0)
-    assert "ledger pointer on: 1 ledger entry files, 1 ids queued" in doc._decision_rubric_state(cfg, tmp_path)
-    assert "ledger pointer" not in doc._decision_rubric_state(_cfg({"enabled": False}), tmp_path)
+    assert "ledger pointer on: 1 ledger entry files, 1 ids queued" in doc._rulebook_state(cfg, tmp_path)
+    assert "ledger pointer" not in doc._rulebook_state(_cfg({"enabled": False}), tmp_path)

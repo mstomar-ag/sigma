@@ -1,4 +1,4 @@
-"""File triage core (decision rubric, slice 14, #999). Pure library, UNWIRED: nothing imports it yet.
+"""File triage core (rulebook, slice 14, #999). Pure library, UNWIRED: nothing imports it yet.
 
 `decide(title, body, flags, config) -> Decision(kind, priority, reason)` for one AI-filed issue.
 kind is `arm` (ready for the loop at `priority`), `park` (an ordinary park with `reason`), or `queue` (triage is

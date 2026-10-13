@@ -1,10 +1,10 @@
-"""Drift judge in shadow mode (library only; no main). Decision rubric slice 11.
+"""Drift judge in shadow mode (library only; no main). Rulebook slice 11.
 
 Asks one injected callable whether a question is consistent with reference documents. The
 callable is `call(prompt, model, max_budget_usd) -> {"kind", "quote", "cost_usd"}`; nothing here
 launches a model itself. Shadow mode: the verdict is returned and nothing parks or blocks.
 
-Fails closed: off unless `decision_rubric.drift.enabled` is the JSON true; no model, no ceiling, an
+Fails closed: off unless `rulebook.drift.enabled` is the JSON true; no model, no ceiling, an
 unusable lock, an unreadable spend file or a reached daily ceiling all mean zero calls and a typed
 `not_judged` reason. A conflict counts only with a quote that `verify_quote` finds in a document.
 Unverified: the cost of one real run has not been measured; the defaults are provisional.
@@ -54,7 +54,7 @@ def _num(v):
 
 def _drift(config):
     try:
-        block = config["decision_rubric"]["drift"]
+        block = config["rulebook"]["drift"]
         return block if isinstance(block, dict) else {}
     except Exception:
         return {}
@@ -159,7 +159,7 @@ def judge(question, docs, config, spend_state, call=None, now=None, nonce_fn=Non
 
 
 def _judge(question, docs, config, spend_state, call, now, nonce_fn):
-    _cfgmod = _sibling("decision_rubric_cfg")
+    _cfgmod = _sibling("rulebook_cfg")
     if not _cfgmod.load(config).part_enabled("drift") or call is None:
         return _nj("disabled")
     d = _drift(config)

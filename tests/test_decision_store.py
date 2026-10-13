@@ -1,4 +1,4 @@
-"""Slice 5 of the decision rubric: the committed, repository-based decisions store."""
+"""Slice 5 of the rulebook: the committed, repository-based decisions store."""
 import ast
 import datetime
 import fcntl
@@ -28,7 +28,7 @@ def _ds():
 def _cfg(vis="private", **records):
     r = {"enabled": True, "repo_visibility": vis}
     r.update(records)
-    return {"decision_rubric": {"records": r}}
+    return {"rulebook": {"records": r}}
 
 
 def _rec(**kw):
@@ -67,8 +67,8 @@ def test_append_refuses_an_existing_id(tmp_path):
 
 def test_closed_writes_zero_bytes(tmp_path):
     ds = _ds()
-    for config in ({}, {"decision_rubric": {"records": {"enabled": "true"}}},
-                   {"decision_rubric": {"records": {"enabled": False}}}):
+    for config in ({}, {"rulebook": {"records": {"enabled": "true"}}},
+                   {"rulebook": {"records": {"enabled": False}}}):
         assert ds.append(tmp_path, _rec(), config, now=NOW) is None
     assert list(tmp_path.iterdir()) == []
 
@@ -159,8 +159,8 @@ def test_doctor_warns_above_the_file_ceiling(tmp_path):
     assert ds.ceiling_warning(tmp_path, _cfg(max_files_warn=3)) is None
     assert "3" in ds.ceiling_warning(tmp_path, _cfg(max_files_warn=2))
     doctor = _mod("skills/sigma-doctor/scripts/doctor.py")
-    assert "decision records" in doctor._decision_rubric_state(_cfg(max_files_warn=2), tmp_path)
-    assert "decision records" not in doctor._decision_rubric_state(_cfg(max_files_warn=3), tmp_path)
+    assert "decision records" in doctor._rulebook_state(_cfg(max_files_warn=2), tmp_path)
+    assert "decision records" not in doctor._rulebook_state(_cfg(max_files_warn=3), tmp_path)
 
 
 def test_untracked_old_records_are_named(tmp_path):
@@ -206,7 +206,7 @@ def test_readers_require_config_and_honour_the_gate(tmp_path):
     for fn, args in ((ds.get, (tmp_path, rid)), (ds.list_by, (tmp_path,)), (ds.reindex, (tmp_path,))):
         with pytest.raises(TypeError):
             fn(*args)
-    closed = {"decision_rubric": {"records": {"enabled": False}}}
+    closed = {"rulebook": {"records": {"enabled": False}}}
     assert ds.get(tmp_path, rid, closed) is None
     assert ds.list_by(tmp_path, closed) == []
     assert ds.reindex(tmp_path, closed) == {"skipped": "closed"}
@@ -242,7 +242,7 @@ def _scan(source):
 
 
 def test_no_behaviour_keys_on_login():
-    for name in ("decision_store.py", "decision_rubric_cfg.py"):
+    for name in ("decision_store.py", "rulebook_cfg.py"):
         src = (ROOT / "skills" / "sigma-loop" / "scripts" / name).read_text(encoding="utf-8")
         assert _scan(src) == [], name
 

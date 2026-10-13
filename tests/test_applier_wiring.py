@@ -82,7 +82,7 @@ def test_a_second_park_reuses_the_pending_ask(tmp_path):
 
 def test_a_closed_gate_opens_nothing_and_reads_nothing(tmp_path):
     sd, cfg, _ = _setup(tmp_path)
-    cfg["decision_rubric"]["autonomy"]["applier"]["enabled"] = False
+    cfg["rulebook"]["autonomy"]["applier"]["enabled"] = False
     src = ReadSrc()
     assert AP.open_for_park(sd, cfg, 7, "needs_decision", source=src, now=T0) is None
     assert src.reads == [] and _asks(sd) == []
@@ -209,7 +209,7 @@ def test_level_four_applies_too(tmp_path):
 def test_gate_closed_record_parked_is_byte_identical_and_reads_nothing(tmp_path):
     _telemetry_backlog(tmp_path)
     sd, cfg, _ = _setup(tmp_path)
-    cfg["decision_rubric"]["autonomy"]["applier"]["enabled"] = False
+    cfg["rulebook"]["autonomy"]["applier"]["enabled"] = False
     closed, bare = ReadSrc(), ReadSrc()
     _park_for_real(sd, cfg, closed)
     _loop()._record(sd, bare, "7", "parked", "needs a call", qkind="needs_decision")

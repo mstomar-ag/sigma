@@ -77,7 +77,7 @@ def _load(name):
 
 state = _load("state")
 ledger = _load("ledger")
-hsg = _load("hard_stop_guard")      # decision rubric slice 10: a no-op until hard_stops.enabled is true
+hsg = _load("hard_stop_guard")      # rulebook slice 10: a no-op until hard_stops.enabled is true
 legacy = _load("legacy")             # #239: PR directives/markers written under the previous name
 scrub_module = _load("scrub")
 post_guard = _load("post_guard")      # #375: opt-in refusal of private-reference text (SIGMA_LEAK_PATTERNS)
@@ -3436,7 +3436,7 @@ def _emit_risk_gates(sdlc_dir, config, goal, categories):
 
 
 def _hs_push_stop(sdlc_dir, config, rec, text, prefix="PARK"):
-    """Decision rubric slice 10: the hard-stop classifier at a push chokepoint. "" while the gate is closed (no
+    """Rulebook slice 10: the hard-stop classifier at a push chokepoint. "" while the gate is closed (no
     call is made); else a refusal line carrying the class and pattern id. The branch is classified by the register-based
     own predicate, so Sigma's lease push of its own goal branch passes."""
     if not hsg.enabled(config):

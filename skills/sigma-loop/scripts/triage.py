@@ -2109,7 +2109,7 @@ def _picked_actions(plan, state_by_issue, assignee, goal_label, parked_label, bl
         # (each label is still only named when it actually needs changing, so "second apply = zero
         # actions" still holds literally); only the number of writes it takes to close the gap is.
         add = [goal_label] if goal_label not in state["labels"] else []
-        # #1393: `proposed_label` joins the removal set. LEGACY-INERT since decision-rubric slice 18:
+        # #1393: `proposed_label` joins the removal set. LEGACY-INERT since rulebook slice 18:
         # nothing writes the label now, but a picked issue that still carries a leftover is cleaned
         # here, exactly as before. Picking an issue that carries the label used to ADD `sdlc:goal` on top of it, producing exactly the
         # half-promoted state `_fetch_pending`, `_card_is_eligible` and `/sigma-promote`'s `drift`

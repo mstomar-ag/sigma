@@ -22,12 +22,12 @@ INIT = _mod("init_flow", ROOT / "skills/sigma-init/scripts/init_flow.py")
 
 
 def _cfg(records=True, autonomy=True, visibility="private", rulebook=False):
-    return {"decision_rubric": {
+    return {"rulebook": {
         "records": {"enabled": records, "repo_visibility": visibility},
         "autonomy": {"enabled": autonomy, "levels": {"l1_min_answers": 2, "l2_min_answers": 4,
                                                       "l2_agreement": 0.75, "l3_min_answers": 5,
                                                       "l3_agreement": 0.75}},
-        "rulebook": {"enabled": rulebook}}}
+        "rules": {"enabled": rulebook}}}
 
 
 def _c(i, q="should we merge the docs change", choice="merge", when=None, issue=7, superseded=False, opts=()):
@@ -165,7 +165,7 @@ def test_readout_shows_imported_separately_and_absent_when_none(tmp_path):
 
 def test_cold_start_line_mentions_imported(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg()
-    cfg["decision_rubric"]["autonomy"]["levels"]["l1_min_answers"] = 50
+    cfg["rulebook"]["autonomy"]["levels"]["l1_min_answers"] = 50
     DI.apply(sd, cfg, [_c(i) for i in range(3)])
     assert "3 imported" in AU.learning_line(sd, "needs_decision", cfg)
 
@@ -186,7 +186,7 @@ def test_autonomy_closed_writes_records_only(tmp_path):
 
 def test_rule_draft_counts_imported_evidence_and_stays_proposed(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg(rulebook=True)
-    cfg["decision_rubric"]["autonomy"]["owners"] = ["boss"]
+    cfg["rulebook"]["autonomy"]["owners"] = ["boss"]
     DI.apply(sd, cfg, [_c(i) for i in range(40)])
     rows = RD.list_patterns(sd, cfg)
     assert [(r["qkind"], r["area"], r["option"]) for r in rows] == [("needs_decision", "repo", "merge")]
@@ -215,8 +215,8 @@ def test_closed_gate_paths_unchanged_without_imports(tmp_path):
 
 
 def test_init_lists_optional_import_only_when_records_open():
-    assert INIT._records_open({"decision_rubric": {"records": {"enabled": True}}}) is True
-    for bad in ({}, {"decision_rubric": []}, {"decision_rubric": {"records": {"enabled": "yes"}}}):
+    assert INIT._records_open({"rulebook": {"records": {"enabled": True}}}) is True
+    for bad in ({}, {"rulebook": []}, {"rulebook": {"records": {"enabled": "yes"}}}):
         assert INIT._records_open(bad) is False
     src = (ROOT / "skills/sigma-init/scripts/init_flow.py").read_text()
     assert "never run by init" in src and "reads only local files" in src

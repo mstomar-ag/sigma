@@ -31,8 +31,8 @@ def test_build_carries_area_only_when_given():
 def test_unpark_record_has_area_and_declared_kind_and_a_rule_matches(tmp_path):
     u, rb = _mod("unpark"), _mod("rulebook")
     cfg = _on(tu._config())
-    cfg["decision_rubric"]["rulebook"] = {"enabled": True}
-    cfg["decision_rubric"]["autonomy"] = {"owners": ["boss"]}
+    cfg["rulebook"]["rules"] = {"enabled": True}
+    cfg["rulebook"]["autonomy"] = {"owners": ["boss"]}
     park = tu._park("x\nsigma-qkind: dependency")
     run = tu._runner(views={"5": tu._view(labels=("sdlc:parked", "area:docs"), comments=[park])})
     u.resolve(str(tmp_path), cfg, 5, {"decision": "go"}, "unpark", run=run)
@@ -91,7 +91,7 @@ def test_ack_record_has_a_stated_area(tmp_path):
 def test_gate_closed_is_byte_identical_and_writes_nothing(tmp_path):
     u, p = _mod("unpark"), _mod("promote")
     closed = tu._config()
-    closed["decision_rubric"] = {"records": {"enabled": "yes"}}   # not the JSON boolean true
+    closed["rulebook"] = {"records": {"enabled": "yes"}}   # not the JSON boolean true
     for cfg in (tu._config(), closed):
         run = tu._runner(views={"5": tu._view(labels=("sdlc:parked", "area:docs"),
                                               comments=[tu._park("x")])})

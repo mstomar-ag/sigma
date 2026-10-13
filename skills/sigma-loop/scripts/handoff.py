@@ -69,7 +69,7 @@ qkind = _load("qkind")                       # #1003: the declared kind of a par
 
 DEFAULT_PRIORITY = "P1"
 DEPENDENCY_LABEL = "sdlc:dependency"
-#: LEGACY (decision rubric, #1003): with triage on (the default) AI-filed issues are armed or parked at
+#: LEGACY (rulebook, #1003): with triage on (the default) AI-filed issues are armed or parked at
 #: filing and never get this label. It is still written when triage is switched off
 #: (`ai_filed.triage.enabled` false) and still READ by the duplicate-corpus query and the blocker
 #: readers, so a leftover labelled issue stays inert. #233: the DISTINCT label every queued

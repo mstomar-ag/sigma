@@ -1,4 +1,4 @@
-"""Decision-rubric slice 18: the confirmation label is LEGACY-ONLY in every reader.
+"""Rulebook slice 18: the confirmation label is LEGACY-ONLY in every reader.
 
 Nothing writes the label any more (a filed follow-up is already a goal), so each reader either still
 tolerates a leftover (promote lists it, triage strips it, status counts it, doctor flags it) or has

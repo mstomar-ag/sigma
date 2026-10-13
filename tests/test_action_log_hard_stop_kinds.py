@@ -28,7 +28,7 @@ actionlog = _mod("actionlog")
 G = _mod("hard_stop_guard")
 
 ACTION = "terraform apply -auto-approve"
-OPEN = {"action_log": {"enabled": True}, "decision_rubric": {"hard_stops": {"enabled": True}}}
+OPEN = {"action_log": {"enabled": True}, "rulebook": {"hard_stops": {"enabled": True}}}
 CLOSED = {"action_log": {"enabled": True}}
 
 

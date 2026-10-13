@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Autonomy levels 0 to 2 and the watch recorder (decision rubric, slice 12 of story 988; library only; no main).
+"""Autonomy levels 0 to 2 and the watch recorder (rulebook, slice 12 of story 988; library only; no main).
 
 Per question kind and area a level from 0 to 4 is DERIVED from facts, never stored as a setting:
 human-answered decision records (`decision_store`) give the count, and watch records (what the rule
 would have chosen next to what the person chose) give the agreement. Levels 0 to 2 only record and
 pre-fill; the higher levels are read by a later slice. Rules:
 
-- Thresholds come from `decision_rubric.autonomy.levels.*`; a wrong-typed value reads as its default.
+- Thresholds come from `rulebook.autonomy.levels.*`; a wrong-typed value reads as its default.
 - Level 2 to 4 need as many watch comparisons as answers for that level, per machine; each machine
   gets a level and the LOWER one wins, so disagreement never raises trust.
 - A veto drops one level (PROVISIONAL: once, not cumulatively); `veto_pause_consecutive` vetoes since
@@ -14,7 +14,7 @@ pre-fill; the higher levels are read by a later slice. Rules:
 - A hard-stop kind (`hard_stop.is_hardstop_kind`) or any record carrying a hardstop class is capped
   at level 2. The cap is fixed, not configurable.
 - A missing, unreadable or malformed file never raises and never raises a level.
-- Everything is inert unless `decision_rubric.autonomy.enabled` is the JSON boolean true: no file is
+- Everything is inert unless `rulebook.autonomy.enabled` is the JSON boolean true: no file is
   written and the level is 0.
 
 State is one file per fact under `<sdlc_dir>/autonomy/`, created exclusively (`watch-<id>.json`,
@@ -56,7 +56,7 @@ def _load(name):
 
 def _sub(config):
     try:
-        sub = config["decision_rubric"]["autonomy"]
+        sub = config["rulebook"]["autonomy"]
         return sub if isinstance(sub, dict) else {}
     except Exception:
         return {}
@@ -64,7 +64,7 @@ def _sub(config):
 
 def enabled(config):
     try:
-        return _sub(config).get("enabled") is True and _load("decision_rubric_cfg").load(config).part_enabled("autonomy")
+        return _sub(config).get("enabled") is True and _load("rulebook_cfg").load(config).part_enabled("autonomy")
     except Exception:
         return False
 
@@ -426,7 +426,7 @@ def _names(value):
 def is_owner(login, config):
     """True when `login` is in `autonomy.owners` (case-insensitive). Owners unset (key absent) falls back
     to `spend_approval.approvers`; an empty or malformed list, or both empty, refuses. This is the only
-    read of a login as authority anywhere in the rubric: a disclosed exception to the person-free rule."""
+    read of a login as authority anywhere in the rulebook: a disclosed exception to the person-free rule."""
     try:
         if not isinstance(login, str) or not login.strip():
             return False

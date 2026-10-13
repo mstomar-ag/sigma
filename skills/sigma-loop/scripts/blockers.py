@@ -103,7 +103,7 @@ def classify(state, goal_label, proposed_label, parked_label, followup_label, me
     names = set(state.get("labels") or ())
     if parked_label in names:
         return CHAINED                       # BEFORE the promotion test -- see the constant block
-    # Legacy label (decision-rubric slice 18): the confirmation label is NO LONGER a classification
+    # Legacy label (rulebook slice 18): the confirmation label is NO LONGER a classification
     # row. A filed follow-up is already a goal, so nothing new carries the label; a leftover is
     # classified by its OTHER labels (provenance -> ROUTED, which grants membership and, in `_act`,
     # strips the leftover). `proposed_label` stays a parameter only so callers keep one signature.

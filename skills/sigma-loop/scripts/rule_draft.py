@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draft a proposed rule from a learned pattern, tested on held-back decisions (decision rubric, goal 1138 of story 988).
+"""Draft a proposed rule from a learned pattern, tested on held-back decisions (rulebook, goal 1138 of story 988).
 
 Verbs: `list <sdlc_dir>` prints the question kind and area pairs whose derived autonomy level is at
 least 2 and whose human answers agree on one option at or above the agreement threshold. `draft
@@ -13,10 +13,10 @@ approves and never writes a file of its own.
   threshold. Fail closed: a held-out set smaller than `min_held_out`, a tie, a missing option
   (public records drop the free-text choice; on public visibility `list` and `draft` say so plainly and exit 1), a hard-stop kind, a level below 2, or a pair that
   already has a rule in the rulebook means NO draft.
-- Gated by both existing gates: `decision_rubric.rulebook.enabled` and `decision_rubric.autonomy.enabled`
+- Gated by both existing gates: `rulebook.rules.enabled` and `rulebook.autonomy.enabled`
   (and the records part for the data). Closed means inert: lists nothing, drafts nothing, writes nothing.
 - Repository-owned: the rule has no person field; the source record ids are linked in its reason.
-- Thresholds, read from `decision_rubric.rulebook.draft` (a wrong-typed value reads as its default):
+- Thresholds, read from `rulebook.rules.draft` (a wrong-typed value reads as its default):
   `min_agreement` (0 to 1, default 0.90, PROVISIONAL) and `min_held_out` (whole number of at least 1,
   default 5, PROVISIONAL).
 
@@ -45,7 +45,7 @@ def _load(name):
 
 def settings(config):
     try:
-        sub = config["decision_rubric"]["rulebook"]["draft"]
+        sub = config["rulebook"]["rules"]["draft"]
         sub = sub if isinstance(sub, dict) else {}
     except Exception:
         sub = {}

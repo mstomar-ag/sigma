@@ -1,4 +1,4 @@
-"""park_mix.py (#991, decision-rubric slice 1): the read-only park-mix reader and census, plus
+"""park_mix.py (#991, rulebook slice 1): the read-only park-mix reader and census, plus
 characterisation pins of today's filing label sets so later slices can show what they changed."""
 import importlib.util
 import json

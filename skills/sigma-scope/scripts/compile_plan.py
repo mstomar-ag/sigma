@@ -105,7 +105,7 @@ def _load_loop_script(name):
 
 sources = _load_loop_script("sources")
 handoff = _load_loop_script("handoff")   # PROPOSED_LABEL / proposed_label() only -- see module docstring
-file_triage = _load_loop_script("file_triage")   # #1006: arm or park a plan issue (rubric slice 17)
+file_triage = _load_loop_script("file_triage")   # #1006: arm or park a plan issue (rulebook slice 17)
 qkind = _load_loop_script("qkind")               # #1006: the declared kind of a park at filing
 
 #: Default priority when a plan issue (or the epic) doesn't name one -- byte-identical default to
@@ -417,7 +417,7 @@ def compile_plan(sdlc_dir, config, plan, *, source=None, goal_label=False,
     path: a source that fails to resolve, or one that can't open issues at all, means nothing is
     created and `report["warnings"]` says why -- never a raise.
 
-    `triage` (#1006, decision rubric slice 17): `decide(title, body, flags, config)` for each plan issue,
+    `triage` (#1006, rulebook slice 17): `decide(title, body, flags, config)` for each plan issue,
     default `file_triage.decide`. With triage on (the default) a plan issue is armed at its own plan
     priority (`sdlc:goal`, never the proposed label) unless the deny-list parks it, and the report gains
     a `parked` mapping `{key: reason}`. With `ai_filed.triage.enabled` false nothing here runs and the

@@ -33,7 +33,7 @@ def _setup(tmp_path, docs=("vision.md",), **over):
     sdlc.mkdir()
     d = {"enabled": True, "model": "m", "spend_ceiling_usd_per_day": 1.0, "documents": list(docs)}
     d.update(over)
-    return sdlc, {"decision_rubric": {"drift": d}}
+    return sdlc, {"rulebook": {"drift": d}}
 
 
 def _run(sdlc, cfg, call, q="Upload logs?", kind="needs_decision", issue=7):
@@ -135,7 +135,7 @@ def test_loop_record_runs_judge_on_park(tmp_path, monkeypatch):
     monkeypatch.setattr(ds, "shadow_for_park", lambda *a, **k: seen.append(a))
     loop = _loop()
     src = type("S", (), {"park": lambda self, g, t: None})()
-    cfg = {"decision_rubric": {"drift": {"enabled": True}}}
+    cfg = {"rulebook": {"drift": {"enabled": True}}}
     sdlc = tmp_path / ".sdlc"
     sdlc.mkdir()
     real = loop._load

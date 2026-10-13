@@ -1,4 +1,4 @@
-"""Slice 19 of the decision rubric: the act-and-tell applier (levels 3 and 4)."""
+"""Slice 19 of the rulebook: the act-and-tell applier (levels 3 and 4)."""
 import datetime
 import importlib.util
 import json
@@ -29,9 +29,9 @@ WD = None
 def _cfg(applier=None, enabled=True, kind_levels=None):
     ap = {"enabled": enabled, "window_minutes": 60, "max_auto_applied_per_day": 3, "spot_check_one_in": 1000000}
     ap.update(applier or {})
-    return {"decision_rubric": {
+    return {"rulebook": {
         "records": {"enabled": True},
-        "rulebook": {"enabled": True},
+        "rules": {"enabled": True},
         "autonomy": {"enabled": True, "owners": ["boss"], "applier": ap,
                      "levels": {"l1_min_answers": 2, "l2_min_answers": 4, "l2_agreement": 0.75,
                                 "l3_min_answers": 8, "l3_agreement": 0.9,
@@ -182,7 +182,7 @@ def test_hard_stop_kind_never_reaches_the_tick(tmp_path):
     # the rulebook's own matcher only knows the default hard-stop kind, so a CONFIGURED hard-stop kind
     # (and a forced top level) must be stopped by the tick itself
     sd, cfg, _ = _setup(tmp_path)
-    cfg["decision_rubric"]["hard_stops"] = {"hardstop_kinds": ["needs_decision"]}
+    cfg["rulebook"]["hard_stops"] = {"hardstop_kinds": ["needs_decision"]}
     _ask(sd, cfg)
     AP.level_fn = lambda *a: 4
     try:
@@ -249,7 +249,7 @@ def test_daemon_step_goes_through_the_timeout_runner(tmp_path):
 
 def test_template_block_defaults():
     tmpl = (ROOT / "skills" / "sigma-init" / "templates" / "config.json.tmpl").read_text()
-    block = json.loads(tmpl)["decision_rubric"]["autonomy"]["applier"]
+    block = json.loads(tmpl)["rulebook"]["autonomy"]["applier"]
     assert block == {"enabled": False, "allow_silent": [], "window_minutes": 1440, "spot_check_one_in": 5,
                      "max_auto_applied_per_day": 3, "stale_after_intervals": 3, "prune_after_days": 30}
     assert AP.settings({}) == {k: v for k, v in block.items() if k != "enabled"}

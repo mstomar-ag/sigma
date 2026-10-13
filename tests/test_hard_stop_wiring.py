@@ -1,4 +1,4 @@
-"""Decision rubric slice 10: the hard-stop classifier wired at Sigma-owned chokepoints (`hard_stop_guard.py`).
+"""Rulebook slice 10: the hard-stop classifier wired at Sigma-owned chokepoints (`hard_stop_guard.py`).
 
 Closed (the default), every chokepoint behaves exactly as before; open, a matching action parks. Controls run once
 each are named in the docstrings (remove the guard call, narrow the predicate to the prefix list, add merge to the
@@ -26,7 +26,7 @@ work = _load("work")
 state = _load("state")
 sources = _load("sources")
 
-OPEN = {"work": {"enabled": True}, "decision_rubric": {"hard_stops": {"enabled": True}}}
+OPEN = {"work": {"enabled": True}, "rulebook": {"hard_stops": {"enabled": True}}}
 CLOSED = {"work": {"enabled": True}}
 PUSH_OWN = "git push --force-with-lease origin HEAD:sdlc/0001-x"
 
@@ -72,7 +72,7 @@ def test_closed_guard_reads_nothing():
     class Boom:
         def __getattr__(self, name):
             raise AssertionError("closed gate touched the source: " + name)
-    for cfg in (CLOSED, {"decision_rubric": {"hard_stops": {"enabled": "true"}}}, None):
+    for cfg in (CLOSED, {"rulebook": {"hard_stops": {"enabled": "true"}}}, None):
         assert G.guard("rm -rf /", {}, cfg) == G.ALLOW
         if cfg is not None:
             assert G.guard_issue_write(Boom(), "5", "complete", config=cfg) == G.ALLOW
@@ -117,7 +117,7 @@ def _runner(diff=""):
 def test_closed_makes_identical_calls(tmp_path):
     """Gate closed or absent: the same commands in the same order, the same string."""
     out = []
-    for i, cfg in enumerate((CLOSED, {**CLOSED, "decision_rubric": {"hard_stops": {"enabled": False}}})):
+    for i, cfg in enumerate((CLOSED, {**CLOSED, "rulebook": {"hard_stops": {"enabled": False}}})):
         d = _sdlc(tmp_path / str(i), cfg)
         goal = _started(d)
         run = _runner(diff="x\n+git commit --no-verify\n")
@@ -254,7 +254,7 @@ def test_legacy_alias_folds_into_the_class_toggles():
     cfg = {**OPEN, "gates": {"irreversible_actions": ["deploy", "spend", "migrate", "overwrite"]}}
     assert not G.guard("rm -rf /var/data", {}, cfg).blocked           # delete removed -> destroy off
     assert G.guard("kubectl apply -f x.yaml", {}, cfg).blocked        # deploy kept
-    named = {**cfg, "decision_rubric": {"hard_stops": {"enabled": True, "classes": {"destroy": True}}}}
+    named = {**cfg, "rulebook": {"hard_stops": {"enabled": True, "classes": {"destroy": True}}}}
     assert G.guard("rm -rf /var/data", {}, named).blocked             # classes wins over the alias
     assert G.guard("rm -rf /var/data", {}, OPEN).blocked              # no alias list: default on
 
@@ -263,7 +263,7 @@ def test_enforcement_doc_matches_generator():
     """The committed table carries the hard-stop row (byte equality with the generator is pinned in
     tests/test_enforcement_table.py)."""
     doc = (ROOT / "docs" / "enforcement.md").read_text()
-    assert "decision_rubric.hard_stops.enabled" in doc
+    assert "rulebook.hard_stops.enabled" in doc
 
 
 # -- the filing-time park is Sigma's own (#1136) ----------------------------------------------------

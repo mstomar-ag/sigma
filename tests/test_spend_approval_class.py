@@ -1,4 +1,4 @@
-"""Slice 7 of the decision rubric (#997): the recorded permission is bound to a class, an optional
+"""Slice 7 of the rulebook (#997): the recorded permission is bound to a class, an optional
 action digest and a durable use counter; `scrub_marker` quotes a first-line marker."""
 import hashlib
 import json

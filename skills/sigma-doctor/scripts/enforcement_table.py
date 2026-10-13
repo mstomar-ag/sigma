@@ -154,9 +154,9 @@ EXTERNAL_CONTROLS = (
                   "not in `gates.irreversible_actions`: it has its own gate and an explicit yes in `sigma-rebase`",
      "condition": "closed refuses before any read; the chat door and a hosted ruleset were not covered by the hosted run"},
     {"control": "Irreversible actions park", "kind": "advice", "hosts": "all",
-     "enabled_by": ("decision_rubric.hard_stops.enabled",), "settings": ("gates.irreversible_actions", "gates.on_block"),
+     "enabled_by": ("rulebook.hard_stops.enabled",), "settings": ("gates.irreversible_actions", "gates.on_block"),
      "mechanism": "the loop's instructions ask the agent to park rather than run a "
-                  "deploy/delete/overwrite/spend/migrate; with `decision_rubric.hard_stops.enabled` the keys are the "
+                  "deploy/delete/overwrite/spend/migrate; with `rulebook.hard_stops.enabled` the keys are the "
                   "legacy alias of the class toggles, and the commit, pull-request and rebase-push steps and the "
                   "issue writes Sigma performs itself park a matching action (a command an agent runs by itself on a "
                   "host without hooks stays advice)",

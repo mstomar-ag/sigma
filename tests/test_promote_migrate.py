@@ -1,4 +1,4 @@
-"""#1010 (decision rubric, slice 20): `promote.py migrate-confirmation`.
+"""#1010 (rulebook, slice 20): `promote.py migrate-confirmation`.
 
 Everything runs against an in-memory fake source (no network, no `gh`): a REST-shaped list endpoint with real
 paging, a live per-issue read, an atomic label swap, and a recording of every write."""

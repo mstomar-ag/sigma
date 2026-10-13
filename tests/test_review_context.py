@@ -1405,7 +1405,7 @@ def test_an_unreadable_plan_on_disk_is_not_reported_as_no_plan():
         assert "Full plan" in out and "0007-blue-button.md" in out
 
 
-# --- #993 (decision rubric slice 3): the `context.documents` key -------------------------------
+# --- #993 (rulebook slice 3): the `context.documents` key -------------------------------
 
 def _doc_brief(d, documents="__absent__", inline_max=None, files=None):
     base, root = _repo(d)

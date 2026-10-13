@@ -3,7 +3,7 @@
 One record per file, `<store_dir>/<id>.json`, created exclusively: parallel worktrees add distinct
 new files and never edit a shared one, and the files ride the goal's own branch through the normal
 commit flow. A generated index (`_index.json`, never committed) is a rebuildable cache. Every
-function is inert unless `decision_rubric.records.enabled` is the JSON boolean true.
+function is inert unless `rulebook.records.enabled` is the JSON boolean true.
 
 Records are about the repository and its areas, never about a person: an audit field the record
 carries is written and read by nothing here (a test scans for it). Scale: about 1 KB per record;
@@ -38,7 +38,7 @@ _INDEX, _LOCK = "_index.json", "_index.lock"
 
 def _records_cfg(config):
     try:
-        sub = config["decision_rubric"]["records"]
+        sub = config["rulebook"]["records"]
         return sub if isinstance(sub, dict) else {}
     except Exception:
         return {}
@@ -51,8 +51,8 @@ def enabled(config):
 def _open(config):
     try:
         import importlib.util
-        here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decision_rubric_cfg.py")
-        spec = importlib.util.spec_from_file_location("decision_rubric_cfg", here)
+        here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rulebook_cfg.py")
+        spec = importlib.util.spec_from_file_location("rulebook_cfg", here)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod.load(config).part_enabled("records")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """promote.py (#1392) -- the ONE sanctioned way to move an issue across the human approval gate.
 
-LEGACY-ONLY LABEL (decision-rubric slice 18). Nothing writes the confirmation label any more -- a
+LEGACY-ONLY LABEL (rulebook slice 18). Nothing writes the confirmation label any more -- a
 filed follow-up is already a goal, armed or parked with a declared question -- so every bucket
 below that keys on `proposed_label` lists LEFTOVERS from old boards, and this verb stays as the
 way to approve or clear each one. The history that follows explains why the buckets exist.
@@ -112,7 +112,7 @@ PROMOTE_COMMENT = "Promoted to `{goal}` via /sigma-promote — approved for the 
 DEMOTE_COMMENT = ("Returned to `{proposed}` via /sigma-promote — awaiting approval again; the loop "
                   "will not pick it up.")
 
-#: #1006 (decision rubric): with triage on, a demotion PARKS the issue (reason and declared question kind in
+#: #1006 (rulebook): with triage on, a demotion PARKS the issue (reason and declared question kind in
 #: the comment) instead of writing the legacy confirmation label.
 DEMOTE_PARK_COMMENT = ("Parked via /sigma-promote: demoted out of the queue, so the loop will not pick it "
                        "up. Run /sigma-unpark to release it.")
@@ -669,10 +669,10 @@ def render_promote(result):
 
 
 # ---------------------------------------------------------------------------------------------------
-# migrate-confirmation (decision rubric, slice 20, #1010)
+# migrate-confirmation (rulebook, slice 20, #1010)
 #
 # One-time move of every issue still carrying the confirmation label: armed (`sdlc:goal`) or an ordinary
-# park, decided by the SAME rubric triage (`file_triage.decide`) and the SAME blocker and gate predicates
+# park, decided by the SAME rulebook triage (`file_triage.decide`) and the SAME blocker and gate predicates
 # `apply` uses. Dry run by default (zero writes). Adds no gh call site: reads go through
 # `sources.fetch_issues_rest` / `source._read_issue`, writes through `source._swap_labels` (ONE mutation per
 # issue, so a parked-plus-label pair can never exist), `source._issue_comment` and `source._set_board_status`.

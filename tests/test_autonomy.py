@@ -1,4 +1,4 @@
-"""Slice 12 of the decision rubric: autonomy levels 0 to 2 and the watch recorder."""
+"""Slice 12 of the rulebook: autonomy levels 0 to 2 and the watch recorder."""
 import ast
 import datetime
 import importlib.util
@@ -31,7 +31,7 @@ def _cfg(enabled=True, levels=None, **extra):
     if levels:
         au["levels"].update(levels)
     au.update(extra)
-    return {"decision_rubric": {"records": {"enabled": True}, "autonomy": au}}
+    return {"rulebook": {"records": {"enabled": True}, "autonomy": au}}
 
 
 def _answer(sd, cfg, n, qkind="needs_decision", area="docs", how="human", **kw):
@@ -152,17 +152,17 @@ def _first_id(sd, cfg):
 
 
 def test_owner_falls_back_to_approvers():
-    own = {"decision_rubric": {"autonomy": {"owners": ["Alice"]}}, "spend_approval": {"approvers": ["bob"]}}
+    own = {"rulebook": {"autonomy": {"owners": ["Alice"]}}, "spend_approval": {"approvers": ["bob"]}}
     assert A.is_owner("alice", own) is True
     assert A.is_owner("bob", own) is False
     unset = {"spend_approval": {"approvers": [" Bob "]}}
     assert A.is_owner("BOB", unset) is True
     assert A.is_owner("carol", unset) is False
     assert A.is_owner("bob", {}) is False
-    assert A.is_owner("bob", {"decision_rubric": {"autonomy": {"owners": []}}, "spend_approval": {"approvers": []}}) is False
-    assert A.is_owner("bob", {"decision_rubric": {"autonomy": {"owners": []}}, "spend_approval": {"approvers": ["bob"]}}) is False
+    assert A.is_owner("bob", {"rulebook": {"autonomy": {"owners": []}}, "spend_approval": {"approvers": []}}) is False
+    assert A.is_owner("bob", {"rulebook": {"autonomy": {"owners": []}}, "spend_approval": {"approvers": ["bob"]}}) is False
     assert A.is_owner(None, unset) is False
-    assert A.is_owner("bob", {"decision_rubric": {"autonomy": {"owners": "bob"}}}) is False
+    assert A.is_owner("bob", {"rulebook": {"autonomy": {"owners": "bob"}}}) is False
 
 
 def test_closed_gate_writes_nothing_and_holds_level_zero(tmp_path):

@@ -1,4 +1,4 @@
-"""Slice 11 of the decision rubric: drift judge in shadow mode. The model call is always a fake."""
+"""Slice 11 of the rulebook: drift judge in shadow mode. The model call is always a fake."""
 import importlib.util
 import json
 import pathlib
@@ -19,7 +19,7 @@ def _cfg(**over):
     d = {"enabled": True, "model": "small-model", "rounds": 1,
          "max_budget_usd_per_call": 0.1, "spend_ceiling_usd_per_day": 1.0}
     d.update(over)
-    return {"decision_rubric": {"drift": {k: v for k, v in d.items() if v is not None}}}
+    return {"rulebook": {"drift": {k: v for k, v in d.items() if v is not None}}}
 
 
 class Fake:
@@ -50,7 +50,7 @@ def test_unset_ceiling_makes_no_call(tmp_path):
 
 def test_closed_gate_makes_no_call(tmp_path):
     f = Fake()
-    for cfg in ({}, _cfg(enabled=False), _cfg(enabled="true"), {"decision_rubric": "x"}):
+    for cfg in ({}, _cfg(enabled=False), _cfg(enabled="true"), {"rulebook": "x"}):
         v = _mod().judge("q", DOCS, cfg, tmp_path, call=f)
         assert v.kind == "not_judged" and v.reason == "disabled"
     assert f.calls == []
@@ -135,7 +135,7 @@ def test_spend_is_recorded_and_shadow_never_raises(tmp_path):
 
 def test_template_and_privacy_pins():
     tmpl = json.loads((ROOT / "skills/sigma-init/templates/config.json.tmpl").read_text())
-    d = tmpl["decision_rubric"]["drift"]
+    d = tmpl["rulebook"]["drift"]
     assert d["enabled"] is False and d["model"] is None and d["spend_ceiling_usd_per_day"] is None
     assert d["rounds"] == 1 and d["max_budget_usd_per_call"] == 0.10
     assert "drift_judge.py" in (ROOT / "docs/privacy.md").read_text()

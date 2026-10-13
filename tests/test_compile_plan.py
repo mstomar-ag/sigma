@@ -66,7 +66,7 @@ class FakeSource:
         return next(c for c in self.created if c["title"] == title)
 
 
-#: AI-filed triage switched off: the pre-triage filing path (decision rubric slice 17, #1006).
+#: AI-filed triage switched off: the pre-triage filing path (rulebook slice 17, #1006).
 TRIAGE_OFF = {"ai_filed": {"triage": {"enabled": False}}}
 
 
@@ -1044,7 +1044,7 @@ def test_the_usage_string_advertises_the_forbid_priority_flag(capsys):
     assert "--forbid-priority" in capsys.readouterr().err
 
 
-# ------------------------------------------------------------- triage at filing (rubric slice 17, #1006)
+# ------------------------------------------------------------- triage at filing (rulebook slice 17, #1006)
 
 
 def test_scope_children_are_armed_with_plan_priority():

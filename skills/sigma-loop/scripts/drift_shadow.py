@@ -1,7 +1,7 @@
-"""Shadow-mode wiring of the drift judge into the park path (decision rubric, goal 1229).
+"""Shadow-mode wiring of the drift judge into the park path (rulebook, goal 1229).
 
-When a question is parked with a declared kind and `decision_rubric.drift.enabled` is the JSON true,
-`shadow_for_park` reads the reference documents named in `decision_rubric.drift.documents`
+When a question is parked with a declared kind and `rulebook.drift.enabled` is the JSON true,
+`shadow_for_park` reads the reference documents named in `rulebook.drift.documents`
 (repository-relative paths), calls the existing `drift_judge.judge` once for that park, and stores
 the verdict in `<sdlc>/state/drift-shadow.json`. It never parks, blocks or changes a label, and it
 never raises. Closed gate, a hard-stop kind or an undeclared kind: nothing is read or written.
@@ -36,7 +36,7 @@ def _load(name):
 
 def _block(config):
     try:
-        b = config["decision_rubric"]["drift"]
+        b = config["rulebook"]["drift"]
         return b if isinstance(b, dict) else {}
     except Exception:
         return {}
@@ -114,7 +114,7 @@ def shadow_for_park(sdlc_dir, config, issue, qkind_, question, call=None, now=No
     """Judge one park in shadow mode. Returns the stored record, or None when nothing was done
     (gate closed, hard-stop or undeclared kind, already judged). Never raises."""
     try:
-        if not _load("decision_rubric_cfg").load(config).part_enabled("drift"):
+        if not _load("rulebook_cfg").load(config).part_enabled("drift"):
             return None
         if not isinstance(qkind_, str) or qkind_ not in _load("qkind").QKINDS:
             return None

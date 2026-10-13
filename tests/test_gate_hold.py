@@ -1,4 +1,4 @@
-"""Decision rubric slice 16: the two pick gates park instead of writing the confirmation label.
+"""Rulebook slice 16: the two pick gates park instead of writing the confirmation label.
 
 With `ai_filed.triage.enabled` not exactly false (the default) a held goal is parked with the declared
 kind scope_hold or owner_hold; `/sigma-unpark` lists it, asks about it and refuses to release it while

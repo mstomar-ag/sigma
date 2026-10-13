@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rulebook file and the propose-approve flow (decision rubric, slice 13 of story 988; library only; no main).
+"""Rulebook file and the propose-approve flow (rulebook, slice 13 of story 988; library only; no main).
 
 A rule says: for a question kind in a repository area, recommend this option. Rules belong to the
 repository, never a person: the schema is a closed key set, so a rule scoped to a login (or any other
@@ -16,7 +16,7 @@ person field) is invalid and never acts. Rules are RECOMMEND AND PRE-FILL ONLY: 
 - `match` returns a recommendation only for exactly one sealed rule; none or several mean ask. A
   hard-stop kind never matches.
 - `due_for_reask` lists approved rules whose confirmation is older than `rulebook.reask_days`.
-- Everything is inert unless `decision_rubric.rulebook.enabled` is the JSON boolean true: no file is
+- Everything is inert unless `rulebook.rules.enabled` is the JSON boolean true: no file is
   written, nothing matches.
 
 SCALE: one file of human-approved rules, read whole (small by construction); writes are a single
@@ -58,7 +58,7 @@ def _load(name):
 
 def _sub(config):
     try:
-        sub = config["decision_rubric"]["rulebook"]
+        sub = config["rulebook"]["rules"]
         return sub if isinstance(sub, dict) else {}
     except Exception:
         return {}
@@ -66,7 +66,7 @@ def _sub(config):
 
 def enabled(config):
     try:
-        return _sub(config).get("enabled") is True and _load("decision_rubric_cfg").load(config).part_enabled("rulebook")
+        return _sub(config).get("enabled") is True and _load("rulebook_cfg").load(config).part_enabled("rules")
     except Exception:
         return False
 

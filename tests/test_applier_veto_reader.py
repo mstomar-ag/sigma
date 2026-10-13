@@ -21,8 +21,8 @@ AP, AU, DS, RB = _mod("applier"), _mod("autonomy"), _mod("decision_store"), _mod
 
 
 def _cfg(enabled=True):
-    return {"decision_rubric": {
-        "records": {"enabled": True}, "rulebook": {"enabled": True},
+    return {"rulebook": {
+        "records": {"enabled": True}, "rules": {"enabled": True},
         "autonomy": {"enabled": True, "owners": ["boss"],
                      "applier": {"enabled": enabled, "window_minutes": 60, "spot_check_one_in": 1000000,
                                  "max_auto_applied_per_day": 3},
@@ -107,7 +107,7 @@ def test_ask_not_applied_changes_nothing(tmp_path):
 
 def test_closed_gate_reads_nothing(tmp_path):
     sd, cfg, src = _applied_world(tmp_path)
-    cfg["decision_rubric"]["autonomy"]["applier"]["enabled"] = False
+    cfg["rulebook"]["autonomy"]["applier"]["enabled"] = False
     called = []
     assert AP.tick(sd, cfg, T0 + 70 * MIN, source=src, comments_fn=lambda i: called.append(i) or []) == []
     assert called == [] and _state(sd).get("vetoed_at") is None

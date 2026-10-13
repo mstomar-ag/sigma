@@ -2406,7 +2406,7 @@ def test_a_non_blocking_duplicate_reuse_never_touches_the_reused_issue(tmp_path,
     assert report["duplicate_of"] == "77"
 
 
-# --------------------------------------------------------------------------- decision rubric slice 15 (#1003)
+# --------------------------------------------------------------------------- rulebook slice 15 (#1003)
 # AI-filed triage at the filing chokepoint: arm at a bucket priority or park, caps, depth, no label.
 
 class TriageSource(FakeSource):
@@ -2630,7 +2630,7 @@ class GuardedSource(TriageSource):
         self.scoped = not handoff.sources.hsg.guard_issue_write(
             types.SimpleNamespace(_read_issue=lambda *a, **k: {"labels": [], "body": ""},
                                   goal_label="g", parked_label="p", follow_up_label="f"),
-            goal, "park", config={"decision_rubric": {"hard_stops": {"enabled": True}}}, ).blocked
+            goal, "park", config={"rulebook": {"hard_stops": {"enabled": True}}}, ).blocked
         super().park(goal, reason, tier)
 
 

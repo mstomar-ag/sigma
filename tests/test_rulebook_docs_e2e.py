@@ -1,5 +1,5 @@
 """Slice 21 of story 988 (#1011): the docs describe no confirmation queue, and one offline end-to-end
-run covers every part of the decision rubric on a throwaway repository."""
+run covers every part of the rulebook on a throwaway repository."""
 import importlib.util
 import pathlib
 import re
@@ -52,9 +52,9 @@ def test_readme_names_queued_as_the_filing_default():
 
 
 def _e2e():
-    path = ROOT / "tools" / "rubric_e2e.py"
-    assert path.exists(), "tools/rubric_e2e.py is missing"
-    spec = importlib.util.spec_from_file_location("rubric_e2e", path)
+    path = ROOT / "tools" / "rulebook_e2e.py"
+    assert path.exists(), "tools/rulebook_e2e.py is missing"
+    spec = importlib.util.spec_from_file_location("rulebook_e2e", path)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
@@ -81,7 +81,7 @@ def test_e2e_all_off_matches_baseline(tmp_path):
 def test_e2e_refuses_a_non_empty_foreign_directory(tmp_path):
     m = _e2e()
     (tmp_path / "keep.txt").write_text("x")
-    p = subprocess.run([sys.executable, str(ROOT / "tools" / "rubric_e2e.py"), "run", str(tmp_path)],
+    p = subprocess.run([sys.executable, str(ROOT / "tools" / "rulebook_e2e.py"), "run", str(tmp_path)],
                        capture_output=True, text=True, stdin=subprocess.DEVNULL)
     assert p.returncode == 2
     assert (tmp_path / "keep.txt").exists()

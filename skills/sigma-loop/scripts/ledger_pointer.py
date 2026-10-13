@@ -1,4 +1,4 @@
-"""Ledger pointer for recorded decisions (decision rubric, slice 9 of story 988). Library only.
+"""Ledger pointer for recorded decisions (rulebook, slice 9 of story 988). Library only.
 
 A pointer is an unaddressed ledger `note` whose `ref` is the reserved value `decision-pointer` and
 whose text carries only `id|kind|how` triples (record id, question kind, autonomous or human).
@@ -6,7 +6,7 @@ No contract change: `note` is an existing kind and `ref`/`why` are existing opti
 is never the record: the records folder and the issue comment each carry the id, so a lost or stalled
 pointer loses nothing.
 
-Everything is OFF unless the records part is open AND `decision_rubric.records.pointer.enabled` is the
+Everything is OFF unless the records part is open AND `rulebook.records.pointer.enabled` is the
 JSON boolean true AND the ledger itself is enabled; closed means zero bytes written, nothing queued.
 
 Growth: a pointer is about 200 bytes, but the ledger names a file per writing process, so writes are
@@ -47,7 +47,7 @@ def _load(name):
 
 def _cfg(config):
     try:
-        sub = config["decision_rubric"]["records"]["pointer"]
+        sub = config["rulebook"]["records"]["pointer"]
         return sub if isinstance(sub, dict) else {}
     except Exception:
         return {}
@@ -67,7 +67,7 @@ def settings(config):
 def is_open(config):
     """True only when the records part is open, the pointer key is true and the ledger is enabled."""
     try:
-        if not _load("decision_rubric_cfg").load(config).part_enabled("records"):
+        if not _load("rulebook_cfg").load(config).part_enabled("records"):
             return False
         return settings(config)["enabled"] and _load("ledger").enabled(config)
     except Exception:

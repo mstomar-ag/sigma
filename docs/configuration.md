@@ -39,7 +39,7 @@ Defaults below are what `/sigma-init` scaffolds (`config.json.tmpl`). Not everyt
 
 ## Per-category autonomy thresholds
 
-The autonomy ladder reads one global set of thresholds, `decision_rubric.autonomy.levels`. A
+The autonomy ladder reads one global set of thresholds, `rulebook.autonomy.levels`. A
 repository can tune them per category with the optional file `.sdlc/categories.json`, a sibling of
 `.sdlc/rulebook.json`. The file is opt-in: the template ships none, and with no file (or the autonomy
 gate closed) behaviour and output are unchanged.

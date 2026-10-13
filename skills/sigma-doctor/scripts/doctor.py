@@ -1615,7 +1615,7 @@ def _unreachable_blocker_scan(gh_cfg, run):
 
 
 def _legacy_confirmation_scan(gh_cfg, config, run):
-    """Decision-rubric slice 18: open issues still carrying the LEGACY confirmation label.
+    """Rulebook slice 18: open issues still carrying the LEGACY confirmation label.
 
     Nothing writes that label any more (a filed follow-up is already a goal), so a hit is a leftover
     from an old board. ADVISORY only -- the caller reports it as a warning with the one gesture that
@@ -2768,7 +2768,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                 "the loop can find or resume them. Re-add the label that reflects their real state, "
                 "or close them."))
 
-        # Decision-rubric slice 18: the confirmation label is legacy-only, so a leftover is advice.
+        # Rulebook slice 18: the confirmation label is legacy-only, so a leftover is advice.
         leftovers = _legacy_confirmation_scan(gh_disc, cfg, run)
         if leftovers:
             shown = ", ".join(f"#{n}" for n in leftovers[:10])
@@ -4854,12 +4854,23 @@ def _model_max_tier(cfg):
     return tier if tier in ("haiku", "sonnet", "opus", "fable") else "opus"
 
 
-def _decision_rubric_state(cfg, sdlc_dir=None):
-    """Decision-rubric readout for the features dashboard (informational, read-only, no network).
+_STALE_RULEBOOK_KEY = "`decision_rubric` was renamed `rulebook`; it is not read"
+
+
+def _rulebook_state(cfg, sdlc_dir=None):
+    """The readout plus one plain line when the retired config key is still present (never read)."""
+    state = _rulebook_state_core(cfg, sdlc_dir)
+    if isinstance(cfg, dict) and "decision_rubric" in cfg:
+        return state + "; " + _STALE_RULEBOOK_KEY
+    return state
+
+
+def _rulebook_state_core(cfg, sdlc_dir=None):
+    """Rulebook readout for the features dashboard (informational, read-only, no network).
     The public signal is the public-repository profile being applied (ledger and auto-merge both off);
     it is a heuristic, so the warning says so."""
     try:
-        mod = _load_loop_script("decision_rubric_cfg")
+        mod = _load_loop_script("rulebook_cfg")
         rub = mod.load(cfg)
         reason = rub.closed_reason()
         if reason:
@@ -5205,12 +5216,12 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
         "run: python3 skills/sigma-doctor/scripts/migrate.py .sdlc (dry run), then --apply; "
         "and rename the environment variable it names to match",
     ))
-    rows.append(("decision rubric (OFF by default)", _decision_rubric_state(cfg, sdlc_dir),
-                 'config: "decision_rubric": {"records": {"enabled": true, "repo_visibility": "private"}}'))
+    rows.append(("rulebook (OFF by default)", _rulebook_state(cfg, sdlc_dir),
+                 'config: "rulebook": {"records": {"enabled": true, "repo_visibility": "private"}}'))
     rows.append(("autonomy levels (OFF by default)", _autonomy_state(cfg, sdlc_dir),
-                 'config: "decision_rubric": {"autonomy": {"enabled": true}}'))
+                 'config: "rulebook": {"autonomy": {"enabled": true}}'))
     rows.append(("applier tick (OFF by default)", _applier_state(cfg, sdlc_dir),
-                 'config: "decision_rubric": {"autonomy": {"applier": {"enabled": true}}}'))
+                 'config: "rulebook": {"autonomy": {"applier": {"enabled": true}}}'))
     return rows
 
 

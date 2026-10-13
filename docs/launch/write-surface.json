@@ -613,7 +613,7 @@
       "function": "_cache_save",
       "rule": "fs-remove",
       "count": 1,
-      "gate": "off by default: runs only when decision_rubric.import.classifier is model and the records part is open, during apply; writes only its own classification cache (fingerprint to kind and area, no text) under the sigma state directory, atomically (tmp file then replace); never deletes user data",
+      "gate": "off by default: runs only when rulebook.import.classifier is model and the records part is open, during apply; writes only its own classification cache (fingerprint to kind and area, no text) under the sigma state directory, atomically (tmp file then replace); never deletes user data",
       "risk": "low"
     },
     {
@@ -621,7 +621,7 @@
       "function": "_cache_save",
       "rule": "fs-write",
       "count": 2,
-      "gate": "off by default: runs only when decision_rubric.import.classifier is model and the records part is open, during apply; writes only its own classification cache (fingerprint to kind and area, no text) under the sigma state directory, atomically (tmp file then replace); never deletes user data",
+      "gate": "off by default: runs only when rulebook.import.classifier is model and the records part is open, during apply; writes only its own classification cache (fingerprint to kind and area, no text) under the sigma state directory, atomically (tmp file then replace); never deletes user data",
       "risk": "low"
     },
     {
@@ -645,7 +645,7 @@
       "function": "append",
       "rule": "fs-write",
       "count": 1,
-      "gate": "decision_rubric.records.enabled is exactly true; exclusive create of one new id-named file in the records folder; never overwrites",
+      "gate": "rulebook.records.enabled is exactly true; exclusive create of one new id-named file in the records folder; never overwrites",
       "risk": "medium"
     },
     {
@@ -693,7 +693,7 @@
       "function": "_acquire",
       "rule": "fs-write",
       "count": 1,
-      "gate": "off by default: runs only when decision_rubric.drift.enabled is true; writes only its own spend ledger and lock under the sigma state directory, atomically (tmp file then replace), pruned to a rolling window; never deletes user data",
+      "gate": "off by default: runs only when rulebook.drift.enabled is true; writes only its own spend ledger and lock under the sigma state directory, atomically (tmp file then replace), pruned to a rolling window; never deletes user data",
       "risk": "low"
     },
     {
@@ -701,7 +701,7 @@
       "function": "_record",
       "rule": "fs-remove",
       "count": 1,
-      "gate": "off by default: runs only when decision_rubric.drift.enabled is true; writes only its own spend ledger and lock under the sigma state directory, atomically (tmp file then replace), pruned to a rolling window; never deletes user data",
+      "gate": "off by default: runs only when rulebook.drift.enabled is true; writes only its own spend ledger and lock under the sigma state directory, atomically (tmp file then replace), pruned to a rolling window; never deletes user data",
       "risk": "low"
     },
     {
@@ -709,7 +709,7 @@
       "function": "_record",
       "rule": "fs-write",
       "count": 1,
-      "gate": "off by default: runs only when decision_rubric.drift.enabled is true; writes only its own spend ledger and lock under the sigma state directory, atomically (tmp file then replace), pruned to a rolling window; never deletes user data",
+      "gate": "off by default: runs only when rulebook.drift.enabled is true; writes only its own spend ledger and lock under the sigma state directory, atomically (tmp file then replace), pruned to a rolling window; never deletes user data",
       "risk": "low"
     },
     {
@@ -717,7 +717,7 @@
       "function": "_save",
       "rule": "fs-remove",
       "count": 1,
-      "gate": "off by default: runs only when decision_rubric.drift.enabled is true and a park declared a non-hard-stop kind; writes only its own verdict file under the sigma state directory, atomically (tmp file then replace), keeping the newest 200; never deletes user data",
+      "gate": "off by default: runs only when rulebook.drift.enabled is true and a park declared a non-hard-stop kind; writes only its own verdict file under the sigma state directory, atomically (tmp file then replace), keeping the newest 200; never deletes user data",
       "risk": "low"
     },
     {
@@ -725,7 +725,7 @@
       "function": "_save",
       "rule": "fs-write",
       "count": 2,
-      "gate": "off by default: runs only when decision_rubric.drift.enabled is true and a park declared a non-hard-stop kind; writes only its own verdict file under the sigma state directory, atomically (tmp file then replace), keeping the newest 200; never deletes user data",
+      "gate": "off by default: runs only when rulebook.drift.enabled is true and a park declared a non-hard-stop kind; writes only its own verdict file under the sigma state directory, atomically (tmp file then replace), keeping the newest 200; never deletes user data",
       "risk": "low"
     },
     {
@@ -3465,7 +3465,7 @@
       "risk": "medium"
     },
     {
-      "path": "tools/rubric_e2e.py",
+      "path": "tools/rulebook_e2e.py",
       "function": "run",
       "rule": "fs-write",
       "count": 3,
@@ -3477,7 +3477,7 @@
       "function": "_write_new",
       "rule": "fs-write",
       "count": 1,
-      "gate": "decision_rubric.autonomy.enabled is exactly true; exclusive create of one new id-named watch or veto file in the autonomy folder; never overwrites; a link folder is refused",
+      "gate": "rulebook.autonomy.enabled is exactly true; exclusive create of one new id-named watch or veto file in the autonomy folder; never overwrites; a link folder is refused",
       "risk": "medium"
     },
     {
@@ -3485,7 +3485,7 @@
       "function": "prune_watch",
       "rule": "fs-remove",
       "count": 1,
-      "gate": "decision_rubric.autonomy.enabled is exactly true; removes only watch files in the autonomy folder older than autonomy.watch.retention_days by embedded time; vetoes and links are never touched",
+      "gate": "rulebook.autonomy.enabled is exactly true; removes only watch files in the autonomy folder older than autonomy.watch.retention_days by embedded time; vetoes and links are never touched",
       "risk": "high"
     },
     {
@@ -3501,7 +3501,7 @@
       "function": "_write",
       "rule": "fs-write",
       "count": 1,
-      "gate": "decision_rubric.rulebook.enabled is exactly true; writes the rulebook file by temp file and atomic replace; propose adds a proposed rule and approve (owner only) seals one; a link folder is refused",
+      "gate": "rulebook.rules.enabled is exactly true; writes the rulebook file by temp file and atomic replace; propose adds a proposed rule and approve (owner only) seals one; a link folder is refused",
       "risk": "medium"
     },
     {
@@ -3509,7 +3509,7 @@
       "function": "_prune",
       "rule": "fs-remove",
       "count": 1,
-      "gate": "decision_rubric.autonomy.applier.enabled is exactly true; removes only answered or vetoed ask files in the autonomy folder older than two days by embedded time",
+      "gate": "rulebook.autonomy.applier.enabled is exactly true; removes only answered or vetoed ask files in the autonomy folder older than two days by embedded time",
       "risk": "high"
     },
     {
@@ -3525,7 +3525,7 @@
       "function": "_write_atomic",
       "rule": "fs-write",
       "count": 1,
-      "gate": "decision_rubric.autonomy.applier.enabled is exactly true; writes one ask file or the tick heartbeat in the autonomy folder by temp file and atomic replace; a link folder is refused",
+      "gate": "rulebook.autonomy.applier.enabled is exactly true; writes one ask file or the tick heartbeat in the autonomy folder by temp file and atomic replace; a link folder is refused",
       "risk": "medium"
     },
     {
