@@ -289,7 +289,9 @@ def test_the_fresh_registry_reads_as_adopted_and_empty_not_as_broken(tmp_path):
     define.open_unit(sdlc, UNIT, "feature", config=LOCAL_CONFIG, run=FakeHost(), cwd=tmp_path)
     features_dir = feature_registry.registry_dir(sdlc)
     assert features_dir.is_dir()
-    assert feature_registry.read(features_dir) == {}
+    # #1312: open now records the unit it opened (so other machines can see it). The contract here is
+    # adopted-and-readable versus broken, not "zero units": the only entry is the unit just opened.
+    assert list(feature_registry.read(features_dir)) == [UNIT]
 
 
 # ------------------------------------------------------------------------------- the ordered gesture
@@ -302,7 +304,8 @@ def test_the_branch_and_the_label_exist_before_any_issue_declares_the_unit(tmp_p
     Asserted over the observed call log rather than over the report, because the report is this
     module's own account of itself and the call log is what happened."""
     flow = _flow(tmp_path)
-    kinds = [a[0] for a in flow["host"].calls]
+    kinds = [a[0] for a in flow["host"].calls
+             if a[:2] not in (["git", "status"], ["git", "add"], ["git", "commit"])]   # #1312: record commit is last
     assert kinds[0] == "git" and "gh" in kinds
     assert kinds.index("gh") > max(i for i, k in enumerate(kinds) if k == "git")
     assert "feature/%s" % UNIT in flow["host"].branches
