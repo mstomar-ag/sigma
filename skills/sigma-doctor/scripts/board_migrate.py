@@ -80,11 +80,17 @@ def build_options_mutation(field_id, options, ready_name=READY):
     (rehearsal step [2]); the appended option is the only one without one, because it does not exist
     yet. Colour and description are carried through verbatim."""
     parts = []
+    new = '{name: "%s", color: %s, description: ""}' % (ready_name, _NEW_COLOR)
     for o in options:
+        # #1319 (PROVISIONAL): Ready goes before a `Parked` lane so the board reads in flow order;
+        # with no `Parked` lane it is appended, exactly as before.
+        if str(o.get("name") or "").strip().casefold() == "parked" and new not in parts:
+            parts.append(new)
         parts.append('{id: "%s", name: "%s", color: %s, description: "%s"}'
                      % (o.get("id"), o.get("name"), o.get("color") or "GRAY",
                         (o.get("description") or "").replace('"', "'")))
-    parts.append('{name: "%s", color: %s, description: ""}' % (ready_name, _NEW_COLOR))
+    if new not in parts:
+        parts.append(new)
     return ('query=mutation { updateProjectV2Field(input: {fieldId: "%s", singleSelectOptions: [%s]}) '
             '{ projectV2Field { ... on ProjectV2SingleSelectField { id } } } }'
             % (field_id, ", ".join(parts)))
