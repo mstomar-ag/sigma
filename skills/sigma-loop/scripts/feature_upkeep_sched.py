@@ -155,9 +155,17 @@ def refs_of(config, unit):
     rebase = _sibling("feature_rebase")
     remote = rebase._remote(config)
     base = (rebase._settings(config).get("base") or "").strip() if isinstance(rebase._settings(config), dict) else ""
-    if not base:
+    if not base or rebase.is_unit_base(base, remote):             # #1311: a unit branch is no base; nothing is offered
         return None, None
     return "%s/%s" % (remote, base), "%s/%s%s" % (remote, _sibling("features").BRANCH_PREFIX, unit)
+
+
+def unit_base_configured(config):
+    """#1327: True when `work.base` is set but names a unit branch (so the scheduler's note can say so, not just `no-base`)."""
+    rebase = _sibling("feature_rebase")
+    settings = rebase._settings(config)
+    base = (settings.get("base") or "").strip() if isinstance(settings, dict) else ""
+    return bool(base) and rebase.is_unit_base(base, rebase._remote(config))
 
 
 class _Opaque:
@@ -196,7 +204,8 @@ def make_measure(config, settings, sdlc_dir, root, now, expired=None):
         check()
         base_ref, unit_ref = refs_of(config, unit)
         if base_ref is None:
-            return drift_mod.Drift(drift_mod.UNKNOWN, drift_mod.UNKNOWN, drift_mod.UNKNOWN, drift_mod.UNKNOWN, ("no-base",))
+            why = _sibling("feature_rebase").UNIT_BASE_NOTE if unit_base_configured(config) else "no-base"   # #1327
+            return drift_mod.Drift(drift_mod.UNKNOWN, drift_mod.UNKNOWN, drift_mod.UNKNOWN, drift_mod.UNKNOWN, (why,))
         if "shallow" not in shared:
             shared["shallow"] = drift_mod.is_shallow(_drift_runner, root)
         check()

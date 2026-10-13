@@ -2541,6 +2541,29 @@ def _origin_mismatch_rows(base, disc, run):
         return []
 
 
+def _watcher_build_rows(base, cfg):
+    """#1315: warn when a live watcher recorded an older build (or none) than this plugin. Silent with no live watcher. Read-only."""
+    try:
+        st = pathlib.Path(base) / "state"
+        pid = int((st / "watch.pid").read_text(encoding="utf-8").strip())
+        os.kill(pid, 0)
+        if _load_loop_script("sync").watcher_liveness(base, cfg)[0] != "live":
+            return []
+        have = json.loads((pathlib.Path(__file__).resolve().parents[3] / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get("version")
+        try:
+            ran = (st / "watch.build").read_text(encoding="utf-8").strip()
+        except OSError:
+            ran = ""
+        if not have or ran == have:
+            return []
+        return [_chk("running watcher matches installed build", False,
+                     "the running watcher started from build %s but build %s is installed; stop it "
+                     "(touch .sdlc/state/watch.stop) and the next trigger restarts it on the new build."
+                     % (ran or "unknown (none recorded)", have))]
+    except Exception:                        # noqa: BLE001 - a detector that cannot run says nothing
+        return []
+
+
 def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_dirs=None,
           installed_plugins_path=None, agents_md=None, cheap_only=False, which=None):
     """Return the setup checks relevant to this project's config; each is {name, ok, fix}.
@@ -2682,6 +2705,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
         if _block(cfg, "work").get("enabled") and not cheap_only:
             out.extend(_landing_rows(base, cfg, run, which))        # #974: branch-creation rulesets
     out.extend(_origin_mismatch_rows(base, disc, run))      # #1314
+    out.extend(_watcher_build_rows(base, cfg))                # #1315
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
     out.extend(_resolver_rows(base, cfg, which, cheap_only))
     out.extend(_unit_record_rows(base, run, cheap_only))

@@ -7672,3 +7672,45 @@ def test_matching_config_leaves_other_rows_unchanged(tmp_path):
     on = [c["name"] for c in d.check(_sdlc(tmp_path / "a", cfg), run=_origin_runner(_SSH + "acme/widgets.git"), cheap_only=True)]
     off = [c["name"] for c in d.check(_sdlc(tmp_path / "b", cfg), run=_origin_runner(""), cheap_only=True)]
     assert on == off
+
+
+# #1315: a live watcher started from an older build than the installed plugin.
+def _plugin_version(d):
+    m = json.loads((D.parents[3] / ".claude-plugin" / "plugin.json").read_text())
+    return m["version"]
+
+
+def _watcher_state(tmp_path, build=None, pid=None, fresh=True):
+    base = pathlib.Path(_sdlc(tmp_path, {}))
+    st = base / "state"; st.mkdir()
+    (st / "watch.pid").write_text("%d\n" % (os.getpid() if pid is None else pid))
+    if fresh:
+        (st / "watch.heartbeat").write_text("")
+    if build is not None:
+        (st / "watch.build").write_text(build)
+    return base
+
+
+def _stale_build_rows(base):
+    checks = _doc().check(str(base), cheap_only=True)
+    return [c for c in checks if c["name"].startswith("running watcher matches installed build")]
+
+
+def test_live_watcher_with_older_build_warns_naming_both(tmp_path):
+    rows = _stale_build_rows(_watcher_state(tmp_path, build="0.0.1\n"))
+    assert len(rows) == 1 and rows[0]["ok"] is False
+    assert "0.0.1" in rows[0]["fix"] and _plugin_version(_doc()) in rows[0]["fix"]
+    assert "stop" in rows[0]["fix"].lower()
+
+
+def test_live_watcher_with_no_recorded_build_reads_as_older(tmp_path):
+    rows = _stale_build_rows(_watcher_state(tmp_path))
+    assert len(rows) == 1 and rows[0]["ok"] is False
+
+
+def test_matching_build_dead_pid_stale_heartbeat_or_no_state_add_no_row(tmp_path):
+    cur = _plugin_version(_doc())
+    assert _stale_build_rows(_watcher_state(tmp_path / "a", build=cur + "\n")) == []
+    assert _stale_build_rows(_watcher_state(tmp_path / "b", build="0.0.1", pid=2 ** 22 + 12345)) == []
+    assert _stale_build_rows(_watcher_state(tmp_path / "c", build="0.0.1", fresh=False)) == []
+    assert _stale_build_rows(pathlib.Path(_sdlc(tmp_path / "d", {}))) == []
