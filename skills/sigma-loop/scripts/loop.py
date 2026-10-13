@@ -4113,8 +4113,11 @@ def _reconcile_one(sdlc_dir, config, source, goal, run, now, results):
 
 
 def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transition="park",
-            merged_pr=False, retry_close=False, housekeeping=True, qkind=None, config=None):
-    """`config` (#1178): with a declared `qkind` on a park, opens the applier's ask (closed gate: nothing).
+            merged_pr=False, retry_close=False, housekeeping=True, qkind=None, config=None,
+            park_failed=None):
+    """`park_failed` (#1303): a list the CLI `record` verb passes; one item is appended when the source
+    reports its park label write did NOT land (`park()` returned exactly False). None = no change.
+    `config` (#1178): with a declared `qkind` on a park, opens the applier's ask (closed gate: nothing).
     `qkind` (#994): a declared question kind; appends one machine line to the text handed to
     `source.park` (and only there). None keeps the comment byte-identical.
     `housekeeping` (#465): False only from the merge-reconcile pass, which holds
@@ -4206,9 +4209,11 @@ def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transit
         if qkind is not None:                      # #994: the declared kind rides inside the text
             park_text = park_text + "\n" + _load("qkind").render_line(qkind)
         if tier is not None and "tier" in inspect.signature(source.park).parameters:
-            source.park(goal, park_text, tier=tier)
+            landed = source.park(goal, park_text, tier=tier)
         else:
-            source.park(goal, park_text)
+            landed = source.park(goal, park_text)
+        if landed is False and park_failed is not None:
+            park_failed.append(goal)
         if qkind is not None and config is not None:   # #1178: the ask opens after the park landed
             try:
                 _load("applier").open_for_park(sdlc_dir, config, goal, qkind, source=source)
@@ -6609,11 +6614,21 @@ def _dispatch(argv):
                       f"for {argv[3]} -- run `work.py pr` first, or record done/parked/failed",
                       file=sys.stderr)
                 return 2
+        park_failed = []
         if merged_pr:
             _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],
-                    reason, retro_grade=retro_grade, merged_pr=True, qkind=qkind, config=config); return 0
-        _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],
-                reason, retro_grade=retro_grade, qkind=qkind, config=config); return 0
+                    reason, retro_grade=retro_grade, merged_pr=True, qkind=qkind, config=config,
+                    park_failed=park_failed)
+        else:
+            _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],
+                    reason, retro_grade=retro_grade, qkind=qkind, config=config,
+                    park_failed=park_failed)
+        if park_failed:       # #1303: the park comment landed but the label did not -- not a success
+            print(f"loop.py record: PARK NOT APPLIED for {argv[3]}: the park label write failed "
+                  "(GraphQL and REST) -- the issue is still pickable; retry the record once the "
+                  "GitHub API budget recovers", file=sys.stderr)
+            return 1
+        return 0
     if len(argv) >= 4 and argv[1] == "claim":       # #1962: claim a goal you already chose
         _coexist_notice(argv[2], "loop.py claim", once=True)    # #251/#314: once per run
         config = state.load_config(argv[2])

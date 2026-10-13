@@ -326,7 +326,7 @@ def test_doctor_row_reports_oldest_age_and_gesture(tmp_path):
     mod.begin(tmp_path, OPEN, "older", 1, PRE, 400)
     row = mod.doctor_row(tmp_path, OPEN, 400 + 7200)
     assert row["ok"] is False and "older" in row["fix"] and "120 minute" in row["fix"] and "2 record" in row["fix"]
-    assert "verify_merge.py land .sdlc older" in row["fix"]
+    assert "verify_merge.py land .sdlc feature/older" in row["fix"] and "<unit>" not in row["fix"]
     assert (ROOT / "skills" / "sigma-rebase" / "scripts" / "verify_merge.py").is_file()
 
 
@@ -408,3 +408,12 @@ def test_doctor_emits_the_row_only_when_open_and_pending(tmp_path):
     assert name in _doctor_rows(sdlc, OPEN)
     assert name not in _doctor_rows(sdlc, {})                       # closed gate: no row
     assert name not in _doctor_rows(sdlc, {"upkeep": {"enabled": "true"}})
+
+
+def test_doctor_row_names_the_outcome_and_skips_settled_records(tmp_path):
+    mod.begin(tmp_path, OPEN, "u1", 1, PRE, 100)
+    mod.finish(tmp_path, OPEN, "u1", mod.Verdict(mod.UNCONFIRMED, "lost-acknowledgment"), 150)
+    row = mod.doctor_row(tmp_path, OPEN, 400)
+    assert "unconfirmed" in row["fix"] and "lost-acknowledgment" in row["fix"]
+    mod.finish(tmp_path, OPEN, "u1", mod.Verdict(mod.REFUSED, "status-502"), 150)
+    assert mod.doctor_row(tmp_path, OPEN, 400) is None
