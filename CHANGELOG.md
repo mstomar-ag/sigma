@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A person's `no` inside the applier window is honoured (#1332).** An owner's exact `no` on a pending ask now cancels it before the applier acts, and a veto `no` is judged by the comment's own time, so a tick that runs late (up to `stale_after_intervals` watch intervals past the veto period) still records it; a `no` made after the period is ignored.
 - **The unpark skill names the rule approve step (#1326).** One sentence now says `rule_draft.py draft` then `rule_draft.py approve <state-folder> <rule id>`, so an agent can find the approval verb.
 - **Upkeep shows why a unit-branch base is refused and also refuses remote-qualified spellings (#1327).** The scheduler's drift note and the job record now say "base is a unit branch" instead of reading like an empty base, and `origin/feature/x` or `refs/heads/feature/x` as `work.base` is refused like `feature/x`; default-branch bases are unchanged.
 - **`define.py open` no longer commits the unit record on a feature branch (#1325).** When a unit branch is checked out, or the branch cannot be read, the record is still written but left uncommitted and the one-line note names the exact `git add` and `git commit` commands; any other branch commits as before.
