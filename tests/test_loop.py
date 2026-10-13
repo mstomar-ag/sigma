@@ -7592,6 +7592,10 @@ def test_end_to_end_a_sibling_green_cannot_satisfy_this_runs_record_done():
         base = _verify_base(d)
         goal = str(pathlib.Path(base) / "goals" / "0158.md")   # a real goal file so `record` can complete
         pathlib.Path(goal).write_text("---\nid: 0158\nstatus: in_progress\n---\nbody\n")
+        (pathlib.Path(base) / "acceptance").mkdir()             # #1338: enforce-on verify needs a record
+        (pathlib.Path(base) / "acceptance" / "0158.md").write_text(
+            '---\nkind: "acceptance"\ngoal: "0158"\nverify_command: null\n---\n'
+            "## Done when\n- [ ] one\n- [ ] two\n- [ ] three\n")
         _loop().main(["loop.py", "start-run", base])            # stamp run_started_at (freshness base)
         # Worker A's own verify genuinely FAILS (a red chain), stamping run=worker-A, exit!=0:
         _cfg(base, "false")

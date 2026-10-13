@@ -1330,6 +1330,9 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None):
         settings = reading.settings
         now = int(time.time() if now is None else now)
         rows = []
+        if getattr(_load_loop_script("feature_rebase"), "LEVEL2_PLAN_FACTORY", None) is None:     # #1344
+            rows.append(_chk("resolver level: not available yet", False,
+                             "conflicts.resolve \"agent\" has no effect in this release; use \"mechanical\" or \"off\""))
         binary = (which or shutil.which)("claude")
         if not binary:
             rows.append(_chk("resolver cli: not found on PATH", False, "install the host CLI the resolver launches"))
