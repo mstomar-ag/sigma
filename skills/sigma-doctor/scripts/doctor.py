@@ -5026,15 +5026,30 @@ def _model_max_tier(cfg):
 _STALE_RULEBOOK_KEY = "`decision_rubric` was renamed `rulebook`; it is not read"
 
 
-def _rulebook_state(cfg, sdlc_dir=None):
+def _real_repo_public(cfg, run):
+    """True/False from ONE REST read of the repository's `private` field, None when it cannot be read
+    (no gh, a failed call, an unexpected reply). Only called when records are on and a runner was given."""
+    try:
+        gh_cfg = cfg.get("gh") if isinstance(cfg, dict) else None
+        repo = (gh_cfg.get("repo") if isinstance(gh_cfg, dict) else None) or "{owner}/{repo}"
+        raw = run(["gh", "api", "repos/" + repo, "--jq", ".private"])
+        if isinstance(raw, _RawFailure):
+            return None
+        text = str(raw).strip().lower()
+        return {"false": True, "true": False}.get(text)
+    except Exception:
+        return None
+
+
+def _rulebook_state(cfg, sdlc_dir=None, run=None):
     """The readout plus one plain line when the retired config key is still present (never read)."""
-    state = _rulebook_state_core(cfg, sdlc_dir)
+    state = _rulebook_state_core(cfg, sdlc_dir, run)
     if isinstance(cfg, dict) and "decision_rubric" in cfg:
         return state + "; " + _STALE_RULEBOOK_KEY
     return state
 
 
-def _rulebook_state_core(cfg, sdlc_dir=None):
+def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
     """Rulebook readout for the features dashboard (informational, read-only, no network).
     The public signal is the public-repository profile being applied (ledger and auto-merge both off);
     it is a heuristic, so the warning says so."""
@@ -5058,8 +5073,20 @@ def _rulebook_state_core(cfg, sdlc_dir=None):
             cap = store.ceiling_warning(sdlc_dir, cfg)
             if cap:
                 extra.append(cap)
-            if mod.visibility(cfg) == "public":
-                extra.append("public repository with records on: answers are posted as keys only")
+            public_msg = "public repository with records on: answers are posted as keys only"
+            if run is None:
+                if mod.visibility(cfg) == "public":
+                    extra.append(public_msg)
+            else:
+                real = _real_repo_public(cfg, run)
+                if real is True:
+                    extra.append(public_msg + " (read from GitHub)")
+                elif real is None:
+                    # No gh or a failed read: the configured value decides, and the row says so.
+                    if mod.visibility(cfg) == "public":
+                        extra.append(public_msg)
+                    extra.append("repository visibility not read (gh unavailable or read failed); "
+                                 "using the configured value %s" % mod.visibility(cfg))
             old = store.untracked_old(sdlc_dir, config=cfg)
             if old:
                 extra.append("%d decision records are untracked for over a day; commit them" % len(old))
@@ -5392,7 +5419,7 @@ def features(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None):
         "run: python3 skills/sigma-doctor/scripts/migrate.py .sdlc (dry run), then --apply; "
         "and rename the environment variable it names to match",
     ))
-    rows.append(("rulebook (OFF by default)", _rulebook_state(cfg, sdlc_dir),
+    rows.append(("rulebook (OFF by default)", _rulebook_state(cfg, sdlc_dir, run),
                  'config: "rulebook": {"records": {"enabled": true, "repo_visibility": "private"}}'))
     rows.append(("autonomy levels (OFF by default)", _autonomy_state(cfg, sdlc_dir),
                  'config: "rulebook": {"autonomy": {"enabled": true}}'))
