@@ -2740,3 +2740,21 @@ def test_watch_daemon_run_rotates_an_oversized_log_end_to_end(tmp_path):
     assert "tick #1" not in rolled
     assert "watch: tick #2" in fresh
     assert not (d / "state" / "watch.log.2").exists()      # exactly one predecessor
+
+
+# #1315: the daemon records the plugin version it started with, beside (never inside) the frozen pid.
+def test_takeover_writes_watch_build_and_leaves_pid_format_frozen(tmp_path):
+    wd = _wd()
+    p = wd.paths(_sdlc(tmp_path))
+    wd.take_over(p)
+    manifest = json.loads((S.parents[2] / ".claude-plugin" / "plugin.json").read_text())
+    assert (p.state / "watch.build").read_text().strip() == manifest["version"]
+    assert p.pid.read_text() == "%d\n" % os.getpid()
+
+
+def test_cleanup_removes_watch_build_with_the_pid(tmp_path):
+    wd = _wd()
+    p = wd.paths(_sdlc(tmp_path))
+    wd.take_over(p)
+    wd.cleanup(p, os.getpid())
+    assert not (p.state / "watch.build").exists()
