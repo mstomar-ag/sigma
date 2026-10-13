@@ -1253,6 +1253,37 @@ def _preflight_fix(check):
     return head + (f" ({tail})" if tail else "")
 
 
+def _unit_record_rows(base, run, cheap_only):
+    """#1312: one row on unit records git cannot show other machines -- a record file that is
+    untracked, or a remote `feature/*` branch with no record. Absent without `.sdlc/features/`;
+    detection only, nothing is committed here. An unanswered git call is no finding."""
+    features = base / "features"
+    if not features.is_dir():
+        return []
+    repo = str(base.parent)
+    found = []
+    out = run(["git", "-C", repo, "ls-files", "--others", "--exclude-standard", "--", str(features / "units")])
+    if isinstance(out, str) and getattr(out, "raw", None) is None:
+        found += ["untracked record " + pathlib.PurePath(x).name for x in out.splitlines() if x.strip()]
+    if not cheap_only:
+        heads = run(["git", "-C", repo, "ls-remote", "--heads", "origin", "feature/*"])
+        if isinstance(heads, str) and getattr(heads, "raw", None) is None:
+            try:
+                fr = _load_loop_script("feature_registry")
+                known = {k.lower() for k in fr.read(fr.registry_dir(base))}
+            except Exception:                        # noqa: BLE001 - unreadable registry answers nothing
+                known = None
+            if known is not None:
+                for line in heads.splitlines():
+                    ref = line.split("\t")[-1].strip()
+                    if ref.startswith("refs/heads/" + _UNIT_BRANCH_PREFIX):
+                        unit = ref[len("refs/heads/" + _UNIT_BRANCH_PREFIX):]
+                        if unit.lower() not in known:
+                            found.append("remote branch " + ref[len("refs/heads/"):] + " has no record")
+    return [_chk("unit records visible to other machines", not found,
+                 "; ".join(found[:5]) + " -- commit the record (git add <file> && git commit) or open the unit")]
+
+
 def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
     """The background upkeep scheduler's liveness and readiness rows (never a pass for something that did not run). Silent
     unless the opt-in block is on or invalid, decided by the gate's own reader, not by looking for the block here. The git
@@ -2653,6 +2684,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     out.extend(_origin_mismatch_rows(base, disc, run))      # #1314
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
     out.extend(_resolver_rows(base, cfg, which, cheap_only))
+    out.extend(_unit_record_rows(base, run, cheap_only))
     if disc.get("source") == "github":
         gh_disc = _block(disc, "github")
         if _block(gh_disc, "project").get("enabled"):
