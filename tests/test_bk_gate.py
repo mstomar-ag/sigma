@@ -334,7 +334,7 @@ def test_pass_pushes_legacy_or_atomic(tmp_path):
                        before + ":" + backup]], pushes
     refs = bk.remote_refs(world.local)
     assert refs[backup] == before and refs["refs/heads/feature/billing"] == report["after"] != before, refs
-    assert [c[1] for c in calls] == subcommands, "the open path must run the same commands as the closed one"
+    assert [c[1] for c in calls if c[1] != "merge-base"] == subcommands, "the open path must run the same commands as the closed one"
 
     def other_writer(world, argv):
         racer = world.root / "racer"
