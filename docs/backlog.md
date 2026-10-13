@@ -277,6 +277,8 @@ breaks). Tune it under `discovery.github.project` — `owner`/`title` (default `
 (reuse an existing board), `status_field` (the field's name), and `columns` (override the column names
 to match an existing board).
 
+**Board back-fill (#1305).** A verb about one issue cards only that issue. Goals missing from the board are carded by the watcher tick, at most `discovery.github.project.backfill_cap` per tick (default 20, `0` = off), and only while GraphQL remaining is at least `backfill_min_graphql` (default 1000; an unreadable limit skips the tick).
+
 **`queue_source`: which one actually decides what gets picked.** Two modes, under
 `discovery.github.project.queue_source`:
 - **`"status"`** (the default, once the board has a `Ready` option) — **labels decide ELIGIBILITY,

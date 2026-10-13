@@ -154,3 +154,26 @@ def test_main_cli_defaults_sdlc_dir_when_omitted(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(reconcile_tick, "tick", lambda d: seen.append(d) or "")
     reconcile_tick.main(["reconcile_tick.py"])
     assert seen == [".sdlc"]
+
+
+def test_tick_board_backfill_gate_closed_is_silent(tmp_path):
+    """#1305: a local-goals source (or a board that is off) adds nothing to the summary and runs no gh."""
+    calls = []
+    d = _sdlc(tmp_path)
+    assert reconcile_tick.tick(d, config={}, run=lambda a: calls.append(a) or "") == ""
+    assert calls == []
+
+
+def test_tick_runs_the_board_backfill_only_when_the_board_is_enabled(tmp_path, monkeypatch):
+    """#1305: github source + project enabled -> the watcher back-fill runs and is reported."""
+    d = _sdlc(tmp_path)
+    cfg = {"discovery": {"source": "github", "github": {"project": {"enabled": True}}}}
+    seen = []
+    real = reconcile_tick._load("sources")
+    monkeypatch.setattr(real.GitHubSource, "backfill_board", lambda self, cap=None: seen.append(1) or 3)
+    monkeypatch.setattr(reconcile_tick, "_load", lambda name: real)
+    assert "3 board card(s) backfilled" in reconcile_tick.tick(d, config=cfg, run=lambda a: "[]")
+    off = {"discovery": {"source": "github", "github": {"project": {"enabled": False}}}}
+    seen.clear()
+    reconcile_tick.tick(d, config=off, run=lambda a: "[]")
+    assert seen == []
