@@ -69,7 +69,7 @@ DEFAULT_KEEP_DAYS = 14
 # request, bounded by that request's timeout (well under a minute), so ten minutes is generous without making a real
 # crash block the unit for long. Clock-skewed (future-dated) records count as young: leaving one is the safe side.
 LIVENESS_SECONDS = 600
-RERUN_GESTURE = "python3 skills/sigma-rebase/scripts/verify_merge.py land .sdlc <unit>"
+RERUN_GESTURE = "python3 skills/sigma-rebase/scripts/verify_merge.py land .sdlc feature/<unit>"
 
 MERGED = "merged"
 MERGED_WARNING = "merged-with-warning"
@@ -324,7 +324,7 @@ def prune(sdlc_dir, config, keep_days=DEFAULT_KEEP_DAYS, now=None):
 
 
 def pending(sdlc_dir):
-    """[(unit, started_at)] of the readable records, oldest first. READ ONLY; bounded by MAX_LIST_SCAN entries."""
+    """[(unit, started_at, outcome, reason)] of the unsettled (pending or unconfirmed) records, oldest first. READ ONLY; bounded by MAX_LIST_SCAN entries."""
     found = []
     try:
         with os.scandir(pathlib.Path(sdlc_dir) / STORE_REL) as entries:
@@ -341,8 +341,8 @@ def pending(sdlc_dir):
                 except (OSError, ValueError, RecursionError):
                     continue
                 if isinstance(doc, dict) and doc.get("schema") == SCHEMA_ID and type(doc.get("started_at")) is int \
-                        and isinstance(doc.get("unit"), str):
-                    found.append((doc["unit"], doc["started_at"]))
+                        and isinstance(doc.get("unit"), str) and doc.get("outcome") in (PENDING, UNCONFIRMED):
+                    found.append((doc["unit"], doc["started_at"], doc["outcome"], str(doc.get("reason"))[:80]))
     except OSError:
         return []
     return sorted(found, key=lambda item: item[1])
@@ -355,8 +355,9 @@ def doctor_row(sdlc_dir, config, now):
     records = pending(sdlc_dir)
     if not records:
         return None
-    unit, started = records[0]
+    unit, started, outcome, why = records[0]
     age = max(0, now - started)
     return {"name": "unit landing not left pending", "ok": False,
-            "fix": "the landing of unit %s has been pending for %d minute(s) (%d record(s) in all); a landing that died "
-                   "leaves this record. Re-run: %s" % (unit, age // 60, len(records), RERUN_GESTURE.replace("<unit>", unit))}
+            "fix": "the landing of unit %s is %s (%s) and has been so for %d minute(s) (%d record(s) in all); a landing "
+                   "that died leaves this record. Re-run: %s"
+                   % (unit, outcome, why, age // 60, len(records), RERUN_GESTURE.replace("<unit>", unit))}
