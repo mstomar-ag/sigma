@@ -178,6 +178,16 @@ def _declared_kind(comments):
     return kind
 
 
+def _kind_at(comments, i, fallback=None):
+    """The kind of the nearest `sigma-qkind:` line at or before comment `i`; `fallback` when none precedes it."""
+    qk = _load("qkind")
+    for c in reversed(comments[: i + 1]):
+        got = qk.parse_line(c.get("body") or "") if isinstance(c, dict) else None
+        if got:
+            return got
+    return fallback
+
+
 def _from_comment(c, issue, legacy, bs, qkind=None):
     body = c.get("body") or ""
     span = _span(body, legacy, bs.UNPARK_QA_START, bs.UNPARK_QA_END)
@@ -289,8 +299,9 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
                 stats["unpark-qa"]["files_read"] += 1
                 got = list(read(config, issue))
                 declared = _declared_kind(got)
-                for c in got:
-                    for cand in _from_comment(c, issue, legacy, bs, declared) if isinstance(c, dict) else []:
+                for i, c in enumerate(got):
+                    kind = _kind_at(got, i, declared) if isinstance(c, dict) else None
+                    for cand in _from_comment(c, issue, legacy, bs, kind) if isinstance(c, dict) else []:
                         if len(cands) >= cap:
                             full = True
                             break
@@ -416,6 +427,12 @@ def model_mode(config):
         and _load("decision_store").enabled(config)
 
 
+def _declared_or(cand, kind, qkinds):
+    """A kind the comment declared is kept over the model's answer (#1354)."""
+    d = cand.get("qkind")
+    return d if d in qkinds and d != UNKNOWN else kind
+
+
 def classify_model(sdlc_dir, config, cands, call, skip=()):
     """-> (rows, info). Rows like `classify`. `call is None` sends nothing (plan): uncached rows are
     unknown and counted as would_send. An invalid answer is unknown and cached; an error or timeout is unknown, uncached and
@@ -431,7 +448,7 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
         fp = _fp(c)
         if fp in cache:
             info["cached"] += 1
-            rows.append(dict(c, qkind=cache[fp]["qkind"], area=cache[fp]["area"], fp=fp))
+            rows.append(dict(c, qkind=_declared_or(c, cache[fp]["qkind"], qkinds), area=cache[fp]["area"], fp=fp))
             continue
         kind, area = UNKNOWN, REPO_AREA
         if call is None:
@@ -458,7 +475,7 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
                 kind, area = ans["kind"], ans["area"]
             cache[fp] = {"qkind": kind, "area": area}
             fresh = True
-        rows.append(dict(c, qkind=kind, area=area, fp=fp))
+        rows.append(dict(c, qkind=_declared_or(c, kind, qkinds), area=area, fp=fp))
     if fresh:
         try:
             _cache_save(sdlc_dir, cache)
