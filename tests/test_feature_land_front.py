@@ -6,6 +6,7 @@ the push."""
 import ast
 import importlib.util
 import json
+import os
 import pathlib
 import types
 
@@ -47,6 +48,7 @@ class World:
         self.settings = {"allow_merge_commit": True, "delete_branch_on_merge": False}
         self.pr_list_rc = 0
         self.git_calls, self.gh_calls, self.passes, self.verifies = [], [], [], []
+        self.goals = []
         self.view = None
         self.__dict__.update(kw)
 
@@ -83,6 +85,7 @@ class World:
 
     def rebase_pass(self, sdlc_dir, config, goal, unit, run=None, cwd=None, remote=None):
         self.passes.append(unit)
+        self.goals.append(goal)
         return {"outcome": "current"}
 
     def verify(self, command, tree, seconds):
@@ -112,6 +115,14 @@ def test_closed_gate_attempts_and_writes_nothing(tmp_path, config):
     assert out.get("closed") is True
     assert (trap.processes, trap.models, trap.network, trap.writes) == ([], [], [], [])
     assert tree(tmp_path) == before
+
+
+def test_landing_passes_no_goal_to_the_rebase_pass(tmp_path):
+    """#1340. Landing is not a goal: the pass receives goal=None, never the unit name."""
+    w = World(tmp_path)
+    w.land()
+    assert w.passes == ["voice"], w.passes
+    assert w.goals == [None], w.goals
 
 
 def test_control_gate_that_does_not_close_is_seen(tmp_path):
@@ -370,3 +381,66 @@ def test_cli_verb_closed_gate_exits_4(tmp_path, capsys):
     (tmp_path / ".sdlc" / "config.json").write_text("{}")
     assert load().main(["land", "voice", "--state-dir", str(tmp_path / ".sdlc"), "--rehearse"]) == 4
     assert "gate is closed" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------------------------- #1333 records
+
+def _write_record(w, **fields):
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_file_location("ful3", SCRIPTS / "feature_upkeep_landing.py"))
+    mod.__spec__.loader.exec_module(mod)
+    doc = {"schema": mod.SCHEMA_ID, "unit": "voice", "pr": 7, "head": TIP, "base": BASE, "observed_unmerged": True,
+           "call": {"kind": "lost", "status": None}, "started_at": 1, "outcome": "unconfirmed", "reason": "x",
+           "last_read_at": None, "merged_at": None, "merge_commit": None}
+    doc.update(fields)
+    path = mod.record_path(w.sdlc, "voice")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc))
+    return mod
+
+
+@pytest.mark.parametrize("outcome", ["refused", "merged-with-warning"])
+def test_a_settled_record_does_not_block_a_later_land(tmp_path, outcome):
+    w = World(tmp_path)
+    _write_record(w, outcome=outcome, reason="status-502")
+    assert w.land()["outcome"] == "rehearsal"
+
+
+def test_a_pending_record_whose_pr_reads_back_merged_is_settled_inside_land(tmp_path):
+    w = World(tmp_path)
+    mod = _write_record(w, outcome="pending", reason="call-in-flight")
+    orig = w.gh
+
+    def gh(args):
+        a = " ".join(args)
+        if "commits/" in a:
+            return json.dumps({"parents": [{"sha": BASE}, {"sha": TIP}]})
+        if "pulls/7" in a and "PUT" not in a and "POST" not in a:
+            return json.dumps({"state": "closed", "merged": True, "head": {"sha": TIP}, "merge_commit_sha": "d" * 40})
+        return orig(args)
+    w.gh = gh
+    w.land()
+    assert mod.read_record(w.sdlc, "voice") is None          # settle deleted the merged record
+
+
+def test_a_still_unconfirmed_record_refuses(tmp_path):
+    w = World(tmp_path)
+    mod = _write_record(w, outcome="unconfirmed", reason="readback-failed")
+    orig = w.gh
+
+    def gh(args):
+        if "pulls/7" in " ".join(args) and "POST" not in " ".join(args):
+            raise OSError("read failed")
+        return orig(args)
+    w.gh = gh
+    assert reason(w.land()) == "refused:pending-landing"
+    assert mod.read_record(w.sdlc, "voice")["outcome"] == "unconfirmed"
+
+
+def test_land_prunes_stale_records(tmp_path):
+    w = World(tmp_path)
+    mod = _write_record(w, outcome="refused")
+    other = mod.record_path(w.sdlc, "voice").with_name("old.json")
+    other.write_text("{}")
+    os.utime(other, (1, 1))
+    w.land()
+    assert not other.exists()

@@ -3234,14 +3234,16 @@ class GitHubSource:
         # exact set) leaves this comment byte-for-byte what it always was.
         if tier:
             comment += f" [decision tier: {tier}]"
-        self._offboard(goal, comment)
+        # #1303: a park must land. True/False = whether the park's label write landed (the CLI
+        # `record` verb exits non-zero on False); `fail()` and every other transition are unchanged.
+        return self._offboard(goal, comment, rest_fallback=True)
 
     def fail(self, goal, reason):
         # Same board mechanics as park (the label is a visibility tag) — the issue
         # timeline carries the distinction: this needs a FIX, not a decision.
         self._offboard(goal, FAIL_COMMENT_PREFIX + _sanitize_offboard_reason(reason))
 
-    def _offboard(self, goal, comment):
+    def _offboard(self, goal, comment, rest_fallback=False):
         self._ensure_labels()
         # #1350: read the CURRENT label set FIRST, before mutating anything — SKILL.md's own
         # existing flow calls `record ... parked` (which lands here via park()/fail()) right after
@@ -3286,6 +3288,8 @@ class GitHubSource:
             goal, add=[self.parked_label],
             remove=[self.goal_label, self.in_progress_label, self.goal_blocked_label],
             what="park")
+        if not landed and rest_fallback:
+            landed = self._park_labels_rest(goal)       # #1303: park only; REST = separate budget
         if not landed:
             self._repair_partial_park(goal)
         # #1657 follow-up (scope): routed through `note()` -- same chokepoint `note()`'s other
@@ -3310,6 +3314,21 @@ class GitHubSource:
         # `Parked` option falls through to exactly the historical column.
         if not self._set_board_status(goal, self.col["parked"], warn=False):
             self._set_board_status(goal, self.col["blocked"])
+        return bool(landed)
+
+    def _park_labels_rest(self, goal):
+        """#1303: the park's label change over REST when the GraphQL swap failed (GraphQL exhaustion
+        is the usual cause; REST has its own rate budget). Add `parked` first, then drop the
+        membership/overlay labels (a 404 on a label the issue lacks is a no-op) -- the swap's own
+        add-first order, via the existing REST helpers. Returns whether it landed; never raises."""
+        try:
+            self._issue_add_labels(goal, [self.parked_label])
+            for name in (self.goal_label, self.in_progress_label, self.goal_blocked_label):
+                if name:
+                    self._issue_remove_label(goal, name)
+            return True
+        except Exception:                        # noqa: BLE001 - the caller reports the failure
+            return False
 
     def _repair_partial_park(self, goal):
         """#722: finish a park whose swap failed AFTER its add landed.

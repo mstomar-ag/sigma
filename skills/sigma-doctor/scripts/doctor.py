@@ -5007,6 +5007,11 @@ def _rulebook_state_core(cfg, sdlc_dir=None):
             if ptr.is_open(cfg):
                 extra.append("ledger pointer on: %d ledger entry files, %d ids queued"
                              % (ptr.pointer_file_count(sdlc_dir), ptr.queued(sdlc_dir)))
+        if sdlc_dir is not None:
+            at = _load_loop_script("drift_judge").ceiling_paused_at(cfg, time.time(), sdlc_dir)
+            if at is not None:
+                extra.append("drift judge paused: daily ceiling reached at "
+                             + time.strftime("%H:%M", time.localtime(at)))
         return state + "".join("; " + e for e in extra)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
