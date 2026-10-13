@@ -416,7 +416,7 @@ def main(argv):
         print(json.dumps(publish(argv[2], config)))
         return 0
     help_asked = len(argv) > 1 and argv[1] in ("-h", "--help")
-    print("usage: decision_store.py publish <sdlc-dir>", file=sys.stdout if help_asked else sys.stderr)
+    print("usage: decision_store.py publish <state-folder>", file=sys.stdout if help_asked else sys.stderr)
     return 0 if help_asked else 2
 
 
