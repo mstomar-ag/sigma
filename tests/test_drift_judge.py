@@ -139,3 +139,54 @@ def test_template_and_privacy_pins():
     assert d["enabled"] is False and d["model"] is None and d["spend_ceiling_usd_per_day"] is None
     assert d["rounds"] == 1 and d["max_budget_usd_per_call"] == 0.10
     assert "drift_judge.py" in (ROOT / "docs/privacy.md").read_text()
+
+
+TIMEOUT_ANSWER = {"kind": None}
+
+
+def _spend(tmp_path):
+    p = tmp_path / "state" / "drift-judge-spend.json"
+    return json.loads(p.read_text())["records"] if p.exists() else []
+
+
+def test_timeout_answer_is_not_a_verdict_and_charges_budget(tmp_path):
+    f = Fake(TIMEOUT_ANSWER, cost=0)
+    v = _mod().judge("q", DOCS, _cfg(), tmp_path, call=f)
+    assert v.kind == "not_judged" and v.reason == "call_failed"
+    assert [r["usd"] for r in _spend(tmp_path)] == [0.1]
+
+
+def test_garbage_kind_is_not_a_verdict(tmp_path):
+    for ans in ({"kind": "maybe"}, {"cost_usd": 0}, {"kind": 3}):
+        v = _mod().judge("q", DOCS, _cfg(), tmp_path, call=Fake(ans))
+        assert v.reason == "call_failed"
+
+
+def test_valid_answers_keep_their_cost_and_verdict(tmp_path):
+    m = _mod()
+    for kind in ("consistent", "not_covered"):
+        v = m.judge("q", DOCS, _cfg(), tmp_path, call=Fake({"kind": kind}, cost=0.02))
+        assert v.kind == kind
+    assert [r["usd"] for r in _spend(tmp_path)] == [0.02, 0.02]
+
+
+def test_charged_timeouts_reach_the_ceiling(tmp_path):
+    m = _mod()
+    cfg = _cfg(spend_ceiling_usd_per_day=0.25)
+    now = time.time()
+    reasons = [m.judge("q", DOCS, cfg, tmp_path, call=Fake(TIMEOUT_ANSWER, cost=0), now=now).reason
+               for _ in range(4)]
+    assert reasons == ["call_failed"] * 3 + ["ceiling_reached"]
+
+
+def test_ceiling_paused_at_names_the_crossing_record(tmp_path):
+    m = _mod()
+    (tmp_path / "state").mkdir()
+    now = 1_000_000.0
+    (tmp_path / "state" / "drift-judge-spend.json").write_text(json.dumps({"records": [
+        {"ts": now - 300, "usd": 0.6}, {"ts": now - 200, "usd": 0.6}, {"ts": now - 100, "usd": 0.6}]}))
+    assert m.ceiling_paused_at(_cfg(), now, tmp_path) == now - 200
+    assert m.ceiling_paused_at(_cfg(spend_ceiling_usd_per_day=5.0), now, tmp_path) is None
+    assert m.ceiling_paused_at(_cfg(spend_ceiling_usd_per_day=None), now, tmp_path) is None
+    assert m.ceiling_paused_at(_cfg(enabled=False), now, tmp_path) is None
+    assert m.ceiling_paused_at(_cfg(), now, tmp_path / "none") is None
