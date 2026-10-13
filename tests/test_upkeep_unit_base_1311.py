@@ -1,0 +1,113 @@
+"""#1311: a `work.base` that is itself a unit branch is refused by upkeep: no unit is offered, no unit is rewritten onto it, and
+the refusal says so. A default-branch base and a closed gate behave as before."""
+import copy
+import json
+
+import test_feature_rebase as R
+import test_upkeep_sched as T
+
+UNIT_BASE = "feature/other"
+
+
+def _config(base):
+    cfg = copy.deepcopy(T.open_config())
+    cfg["work"]["base"] = base
+    return cfg
+
+
+def test_refs_of_offers_nothing_for_a_unit_branch_base_and_is_unchanged_for_the_default_branch():
+    sched = T.sched()
+    assert sched.refs_of(_config(UNIT_BASE), "voice") == (None, None)
+    assert sched.refs_of(_config("main"), "voice") == ("origin/main", "origin/feature/voice")
+
+
+def test_the_engine_refuses_a_unit_branch_base_without_calling_either_pass(tmp_path, capsys):
+    calls = []
+    line = T.job().run_engine(
+        _config(UNIT_BASE), T.project(tmp_path), str(tmp_path), "voice", environ=T.ENV,
+        upkeep=lambda *a, **k: calls.append("older") or {"outcome": "rebased"},
+        unit_pass=lambda *a, **k: calls.append("unit") or {"result": "rewritten"})
+    assert calls == []
+    assert line["outcome"] == "no-base" and line["unit_pass"] == "skipped"
+    assert "unit branch" in line["reason"] and "default branch" in line["reason"]
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == line
+
+
+def test_the_engine_is_unchanged_for_a_default_branch_base_and_a_closed_gate(tmp_path, capsys):
+    seen = []
+
+    def entry(config, sdlc_dir, unit, unit_ref, base_ref, base_name, now, **kw):
+        seen.append((unit_ref, base_ref, base_name))
+        return {"result": "rewritten"}
+    quiet = lambda *a, **k: {"outcome": "current"}
+    line = T.job().run_engine(_config("main"), T.project(tmp_path), str(tmp_path), "voice", environ=T.ENV, upkeep=quiet, unit_pass=entry)
+    assert seen == [("refs/remotes/origin/feature/voice", "refs/remotes/origin/main", "main")]
+    assert line == {"outcome": "current", "unit_tip": None, "unit_pass": "rewritten"}
+    shut = T.job().run_engine(_config(UNIT_BASE), T.project(tmp_path), str(tmp_path), "voice", environ={}, upkeep=quiet, unit_pass=entry)
+    assert shut["closed"] is True and len(seen) == 1
+    capsys.readouterr()
+
+
+def test_the_older_pass_does_not_rewrite_a_unit_onto_another_unit_branch(tmp_path):
+    """Control on a real bare remote: the other unit branch is ahead of the integration branch, so before the fix the
+    billing branch was rebased onto it and force-pushed."""
+    m = R._mod()
+    world = R.World(tmp_path).build()
+    R._git(world.local, "checkout", "-q", "-b", UNIT_BASE, R.INTEGRATION)
+    R._write(world.local / "o.txt", "o\n")
+    R._git(world.local, "add", "o.txt")
+    R._git(world.local, "commit", "-q", "-m", "other unit work")
+    R._git(world.local, "push", "-q", "origin", UNIT_BASE)
+    R._git(world.local, "checkout", "-q", R.INTEGRATION)
+    before = world.tip(R.FEATURE)
+    report = R._upkeep(m, world, config=R._cfg(base=UNIT_BASE))
+    assert report["outcome"] == m.NO_BASE, report
+    assert "unit branch" in report["why"] and "default branch" in report["why"], report
+    assert world.tip(R.FEATURE) == before
+
+
+# ---- #1327: the refusal is visible, and qualified spellings of a unit base are refused too
+
+QUALIFIED = ("origin/feature/other", "refs/heads/feature/other", "refs/remotes/origin/feature/other")
+
+
+def test_a_remote_qualified_or_full_ref_unit_base_is_refused_and_default_branch_names_are_not():
+    rebase = R._mod()
+    for base in (UNIT_BASE,) + QUALIFIED:
+        assert rebase.is_unit_base(base), base
+    for base in ("main", "origin/main", "refs/heads/main", "refs/remotes/origin/main", "my-feature/x", "featured", "release/feature-x", ""):
+        assert not rebase.is_unit_base(base), base
+
+
+def test_the_scheduler_and_the_engine_refuse_every_qualified_spelling():
+    sched = T.sched()
+    for base in QUALIFIED:
+        assert sched.refs_of(_config(base), "voice") == (None, None), base
+
+
+def test_the_scheduler_drift_note_says_unit_base_and_differs_from_no_base():
+    m = T.sched()
+    measure = lambda base: m.make_measure(_config(base), m.feature_upkeep.read(_config(base)).settings, "s", "r", 1_000_000)
+    unit = measure(UNIT_BASE)("voice", None)
+    empty = measure("")("voice", None)
+    assert unit.notes == ("base is a unit branch",) and empty.notes == ("no-base",)
+
+
+def test_the_job_record_carries_the_refusal_reason_next_to_the_outcome(tmp_path):
+    j, sdlc = T.job(), T.project(tmp_path)
+    line = {"outcome": "no-base", "unit_tip": None, "unit_pass": "skipped", "reason": "base is a unit branch; upkeep needs the default branch"}
+    cmd = [T.sys.executable, "-c", "import json;print(json.dumps(%r))" % line]
+    j.run_job(T.open_config(), sdlc, str(tmp_path / "proj"), "voice", "r1", 30, environ=T.ENV, command=cmd)
+    record = json.loads(open(str(sdlc) + "/state/upkeep/job.json").read())
+    assert record["outcome"] == "no-base" and "base is a unit branch" in record["reason"]
+    plain = T.project(tmp_path / "b")
+    j.run_job(T.open_config(), plain, str(tmp_path / "proj"), "voice", "r1", 30, environ=T.ENV, command=T.ok_command())
+    assert "reason" not in json.loads(open(str(plain) + "/state/upkeep/job.json").read())
+
+
+def test_the_engine_refuses_a_qualified_unit_base_without_calling_either_pass(tmp_path, capsys):
+    for base in QUALIFIED:
+        line = T.job().run_engine(_config(base), T.project(tmp_path), str(tmp_path), "voice", environ=T.ENV,
+                                  upkeep=lambda *a, **k: 1 / 0, unit_pass=lambda *a, **k: 1 / 0)
+        assert line["outcome"] == "no-base" and "base is a unit branch" in line["reason"], base
+    capsys.readouterr()

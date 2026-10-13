@@ -219,7 +219,8 @@ def test_the_observed_call_order_matches_the_declared_one(tmp_path):
     assert report["ok"], report
     assert [s["step"] for s in report["steps"]] == list(define._STEPS)
     # git (branch) strictly before gh (label); the registry directory is written by neither.
-    assert run.kinds().index("gh") > max(i for i, k in enumerate(run.kinds()) if k == "git")
+    kinds = [a[0] for a in run.calls if a[:2] not in (["git", "status"], ["git", "add"], ["git", "commit"])]
+    assert kinds.index("gh") > max(i for i, k in enumerate(kinds) if k == "git")   # #1312: the record commit is last
     assert feature_registry.registry_dir(sdlc).is_dir()
 
 

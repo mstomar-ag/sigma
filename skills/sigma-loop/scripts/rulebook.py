@@ -22,6 +22,7 @@ person field) is invalid and never acts. Rules are RECOMMEND AND PRE-FILL ONLY: 
 SCALE: one file of human-approved rules, read whole (small by construction); writes are a single
 atomic replace and assume one writer at a time (a concurrent edit is a normal git merge of one file).
 """
+import contextlib
 import datetime
 import hashlib
 import importlib.util
@@ -209,6 +210,8 @@ def approve(sdlc_dir, rule_id, login, config, now=None):
             r["confirmed"] = _now(now).isoformat()
             r["seal"] = _seal(r)
             _write(path, rules)
+            with contextlib.suppress(Exception):        # #1313: commit only, best effort
+                _load("decision_store").publish(sdlc_dir, config)
             return None
     raise KeyError(rule_id)
 
