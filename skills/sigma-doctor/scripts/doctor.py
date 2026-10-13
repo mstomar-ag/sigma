@@ -1253,6 +1253,37 @@ def _preflight_fix(check):
     return head + (f" ({tail})" if tail else "")
 
 
+def _unit_record_rows(base, run, cheap_only):
+    """#1312: one row on unit records git cannot show other machines -- a record file that is
+    untracked, or a remote `feature/*` branch with no record. Absent without `.sdlc/features/`;
+    detection only, nothing is committed here. An unanswered git call is no finding."""
+    features = base / "features"
+    if not features.is_dir():
+        return []
+    repo = str(base.parent)
+    found = []
+    out = run(["git", "-C", repo, "ls-files", "--others", "--exclude-standard", "--", str(features / "units")])
+    if isinstance(out, str) and getattr(out, "raw", None) is None:
+        found += ["untracked record " + pathlib.PurePath(x).name for x in out.splitlines() if x.strip()]
+    if not cheap_only:
+        heads = run(["git", "-C", repo, "ls-remote", "--heads", "origin", "feature/*"])
+        if isinstance(heads, str) and getattr(heads, "raw", None) is None:
+            try:
+                fr = _load_loop_script("feature_registry")
+                known = {k.lower() for k in fr.read(fr.registry_dir(base))}
+            except Exception:                        # noqa: BLE001 - unreadable registry answers nothing
+                known = None
+            if known is not None:
+                for line in heads.splitlines():
+                    ref = line.split("\t")[-1].strip()
+                    if ref.startswith("refs/heads/" + _UNIT_BRANCH_PREFIX):
+                        unit = ref[len("refs/heads/" + _UNIT_BRANCH_PREFIX):]
+                        if unit.lower() not in known:
+                            found.append("remote branch " + ref[len("refs/heads/"):] + " has no record")
+    return [_chk("unit records visible to other machines", not found,
+                 "; ".join(found[:5]) + " -- commit the record (git add <file> && git commit) or open the unit")]
+
+
 def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
     """The background upkeep scheduler's liveness and readiness rows (never a pass for something that did not run). Silent
     unless the opt-in block is on or invalid, decided by the gate's own reader, not by looking for the block here. The git
@@ -2482,6 +2513,57 @@ def _kg_last_attempt(path):
     return f"{age} ago, FAILED: {detail}"
 
 
+def _origin_mismatch_rows(base, disc, run):
+    """#1314: warn when discovery.github.repo (or project.owner) names a different repo/owner than origin.
+    Silent when they match, when unset, or when origin has no readable owner/name. Local git read only."""
+    try:
+        gh = _block(disc, "github")
+        repo = str(gh.get("repo") or "").strip()
+        owner = str(_block(gh, "project").get("owner") or "").strip()
+        if not repo and not owner:
+            return []
+        url = str(run(["git", "-C", str(base.parent), "remote", "get-url", "origin"]) or "").strip()
+        slug = _load_loop_script("feature_sync").slug_from_remote_url(url) if url else None
+        if not slug:
+            return []
+        problems = []
+        if repo and repo.lower() != slug.lower():
+            problems.append("discovery.github.repo is %s but origin is %s" % (repo, slug))
+        if owner and not owner.startswith("@") and owner.lower() != slug.split("/")[0].lower():
+            problems.append("discovery.github.project.owner is %s but origin's owner is %s"
+                            % (owner, slug.split("/")[0]))
+        if not problems:
+            return []
+        return [_chk("configured repo matches origin", False,
+                     "; ".join(problems) + ". Correct the config, or ignore if this checkout is a "
+                     "deliberate fork.")]
+    except Exception:                        # noqa: BLE001 - a detector that cannot run says nothing
+        return []
+
+
+def _watcher_build_rows(base, cfg):
+    """#1315: warn when a live watcher recorded an older build (or none) than this plugin. Silent with no live watcher. Read-only."""
+    try:
+        st = pathlib.Path(base) / "state"
+        pid = int((st / "watch.pid").read_text(encoding="utf-8").strip())
+        os.kill(pid, 0)
+        if _load_loop_script("sync").watcher_liveness(base, cfg)[0] != "live":
+            return []
+        have = json.loads((pathlib.Path(__file__).resolve().parents[3] / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get("version")
+        try:
+            ran = (st / "watch.build").read_text(encoding="utf-8").strip()
+        except OSError:
+            ran = ""
+        if not have or ran == have:
+            return []
+        return [_chk("running watcher matches installed build", False,
+                     "the running watcher started from build %s but build %s is installed; stop it "
+                     "(touch .sdlc/state/watch.stop) and the next trigger restarts it on the new build."
+                     % (ran or "unknown (none recorded)", have))]
+    except Exception:                        # noqa: BLE001 - a detector that cannot run says nothing
+        return []
+
+
 def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_dirs=None,
           installed_plugins_path=None, agents_md=None, cheap_only=False, which=None):
     """Return the setup checks relevant to this project's config; each is {name, ok, fix}.
@@ -2622,8 +2704,11 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
         out.extend(_graphql_capability_rows(base, cfg))     # #801: advisory, detection only
         if _block(cfg, "work").get("enabled") and not cheap_only:
             out.extend(_landing_rows(base, cfg, run, which))        # #974: branch-creation rulesets
+    out.extend(_origin_mismatch_rows(base, disc, run))      # #1314
+    out.extend(_watcher_build_rows(base, cfg))                # #1315
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
     out.extend(_resolver_rows(base, cfg, which, cheap_only))
+    out.extend(_unit_record_rows(base, run, cheap_only))
     if disc.get("source") == "github":
         gh_disc = _block(disc, "github")
         if _block(gh_disc, "project").get("enabled"):

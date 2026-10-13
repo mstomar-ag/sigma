@@ -165,6 +165,8 @@ def write_all(sdlc_dir, record, config, source, text="", poster=None):
         point(sdlc_dir, out["id"], record, config)
         if out["id"]:
             _safe(record_comparison, sdlc_dir, record, would, config)
+            if record.get("how") == "human":            # #1313: commit only, best effort
+                _safe(decision_store.publish, sdlc_dir, config)
     except Exception as exc:                            # noqa: BLE001 - reported, never raised
         out["error"] = "decision record not stored: %s" % exc
     rid = out["id"] or "(not stored)"

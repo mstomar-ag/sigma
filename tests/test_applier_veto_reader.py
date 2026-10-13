@@ -104,14 +104,14 @@ def test_veto_on_a_board_active_source_moves_the_card_back_to_parked(tmp_path):
     assert src.cards == [(7, "Parked")]
 
 
-def test_a_failed_card_move_fails_the_veto_for_a_retry(tmp_path):
+def test_a_failed_card_move_does_not_fail_the_veto(tmp_path):
     class Stuck(BoardSrc):
         def _set_board_status(self, issue, status, warn=True):
             return status != "Parked"
     sd, cfg, src = _applied_world(tmp_path, Stuck())
     acts = _tick(sd, cfg, src, [_comment("boss", "no", 65)])
-    assert [(a["kind"], a["result"]) for a in acts] == [("veto", "failed")]
-    assert not _state(sd).get("reparked")
+    assert [(a["kind"], a["result"]) for a in acts] == [("veto", "done")]
+    assert _state(sd).get("reparked")
 
 
 def test_other_text_non_owner_or_old_comment_change_nothing(tmp_path):

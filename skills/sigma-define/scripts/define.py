@@ -385,6 +385,33 @@ def _step_registry(ctx):
     return CREATED, str(path)
 
 
+def _commit_record(ctx):
+    """#1312: make the unit visible to other machines. A unit with no record gets one written (the
+    same `write_unit` shape the sync uses: no person or login field), then that one path is committed
+    on the current branch (never a push), except on a unit branch, where it is left uncommitted and the
+    command is printed (#1325). Never raises and never changes the report: when the write
+    or commit cannot be made it prints one line naming the exact command."""
+    path = None
+    try:
+        features_dir = feature_registry.registry_dir(ctx.sdlc_dir)
+        path = feature_registry.unit_path(features_dir, ctx.name)
+        if not path.is_file():
+            report = feature_sync.amend(ctx.sdlc_dir, ctx.name, lambda entry: entry.update(title=ctx.name))
+            if report.get("refused") or not path.is_file():
+                raise RuntimeError(report.get("refused") or "the record was not written")
+        if not ctx.run(ctx.cwd, ["git", "status", "--porcelain", "--", str(path)]).strip():
+            return                                  # already committed and unchanged
+        branch = ctx.run(ctx.cwd, ["git", "rev-parse", "--abbrev-ref", "HEAD"]).strip()
+        if not branch or branch.startswith(features.BRANCH_PREFIX):
+            # #1325: nobody commits directly to a unit branch (an unreadable branch fails closed).
+            raise RuntimeError("a unit branch is checked out" if branch else "the current branch is unreadable")
+        ctx.run(ctx.cwd, ["git", "add", "--", str(path)])
+        ctx.run(ctx.cwd, ["git", "commit", "-m", "sdlc: record unit %s" % ctx.name, "--", str(path)])
+    except Exception as exc:                        # noqa: BLE001 - a diagnostic never breaks the gesture
+        _note("sigma: define: unit record not committed (%s); run: git add -- %s && git commit "
+              "-m 'sdlc: record unit %s' -- %s\n" % (_flat(exc), path, ctx.name, path))
+
+
 #: D7: the recovery differs per step, so each failure names its own first check (the raw detail stays).
 _STEP_HINTS = {
     "branch": " -- check that `git remote -v` lists the remote and that you can push to it "
@@ -425,6 +452,7 @@ def open_unit(sdlc_dir, name, kind, *, config=None, run=None, cwd=None, remote=N
             return report
         report["steps"].append({"step": step, "outcome": outcome, "detail": detail})
     report["ok"] = True
+    _commit_record(ctx)
     return report
 
 
