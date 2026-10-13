@@ -75,15 +75,73 @@ def test_timeout_kills_the_whole_process_group(tmp_path):
         raise AssertionError("expected a timeout")
     except FJ.subprocess.TimeoutExpired:
         pass
-    pid = int(pidfile.read_text())
-    for _ in range(50):
+    pid = _wait_pid(pidfile)
+    assert _gone(pid, 5), "grandchild survived the timeout"
+
+
+def _wait_pid(pidfile, limit=30):
+    """Poll for the pidfile (#1353): a slow machine may not have written it when the timeout fires."""
+    end = time.time() + limit
+    while time.time() < end:
+        if pidfile.exists() and pidfile.read_text().strip():
+            return int(pidfile.read_text())
+        time.sleep(0.1)
+    raise AssertionError("pidfile never appeared")
+
+
+def _gone(pid, limit):
+    end = time.time() + limit
+    while time.time() < end:
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
-            return
+            return True
         time.sleep(0.1)
-    os.kill(pid, 9)
-    raise AssertionError("grandchild survived the timeout")
+    try:
+        os.kill(pid, 9)
+    except ProcessLookupError:
+        pass
+    return False
+
+
+def test_read_after_group_kill_is_bounded(tmp_path, monkeypatch):
+    """A descendant that left the group (own session) holds the pipe open; the post-kill read must give up."""
+    monkeypatch.setattr(FJ, "_POST_KILL_READ_S", 1.0)
+    pidfile = tmp_path / "esc.pid"
+    code = ("import subprocess,sys,time;"
+            "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(25)'],start_new_session=True);"
+            "open(%r,'w').write(str(p.pid));time.sleep(60)" % str(pidfile))
+    t0 = time.time()
+    try:
+        FJ._run_group([sys.executable, "-c", code], timeout=3)
+        raise AssertionError("expected a timeout")
+    except FJ.subprocess.TimeoutExpired:
+        pass
+    took = time.time() - t0
+    esc = _wait_pid(pidfile)
+    _gone(esc, 0)                               # clean up the escaped sleeper
+    assert took < 15, "post-kill read blocked for %.1fs" % took
+
+
+def test_interrupt_kills_the_group_and_reraises(tmp_path, monkeypatch):
+    pidfile = tmp_path / "int.pid"
+    code = ("import subprocess,sys,time;"
+            "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+            "open(%r,'w').write(str(p.pid));time.sleep(60)" % str(pidfile))
+    real = FJ.subprocess.Popen
+
+    class P(real):
+        def communicate(self, *a, **k):
+            _wait_pid(pidfile)                  # the grandchild exists before the "Ctrl-C" lands
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(FJ.subprocess, "Popen", P)
+    try:
+        FJ._run_group([sys.executable, "-c", code], timeout=60)
+        raise AssertionError("expected KeyboardInterrupt")
+    except KeyboardInterrupt:
+        pass
+    assert _gone(int(pidfile.read_text()), 5), "grandchild survived the interrupt"
 
 
 def test_closed_gate_is_byte_identical(tmp_path):
