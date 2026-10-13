@@ -377,6 +377,15 @@ def read_vetoes(sdlc_dir, config, asks, now, comments_fn):
             continue
 
 
+def _keys_only(config):
+    """#1342: records part open AND repo declared public; any other state is today's text."""
+    try:
+        rc = _load("rulebook_cfg")
+        return rc.load(config).part_enabled("records") and rc.visibility(config) == "public"
+    except Exception:
+        return False
+
+
 def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comments_fn=None):
     """Plan, and unless `apply_actions` is false apply, one pass. Returns the actions (dicts with a
     `result` of would, done, failed or skipped). Closed gate: `[]`, nothing read, nothing written."""
@@ -415,8 +424,14 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
             rule = next((r for r in rules if r.get("id") == m.rule_id), None)
             level = _level(sdlc_dir, qkind, area, config)
             silent = level >= 4 and silent_allowed(qkind, config, rule) and not _spot_check(ask["id"], config)
-            text = "" if silent else ("Applied automatically by rule %s (%s): %s. No answer arrived within "
-                                      "the window. Reply no to veto." % (m.rule_id, qkind, m.option))
+            if silent:
+                text = ""
+            elif _keys_only(config):   # #1342: public repo, records on: the option is free text
+                text = ("Applied automatically by rule %s (%s). No answer arrived within "
+                        "the window. Reply no to veto." % (m.rule_id, qkind))
+            else:
+                text = ("Applied automatically by rule %s (%s): %s. No answer arrived within "
+                        "the window. Reply no to veto." % (m.rule_id, qkind, m.option))
             actions.append({"kind": ask.get("gesture") if ask.get("gesture") in GESTURES else "unpark",
                             "ask": ask["id"], "issue": ask.get("issue"), "qkind": qkind, "area": area,
                             "option": m.option, "rule_id": m.rule_id, "level": level, "silent": silent,
