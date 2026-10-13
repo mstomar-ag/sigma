@@ -491,14 +491,13 @@ def test_cli_resolve_end_to_end(tmp_path, capsys):
     assert "_Start again?_" in body
 
 
-def test_resolve_records_the_answers_even_when_there_is_nothing_left_to_swap():
-    """A goal whose labels were already fixed by hand still deserves its context recorded -- and
-    that is not a failure."""
+def test_resolve_refuses_a_goal_that_is_not_parked_and_records_nothing():
+    """#1304 replaces the old "already pickable -- answers recorded": no parked label, no gesture."""
     u = _mod("unpark")
     run = _runner(views={"5": _view(labels=("sdlc:goal",), comments=[_park("x")])})
     result = u.resolve(".sdlc", _config(), 5, {"decision": "start it again"}, "unpark", run=run)
-    assert result["outcome"] == "unparked" and "already pickable" in result["detail"]
-    assert any(c[:2] == ["issue", "comment"] for c in run.calls)
+    assert result["outcome"] == "failed" and "not parked" in result["detail"]
+    assert not any(c[:2] in (["issue", "comment"], ["issue", "edit"]) for c in run.calls)
 
 
 def test_a_local_source_degrades_instead_of_raising():

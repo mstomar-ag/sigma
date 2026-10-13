@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Unpark records a decision only for a gesture that landed (#1304).** A failed label write no longer writes the decision record, and `keep-parked` or `unpark` on an issue that is not parked is refused with nothing recorded.
 - **A person's no after an applied ask reaches the veto through the real verbs (#1189).** Keep-parked and demote on an issue whose ask was applied inside its window record the veto; a failure never blocks the gesture.
 
 
