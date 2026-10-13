@@ -2613,6 +2613,19 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     if bad_json:
         out.append(_chk("config.json is valid JSON", False, bad_json))
 
+    # #1343: `gates.phase_record` absent means the gate is off, so a repo adopted before the gate existed
+    # merges and records done without phase records. Any present value (even an explicit off) is a
+    # deliberate choice and passes. Local config read only, so it also runs under `cheap_only`; a hygiene
+    # row, deliberately not in the setup wizard's allow-list.
+    if (base / "config.json").exists() and "phase_record" not in _block(cfg, "gates"):
+        out.append(_chk(
+            "phase-record gate configured", False,
+            'gates.phase_record is not set in .sdlc/config.json, so the gate is off and a goal can be '
+            'recorded done without its SDLC phases. Add `"gates": {"phase_record": {"enabled": true}}` '
+            '(it needs `action_log.enabled` true), or `{"enabled": false}` to keep it off on purpose.'))
+    elif (base / "config.json").exists():
+        out.append(_chk("phase-record gate configured", True, ""))
+
     # #1200 gap 2: informational, always ok=True -- same "state embedded in the name, no fix"
     # idiom the "companions" rows below already use (a plugin being present/absent is neither a
     # pass nor a fail either). Unconditional (unlike the github-gated checks below it) since a
