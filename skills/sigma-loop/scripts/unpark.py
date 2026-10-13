@@ -58,6 +58,7 @@ decision_tier = _load("decision_tier")
 qkind = _load("qkind")            # #994: a kind declared on the park comment
 gate_hold = _load("gate_hold")    # #1005: the hold guard shared with promote
 decision_record = _load("decision_record")   # slice 8: store record + attributed comment
+rulebook_cfg = _load("rulebook_cfg")         # #1342: public records keep free text out of issue text
 loop = _load("loop")
 
 #: The fixed heading of the recorded block, in the body and in the comment alike. Deliberately free
@@ -340,18 +341,34 @@ def _recorded_answers(body):
     return out
 
 
-def render_block(answers, questions_asked=()):
+PRIVATE_VALUE = "recorded privately"
+
+
+def _keys_only(config):
+    """#1342: True only with the records part open AND the repo declared public. Anything else
+    (gate closed, private, no config) keeps today's output byte for byte."""
+    try:
+        return (config is not None and rulebook_cfg.load(config).part_enabled("records")
+                and rulebook_cfg.visibility(config) == "public")
+    except Exception:                                   # noqa: BLE001 - total: fall back to today's text
+        return False
+
+
+def render_block(answers, questions_asked=(), config=None):
     """The fenced record, identical in the body and in the comment so the two can never disagree.
 
     `questions_asked` carries the question TEXT alongside each id, so a reader six weeks later sees
     what was actually asked rather than a bare key -- the answers are only meaningful next to them.
+    With `config` public and records on (#1342) each value is `recorded privately`; the key and the
+    question text stay.
     """
+    keys_only = _keys_only(config)
     asked = {q["id"]: q["ask"] for q in (questions_asked or [])}
     lines = [backlog_check.UNPARK_QA_START, QA_HEADING, ""]
     for key, value in answers.items():
         if key in asked:
             lines.append("_%s_" % asked[key])
-        lines.append("- **%s** — %s" % (key, " ".join(str(value).split())))
+        lines.append("- **%s** — %s" % (key, PRIVATE_VALUE if keys_only else " ".join(str(value).split())))
     lines += ["", backlog_check.UNPARK_QA_END]
     return "\n".join(lines)
 
@@ -387,11 +404,10 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
       `unpark`      -- ONE atomic swap (`+goal_label`, `-parked_label`/`-goal_blocked_label`), then
                        the board card to `ready`, then the record in the body AND as a comment.
 
-    ORDER, and why: the record is written BEFORE the label swap on the keep-parked path (nothing
-    depends on it) but AFTER on the unpark path, so a failure between them leaves a goal that is
-    pickable-with-context rather than one whose context landed and whose unpark did not. Both
-    failure directions cost a redo; neither loses the answers, because the comment is posted on
-    both paths.
+    ORDER, and why: keep-parked changes no label, so its record is the gesture. On the unpark path
+    the decision record is written only AFTER the label swap landed (#1304); a failed swap keeps the
+    typed answers (plain comment + body) but records no decision. An issue that is not parked is
+    refused on both paths and records nothing.
 
     Returns `{"number", "decision", "outcome", "detail"}` -- `outcome` is
     `unparked`/`kept-parked`/`would`/`failed`."""
@@ -413,6 +429,13 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
                 "detail": "#%s is closed — reopen it first if it should be worked" % n}
 
     names = _names(data)
+    if source.parked_label not in names and source.goal_blocked_label not in names:
+        # #1304: a gesture on a goal that is not parked changes nothing, so it records nothing --
+        # a "kept-parked" or "start it again" record for it would teach the Rulebook a decision
+        # that never happened.
+        return {"number": n, "decision": decision, "outcome": "failed",
+                "detail": "#%s is not parked (no %s or %s label) — nothing was recorded"
+                          % (n, source.parked_label, source.goal_blocked_label)}
     if decision == "unpark" and gate_hold.declared_gate_kind(
             [c.get("body") or "" for c in (data.get("comments") or [])]):
         # #1005: the hold guard `/sigma-promote` already has. A gate hold is released by a registry edit,
@@ -421,7 +444,7 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
                                           gesture="unpark")
         if held:
             return {"number": n, "decision": decision, "outcome": "failed", "detail": held}
-    block = render_block(answers, questions_asked)
+    block = render_block(answers, questions_asked, config)
     # #1393: `proposed_label` joins the removal set. An issue can be BOTH awaiting approval and
     # parked (a proposal a human parked rather than ruled on), and an unpark that only dropped
     # `sdlc:parked` would leave `sdlc:goal` + `sdlc:needs-confirmation` -- the half-promoted state,
@@ -450,33 +473,24 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         # parked" here is making exactly the decision that comment exists to record, so the
         # automatic sweep must see it in the form it already knows how to read.
         err = _comment_decision(sdlc_dir, config, source, n, block + "\n\n"
-                                + auto_unpark.keep_parked_comment(_one_line(_substantive_reason(answers))),
+                                + auto_unpark.keep_parked_comment(_one_line(
+                                    PRIVATE_VALUE if _keys_only(config) else _substantive_reason(answers))),
                                 "keep-parked", answers, data)
         _append_block(source, n, data.get("body") or "", block)
         return {"number": n, "decision": decision, "outcome": "kept-parked",
                 "detail": "answers recorded; the automatic sweep will leave it alone" + err}
 
-    if not add and not remove:
-        # Nothing to swap -- but the answers are still worth recording, and this is not a failure.
-        err = _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data)
-        _append_block(source, n, data.get("body") or "", block)
-        return {"number": n, "decision": decision, "outcome": "unparked",
-                "detail": "#%s was already pickable — answers recorded" % n + err}
     try:
         source._swap_labels(n, add=add, remove=remove)
     except Exception as exc:                            # noqa: BLE001 - reported, never raised
-        # Review bug_001: record the answers ANYWAY. This path used to return straight out, which
-        # discarded an interview a human had just typed — and contradicted this function's own
-        # docstring promise that "neither loses the answers, because the comment is posted on both
-        # paths". The label write is the retryable half; the answers are not, and re-asking a person
-        # the same five questions because GitHub returned a 502 is the one cost here that cannot be
-        # automated away. Recording first also makes the retry cheap: `brief` reads the block back,
-        # so the second attempt has nothing left to ask.
-        err = _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data)
+        # Review bug_001: keep the typed answers (comment + body block) so a retry asks nothing.
+        # #1304: but the DECISION did not happen, so no decision record, store file or applier
+        # close is written; those come only from the landed path below.
+        _comment(source, n, block)
         _append_block(source, n, data.get("body") or "", block)
         return {"number": n, "decision": decision, "outcome": "failed",
                 "detail": "label write did not land: %s — the answers were recorded, so re-running "
-                          "this will not ask them again" % exc + err}
+                          "this will not ask them again" % exc}
     detail = triage._swap_detail(add, remove)
     if not source._set_board_status(n, source.col["ready"]) and source.board_active:
         detail += ("; the label landed but the board card did not move to %r — move it by hand if "

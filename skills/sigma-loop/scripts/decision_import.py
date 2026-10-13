@@ -178,6 +178,16 @@ def _declared_kind(comments):
     return kind
 
 
+def _kind_at(comments, i, fallback=None):
+    """The kind of the nearest `sigma-qkind:` line at or before comment `i`; `fallback` when none precedes it."""
+    qk = _load("qkind")
+    for c in reversed(comments[: i + 1]):
+        got = qk.parse_line(c.get("body") or "") if isinstance(c, dict) else None
+        if got:
+            return got
+    return fallback
+
+
 def _from_comment(c, issue, legacy, bs, qkind=None):
     body = c.get("body") or ""
     span = _span(body, legacy, bs.UNPARK_QA_START, bs.UNPARK_QA_END)
@@ -289,8 +299,9 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
                 stats["unpark-qa"]["files_read"] += 1
                 got = list(read(config, issue))
                 declared = _declared_kind(got)
-                for c in got:
-                    for cand in _from_comment(c, issue, legacy, bs, declared) if isinstance(c, dict) else []:
+                for i, c in enumerate(got):
+                    kind = _kind_at(got, i, declared) if isinstance(c, dict) else None
+                    for cand in _from_comment(c, issue, legacy, bs, kind) if isinstance(c, dict) else []:
                         if len(cands) >= cap:
                             full = True
                             break
@@ -361,11 +372,13 @@ def _eligible(cands):
     return [c for c in cands if not c["superseded"] and c["choice"]]
 
 
-def default_call(prompt, model, max_budget_usd):
-    """The drift judge's invocation path (`feature_judge.ask_claude`); no key is read here."""
-    payload, cost = _load("feature_judge").ask_claude(prompt, _SCHEMA, model=model,
+def default_call(prompt, model, max_budget_usd, timeout_s=60):
+    """The drift judge's invocation path (`feature_judge.ask_claude`); no key is read here. No answer at all (a timeout,
+    a failure) is None, so the row is skipped and retried next run (#1310), not stored as unknown."""
+    payload, cost = _load("feature_judge").ask_claude(prompt, _SCHEMA, model=model, timeout_s=timeout_s,
                                                       max_budget_usd=max_budget_usd)
-    payload = payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return None
     return {"kind": payload.get("kind"), "area": payload.get("area"), "cost_usd": cost}
 
 
@@ -414,6 +427,12 @@ def model_mode(config):
         and _load("decision_store").enabled(config)
 
 
+def _declared_or(cand, kind, qkinds):
+    """A kind the comment declared is kept over the model's answer (#1354)."""
+    d = cand.get("qkind")
+    return d if d in qkinds and d != UNKNOWN else kind
+
+
 def classify_model(sdlc_dir, config, cands, call, skip=()):
     """-> (rows, info). Rows like `classify`. `call is None` sends nothing (plan): uncached rows are
     unknown and counted as would_send. An invalid answer is unknown and cached; an error or timeout is unknown, uncached and
@@ -423,13 +442,13 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
     areas = _areas(sdlc_dir)
     cache = _cache_read(sdlc_dir)
     info = {"model": lim["model"], "run_ceiling": lim["max_budget_usd_per_run"], "cached": 0, "sent": 0,
-            "would_send": 0, "spent": 0.0, "stopped_after": None}
+            "would_send": 0, "spent": 0.0, "stopped_after": None, "timed_out": 0}
     rows, fresh = [], False
     for c in (x for x in _eligible(cands) if _fp(x) not in skip):
         fp = _fp(c)
         if fp in cache:
             info["cached"] += 1
-            rows.append(dict(c, qkind=cache[fp]["qkind"], area=cache[fp]["area"], fp=fp))
+            rows.append(dict(c, qkind=_declared_or(c, cache[fp]["qkind"], qkinds), area=cache[fp]["area"], fp=fp))
             continue
         kind, area = UNKNOWN, REPO_AREA
         if call is None:
@@ -449,13 +468,14 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
             ok = isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0
             info["spent"] += cost if ok else lim["max_budget_usd_per_call"]
             if not isinstance(ans, dict):  # no answer at all: not cached, not stored, retried next run
+                info["timed_out"] += 1
                 rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
                 continue
             if ans.get("kind") in qkinds and ans.get("area") in areas:
                 kind, area = ans["kind"], ans["area"]
             cache[fp] = {"qkind": kind, "area": area}
             fresh = True
-        rows.append(dict(c, qkind=kind, area=area, fp=fp))
+        rows.append(dict(c, qkind=_declared_or(c, kind, qkinds), area=area, fp=fp))
     if fresh:
         try:
             _cache_save(sdlc_dir, cache)
@@ -479,16 +499,37 @@ def _known(sdlc_dir, config):
     return recs, watched
 
 
+def shape_of(c):
+    """A candidate's normalised decision shape `<resume|keep|->|<rec|norec|?>|<first|later|free|?>`, or None
+    when it has no options and no resume/keep word. Enumerations only: no free text, no person."""
+    choice, opts = str(c.get("choice") or ""), [str(o) for o in (c.get("options") or [])]
+    low = choice.lower()
+    rk = "resume" if re.search(r"\bresume\b", low) else "keep" if re.search(r"\bkeep\b", low) else "-"
+    if not opts and rk == "-":
+        return None
+    if not opts:
+        return "%s|?|?" % rk
+    rec = "rec" if "(recommended)" in low else "norec"
+    role = "free" if choice not in opts else "first" if opts[0] == choice else "later"
+    return "%s|%s|%s" % (rk, rec, role)
+
+
+def _key(r):
+    """What a row is compared on: its shape when it has one, else its exact choice text."""
+    return r.get("shape") or r["choice"]
+
+
 def replay(rows):
-    """Rows (qkind, area, original time, fp, choice) -> {fp: would}. In time order per pair, the unique
-    majority of EARLIER answers of the pair; the first of a pair and ties have none."""
+    """Rows (qkind, area, original time, fp, choice[, shape]) -> {fp: would}. In time order per pair, the unique
+    majority of EARLIER answers of the pair (by shape when a row has one, else exact choice); the first of a
+    pair and ties have none."""
     out, seen = {}, {}
     for r in sorted(rows, key=lambda r: (r["when"], r["fp"])):
         earlier = seen.setdefault((r["qkind"], r["area"]), [])
         top = sorted(((earlier.count(x), x) for x in set(earlier)), reverse=True)
         if top and not (len(top) > 1 and top[0][0] == top[1][0]):
             out[r["fp"]] = top[0][1]
-        earlier.append(r["choice"])
+        earlier.append(_key(r))
     return out
 
 
@@ -506,9 +547,12 @@ def _evidence(sdlc_dir, config, cands, call=None, info=None):
     for fp, rec in have.items():
         if isinstance(rec.get("choice"), str) and fp not in allrows:
             allrows[fp] = {"qkind": rec.get("qkind"), "area": rec.get("area") or REPO_AREA,
-                           "when": rec.get("original_time") or "", "fp": fp, "choice": rec["choice"]}
+                           "when": rec.get("original_time") or "", "fp": fp, "choice": rec["choice"],
+                           "shape": rec.get("shape")}
     for r in allrows.values():
         r["when"] = r.get("when") or ""
+        if "shape" not in r:
+            r["shape"] = shape_of(r)
     return rows, new, replay(list(allrows.values())), allrows, watched
 
 
@@ -523,7 +567,7 @@ def plan(sdlc_dir, config, cands):
         p["all"] += 1
         if r["fp"] in would:
             p["comps"] += 1
-            p["agree"] += 1 if would[r["fp"]] == r["choice"] else 0
+            p["agree"] += 1 if would[r["fp"]] == _key(r) else 0
     for r in new:
         pairs[(r["qkind"], r["area"])]["write"] += 1
     out = []
@@ -546,14 +590,20 @@ def apply(sdlc_dir, config, cands, call=None):
     if not out["gate"]:
         return out
     info = {}
+    if call is None:
+        tmo = _load("rulebook_cfg").import_limits(config)["timeout_s"]
+        call = lambda p, m, b: default_call(p, m, b, timeout_s=tmo)  # noqa: E731
     rows, new, would, allrows, watched = _evidence(
-        sdlc_dir, config, cands, (call or default_call) if model_mode(config) else None, info)
+        sdlc_dir, config, cands, call if model_mode(config) else None, info)
     if info:
         out["stopped_after"] = info["stopped_after"]
+        out["timed_out"] = info["timed_out"]
         out["model"] = info
     for r in new:
         record = rec.build("import", r["issue"], r["qkind"], r["choice"], r["reason"], "imported", area=r["area"])
         record.update(source=r["fp"], original_time=r["when"])
+        if allrows[r["fp"]].get("shape"):
+            record["shape"] = allrows[r["fp"]]["shape"]
         if store.append(sdlc_dir, record, config):
             out["records"] += 1
     if store._visibility(config) == "public":
@@ -563,7 +613,7 @@ def apply(sdlc_dir, config, cands, call=None):
         r = allrows[fp]
         if fp in watched or not au.enabled(config):
             continue
-        if au.record_watch(sdlc_dir, r["qkind"], r["area"], mine, r["choice"], config,
+        if au.record_watch(sdlc_dir, r["qkind"], r["area"], mine, _key(r), config,
                            imported={"source": fp, "original_time": r["when"]}):
             out["watch"] += 1
     if not au.enabled(config):
@@ -587,13 +637,22 @@ def _add_options(v):
 
 
 def list_issues(config, limits, run=None):
-    """Numbers of the goal-labelled issues (any state, newest first) whose comments the scan reads."""
+    """Numbers of the goal-labelled AND parked-labelled issues (any state, newest first) whose comments the scan reads.
+
+    A parked issue lost its goal label when it was parked, and its unpark answers live there, so a second
+    REST list covers `discovery.github.parked_label` (#1355). Cost when the comments gate is on: one extra
+    list per run, bounded by the same `max_issues` cap and page size as the first; gate closed never gets here."""
     src = _load("sources")
     gh = (config.get("discovery") or {}).get("github") or {}
-    items = src.fetch_issues_rest(run or src._run_gh, gh.get("repo") or None,
-                                  [gh.get("goal_label", "sdlc:goal")], limits["max_issues"],
-                                  state="all", sort="updated", direction="desc")
-    return [i["number"] for i in items if isinstance(i.get("number"), int)]
+    seen = []
+    for label in (gh.get("goal_label", "sdlc:goal"), gh.get("parked_label", "sdlc:parked")):
+        items = src.fetch_issues_rest(run or src._run_gh, gh.get("repo") or None, [label],
+                                      limits["max_issues"], state="all", sort="updated", direction="desc")
+        for i in items:
+            n = i.get("number")
+            if isinstance(n, int) and n not in seen:
+                seen.append(n)
+    return seen
 
 
 def main(argv=None, lister=None, comments_fn=None):
@@ -619,8 +678,10 @@ def main(argv=None, lister=None, comments_fn=None):
     if _load("rulebook_cfg").import_limits(config)["comments"]:
         try:
             issues = (lister or list_issues)(config, _load("rulebook_cfg").import_limits(config))
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             issues = None
+            print("decision_import: issue lister failed, comment import skipped: %s" % (
+                " ".join(str(exc).split())[:160] or type(exc).__name__), file=sys.stderr)
     out = scan(args.sdlc_dir, config, args.profile or None, issues=issues, comments_fn=comments_fn,
                project_dirs=args.project_dir or None)
     if args.verb == "plan":
@@ -646,6 +707,9 @@ def main(argv=None, lister=None, comments_fn=None):
         if res.get("stopped_after") is not None:
             print("ceiling stopped the run after %d model calls: the rest stay unclassified, run apply again" % (
                 res["stopped_after"]))
+        if res.get("timed_out"):
+            print("%d rows got no answer (timeout or failure): not stored, run apply again to retry them" % (
+                res["timed_out"]))
         return 0
     for name in SOURCES:
         st = out["stats"][name]

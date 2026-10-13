@@ -1298,7 +1298,7 @@ def test_a_regenerated_block_is_reported_exactly_once(tmp_path, capsys):
     capsys.readouterr()
     _sync(sdlc, goal="2880")
     said = capsys.readouterr().err
-    assert said.count("regenerated over an edit it could not vouch for") == 1
+    assert said.count("regenerated; whether it had been edited could not be told") == 1
     assert m.BLOCK_DIVERGED in m.SURFACED_BY_THE_DOC
 
 
@@ -1497,3 +1497,18 @@ def test_an_absent_shard_is_still_created_normally(tmp_path):
     rep = m.amend(tmp_path, "int-contract", lambda e: e.setdefault("repos", {}).setdefault("o/r", {}))
     assert not rep.get("refused")
     assert rep["written"] is True and rep["existed"] is False
+
+
+def test_a_regenerated_block_message_does_not_assert_an_edit(tmp_path, capsys):
+    """#1346: the digest not vouching for the block does not show WHO changed it or whether anyone did."""
+    m, sdlc = _mod(), _sdlc(tmp_path, ledger_on=True)
+    _seed(sdlc, "int-contract", _entry())
+    _sync(sdlc, goal="2879")
+    path = sdlc / "features" / "int-contract.md"
+    path.write_text(path.read_text(encoding="utf-8").replace("Manifest", "MEDDLED"),
+                    encoding="utf-8")
+    capsys.readouterr()
+    _sync(sdlc, goal="2880")
+    said = capsys.readouterr().err
+    assert "was regenerated; whether it had been edited could not be told from what was on disk" in said
+    assert "over an edit" not in said

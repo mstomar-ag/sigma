@@ -970,8 +970,8 @@ def sync(features_dir, name, entry, goal=None, sdlc_dir=None):
     # stated rather than swallowed, with the discarded text handed back in full for any caller that
     # wants more than the ledger's one capped line.
     _tell(sdlc_dir, name, goal,
-          "the managed block in %s was regenerated over an edit it could not vouch for; the "
-          "block is generated from the registry and is not hand-editable" % (path.name,),
+          "the managed block in %s was regenerated; whether it had been edited could not be told "
+          "from what was on disk; the block is generated from the registry and is not hand-editable" % (path.name,),
           to=owner)
     return _report(path, OVERWRITTEN, diverged=True, discarded=discarded,
                    entry=registry.normalise_entry(entry))

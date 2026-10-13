@@ -890,3 +890,120 @@ def test_record_merge_delivery_write_error_never_fails_a_successful_landing(tmp_
         raise OSError("read-only file system")
     monkeypatch.setattr(m, "_write_delivery", boom)
     m.record_merge(str(d), config, "feature/x", 55, "why", run=run, cwd=str(tmp_path))
+
+
+# --------------------------------------------------------------------------- the base's upkeep gate (#1341)
+
+
+def _show_runner(base_text=None, fail=False):
+    """A `(cwd, argv) -> stdout` fake answering only the read-only `git show <remote>/<base>:.sdlc/config.json`."""
+    calls = []
+
+    def run(cwd, argv):
+        calls.append(list(argv))
+        if fail:
+            raise RuntimeError("fatal: path does not exist")
+        return base_text
+
+    run.calls = calls
+    return run
+
+
+_GATE_OPEN = json.dumps({"upkeep": {"enabled": True}})
+_UNIT = "feature/x"
+
+
+def test_unit_branch_with_gate_closed_in_tree_but_open_on_base_warns(capsys):
+    m = _mod()
+    run = _show_runner(_GATE_OPEN)
+    got = m._engine_route({"work": {"base": BASE, "remote": "origin"}}, "/nonexistent", _UNIT,
+                          lambda: pytest.fail("must not ask"), run=run, cwd="/x")
+    err = capsys.readouterr().err
+    assert got is None
+    assert "upkeep" in err and "legacy" in err and "origin/main" in err
+    assert run.calls == [["git", "show", "origin/main:.sdlc/config.json"]]
+
+
+def test_gate_closed_in_both_prints_nothing(capsys):
+    m = _mod()
+    got = m._engine_route({"work": {"base": BASE}}, "/nonexistent", _UNIT, lambda: True,
+                          run=_show_runner(json.dumps({"work": {}})), cwd="/x")
+    out = capsys.readouterr()
+    assert got is None and out.err == "" and out.out == ""
+
+
+def test_unreadable_or_garbled_base_config_is_silent(capsys):
+    m = _mod()
+    for run in (_show_runner(fail=True), _show_runner("not json"), _show_runner("[1]")):
+        assert m._engine_route({"work": {"base": BASE}}, "/nonexistent", _UNIT, lambda: True,
+                               run=run, cwd="/x") is None
+    assert capsys.readouterr().err == ""
+
+
+def test_non_unit_branch_never_reads_the_base(capsys):
+    m = _mod()
+    run = _show_runner(_GATE_OPEN)
+    assert m._engine_route({"work": {"base": BASE}}, "/nonexistent", "sdlc/1", lambda: True,
+                           run=run, cwd="/x") is None
+    assert run.calls == [] and capsys.readouterr().err == ""
+
+
+def test_gate_open_in_tree_does_not_read_the_base(monkeypatch, capsys):
+    m = _mod()
+    run = _show_runner(_GATE_OPEN)
+    engine = type("E", (), {"land": staticmethod(lambda *a, **k: {"outcome": "merged"})})
+    real = m._load
+    monkeypatch.setattr(m, "_load", lambda n, d=None: engine if n == "feature_land" else real(n, d))
+    got = m._engine_route({"upkeep": {"enabled": True}}, "/nonexistent", _UNIT, lambda: True,
+                          run=run, cwd="/x")
+    assert got == 0 and run.calls == [] and capsys.readouterr().err == ""
+def test_engine_route_refuses_a_pair_unit_before_any_pass_or_pr(tmp_path, capsys):
+    """#1339, through the documented gesture's engine route: exit 1, the refusal printed, no pass, no PR."""
+    from test_feature_land_front import World, CONFIG, load as load_front
+    from test_feature_land_front import pair_unit
+    m = _mod()
+    w = World(tmp_path)
+    pair_unit(w)
+    engine = load_front()
+
+    class Engine:
+        def land(self, config, sdlc_dir, unit, **kw):
+            return engine.land(config, w.sdlc, unit, run=w.run, gh_run=w.gh, rebase_pass=w.rebase_pass,
+                               verify=w.verify, **kw)
+    real = m._load
+    m._load = lambda name, directory=None: Engine() if name == "feature_land" else real(name, directory)
+    assert m._engine_route(CONFIG, str(w.sdlc), "feature/voice", lambda: True) == 1
+    assert "refused:sibling" in capsys.readouterr().out
+    assert w.passes == [] and w.posts() == []
+
+
+def test_engine_route_prompt_does_not_claim_verification_and_closed_prompt_is_unchanged(monkeypatch):
+    """#1346: the engine route verifies INSIDE the landing, so its question cannot say 'Verify passed';
+    the closed path's own prompt stays byte-identical."""
+    m = _mod()
+    asked = []
+    def fake_input(prompt=""):
+        asked.append(prompt)
+        return "y"
+    monkeypatch.setattr("builtins.input", fake_input)
+    assert m._interactive_land_decide() is True
+    assert m._interactive_decide() is True
+    assert asked[0] == "Land the unit now? Verification runs first. [y/N]: "
+    assert "Verify passed" not in asked[0]
+    assert asked[1] == "Verify passed. Merge now? [y/N]: "
+
+
+def test_main_gives_the_engine_route_the_landing_prompt_and_the_closed_path_the_old_one(tmp_path, monkeypatch):
+    m = _mod()
+    seen = {}
+    monkeypatch.setattr(m.state, "load_config", lambda _d: {})
+    monkeypatch.setattr(m.rebase_brief, "resolve_branch", lambda *_a: "feature/x")
+    monkeypatch.setattr(m.rebase_brief, "resolve_base", lambda _c: "main")
+    monkeypatch.setattr(m.rebase_brief, "current_branch", lambda *_a: "feature/x")
+    monkeypatch.setattr(m.feature_rebase, "rebase_stopped", lambda *_a: False)
+    def route(config, sdlc_dir, branch, decide, **_kw):
+        seen["engine"] = decide
+        return 0
+    monkeypatch.setattr(m, "_engine_route", route)
+    assert m.main(["verify_merge.py", "land", str(tmp_path / ".sdlc")]) == 0
+    assert seen["engine"] is m._interactive_land_decide

@@ -37,6 +37,10 @@ Defaults below are what `/sigma-init` scaffolds (`config.json.tmpl`). Not everyt
 > what makes a human-authored, comment-only dependency marker (bypassing `hand_off()`) actually
 > honored, not just silently ignored.
 
+## Rulebook rollout notes
+
+The model classifier's spend ceiling, `rulebook.import.max_budget_usd_per_run`, applies to one import run only. There is no daily or cross-run cap, so repeated runs add up; size it with that in mind. With `work.require_review: "approval"`, a host or token that cannot answer the approval query (it needs GraphQL) leaves the goal parked rather than merged. Either use an approval the REST API can see, or accept the parking. Nothing in `work.py` changes this.
+
 ## Per-category autonomy thresholds
 
 The autonomy ladder reads one global set of thresholds, `rulebook.autonomy.levels`. A
