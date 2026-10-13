@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **`decision_import.py` keeps the kind of comment-sourced decisions and one resume answer (#1309).** An unpark answer now takes the kind from the issue's `sigma-qkind` line instead of `unknown`, and `start it again now` is stored as `start it again`; with `rulebook.import.comments` off nothing changes.
 - **`decision_import.py` now reads issue comments from the command line (#1308).** With `rulebook.import.comments` on, scan, plan and apply list the goal-labelled issues and pass them to the scan; with it off nothing is fetched.
 - **The autonomy readout and the question-list learning line use the category thresholds in force (#1317).** When `.sdlc/categories.json` has a category covering a pair, "level N needs X answers" and "of X answers" now show that category's numbers instead of the global ones; with no categories file every line is unchanged.
 - **Landing a unit no longer hands the unit name to upkeep as a goal (#1340).** `feature_land` now passes no goal to the rebase pass, and the pass reports and files a finding with no goal instead of reading `issues/<unit>` or failing on `int()`; with the upkeep gate closed nothing changes.
