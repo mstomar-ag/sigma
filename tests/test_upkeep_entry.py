@@ -129,7 +129,33 @@ def test_the_push_is_a_lease_not_a_plain_force(wired):
     rewrite(spy, tips)
     push(spy, tips)
     pushes = [a for a in seen if a[:2] == ["git", "push"]]
-    assert len(pushes) == 1 and pushes[0][2].startswith("--force-with-lease=refs/heads/feature/u:") and "--force" not in pushes[0]
+    assert len(pushes) == 1 and pushes[0][:3][2] == "--atomic" and "--force" not in pushes[0]
+    assert pushes[0][3].startswith("--force-with-lease=refs/heads/feature/u:")
+
+
+def backups(bare):
+    return git(bare, "for-each-ref", "--format=%(refname) %(objectname)", "refs/sigma/backup/").splitlines()
+
+
+def test_the_unit_push_keeps_the_old_tip_as_a_backup_ref(wired):
+    """Goal 1300: the rewrite and the backup of the replaced tip travel in one atomic push."""
+    root, bare = wired
+    old = remote_tip(bare, "feature/u")
+    assert enter(root)["result"] == "rewritten"
+    rows = backups(bare)
+    assert len(rows) == 1 and rows[0].startswith("refs/sigma/backup/u/") and rows[0].endswith(" " + old)
+    assert remote_tip(bare, "feature/u") != old
+
+
+def test_a_stale_lease_moves_nothing_and_leaves_no_backup(wired):
+    root, bare = wired
+    old = remote_tip(bare, "feature/u")
+    rewrite, push = mod().unit_callables(root, "origin", "feature/u")
+    run = mod().engine_runner("off")
+    assert rewrite(run, (old, remote_tip(bare, "main")))["ok"] is True
+    with pytest.raises(Exception):
+        push(run, ("1" * 40, remote_tip(bare, "main")))
+    assert remote_tip(bare, "feature/u") == old and backups(bare) == []
 
 
 # ------------------------------------------------------------------------------------------ goal 1101: valid_ref vs git
