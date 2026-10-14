@@ -3544,12 +3544,11 @@ def test_blocking_priority_override_falls_back_to_the_default_on_a_non_boolean_v
 # board-authoritative half lives in test_github_project.py (_board_queue/_card_rank), since it
 # needs that file's board-world fixtures.
 
-def test_github_blocking_priority_override_sorts_a_low_priority_blocking_issue_first():
-    """A P3 issue carrying sdlc:blocking must outrank a plain P0 issue when the override is on --
-    a structural sort, not a priority nudge."""
+def test_github_blocking_priority_override_sorts_a_blocking_issue_first_within_its_tier():
+    """#1409: tier first. A P3 blocker no longer passes a P0; a blocker of the SAME tier does."""
     src = _mod("sources")
     p0_issue = {"number": 9, "labels": [{"name": "sdlc:goal"}, {"name": "priority:P0"}]}
-    blocking_issue = {"number": 3, "labels": [{"name": "sdlc:goal"}, {"name": "priority:P3"},
+    blocking_issue = {"number": 3, "labels": [{"name": "sdlc:goal"}, {"name": "priority:P0"},
                                               {"name": "sdlc:blocking"}]}
 
     def run(a):
