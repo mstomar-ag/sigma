@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A unit branch can be declared the integration base (#1389).** `work.integration_base` names a unit branch that is also `work.base`, so upkeep accepts it instead of refusing it as a unit base; undeclared unit bases are still refused.
+
 ## 1.0.13 — 2026-10-14 — upkeep and Rulebook hardening from the two stress-test passes: backups, applier, landing, board back-fill, session start
 
 - **Level-4 spot check is a counter, not a hash sample (#1337).** With the applier on and a silent-allowed kind at level 4, every `spot_check_one_in`-th silent-eligible apply per kind and area now comments (a count kept in the autonomy folder, advanced only by applies that landed, never by a dry run); before, a hash of the ask id decided, so a run of silent applies could go unobserved for long. A closed gate is unchanged.
