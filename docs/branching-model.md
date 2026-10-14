@@ -44,6 +44,8 @@ main                                  ← the integration branch (your `work.bas
       └── feature/<name>/<sub>         ← a dependency discovered mid-flight (max depth 3)
 ```
 
+Upkeep refuses a unit branch as `work.base` unless `work.integration_base` names that same branch.
+
 Three names, and each answers a different question:
 
 | Branch | What it is | Who cuts it |

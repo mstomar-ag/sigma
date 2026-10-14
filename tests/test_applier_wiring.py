@@ -27,7 +27,7 @@ class ReadSrc(Src):
 
     def _read_issue(self, goal, fields, comment_limit=None):
         self.reads.append((goal, tuple(fields)))
-        return {"labels": [{"name": n} for n in self.labels]}
+        return {"labels": [{"name": n} for n in self.labels + [self.parked_label]]}
 
     def park(self, goal, text):
         self.parked.append((goal, text))

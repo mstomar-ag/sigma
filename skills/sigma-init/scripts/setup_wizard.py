@@ -302,7 +302,9 @@ def _write_cache(sdlc_dir, needs_wizard, now=None, transient=False):
 
 def _only_auth_failing(checks):
     bad = [c["name"] for c in checks if not c["ok"] and c["name"] in _MODES]
-    return bad == ["gh auth"]
+    # #1399: with a project board on, an unconfirmed login also fails "gh project scope"; that pair
+    # is the same blip. Scope alone, or any other row alongside, is a real state.
+    return "gh auth" in bad and set(bad) <= {"gh auth", "gh project scope"}
 
 
 def _transient_result(dismissed):

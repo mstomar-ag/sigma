@@ -2486,20 +2486,29 @@ def _report(goal, unit, config):
             "serialised": True, "merge_method": merge_method(config), "why": "", "note": ""}
 
 
-UNIT_BASE_WHY = "base is a unit branch; upkeep needs the default branch"
-UNIT_BASE_NOTE = "base is a unit branch"
+UNIT_BASE_WHY = "base is a unit branch; upkeep needs the default branch (or declare it as work.integration_base)"
+UNIT_BASE_NOTE = "base is a unit branch (declare work.integration_base if intended)"
 
 
-def is_unit_base(base, remote=None):
-    """#1311: a `work.base` that is itself a unit branch is no integration branch; upkeep refuses it (default branch only).
-    #1327: also when written with the remote's name or as a full ref (`origin/feature/x`, `refs/heads/feature/x`)."""
-    if not isinstance(base, str):
-        return False
-    name, remote = base.strip(), (remote or DEFAULT_REMOTE)
+def _bare_ref(base, remote):
+    name = base.strip()
     for lead in ("refs/heads/", "refs/remotes/" + remote + "/", remote + "/"):
         if name.startswith(lead):
-            name = name[len(lead):]
-            break
+            return name[len(lead):]
+    return name
+
+
+def is_unit_base(base, remote=None, config=None):
+    """#1311: a `work.base` that is itself a unit branch is no integration branch; upkeep refuses it (default branch only).
+    #1327: also when written with the remote's name or as a full ref (`origin/feature/x`, `refs/heads/feature/x`).
+    #1389: unless `work.integration_base` declares that very branch (same spellings) as the integration branch."""
+    if not isinstance(base, str):
+        return False
+    remote = remote or DEFAULT_REMOTE
+    name = _bare_ref(base, remote)
+    declared = _settings(config).get("integration_base")
+    if isinstance(declared, str) and declared.strip() and _bare_ref(declared, remote) == name:
+        return False
     return name.startswith(features.BRANCH_PREFIX)
 
 
@@ -2620,7 +2629,7 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
                 report["why"] = ("work.base is empty, so upkeep has no integration branch and did nothing; "
                                  "set it in .sdlc/config.json (for example to your default branch)")
             return report
-        if is_unit_base(base, remote or _remote(config)):
+        if is_unit_base(base, remote or _remote(config), config):
             report["outcome"] = NO_BASE
             report["why"] = UNIT_BASE_WHY
             return report
@@ -2775,7 +2784,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
             registry_now = None
         # Classifier TEXT only (never executed); the real push is `_pushed`, the one pinned colon-refspec site.
         verdict = hsg.guard("git push --force-with-lease %s HEAD:%s" % (remote, "refs/heads/" + branch),
-                            {"branch": branch, "registry": registry_now}, config)
+                            {"branch": branch, "registry": registry_now, "pass_branch": branch}, config)
         if verdict.blocked:
             report["outcome"] = FAILED
             report["why"] = verdict.reason

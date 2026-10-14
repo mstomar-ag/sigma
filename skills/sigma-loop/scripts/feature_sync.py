@@ -649,6 +649,10 @@ def reconcile(entry, name, repo, live):
     branches = [one.get("branch") for one in repos.values()
                 if isinstance(one, dict) and one.get("branch")]
     goals = [g for one in repos.values() if isinstance(one, dict) for g in (one.get("goals") or [])]
+    # #1396: `define open` records no branch, but the unit's conventional branch is live on the remote --
+    # a unit whose own `feature/<name>` exists is not empty, so it is not closed (and not rewritten).
+    if isinstance(name, str) and (features.BRANCH_PREFIX + name) in live:
+        return found
     if entry["open"] and not branches and not goals:
         entry["open"] = False
         found.append(_div(CLOSED, name, repo, ""))

@@ -266,6 +266,10 @@ def _own_push(text, context, registry, config):
     """True only when every force-push segment of `text` targets an owned branch (or the context names one)."""
     branch = context.get("branch") if isinstance(context, dict) else None
     if branch:
+        declared = context.get("pass_branch")
+        if (declared == branch and branch.startswith("feature/")
+                and _block(config).get("own_registered_units", True) is not False):
+            return True       # the pass's own push of the unit branch it computed, whatever this tree's registry holds
         return is_own(branch, registry, config)
     pushes = [seg for seg in re.split(r"[;&|\n]+", text) if _PUSH_RX.search(seg)]
     if not pushes:

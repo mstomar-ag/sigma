@@ -84,6 +84,8 @@
     "_comment": "One git worktree + branch + PR per goal, so the loop never moves your checkout - and never rewrites .sdlc/goals/ underneath itself by switching branches. The worktree is cut fresh from <remote>/<base>, which IS the goal-start rebase: nothing to replay, so it cannot conflict or strand a half-applied tree. verify_command then runs IN that worktree, because the main checkout does not contain the change. #2741: ships true directly from /sigma-init as of 1.0.0 (was null/NOT-YET-DECIDED, decided by /sigma-setup on first github adoption per #2255) -- a fresh install now gets a worktree/branch/PR per goal from the first run. Set explicit false to keep the loop writing to git exactly as little as before. Gitignore .sdlc/work/.",
     "base": "",
     "_base": "The integration branch to cut from and target. Empty = whichever branch the loop was started on. GITHUB-BACKED GOALS ONLY (discovery.source == \"github\", and a goal whose id is an issue number): this is then the FALLBACK, not the only answer -- a goal whose ISSUE declares a unit of work (a `feature:<name>` label, or a `Feature: <name>` line in the body) is cut from `feature/<name>` instead, resolved per goal. In local-goals mode nothing is read and no marker in a .sdlc/goals/*.md file has any effect, so this key is always the answer. A goal declaring no unit uses this key too, exactly as it always did.",
+    "integration_base": "",
+    "_integration_base": "Optional. Name a unit branch that is also your integration branch (work.base) so upkeep accepts it; empty = a unit branch as base is refused.",
     "remote": "origin",
     "branch_prefix": "sdlc/",
     "worktree_dir": ".sdlc/work",
