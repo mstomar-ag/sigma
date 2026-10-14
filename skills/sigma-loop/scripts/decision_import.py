@@ -289,12 +289,16 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
                 full = len(cands) >= cap
         if not found and name != names[0]:
             refusals.append("project folder %s not found under the given profiles" % name)
+    comments_timed_out = False
     if not full and limits["comments"]:
         try:
             legacy, bs, src = _load("legacy"), _load("blocker_scan"), _load("sources")
             read = comments_fn or src.fetch_comments
             for issue in (issues or [])[: limits["max_issues"]]:
                 if full:
+                    break
+                if clock() > deadline:                  # #1403: the comment scan honours the budget too
+                    comments_timed_out = True
                     break
                 stats["unpark-qa"]["files_read"] += 1
                 got = list(read(config, issue))
@@ -312,6 +316,8 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
             stats["unpark-qa"]["skipped"] += 1
     if timed_out:
         refusals.append("time budget reached: remaining transcript files were not read, raise rulebook.import.time_budget_s")
+    if comments_timed_out:
+        refusals.append("time budget reached: remaining issue comments were not read, raise rulebook.import.time_budget_s")
     if full:
         refusals.append("candidate cap of %d reached: scan stopped, raise rulebook.import.max_candidates" % cap)
     _mark_superseded(cands)

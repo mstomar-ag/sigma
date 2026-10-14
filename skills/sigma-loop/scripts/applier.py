@@ -639,6 +639,9 @@ def main(argv):
         done = [a for a in acts if a.get("result") == "done"]
         if done:
             print("applier: %d answer(s) applied or vetoed" % len(done))
+        failed = [a for a in acts if a.get("result") == "failed"]
+        if failed:                                      # #1403: a failed ask stays pending; say so
+            print("applier: %d asks failed and will be retried" % len(failed), file=sys.stderr)
     except Exception as exc:  # noqa: BLE001 - a watcher tick is never fatal
         print("applier: tick failed (non-fatal): %s" % type(exc).__name__, file=sys.stderr)
         return 1

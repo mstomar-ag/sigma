@@ -1231,6 +1231,9 @@ def settings(config):
     for key, label in (("remote", "work.remote"), ("base", "work.base"),
                        ("branch_prefix", "work.branch_prefix")):
         s[key] = state.safe_ref(label, s.get(key))      # #710: option injection into git
+    lead = "%s/" % s["remote"] if isinstance(s.get("remote"), str) and s["remote"] else ""
+    if lead and isinstance(s["base"], str) and s["base"].startswith(lead) and len(s["base"]) > len(lead):
+        s["base"] = s["base"][len(lead):]               # #1403: `origin/main` means `main`
     return s
 
 
