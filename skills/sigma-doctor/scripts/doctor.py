@@ -5058,12 +5058,29 @@ def _model_max_tier(cfg):
 _STALE_RULEBOOK_KEY = "`decision_rubric` was renamed `rulebook`; it is not read"
 
 
-def _real_repo_public(cfg, run):
+def _real_repo_slug(cfg, run, sdlc_dir):
+    """A plain owner/name for the REST read: discovery.github.repo, else origin parsed (host aliases
+    included), else None. A failed git read yields None."""
+    try:
+        disc = cfg.get("discovery") if isinstance(cfg, dict) else None
+        gh = disc.get("github") if isinstance(disc, dict) else None
+        conf = str((gh.get("repo") if isinstance(gh, dict) else None) or "").strip()
+        parts = conf.split("/")
+        if len(parts) == 2 and all(parts) and not any(c.isspace() or c in "{}" for c in conf):
+            return conf
+        if sdlc_dir is None:
+            return None
+        url = str(run(["git", "-C", str(pathlib.Path(sdlc_dir).parent), "remote", "get-url", "origin"]) or "").strip()
+        return _load_loop_script("feature_sync").slug_from_remote_url(url) if url else None
+    except Exception:
+        return None
+
+
+def _real_repo_public(cfg, run, sdlc_dir=None):
     """True/False from ONE REST read of the repository's `private` field, None when it cannot be read
     (no gh, a failed call, an unexpected reply). Only called when records are on and a runner was given."""
     try:
-        gh_cfg = cfg.get("gh") if isinstance(cfg, dict) else None
-        repo = (gh_cfg.get("repo") if isinstance(gh_cfg, dict) else None) or "{owner}/{repo}"
+        repo = _real_repo_slug(cfg, run, sdlc_dir) or "{owner}/{repo}"
         raw = run(["gh", "api", "repos/" + repo, "--jq", ".private"])
         if isinstance(raw, _RawFailure):
             return None
@@ -5110,7 +5127,7 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
                 if mod.visibility(cfg) == "public":
                     extra.append(public_msg)
             else:
-                real = _real_repo_public(cfg, run)
+                real = _real_repo_public(cfg, run, sdlc_dir)
                 if real is True:
                     extra.append(public_msg + " (read from GitHub)")
                 elif real is None:

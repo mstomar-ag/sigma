@@ -266,9 +266,9 @@ def _priority_aliases(config):
 
 
 def _blocker_promotion(config):
-    """`discovery.blocker_promotion.mode` -> 'off' (default) | 'smart' | 'always'. An unrecognised
-    or missing value falls back to 'off' rather than raising or silently promoting anything -- a
-    typo in config must not activate a feature nobody asked for, same defensive shape as `_order`.
+    """`discovery.blocker_promotion.mode` -> 'always' (default, #1406) | 'smart' | 'off'. An
+    unrecognised or missing value falls back to the default (the full rule: a blocker is never
+    below what it blocks); only an explicit 'off' disables it. Same defensive shape as `_order`.
     Shared by both sources so one config key means the same thing in local and github mode (#900);
     passed straight through to `discovery.blocker_promotion_rank`."""
     block = ((config or {}).get("discovery") or {}).get("blocker_promotion")
@@ -3047,6 +3047,10 @@ class GitHubSource:
             state_now = (info.get("state") or "").upper()
             label_names = {(l.get("name") or "") for l in (info.get("labels") or [])}
             terminal = state_now == "CLOSED" or self.parked_label in label_names
+            # #1394: a probe that SUCCEEDED and shows no claim label means there is nothing to
+            # release (never claimed, or already released) -- same silent no-op as terminal.
+            # Only a successful read reaches here; a failed probe stays fail-open below.
+            terminal = terminal or self.in_progress_label not in label_names
         except Exception:
             pass   # best-effort probe; a transient gh error must fall through to the pre-existing
                    # (fire-anyway) release behavior, never block a legitimate one on a read that
@@ -4686,11 +4690,26 @@ class GitHubSource:
                 return
 
             directly_blocks = {}                        # blocker ref -> [directly-blocked ref, ...]
+            smart = self.blocker_promotion_mode == "smart"
+            outside = []                                 # #1406: same-repo blockers not in this corpus
+            cross_repo = []                              # #1406: other-repository blockers (unwritable)
+
+            def is_proposed(ref):
+                labels = by_ref[ref].get("labels") or []
+                return self.proposed_label in [(l.get("name") if isinstance(l, dict) else str(l or ""))
+                                               for l in labels]
 
             def add_edge(blocked, by):
                 by, blocked = str(by), str(blocked)
-                if by == blocked or by not in open_refs or blocked not in open_refs:
-                    return                               # self-reference, or outside this corpus
+                if by == blocked or blocked not in open_refs:
+                    return                               # self-reference, or blocked side outside the corpus
+                if by not in open_refs:
+                    if smart:
+                        return                           # smart stays corpus-only (needs the blocker's rank/board item)
+                    if by not in outside:
+                        outside.append(by)
+                elif is_proposed(by):
+                    return                               # #1406: a goal awaiting confirmation is never a blocker
                 directly_blocks.setdefault(by, [])
                 if blocked not in directly_blocks[by]:
                     directly_blocks[by].append(blocked)
@@ -4699,6 +4718,9 @@ class GitHubSource:
             for ref, it in by_ref.items():
                 haystack = (it.get("title") or "") + "\n" + (it.get("body") or "")
                 for m in backlog_check._BLOCK_RE.finditer(haystack):
+                    if not smart and backlog_check.blocker_scan.is_cross_repo(haystack, m):
+                        cross_repo.append("#%s blocked by another repository's #%s" % (ref, m.group(2)))
+                        continue
                     add_edge(ref, m.group(2))
 
             if self.sdlc_dir:
@@ -4708,11 +4730,49 @@ class GitHubSource:
                 except Exception:
                     pass         # the ledger is a second, additive channel; explicit markers alone still work
 
+            self._warn_unwritable_blockers(cross_repo)
             if not directly_blocks:
                 return                                   # nothing blocks anything in this corpus
 
+            # #1406: a blocker outside this corpus (closed or parked goals, or never goal-labelled)
+            # has no labels on hand, so read each by ONE REST read, at most `_BLOCKER_READ_CAP` per
+            # pass. One that is closed, awaiting confirmation, or unreadable is dropped and
+            # reported; it is never silently treated as unprioritised.
+            ext = {}
+            unreadable = []
+            for ref in outside[:self._BLOCKER_READ_CAP]:
+                try:
+                    data = self._read_issue(ref, ["number", "state", "labels"])
+                    names = [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (data.get("labels") or [])]
+                    if str(data.get("state") or "open").lower() == "closed" or self.proposed_label in names:
+                        directly_blocks.pop(ref, None)
+                        continue
+                    ext[ref] = {"number": int(ref), "labels": data.get("labels") or []}
+                except Exception as exc:
+                    directly_blocks.pop(ref, None)
+                    unreadable.append("#%s could not be read (%s)" % (ref, exc))
+            for ref in outside[self._BLOCKER_READ_CAP:]:
+                directly_blocks.pop(ref, None)
+                unreadable.append("#%s not read (more than %d outside blockers this pass)" % (ref, self._BLOCKER_READ_CAP))
+            self._warn_unwritable_blockers(unreadable)
+            if not directly_blocks:
+                return
+
+            def item_of(ref):
+                return by_ref[ref] if ref in by_ref else ext[ref]
+
             def own_rank(ref):
-                return discovery.priority_rank(self._priority_name(by_ref[ref].get("labels")))
+                return discovery.priority_rank(self._priority_name(item_of(ref).get("labels")))
+
+            if not smart:
+                edges = [(b, d) for b, ds in directly_blocks.items() for d in ds]
+                ranks = {r: own_rank(r) for r in {x for e in edges for x in e}}
+                required, cyc = discovery.blocker_required_ranks(edges, ranks)
+                if cyc:
+                    self._warn_blocking_cycle(set(cyc))
+                for ref, (new_rank, cause) in required.items():
+                    self._write_blocker_promotion(ref, item_of(ref), ranks[ref], new_rank, cause)
+                return
 
             # "Has other unblocked work at its tier" (per dependent): some OTHER issue at the same
             # priority tier that is not itself blocked AND is genuinely pickable next by the actual
@@ -4840,6 +4900,19 @@ class GitHubSource:
                 self._write_blocker_promotion(ref, by_ref[ref], old_rank, new_rank, cause)
         except Exception as exc:
             self._note_scope(exc)
+
+    #: #1406: most outside-the-corpus blockers read (one REST read each) in a single pass.
+    _BLOCKER_READ_CAP = 10
+
+    def _warn_unwritable_blockers(self, notes):
+        """#1406: a blocker this pass cannot raise (another repository, or a read that failed) is
+        reported on stderr, never skipped silently. Best-effort, never raises."""
+        if not notes:
+            return
+        try:
+            sys.stderr.write("sigma: blocker priority not enforced for: %s\n" % "; ".join(sorted(set(notes))))
+        except Exception:
+            pass
 
     def _write_blocker_promotion(self, ref, it, old_rank, new_rank, cause):
         """Write ONE blocker's promoted priority + its audit comment naming the cause. THREE
