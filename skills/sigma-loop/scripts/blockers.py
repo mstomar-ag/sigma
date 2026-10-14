@@ -294,6 +294,8 @@ def _raise_rank(source, ref, goal, verdict, apply):
     """#1407: raise a still-open blocker to the blocked goal's rank. Fail-open, never raises."""
     if apply and verdict in (PICKABLE, PROMOTED, ROUTED, CHAINED) and hasattr(source, "raise_blocker_priority"):
         try:
+            if verdict == CHAINED and hasattr(source, "strip_blocker_confirmation"):
+                source.strip_blocker_confirmation(ref)  # #1415: the other verdicts strip in `_act`
             source.raise_blocker_priority(ref, goal)
         except Exception:                               # noqa: BLE001 - priority is an enrichment
             pass
