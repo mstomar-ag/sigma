@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A project board no longer turns a gh login blip into a login instruction (#1399).** When the session-start check cannot confirm the login and the board scope row fails with it, it now retries once and shows the short could-not-confirm step instead of advising a fresh login; scope alone, or any other failing row, behaves as before.
+
 ## 1.0.13 — 2026-10-14 — upkeep and Rulebook hardening from the two stress-test passes: backups, applier, landing, board back-fill, session start
 
 - **Level-4 spot check is a counter, not a hash sample (#1337).** With the applier on and a silent-allowed kind at level 4, every `spot_check_one_in`-th silent-eligible apply per kind and area now comments (a count kept in the autonomy folder, advanced only by applies that landed, never by a dry run); before, a hash of the ask id decided, so a run of silent applies could go unobserved for long. A closed gate is unchanged.
