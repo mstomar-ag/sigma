@@ -394,54 +394,40 @@ and GitHub labels/fields alike. `discovery.order` (`"priority"` default | `"crea
 queue order — under `"created"`, priority is ignored entirely, by design, so a repo that just wants
 strict filing order still gets it.
 
-**A blocked issue is parked — but its blocker's own priority is never touched.** A P2 issue quietly
-blocking a P0 stays P2 forever: nothing in the queue reflects the urgency it's actually holding up.
-`discovery.blocker_promotion` closes that gap: a blocker's priority is never below what it blocks.
-It is on by default; to choose a mode explicitly:
+**A blocker is never ranked below what it blocks.** Whenever one issue blocks another, the blocker's
+priority is at least the priority of what it blocks: a lower-priority blocker is raised to match when
+the blocked and blocking marks are assigned, and again whenever the reconcile tick finds the graph
+changed. Nothing is ever lowered. It is on by default, with no config key to set.
 
-```json
-"discovery": {
-  "blocker_promotion": {
-    "mode": "smart"
-  }
-}
-```
+Worked cases:
 
-`discovery.blocker_promotion.mode` is `"always"` by default (the full rule), and an explicit `off` is
-byte-identical to every release before this feature existed: a blocker's priority is never touched,
-no matter what it blocks. The rule only ever raises, follows chains of blockers, reports a blocking
-cycle once, and treats an unknown priority as the lowest. A goal waiting on human confirmation is
-never counted as a blocker. A blocker that is not itself a goal is read with one bounded read per
-pass; a blocker that lives in another repository, or cannot be read, is reported on stderr rather
-than skipped silently. Three modes:
+- A P0 goal becomes blocked by an open P3 issue: the P3 issue becomes P0 in the same step that marks
+  the pair.
+- A P3 goal blocked by a P0, P1 or P2 issue: no change on either side.
+- A P2 blocker of a P2 goal stays P2; the same at P0, P1, P3 and P4.
+- A follow-up filed because a P0 goal cannot proceed, with no priority or an unknown one, is filed at P0.
+- A chain raises through the middle: if C blocks B and B blocks A, C is raised to A's priority. A cycle
+  is reported once and never loops.
+- An issue waiting on the legacy confirmation label is never a blocker: the label is stripped from a
+  blocker, not honoured.
+- A blocker in another repository that Sigma cannot write to is reported on stderr, never skipped silently.
 
-- **`off`** — no promotion; a blocker's rank never changes on account of what it blocks.
-- **`smart`** — a blocker's rank is raised to match the most urgent issue it directly blocks, but
-  only counting a dependent that would actually be affected by the promotion: one with no OTHER
-  unblocked work already sitting at its own priority tier. A blocked P0 gains nothing from its
-  blocker jumping the queue when the queue already has a different ready P0 to work regardless — so
-  `smart` excludes that dependent from consideration entirely, not merely caps its pull. A different
-  dependent with no such other work still counts in full.
-- **`always`** — the identical "raise to the most urgent dependent" rule, with no such carve-out:
-  every direct dependent counts, whether or not it has other unblocked work waiting.
+Every raise writes one comment on the blocker naming the old and new priority and the issue it blocks.
+An unknown priority counts as the lowest. Writes per reconcile tick are bounded (10 writes, 200 edges),
+and the board field write is skipped when the GraphQL budget is low; the label write still lands.
 
-Either mode, the result is always a plain minimum: a blocker's priority can only be RAISED to match
-its most urgent dependent, never lowered — a blocker already at least as urgent as everything it
-blocks is left untouched. Several dependents at the same tier need no separate tie-break; the most
-urgent one wins outright, whichever it happens to be. A transitive chain promotes correctly too: if
-C blocks B blocks A, B's own PROMOTED rank (not its original one) feeds in as C's input, so urgency
-travels the whole chain, not just one hop (a cycle in a hand-authored blocking graph is detected and
-neutralized, with a warning, rather than looping forever).
+**One-way ratchet, deliberately.** A raise is never automatically undone. Once a blocker's priority is
+raised it stays there, even after the issue it was blocking closes or is unblocked another way. There is
+no de-priority path.
 
-Every promotion is paired with an explanatory comment on the blocker's own issue, naming the old and
-new priority and which issue it blocks (`smart` mode's comment also names why: that dependent had no
-other unblocked work at its tier) — never a silent label change.
+**Explicit `off`.** `discovery.blocker_promotion.mode` is `"always"` when absent. Setting it to `"off"`
+is byte-identical to a release without the feature: no read, no write, no state file, and `/sigma-doctor`
+shows no row. The older `"smart"` value is still accepted for the board pass only and is not the rule above.
 
-**One-way ratchet, deliberately.** A promotion is never automatically undone. Once a blocker's
-priority is raised, it stays there — even after the issue it was blocking closes, gets unblocked some
-other way, or the blocking relationship is otherwise resolved. There is no de-promotion path today.
-Know this before turning the feature on: a promoted priority is a trade you're accepting, not a
-transient signal that quietly resets itself once it's no longer earned.
+**Rollout.** On the first reconcile tick after an upgrade, the reconciler prints one stderr line saying how
+many blockers it would raise, then raises them; later ticks print nothing. The count is kept in a small
+state file under the state directory, and `/sigma-doctor` shows one row, flagged when violations persist
+for two reconcile intervals.
 
 **Where this reaches.** The live GitHub-mode board sync: every open `sdlc:goal` issue is
 re-evaluated against this rule on every board touch, and a promotion writes through, live.
@@ -455,8 +441,7 @@ so the same "Blocked by #N" marker scan that finds edges in GitHub mode can neve
 local goal's body, by construction — nothing to promote, so the config key is simply never read
 there.
 
-Config: `discovery.blocker_promotion.mode` (`always` default | `smart` | `off`) is the only key this
-feature reads.
+Config: `discovery.blocker_promotion.mode` (`always` default | `off`) is the only key this feature reads.
 
 **A goal BLOCKED on another issue resumes by itself once that blocker is resolved (a closed issue or a merged pull request). A goal a human
 PARKED never does.** That split is why this sweep ships on. When work on a goal finds a genuine
