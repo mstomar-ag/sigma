@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **`ack --all` acks only what the filed issue listed (#1412).** The listed shas are now written only when the direct-commits issue is actually filed, so a commit landing after the filing is not swept in by a later pass; when every listed sha is gone, `ack --all` says so and writes nothing.
 - **The blocker priority rule is documented and proven end to end (#1411).** Scenario tests drive every worked case through the real writers, repair, filing, picker and reconcile tick; the backlog guide, label model and config template now describe the rule as on by default with an explicit `off`, the one-way ratchet and the one-time rollout line.
 - **Wording after the REST fallbacks (#1413).** The release no-op message now says the goal may never have been claimed, and the review gate docstring and comment describe the unreadable-decision case with an approve directive. The duplicate #1398 line is removed.
 - **A refused owner lookup names the GraphQL rate limit (#1400).** A bare `unknown owner type` from a `gh project` call now says it is usually the GraphQL rate limit (check `gh api rate_limit`, wait for the reset, retry) and keeps the phrase the doctor matches; the rate-limit wording and other errors are unchanged.
