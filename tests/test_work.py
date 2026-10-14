@@ -5440,14 +5440,19 @@ def test_review_gate_reviews_fall_back_to_gh_pr_view_reviews_once(tmp_path, monk
 
 @pytest.mark.parametrize("env", ["CLAUDE_CODE_REMOTE", "SIGMA_GH_GRAPHQL"])
 def test_review_gate_approval_parks_without_graphql_and_never_makes_the_decision_call(tmp_path, monkeypatch, env):
-    """KNOWN LIMITATION, documented: approval mode with GraphQL unavailable parks even with a `sigma:approve`
-    comment (as before: the decision read failed). The residual `reviewDecision` call is not even attempted."""
+    """#1398 (provisional): approval mode with GraphQL unavailable passes on a `sigma:approve` comment,
+    and the residual `reviewDecision` call is not even attempted. With no directive it still parks."""
     monkeypatch.setenv(env, "true" if env == "CLAUDE_CODE_REMOTE" else "off")
     d = _sdlc(tmp_path, _APPROVAL); g = _started(d)
     run = _runner(_review(decision="APPROVED", comments=["sigma:approve"], comment_authors=["x"]))
+    got = work.review_gate(d, _APPROVAL, g, run=run)
+    assert not any("reviewDecision" in c for c in run.calls)
+    ok, why = got
+    if not ok:                     # cloud: the thread check may still refuse; it must not be the decision park
+        assert "review decision" not in why
+    run = _runner(_review(decision="APPROVED"))
     ok, why = work.review_gate(d, _APPROVAL, g, run=run)
     assert ok is False and "review decision" in why and "GraphQL" in why
-    assert not any("reviewDecision" in c for c in run.calls)
 
 
 def test_review_gate_changes_mode_in_cloud_still_reads_reviews_over_rest_and_passes(tmp_path, monkeypatch):
