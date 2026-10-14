@@ -1512,3 +1512,16 @@ def test_a_regenerated_block_message_does_not_assert_an_edit(tmp_path, capsys):
     said = capsys.readouterr().err
     assert "was regenerated; whether it had been edited could not be told from what was on disk" in said
     assert "over an edit" not in said
+
+
+def test_a_unit_opened_without_a_recorded_branch_stays_open_while_its_branch_is_live(tmp_path):
+    """#1396: `define open` leaves the repo's branch unrecorded. The unit's own `feature/<name>`
+    exists on the remote, so the reconcile pass must not close it; with the branch absent it still does."""
+    m = _mod()
+    bare = {"branch": None, "goals": []}
+    live_entry = m.registry.normalise_entry(_entry(repos={REPO: dict(bare)}))
+    assert m.reconcile(live_entry, "fresh-unit", REPO, frozenset({"feature/fresh-unit"})) == []
+    assert live_entry["open"] is True
+    gone_entry = m.registry.normalise_entry(_entry(repos={REPO: dict(bare)}))
+    kinds = [d["kind"] for d in m.reconcile(gone_entry, "fresh-unit", REPO, frozenset())]
+    assert m.CLOSED in kinds and gone_entry["open"] is False
