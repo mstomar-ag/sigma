@@ -45,7 +45,7 @@ def test_config_slug_is_used(tmp_path):
 
 
 def test_host_alias_origin_is_parsed(tmp_path):
-    run = _Run("false\n", origin="git@github.com-work:acme/widgets.git\n")
+    run = _Run("false\n", origin="https://github.com-work/acme/widgets.git\n")
     out = _doctor()._rulebook_state(_cfg(), tmp_path / ".sdlc", run=run)
     assert _gh(run) == [["gh", "api", "repos/acme/widgets", "--jq", ".private"]]
     assert WARN in out and "(read from GitHub)" in out
@@ -59,6 +59,6 @@ def test_neither_available_keeps_placeholder_call(tmp_path):
 
 def test_unreadable_reply_is_not_read(tmp_path):
     d = _doctor()
-    run = _Run(d._RawFailure("no gh"), origin="git@github.com-work:acme/widgets.git")
+    run = _Run(d._RawFailure("no gh"), origin="https://github.com-work/acme/widgets.git")
     out = d._rulebook_state(_cfg(), tmp_path / ".sdlc", run=run)
     assert "repository visibility not read" in out and "(read from GitHub)" not in out
