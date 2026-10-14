@@ -2775,7 +2775,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
             registry_now = None
         # Classifier TEXT only (never executed); the real push is `_pushed`, the one pinned colon-refspec site.
         verdict = hsg.guard("git push --force-with-lease %s HEAD:%s" % (remote, "refs/heads/" + branch),
-                            {"branch": branch, "registry": registry_now}, config)
+                            {"branch": branch, "registry": registry_now, "pass_branch": branch}, config)
         if verdict.blocked:
             report["outcome"] = FAILED
             report["why"] = verdict.reason
