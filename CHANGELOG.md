@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Ten small wiring fixes (#1403).** A park no longer prints a failed-label line when the REST fallback landed it; failed applier asks are named; the comment scan honours its time budget; landing refusals keep the reason; ack --all acks only the listed commits; work.base accepts a remote-prefixed name; the board dry run shows the apply order; a rebased outcome drops conflict text; the reconcile tick limit scales with the watcher interval.
 - **A project board no longer turns a gh login blip into a login instruction (#1399).** When the session-start check cannot confirm the login and the board scope row fails with it, it now retries once and shows the short could-not-confirm step instead of advising a fresh login; scope alone, or any other failing row, behaves as before.
 
 ## 1.0.13 — 2026-10-14 — upkeep and Rulebook hardening from the two stress-test passes: backups, applier, landing, board back-fill, session start

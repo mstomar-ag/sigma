@@ -257,7 +257,9 @@ def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None
         report = env.rebase_pass(sdlc_dir, config, None, unit, run=None, cwd=env.cwd, remote=env.remote)
         outcome = report.get("outcome") if isinstance(report, dict) else None
         if outcome not in (env.rebase.CURRENT, env.rebase.REBASED):
-            return refuse("pass-" + str(outcome), "the upkeep pass did not leave the unit current")
+            why = " ".join(str(report.get("why") or "").split()) if isinstance(report, dict) else ""
+            return refuse("pass-" + str(outcome), "the upkeep pass did not leave the unit current"
+                          + (": " + why if why else ""))     # #1403: keep the pass's own reason
         candidate = _remote_tip(env, branch)
         if candidate is None:
             return refuse("no-branch", "the unit branch vanished from the remote")

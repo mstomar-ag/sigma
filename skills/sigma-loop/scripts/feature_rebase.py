@@ -674,7 +674,8 @@ def ack(sdlc_dir, config, unit, shas, all_=False, run=None, cwd=None, remote=Non
         result["why"] = _flat(exc)
         return result
     if all_:
-        chosen = list(found)
+        listed = _read_listed(sdlc_dir, unit)       # #1403: only what the filed issue listed
+        chosen = [d for d in found if d["sha"] in listed] if listed else list(found)
     else:
         chosen, unknown = [], []
         for want in shas:
@@ -1857,6 +1858,32 @@ def _read_filed(sdlc_dir, unit):
     return seen if isinstance(seen, dict) else {}
 
 
+LISTED_SUFFIX = ".rebase-listed.json"
+
+
+def _listed_path(sdlc_dir, unit):
+    return filed_path(sdlc_dir, unit).with_name(unit.lower() + LISTED_SUFFIX)
+
+
+def _record_listed(sdlc_dir, unit, found):
+    """#1403: remember the shas the direct-commits issue listed, so `ack --all` acks those and not
+    whatever has landed on the branch since. Runtime bookkeeping; never raises."""
+    try:
+        path = _listed_path(sdlc_dir, unit)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(sorted(d["sha"] for d in found)), encoding="utf-8")
+    except (OSError, ValueError, KeyError):   # noqa: S110
+        pass
+
+
+def _read_listed(sdlc_dir, unit):
+    try:
+        data = json.loads(_listed_path(sdlc_dir, unit).read_text(encoding="utf-8"))
+    except Exception:                         # noqa: BLE001 - absent or unreadable means "no record"
+        return set()
+    return {x for x in data if isinstance(x, str)} if isinstance(data, list) else set()
+
+
 def _told_before(sdlc_dir, unit, slot, fingerprint):
     """Has this exact finding ALREADY BEEN FILED SUCCESSFULLY? -> bool.
 
@@ -2747,6 +2774,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
         _settle_direct(sdlc_dir, config, run, cwd, remote, report, branch)
     if found:
         report["outcome"] = DIRECT_COMMITS
+        _record_listed(sdlc_dir, unit, found)
         _file_issue(sdlc_dir, config, goal, report,
                     slot="direct:%s" % branch, key=before,
                     title="Direct commits on %s block rebase upkeep" % branch,
@@ -2818,6 +2846,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
         return report
     if outcome != REBASED:
         return report
+    report["why"] = ""                    # #1403: a success keeps no intermediate git conflict text
     _clear_blocked(sdlc_dir, unit)
     if report.get("resolved"):
         _after_resolved_push(sdlc_dir, config, run, cwd, remote, base_ref, report)

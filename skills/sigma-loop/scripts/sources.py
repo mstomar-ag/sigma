@@ -1732,7 +1732,7 @@ class GitHubSource:
         return False                                      # unreachable: the loop always returns/raises
 
     def _swap_labels_best_effort(self, goal, add=(), remove=(), what="label change",
-                                 retries=None, retry_base=None):
+                                 retries=None, retry_base=None, quiet=False):
         """`_swap_labels`, but never raising — the shape every lifecycle transition needs.
 
         #1391 step 2, and this wrapper is the whole reason step 2 is safe. `_swap_labels` RAISES by
@@ -1761,6 +1761,8 @@ class GitHubSource:
             return bool(self._swap_labels(goal, add=add, remove=remove,
                                           retries=retries, retry_base=retry_base))
         except Exception as exc:                 # noqa: BLE001 - see docstring; must never propagate
+            if quiet:                            # #1403: the caller prints once, after its own fallback
+                return False
             try:
                 sys.stderr.write("sigma: %s label write failed for #%s (%s) — continuing; the "
                                  "reconciler will pick this up\n" % (what, goal, _fx(exc)))
@@ -3323,9 +3325,12 @@ class GitHubSource:
         landed = self._swap_labels_best_effort(
             goal, add=[self.parked_label],
             remove=[self.goal_label, self.in_progress_label, self.goal_blocked_label],
-            what="park")
+            what="park", quiet=rest_fallback)
         if not landed and rest_fallback:
             landed = self._park_labels_rest(goal)       # #1303: park only; REST = separate budget
+            if not landed:                              # #1403: say so only if the fallback failed too
+                sys.stderr.write("sigma: park label write failed for #%s (graphql and rest) — continuing; "
+                                 "the reconciler will pick this up\n" % (goal,))
         if not landed:
             self._repair_partial_park(goal)
         # #1657 follow-up (scope): routed through `note()` -- same chokepoint `note()`'s other
