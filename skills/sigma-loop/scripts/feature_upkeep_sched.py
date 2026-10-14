@@ -334,7 +334,7 @@ def scheduler_tick(config, sdlc_dir, *, environ=None, now=None, budget=30, clock
     if not window.is_open(settings, sdlc_dir, now):          # a stamp read and arithmetic: no unit listing, no git, no gh
         return status(sdlc_dir, now, decision="window-closed", noted=collected)
     root = str(pathlib.Path(sdlc_dir).resolve().parent)
-    if not window.stamp(sdlc_dir, now, "attempted", (window.read(sdlc_dir) or {}).get("unreached") or []):
+    if not window.stamp_attempt(sdlc_dir, now, "attempted", (window.read(sdlc_dir) or {}).get("unreached") or []):
         return status(sdlc_dir, now, decision="state-unwritable", unit="*", detail="window stamp")
     run_id = "%d-%d" % (now, os.getpid())
     try:

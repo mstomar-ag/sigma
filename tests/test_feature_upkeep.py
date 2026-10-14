@@ -20,6 +20,7 @@ OPEN_ENV = support.OPEN_ENV
 EXPECTED_SCHEMA = {   # key -> (kind, lo, hi, min_items)
     "enabled": ("bool", None, None, None),
     "window_hours": ("int", 1, 8760, None),
+    "retry_minutes": ("int", 1, 10080, None),
     "units.include": ("name_list", None, None, 1),
     "units.exclude": ("name_list", None, None, 0),
     "triggers.drift_merges": ("auto_int_null", 1, 1000, None),
@@ -41,7 +42,7 @@ EXPECTED_SCHEMA = {   # key -> (kind, lo, hi, min_items)
     "backup.former_prefixes": ("name_list", None, None, 0),
 }
 DEFAULT_TABLE = {
-    "enabled": False, "window_hours": 12, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
+    "enabled": False, "window_hours": 12, "retry_minutes": 60, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
     "triggers.every_hours": 24, "triggers.min_interval_minutes": 120, "triggers.dormant_days": 14,
     "triggers.dormant_every_hours": 72, "auto.window_days": 21, "auto.burst_window_hours": 24,
     "auto.target_hours": 12, "auto.floor": 3, "auto.ceiling": 40, "verify.clean_rebase": False,
@@ -76,7 +77,7 @@ def cross_ok(eff):                                    # the cross-checks, restat
 
 def block_for(key, v, flag):
     block = {"enabled": flag}
-    if key in ("enabled", "window_hours"):
+    if key in ("enabled", "window_hours", "retry_minutes"):
         block[key] = v
     else:
         head, _, tail = key.rpartition(".")
@@ -158,7 +159,7 @@ def test_schema_is_locked():
     got = {k: (s["kind"], s.get("lo"), s.get("hi"), s.get("min_items")) for k, s in g.SCHEMA.items()}
     assert got == EXPECTED_SCHEMA
     assert {k.split(".")[0] for k in g.SCHEMA if "." in k} == set(SECTIONS)
-    assert [k for k in g.SCHEMA if "." not in k] == ["enabled", "window_hours"]
+    assert [k for k in g.SCHEMA if "." not in k] == ["enabled", "window_hours", "retry_minutes"]
 
 
 def test_defaults_pinned():

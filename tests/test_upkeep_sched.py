@@ -95,7 +95,7 @@ def test_a_failed_start_is_reported_and_the_attempt_stays_stamped(tmp_path):
         raise OSError("no")
     result = m.scheduler_tick(open_config(), sdlc, environ=ENV, now=1_000_000, deps={"spawn": refuse})
     assert result["decision"] == "spawn-failed"
-    assert json.loads(pathlib.Path(sdlc, "state/upkeep/window.json").read_text())["last_at"] == 1_000_000
+    assert json.loads(pathlib.Path(sdlc, "state/upkeep/window.json").read_text())["attempt_at"] == 1_000_000
 
 
 def test_windows_is_refused_and_the_refusal_is_recorded_once(tmp_path, monkeypatch):

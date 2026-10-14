@@ -133,7 +133,7 @@ def test_open_window_session_start_spawns_one_detached_sweep_and_does_not_wait(t
     mod, sdlc, spawned = _session(), T.project(tmp_path), []
     got = mod.start(sdlc, environ=ENV, now=NOW, deps={"spawn": lambda *a: spawned.append(a)})
     assert got["decision"] == "started" and len(spawned) == 1 and spawned[0][2] == "*" and spawned[0][-1] is True, spawned
-    assert window().read(sdlc)["last_at"] == NOW                                    # the attempt is stamped before the work
+    assert window().read(sdlc)["attempt_at"] == NOW and window().read(sdlc)["last_at"] == 0   # an attempt, not a completed sweep
     # the real spawn: its own session, null stdio, --sweep, and no wait on the handle
     m, seen = T.sched(), {}
 
@@ -200,6 +200,7 @@ def test_a_second_sweep_while_the_first_holds_the_lease_backs_off_as_a_refusal(t
         out = sweep(j, sdlc, tmp_path, ["a"], engine(log, {}))
     assert out == {"outcome": "busy"} and log == [], (out, log)
     assert window().read(sdlc)["outcome"] == "busy"                                 # a refusal, never a failure
+    assert window().read(sdlc)["last_at"] == 0 and window().read(sdlc)["attempt_at"] == NOW   # and it never closes the window
     assert not pathlib.Path(sdlc, "state/upkeep/units/a.json").exists()
 
 
@@ -287,7 +288,97 @@ def test_session_start_script_help_and_usage():
     assert p.returncode == 0 and "start <sdlc_dir>" in p.stdout
 
 
+# ------------------------------------------------------------------------------------------ attempt versus completed (round 2)
+
+RETRY = {"window_hours": 12, "retry_minutes": 60}
+
+
+def test_an_attempt_holds_off_only_for_the_retry_window_and_never_closes_the_twelve_hours(tmp_path):
+    w, sdlc = window(), T.project(tmp_path)
+    assert w.stamp_attempt(sdlc, NOW - 59 * 60, "attempted")
+    assert w.is_open(RETRY, sdlc, NOW) is False                                     # inside the retry window
+    assert w.is_open(RETRY, sdlc, NOW + 2 * 60) is True                             # 61 minutes after the attempt
+    assert w.is_open({"window_hours": 12, "retry_minutes": 5}, sdlc, NOW) is True   # the retry window is configurable
+    assert w.retry_minutes_of({}) == 60 and w.retry_minutes_of({"retry_minutes": 0}) == 60
+    stamp_at(sdlc, NOW - 2 * HOUR)                                                  # a completed sweep closes the 12 hours
+    w.stamp_attempt(sdlc, NOW - 3 * HOUR, "attempted")
+    assert w.is_open(RETRY, sdlc, NOW) is False
+
+
+def test_an_attempt_keeps_the_last_completed_time_and_a_completed_sweep_clears_the_attempt(tmp_path):
+    w, sdlc = window(), T.project(tmp_path)
+    stamp_at(sdlc, NOW - 13 * HOUR)
+    w.stamp_attempt(sdlc, NOW - 5, "attempted")
+    got = w.read(sdlc)
+    assert got["last_at"] == NOW - 13 * HOUR and got["attempt_at"] == NOW - 5
+    stamp_at(sdlc, NOW)
+    assert w.read(sdlc)["attempt_at"] is None and w.is_open(RETRY, sdlc, NOW + HOUR) is False
+
+
+def test_the_scheduler_attempt_then_a_failed_spawn_retries_after_the_retry_window_not_after_twelve_hours(tmp_path):
+    m, sdlc, spawned = T.sched(), T.project(tmp_path), []
+
+    def boom(*a):
+        raise OSError("no spawn")
+    got = m.scheduler_tick(T.open_config(), sdlc, environ=ENV, now=NOW, deps={"spawn": boom})
+    assert got["decision"] == "spawn-failed"
+    again = m.scheduler_tick(T.open_config(), sdlc, environ=ENV, now=NOW + 30 * 60, deps={"spawn": lambda *a: spawned.append(a)})
+    assert again["decision"] == "window-closed" and spawned == []
+    later = m.scheduler_tick(T.open_config(), sdlc, environ=ENV, now=NOW + 61 * 60, deps={"spawn": lambda *a: spawned.append(a)})
+    assert later["decision"] == "started" and len(spawned) == 1
+
+
+def test_a_sweep_that_dies_or_is_cut_off_before_its_first_unit_is_an_attempt_not_a_completed_sweep(tmp_path):
+    j, sdlc, log = T.job(), T.project(tmp_path), []
+    stop = pathlib.Path(sdlc, "state/upkeep.stop")
+    stop.parent.mkdir(parents=True, exist_ok=True)
+    stop.write_text("")
+    out = sweep(j, sdlc, tmp_path, ["a", "b"], engine(log, {}))
+    got = window().read(sdlc)
+    assert out["sweep"]["unreached"] == ["a", "b"] and got["last_at"] == 0 and got["attempt_at"] == NOW, got
+    sdlc2 = T.project(tmp_path / "two")
+
+    def explode(unit):
+        raise RuntimeError("killed")
+    with pytest.raises(RuntimeError):
+        sweep(j, sdlc2, tmp_path, ["a"], explode)
+    got = window().read(sdlc2)
+    assert got["outcome"] == "failed" and got["last_at"] == 0 and got["attempt_at"] == NOW, got
+
+
+def test_a_sweep_that_finished_with_some_units_unreached_still_closes_the_window(tmp_path):
+    j, sdlc, log = T.job(), T.project(tmp_path), []
+    clock = {"t": 0.0}
+    base = engine(log, {})
+
+    def command(unit):
+        clock["t"] += 100
+        return base(unit)
+    sweep(j, sdlc, tmp_path, list("abcde"), command, cap=250, beat=lambda: clock["t"])
+    got = window().read(sdlc)
+    assert got["last_at"] == NOW and got["attempt_at"] is None and got["unreached"] == ["d", "e"]
+
+
+def test_retry_minutes_is_validated_and_defaults_to_sixty():
+    g = S.gate()
+    assert g.DEFAULTS["retry_minutes"] == 60
+    for bad in ("60", 0, -1, 1.5, True, 10081):
+        got = g.read({"upkeep": {"enabled": True, "retry_minutes": bad}})
+        assert got.enabled is False and any("retry_minutes" in p for p in got.problems), (bad, got.problems)
+    assert g.read({"upkeep": {"enabled": True, "retry_minutes": 15}}).settings["retry_minutes"] == 15
+
+
 # ------------------------------------------------------------------------------------------ break-it controls
+
+def test_control_an_attempt_that_closes_the_window_is_caught(tmp_path):
+    broken = S.script("feature_upkeep_window", ('"last_at": prior.get("last_at") or 0, "attempt_at": int(now)', '"last_at": int(now), "attempt_at": int(now)'))
+    sdlc = T.project(tmp_path)
+    broken.stamp_attempt(sdlc, NOW - 2 * HOUR, "attempted")
+    assert broken.is_open(RETRY, sdlc, NOW) is False                                # the broken version silences 12 hours
+    sdlc2 = T.project(tmp_path / "real")
+    window().stamp_attempt(sdlc2, NOW - 2 * HOUR, "attempted")
+    assert window().is_open(RETRY, sdlc2, NOW) is True                              # the real one re-opens after the retry window
+
 
 def test_control_window_check_removed_is_caught(tmp_path, monkeypatch):
     broken = S.script("feature_upkeep_sched", ("if not window.is_open(settings, sdlc_dir, now):", "if False:"))
@@ -298,7 +389,7 @@ def test_control_window_check_removed_is_caught(tmp_path, monkeypatch):
 
 
 def test_control_busy_refusal_removed_is_caught(tmp_path):
-    broken = S.script("feature_upkeep_job", ('            prior = window.read(sdlc_dir) or {}\n            window.stamp(sdlc_dir, stamp_now(), "busy", prior.get("unreached") or [])\n            return {"outcome": "busy"}', "            pass"))
+    broken = S.script("feature_upkeep_job", ('            prior = window.read(sdlc_dir) or {}\n            window.stamp_attempt(sdlc_dir, stamp_now(), "busy", prior.get("unreached") or [])\n            return {"outcome": "busy"}', "            pass"))
     sdlc, log = T.project(tmp_path), []
     lock = pathlib.Path(sdlc, "state/upkeep/job.lock")
     lock.parent.mkdir(parents=True)

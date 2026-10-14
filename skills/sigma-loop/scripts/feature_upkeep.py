@@ -63,6 +63,7 @@ MAX_NEAR_EDITS = 2
 SCHEMA = {   # dotted key -> spec; the lo/hi are guard rails against typos, not tuning advice
     "enabled": {"kind": "bool"},
     "window_hours": {"kind": "int", "lo": 1, "hi": 8760},
+    "retry_minutes": {"kind": "int", "lo": 1, "hi": 10080},
     "units.include": {"kind": "name_list", "min_items": 1},
     "units.exclude": {"kind": "name_list", "min_items": 0},
     "triggers.drift_merges": {"kind": "auto_int_null", "lo": 1, "hi": 1000},
@@ -84,7 +85,7 @@ SCHEMA = {   # dotted key -> spec; the lo/hi are guard rails against typos, not 
     "backup.former_prefixes": {"kind": "name_list", "min_items": 0},
 }
 DEFAULTS = {   # the one place the defaults live; the shipped template must equal this
-    "enabled": False, "window_hours": 12, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
+    "enabled": False, "window_hours": 12, "retry_minutes": 60, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
     "triggers.every_hours": 24, "triggers.min_interval_minutes": 120, "triggers.dormant_days": 14,
     "triggers.dormant_every_hours": 72, "auto.window_days": 21, "auto.burst_window_hours": 24,
     "auto.target_hours": 12, "auto.floor": 3, "auto.ceiling": 40, "verify.clean_rebase": False,
@@ -203,7 +204,7 @@ def read(config):
         return Reading(False, defaults, ("upkeep: expected an object, got " + _tname(block),))
     if len(block) > MAX_BLOCK_KEYS:
         return Reading(False, defaults, ("upkeep: more than %d keys" % MAX_BLOCK_KEYS,))
-    problems = _unknown("upkeep", block, {"enabled", "window_hours"} | set(_SECTIONS))
+    problems = _unknown("upkeep", block, {"enabled", "window_hours", "retry_minutes"} | set(_SECTIONS))
     sections = {}
     for name in _SECTIONS:
         got = block.get(name, _ABSENT)

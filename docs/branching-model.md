@@ -1718,7 +1718,8 @@ of settings that contradicts itself closes the whole block, and `/sigma-doctor` 
 | Key | Default | Range | What it does |
 | --- | --- | --- | --- |
 | enabled | false | boolean | project opt-in; only the boolean true opens it |
-| window_hours | 12 | 1 to 8760 | the sweep window: once this many hours have passed since this machine's last sweep, the next session start or watcher tick starts one sweep of every unit |
+| window_hours | 12 | 1 to 8760 | the sweep window: once this many hours have passed since this machine's last completed sweep, the next session start or watcher tick starts one sweep of every unit |
+| retry_minutes | 60 | 1 to 10080 | after a sweep that was killed, cut off before its first unit, busy or failed to spawn, no new sweep starts for this long; it never closes the window |
 | units.include | ["*"] | list of unit names, at least one | units the scheduler may pick (case-folded globs) |
 | units.exclude | [] | list of unit names | units it never picks; wins over include |
 | triggers.drift_merges | "auto" | "auto", a whole number 1 to 1000, or null | no longer schedules (read for one release); was: arrivals on the base that make a unit due; null turns the trigger off |

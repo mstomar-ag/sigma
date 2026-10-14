@@ -191,7 +191,7 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             prior = window.read(sdlc_dir) or {}
-            window.stamp(sdlc_dir, stamp_now(), "busy", prior.get("unreached") or [])
+            window.stamp_attempt(sdlc_dir, stamp_now(), "busy", prior.get("unreached") or [])
             return {"outcome": "busy"}
         head = {"schema": sched.RECORD_SCHEMA, "unit": SWEEP_UNIT, "run_id": run_id, "noted": False, "sweep_job": True}
         _record(sdlc_dir, dict(head, state="running", started_at=stamp_now()))
@@ -227,7 +227,10 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
         finally:
             summary = {"counts": counts, "unreached": unreached}
             _record(sdlc_dir, dict(head, state="done", outcome=outcome, unit_tip=None, finished_at=stamp_now(), sweep=summary))
-            window.stamp(sdlc_dir, stamp_now(), outcome, unreached)
+            if outcome == "swept" and (counts or not unreached):          # a sweep cut off before its first unit is an attempt
+                window.stamp(sdlc_dir, stamp_now(), outcome, unreached)
+            else:
+                window.stamp_attempt(sdlc_dir, stamp_now(), outcome, unreached)
     return {"outcome": outcome, "sweep": {"counts": counts, "unreached": unreached}}
 
 
