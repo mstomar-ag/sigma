@@ -266,9 +266,9 @@ def _priority_aliases(config):
 
 
 def _blocker_promotion(config):
-    """`discovery.blocker_promotion.mode` -> 'off' (default) | 'smart' | 'always'. An unrecognised
-    or missing value falls back to 'off' rather than raising or silently promoting anything -- a
-    typo in config must not activate a feature nobody asked for, same defensive shape as `_order`.
+    """`discovery.blocker_promotion.mode` -> 'always' (default, #1406) | 'smart' | 'off'. An
+    unrecognised or missing value falls back to the default (the full rule: a blocker is never
+    below what it blocks); only an explicit 'off' disables it. Same defensive shape as `_order`.
     Shared by both sources so one config key means the same thing in local and github mode (#900);
     passed straight through to `discovery.blocker_promotion_rank`."""
     block = ((config or {}).get("discovery") or {}).get("blocker_promotion")
@@ -458,9 +458,9 @@ def _blocking_priority_override(config):
     boolean `True` turns it on, anything else (missing, a typo'd string, a number, null) reads as
     off, so a config mistake can never silently activate a scheduling override nobody asked for.
 
-    When on: any `goal_label` issue that ALSO carries `blocking_label` sorts ahead of EVERY other
-    pending issue, regardless of priority tier -- a STRUCTURAL override, not a priority nudge (a
-    promoted P0 can still tie with other real P0s; this doesn't). See `GitHubSource.
+    When on: any `goal_label` issue that ALSO carries `blocking_label` sorts ahead of every other
+    pending issue OF ITS OWN priority tier (#1409): a blocker is never below what it blocks, and
+    the writers raise it to that tier, so it never jumps a higher tier. See `GitHubSource.
     _blocking_priority_pending` (label-queue path) and `_board_queue` (board-authoritative path) --
     both need this, independently, per the epic's own adversarial plan-review finding (§10.3 of the
     design doc): a fix to only one would silently fail to surface a blocker on whichever path a
@@ -1320,28 +1320,42 @@ class GitHubSource:
             return self._raw_run(args)
         for attempt in range(self._PROJECT_RETRIES):
             try:
-                return self._raw_run(args)
+                out = self._raw_run(args)
+                self._project_refusals = 0         # #1402: any answered project call clears the streak
+                return out
             except Exception as e:
                 # #233: a runner that already KILLED a hung call marks it `no_retry` -- a timeout is
                 # not a blip, and retrying it would spend the whole boundary budget on one card.
                 if attempt == self._PROJECT_RETRIES - 1 or getattr(e, "no_retry", False) \
                         or not self._is_transient(e):
                     limited = self._rate_limit_error(e, args)
+                    if limited is not None or "unknown owner type" in str(e).lower():
+                        self._project_refusals += 1    # #1402: consecutive refused project calls
                     if limited is not None:
                         raise limited from e
                     raise
                 time.sleep(self._RETRY_BASE * (2 ** attempt))
 
     _RATE_LIMIT = ("rate limit", "secondary rate")
+    _project_refusals = 0                            # #1402: consecutive refused `gh project` calls
 
     @classmethod
     def _rate_limit_error(cls, exc, args):
         """#1319 (PROVISIONAL): a rate-limited owner lookup comes back from `gh project` as the
         misleading "unknown owner type". When the error text carries the rate-limit wording, return
         one clear RuntimeError naming it; else None (the original error propagates unchanged)."""
-        if not any(m in str(exc).lower() for m in cls._RATE_LIMIT):
-            return None
+        text = str(exc).lower()
         verb = " ".join(str(a) for a in args[:2])
+        if not any(m in text for m in cls._RATE_LIMIT):
+            # #1400: the bare owner-lookup text is usually the GraphQL rate limit; keep the phrase
+            # (doctor matches it as "board gone") and say what to check.
+            if "unknown owner type" not in text:
+                return None
+            msg = ("`gh %s` failed with 'unknown owner type', which is usually the GraphQL rate limit "
+                   "(check `gh api rate_limit`); wait for the reset, then retry" % verb)
+            err = RuntimeError(msg)
+            err.hint = msg
+            return err
         msg = ("GitHub API rate limit reached on `gh %s` (gh may report it as 'unknown owner type'); "
                "wait for the limit to reset, then retry" % verb)
         err = RuntimeError(msg)
@@ -1670,6 +1684,17 @@ class GitHubSource:
             raise RuntimeError(f"issue {issue} has no resolvable node id")
         return node
 
+    def _swap_labels_rest(self, issue, add, remove, cause):
+        """#1398: the REST twin of the GraphQL swap, reached only when GraphQL could not even resolve
+        the ids. Existing gh_api helpers only (add, then remove: same order). One stderr line."""
+        sys.stderr.write("sigma: label swap on #%s: GraphQL unavailable (%s); using REST\n"
+                         % (issue, " ".join(str(cause).split())[:120]))
+        if add:
+            self._issue_add_labels(issue, list(add))
+        for label in remove:
+            self._issue_remove_label(issue, label)
+        return True
+
     def _swap_labels(self, issue, add=(), remove=(), retries=None, retry_base=None):
         """Apply a lifecycle label change to `issue` as ONE mutation request. See the block comment
         above for why this shape and not `gh issue edit` or the REST set-replace.
@@ -1700,11 +1725,18 @@ class GitHubSource:
         add, remove = [l for l in add if l], [l for l in remove if l]
         if not add and not remove:
             return False
-        node = self._issue_node_id(issue)
+        try:
+            node = self._issue_node_id(issue)
+            ids = self._label_node_ids((*add, *remove))
+        except Exception as exc:                          # noqa: BLE001 - GraphQL refused: use REST
+            # #1398: a refused/rate-limited GraphQL budget must not strand a lifecycle label (the
+            # claim above all). REST has its own budget; same helpers every other label write uses.
+            if any(m in str(exc) for m in ("has no resolvable node id", "could not identify a repository", "control character")):
+                raise
+            return self._swap_labels_rest(issue, add, remove, exc)
         # Ask for exactly the labels this swap is about. `_label_node_ids` caches only what it
         # FOUND, so a name still missing here is genuinely absent from the repo -- no second
         # invalidate-and-refetch round is needed (or possible: the old one re-ran the same query).
-        ids = self._label_node_ids((*add, *remove))
         missing = [l for l in (*add, *remove) if l not in ids]
         if missing:
             raise RuntimeError(f"unknown label(s) on this repo: {', '.join(sorted(missing))}")
@@ -1732,7 +1764,7 @@ class GitHubSource:
         return False                                      # unreachable: the loop always returns/raises
 
     def _swap_labels_best_effort(self, goal, add=(), remove=(), what="label change",
-                                 retries=None, retry_base=None):
+                                 retries=None, retry_base=None, quiet=False):
         """`_swap_labels`, but never raising — the shape every lifecycle transition needs.
 
         #1391 step 2, and this wrapper is the whole reason step 2 is safe. `_swap_labels` RAISES by
@@ -1761,6 +1793,8 @@ class GitHubSource:
             return bool(self._swap_labels(goal, add=add, remove=remove,
                                           retries=retries, retry_base=retry_base))
         except Exception as exc:                 # noqa: BLE001 - see docstring; must never propagate
+            if quiet:                            # #1403: the caller prints once, after its own fallback
+                return False
             try:
                 sys.stderr.write("sigma: %s label write failed for #%s (%s) — continuing; the "
                                  "reconciler will pick this up\n" % (what, goal, _fx(exc)))
@@ -2111,7 +2145,7 @@ class GitHubSource:
         priority — drag to reorder and the loop obeys.
 
         #1352: when `blocking_priority_override` is on, a Ready card also carrying `blocking_label`
-        sorts ahead of every non-blocking Ready card, before priority — the SAME structural override
+        sorts ahead of every non-blocking Ready card of its own tier (#1409: tier first) — the SAME override
         `_blocking_priority_pending` applies on the label-queue path (this is the board-authoritative
         half of that same feature; the design doc's own adversarial review flagged that a fix to only
         one of the two paths would silently fail on whichever path a given repo's config routes
@@ -2208,7 +2242,7 @@ class GitHubSource:
                 # (#254, #318) queued 10th and 11th behind eight P1s.
                 is_blocking = (self.blocking_priority_override
                               and self.blocking_label in names)
-                ready.append((0 if is_blocking else 1, self._card_rank(it),
+                ready.append((self._card_rank(it), 0 if is_blocking else 1,
                              self._board_feature_rank(names), pos, int(n)))
             elif it.get("status") not in in_flight:
                 names = set(it.get("labels") or [])
@@ -2602,8 +2636,8 @@ class GitHubSource:
 
     def _blocking_priority_pending(self, skip, primary=True):
         """#1352: `blocking_priority_override`'s structural override on the LABEL-QUEUE path — any
-        `goal_label` issue that ALSO carries `blocking_label` sorts ahead of EVERY other pending
-        issue, regardless of priority tier. Reuses `_fetch_pending` completely UNCHANGED with an
+        `goal_label` issue that ALSO carries `blocking_label` sorts ahead of other pending issues
+        of its own tier (#1409: never across tiers). Reuses `_fetch_pending` completely UNCHANGED with an
         extra `--label blocking_label` filter — `gh issue list --label` ANDs repeated flags, so this
         is naturally scoped to issues carrying BOTH labels, and it inherits every existing safeguard
         for free: the retry/degraded-read machinery, the parked/in-progress/blocked exclusion, and
@@ -2666,9 +2700,15 @@ class GitHubSource:
         if self.blocking_priority_override and self.order == "priority":
             blocking_pending = self._blocking_priority_pending(skip, primary=primary) or []
             if blocking_pending:
+                # #1409: tier first, blocker first WITHIN its tier, then the usual pick key.
                 blocking_numbers = {p["number"] for p in blocking_pending}
-                rest = [p for p in pending if p["number"] not in blocking_numbers]
-                return blocking_pending + rest
+                seen = {p["number"] for p in pending}
+                merged = pending + [p for p in blocking_pending if p["number"] not in seen]
+
+                def _tiered(p):
+                    k = self._pick_key(p)
+                    return (k[0], 0 if p["number"] in blocking_numbers else 1) + k[1:]
+                return sorted(merged, key=_tiered)
         return pending
 
     def _pending_by_priority(self, skip, primary=True):
@@ -3029,6 +3069,10 @@ class GitHubSource:
             state_now = (info.get("state") or "").upper()
             label_names = {(l.get("name") or "") for l in (info.get("labels") or [])}
             terminal = state_now == "CLOSED" or self.parked_label in label_names
+            # #1394: a probe that SUCCEEDED and shows no claim label means there is nothing to
+            # release (never claimed, or already released) -- same silent no-op as terminal.
+            # Only a successful read reaches here; a failed probe stays fail-open below.
+            terminal = terminal or self.in_progress_label not in label_names
         except Exception:
             pass   # best-effort probe; a transient gh error must fall through to the pre-existing
                    # (fire-anyway) release behavior, never block a legitimate one on a read that
@@ -3323,9 +3367,12 @@ class GitHubSource:
         landed = self._swap_labels_best_effort(
             goal, add=[self.parked_label],
             remove=[self.goal_label, self.in_progress_label, self.goal_blocked_label],
-            what="park")
+            what="park", quiet=rest_fallback)
         if not landed and rest_fallback:
             landed = self._park_labels_rest(goal)       # #1303: park only; REST = separate budget
+            if not landed:                              # #1403: say so only if the fallback failed too
+                sys.stderr.write("sigma: park label write failed for #%s (graphql and rest) — continuing; "
+                                 "the reconciler will pick this up\n" % (goal,))
         if not landed:
             self._repair_partial_park(goal)
         # #1657 follow-up (scope): routed through `note()` -- same chokepoint `note()`'s other
@@ -4505,6 +4552,13 @@ class GitHubSource:
             cap = self._project_cfg.get("backfill_cap", 20)
         if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
             return 0
+        # #1402 (PROVISIONAL default 1): a refused project call outranks the REST counter, which can
+        # read thousands while the project API refuses. Skip until a project call is answered again.
+        mx = self._project_cfg.get("backfill_max_refusals", 1)
+        if isinstance(mx, bool) or not isinstance(mx, int) or mx <= 0:
+            mx = 1
+        if self._project_refusals >= mx:
+            return 0
         floor = self._project_cfg.get("backfill_min_graphql", 1000)
         try:
             remaining = json.loads(self._run(["api", "rate_limit"]))["resources"]["graphql"]["remaining"]
@@ -4668,11 +4722,26 @@ class GitHubSource:
                 return
 
             directly_blocks = {}                        # blocker ref -> [directly-blocked ref, ...]
+            smart = self.blocker_promotion_mode == "smart"
+            outside = []                                 # #1406: same-repo blockers not in this corpus
+            cross_repo = []                              # #1406: other-repository blockers (unwritable)
+
+            def is_proposed(ref):
+                labels = by_ref[ref].get("labels") or []
+                return self.proposed_label in [(l.get("name") if isinstance(l, dict) else str(l or ""))
+                                               for l in labels]
 
             def add_edge(blocked, by):
                 by, blocked = str(by), str(blocked)
-                if by == blocked or by not in open_refs or blocked not in open_refs:
-                    return                               # self-reference, or outside this corpus
+                if by == blocked or blocked not in open_refs:
+                    return                               # self-reference, or blocked side outside the corpus
+                if by not in open_refs:
+                    if smart:
+                        return                           # smart stays corpus-only (needs the blocker's rank/board item)
+                    if by not in outside:
+                        outside.append(by)
+                elif is_proposed(by):
+                    return                               # #1406: a goal awaiting confirmation is never a blocker
                 directly_blocks.setdefault(by, [])
                 if blocked not in directly_blocks[by]:
                     directly_blocks[by].append(blocked)
@@ -4681,6 +4750,9 @@ class GitHubSource:
             for ref, it in by_ref.items():
                 haystack = (it.get("title") or "") + "\n" + (it.get("body") or "")
                 for m in backlog_check._BLOCK_RE.finditer(haystack):
+                    if not smart and backlog_check.blocker_scan.is_cross_repo(haystack, m):
+                        cross_repo.append("#%s blocked by another repository's #%s" % (ref, m.group(2)))
+                        continue
                     add_edge(ref, m.group(2))
 
             if self.sdlc_dir:
@@ -4690,11 +4762,49 @@ class GitHubSource:
                 except Exception:
                     pass         # the ledger is a second, additive channel; explicit markers alone still work
 
+            self._warn_unwritable_blockers(cross_repo)
             if not directly_blocks:
                 return                                   # nothing blocks anything in this corpus
 
+            # #1406: a blocker outside this corpus (closed or parked goals, or never goal-labelled)
+            # has no labels on hand, so read each by ONE REST read, at most `_BLOCKER_READ_CAP` per
+            # pass. One that is closed, awaiting confirmation, or unreadable is dropped and
+            # reported; it is never silently treated as unprioritised.
+            ext = {}
+            unreadable = []
+            for ref in outside[:self._BLOCKER_READ_CAP]:
+                try:
+                    data = self._read_issue(ref, ["number", "state", "labels"])
+                    names = [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (data.get("labels") or [])]
+                    if str(data.get("state") or "open").lower() == "closed" or self.proposed_label in names:
+                        directly_blocks.pop(ref, None)
+                        continue
+                    ext[ref] = {"number": int(ref), "labels": data.get("labels") or []}
+                except Exception as exc:
+                    directly_blocks.pop(ref, None)
+                    unreadable.append("#%s could not be read (%s)" % (ref, exc))
+            for ref in outside[self._BLOCKER_READ_CAP:]:
+                directly_blocks.pop(ref, None)
+                unreadable.append("#%s not read (more than %d outside blockers this pass)" % (ref, self._BLOCKER_READ_CAP))
+            self._warn_unwritable_blockers(unreadable)
+            if not directly_blocks:
+                return
+
+            def item_of(ref):
+                return by_ref[ref] if ref in by_ref else ext[ref]
+
             def own_rank(ref):
-                return discovery.priority_rank(self._priority_name(by_ref[ref].get("labels")))
+                return discovery.priority_rank(self._priority_name(item_of(ref).get("labels")))
+
+            if not smart:
+                edges = [(b, d) for b, ds in directly_blocks.items() for d in ds]
+                ranks = {r: own_rank(r) for r in {x for e in edges for x in e}}
+                required, cyc = discovery.blocker_required_ranks(edges, ranks)
+                if cyc:
+                    self._warn_blocking_cycle(set(cyc))
+                for ref, (new_rank, cause) in required.items():
+                    self._write_blocker_promotion(ref, item_of(ref), ranks[ref], new_rank, cause)
+                return
 
             # "Has other unblocked work at its tier" (per dependent): some OTHER issue at the same
             # priority tier that is not itself blocked AND is genuinely pickable next by the actual
@@ -4823,6 +4933,19 @@ class GitHubSource:
         except Exception as exc:
             self._note_scope(exc)
 
+    #: #1406: most outside-the-corpus blockers read (one REST read each) in a single pass.
+    _BLOCKER_READ_CAP = 10
+
+    def _warn_unwritable_blockers(self, notes):
+        """#1406: a blocker this pass cannot raise (another repository, or a read that failed) is
+        reported on stderr, never skipped silently. Best-effort, never raises."""
+        if not notes:
+            return
+        try:
+            sys.stderr.write("sigma: blocker priority not enforced for: %s\n" % "; ".join(sorted(set(notes))))
+        except Exception:
+            pass
+
     def _write_blocker_promotion(self, ref, it, old_rank, new_rank, cause):
         """Write ONE blocker's promoted priority + its audit comment naming the cause. THREE
         independent `gh` calls -- label write, field write, comment post -- each independently
@@ -4856,7 +4979,7 @@ class GitHubSource:
             self._note_scope(exc)
             return
         try:
-            item_id = self._item_id(int(ref))
+            item_id = None if getattr(self, "_no_field_writes", False) else self._item_id(int(ref))   # #1410
             if item_id:
                 self._write_priority_field(int(ref), new_rank, item_id)
         except Exception as exc:
@@ -4872,6 +4995,243 @@ class GitHubSource:
             self.note(ref, "priority promoted %s -> %s: %s" % (old_label, canon, reason))
         except Exception as exc:
             self._warn_promotion_comment_failed(ref, old_label, canon, exc)
+
+    def raise_blocker_priority(self, blocker, dependent):
+        """#1407: raise ONE blocker to the rank of the one goal it was just assigned to block, in the
+        same action batch as the blocked/blocking mark. Same shared rule as `_promote_blockers`
+        (`discovery.blocker_required_ranks`), single edge only, written through the same
+        `_write_blocker_promotion` (label, board field, one comment). Returns "raised",
+        "unchanged" or "skipped: <reason>". Raise-only and idempotent (an equal or higher rank
+        writes nothing). Mode "off" returns before any call. Mode "smart" also returns before any call
+        ("skipped: smart"): smart's "no other unblocked work" claim is only checked by the board
+        pass (`_promote_blockers`), so a per-edge write here would promote unconditionally. Fail-open: a read failure is reported
+        on stderr and does less. A closed or confirmation-labelled blocker is never raised."""
+        if self.blocker_promotion_mode == "off":
+            return "skipped: off"
+        if self.blocker_promotion_mode == "smart":
+            return "skipped: smart"
+        try:
+            if str(blocker) == str(dependent):
+                return "skipped: self edge"
+            items = {}
+            for ref in (blocker, dependent):
+                data = self._read_issue(ref, ["number", "state", "labels"])
+                items[str(ref)] = data
+            b = items[str(blocker)]
+            names = [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (b.get("labels") or [])]
+            if str(b.get("state") or "open").lower() == "closed" or self.proposed_label in names:
+                return "skipped: blocker closed or awaiting confirmation"
+            ranks = {str(r): discovery.priority_rank(self._priority_name(d.get("labels")), self.priority_aliases)
+                     for r, d in items.items()}
+            required, _cyc = discovery.blocker_required_ranks([(str(blocker), str(dependent))], ranks)
+            if str(blocker) not in required:
+                return "unchanged"
+            new_rank, cause = required[str(blocker)]
+            self._write_blocker_promotion(str(blocker), b, ranks[str(blocker)], new_rank, cause)
+            return "raised"
+        except Exception as exc:
+            self._warn_unwritable_blockers(["#%s could not be raised (%s)" % (blocker, exc)])
+            return "skipped: read failed"
+
+    #: #1410: most edges looked at, and most repair writes made, in one reconcile tick (PROVISIONAL).
+    _REPAIR_EDGE_CAP = 200
+    _REPAIR_WRITE_CAP = 10
+
+    def repair_blocker_ranks(self, cap=None, apply=True):
+        """#1410: find every open blocking edge whose blocker ranks below what it blocks and repair it.
+        The same edge extraction as `_promote_blockers` (explicit phrases plus the ledger) over the open
+        goal and blocked-goal issues read through REST, the shared rule `discovery.blocker_required_ranks`
+        and the same `_write_blocker_promotion` (label, field, one comment). Also strips the legacy
+        confirmation label from a blocker and removes the blocking mark from a closed blocker or one that
+        blocks nothing. Raise-only and idempotent. Returns a dict: violations (blockers found below
+        what they block), raised, stripped, unmarked (issue refs written), unwritable (reported on
+        stderr), skipped (reason or ""). `apply=False` counts and writes nothing. Mode off returns
+        before any call; smart returns too (its claim is only checked by the board pass). At most `cap`
+        writes (default 10) and 200 edges; the board field write is skipped when GraphQL remaining is
+        low or unreadable, label writes stay REST. Fail-open."""
+        out = {"violations": 0, "raised": [], "stripped": [], "unmarked": [], "unwritable": [], "skipped": ""}
+        if self.blocker_promotion_mode == "off":
+            out["skipped"] = "off"
+            return out
+        if self.blocker_promotion_mode == "smart":
+            out["skipped"] = "smart"
+            return out
+        if cap is None:
+            cap = self._REPAIR_WRITE_CAP
+        if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+            out["skipped"] = "cap"
+            return out
+        try:
+            corpus = {}
+            for label in (self.goal_label, self.goal_blocked_label):
+                for it in self._fetch_issues_rest([label], self._BOARD_ITEM_LIMIT):
+                    if it.get("number") is not None:
+                        corpus.setdefault(str(it["number"]), it)
+            edges, cross_repo, blocker_refs = self._repair_edges(corpus, out)
+            edges = edges[:self._REPAIR_EDGE_CAP]
+            ext, proposed = {}, {}
+            for ref in sorted({b for b, _ in edges} - set(corpus))[:self._BLOCKER_READ_CAP]:
+                try:
+                    data = self._read_issue(ref, ["number", "state", "labels"])
+                except Exception as exc:
+                    cross_repo.append("#%s could not be read (%s)" % (ref, exc))
+                    continue
+                names = self._label_names(data.get("labels"))
+                if str(data.get("state") or "open").lower() == "closed":
+                    continue
+                if self.proposed_label in names:
+                    proposed[ref] = data
+                    continue
+                ext[ref] = {"number": int(ref), "labels": data.get("labels") or []}
+            for ref, it in corpus.items():
+                if ref in blocker_refs and self.proposed_label in self._label_names(it.get("labels")):
+                    proposed[ref] = it
+            edges = [(b, d) for b, d in edges if b in ext or (b in corpus and b not in proposed)]
+            item_of = lambda r: corpus[r] if r in corpus else ext[r]            # noqa: E731
+            ranks = {r: discovery.priority_rank(self._priority_name(item_of(r).get("labels")), self.priority_aliases)
+                     for r in {x for e in edges for x in e if x in corpus or x in ext}}
+            edges = [e for e in edges if e[0] in ranks and e[1] in ranks]
+            required, cyc = discovery.blocker_required_ranks(edges, ranks)
+            if cyc:
+                self._warn_blocking_cycle(set(cyc))
+            out["violations"] = len(required)
+            self._warn_unwritable_blockers(cross_repo)
+            out["unwritable"] = sorted(set(cross_repo))
+            if not apply:
+                return out
+            budget = [cap]
+            no_field = self._repair_graphql_low()
+            self._no_field_writes = no_field
+            try:
+                for ref, (new_rank, cause) in sorted(required.items()):
+                    if budget[0] <= 0:
+                        break
+                    budget[0] -= 1
+                    self._write_blocker_promotion(ref, item_of(ref), ranks[ref], new_rank, cause)
+                    out["raised"].append(ref)
+            finally:
+                self._no_field_writes = False
+            for ref, data in sorted(proposed.items()):
+                if budget[0] <= 0:
+                    break
+                budget[0] -= 1
+                try:
+                    self._issue_remove_label(ref, self.proposed_label)
+                    out["stripped"].append(ref)
+                except Exception as exc:
+                    self._note_scope(exc)
+            self._repair_blocking_marks(blocker_refs, budget, out)
+        except Exception as exc:
+            self._note_scope(exc)
+            out["skipped"] = out["skipped"] or "failed"
+        return out
+
+    @staticmethod
+    def _label_names(labels):
+        return [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (labels or [])]
+
+    def _repair_edges(self, corpus, out):
+        """-> (edges [(blocker, blocked)], unwritable notes, every ref seen as a blocker). The edge
+        extraction `_promote_blockers` uses: explicit phrases over title and body, plus the ledger."""
+        edges, cross_repo, blocker_refs = [], [], set()
+
+        def add(blocked, by):
+            by, blocked = str(by), str(blocked)
+            if by == blocked:
+                return
+            blocker_refs.add(by)                  # keeps its mark even when the blocked side is unseen
+            if blocked not in corpus:
+                return
+            if (by, blocked) not in edges:
+                edges.append((by, blocked))
+
+        backlog_check = _get_backlog_check()
+        for ref, it in corpus.items():
+            haystack = (it.get("title") or "") + "\n" + (it.get("body") or "")
+            for m in backlog_check._BLOCK_RE.finditer(haystack):
+                if backlog_check.blocker_scan.is_cross_repo(haystack, m):
+                    cross_repo.append("#%s blocked by another repository's #%s" % (ref, m.group(2)))
+                    continue
+                add(ref, m.group(2))
+        if self.sdlc_dir:
+            try:
+                for h in ledger.outstanding(ledger.read_all(self.sdlc_dir)):
+                    add(h.get("goal"), ledger.handoff_key(h))
+            except Exception:
+                pass
+        return edges, cross_repo, blocker_refs
+
+    def _repair_graphql_low(self):
+        """True when the board field write should be skipped: GraphQL remaining below the back-fill
+        floor or unreadable. Label writes never depend on it."""
+        try:
+            floor = self._project_cfg.get("backfill_min_graphql", 1000)
+            remaining = json.loads(self._run(["api", "rate_limit"]))["resources"]["graphql"]["remaining"]
+            return int(remaining) < int(floor)
+        except Exception:
+            return True
+
+    def _repair_blocking_marks(self, blocker_refs, budget, out):
+        """Remove the blocking mark from a closed blocker. An open blocker's mark is left to the unpark
+        sweep, which also reads comments (PROVISIONAL, owner to ratify: one writer for open marks)."""
+        label = self.blocking_label
+        stale = []
+        try:
+            closed = fetch_issues_rest(self._run, self.repo, [label], self._BOARD_ITEM_LIMIT, state="closed",
+                                       page_size=self._REST_PAGE_SIZE)
+            stale += [str(i["number"]) for i in closed if i.get("number") is not None]
+        except Exception as exc:
+            self._note_scope(exc)
+            return
+        for ref in sorted(set(stale), key=lambda r: (len(r), r)):
+            if budget[0] <= 0:
+                return
+            budget[0] -= 1
+            try:
+                self._issue_remove_label(ref, label)
+                out["unmarked"].append(ref)
+            except Exception as exc:
+                self._note_scope(exc)
+
+    def blocker_filing_priority(self, goal, own):
+        """#1408: the priority tier (`P0`..`P4`) a blocker about to be filed for `goal` should carry,
+        or None to leave `own` as it is. Raise-only: a goal that is no more urgent than `own` returns
+        None, as does an unprioritised goal. Mode "off" and "smart" return before any call. One bounded
+        read of the goal; a failed read is reported on stderr and returns None (file as before)."""
+        if self.blocker_promotion_mode != "always":
+            return None
+        try:
+            data = self._read_issue(goal, ["number", "labels"])
+            goal_rank = discovery.priority_rank(self._priority_name(data.get("labels")), self.priority_aliases)
+        except Exception as exc:
+            self._warn_unwritable_blockers(["blocker for #%s filed at its own priority: goal could not be read (%s)"
+                                            % (goal, exc)])
+            return None
+        own_rank = discovery.priority_rank(own, self.priority_aliases)
+        return discovery.PRIORITIES[goal_rank] if goal_rank < own_rank else None
+
+    def strip_blocker_confirmation(self, blocker):
+        """#1408: remove the legacy confirmation label from an open blocker, with one comment, through
+        the existing label swap and note writers. Strip only: membership is never granted here (that is
+        `blockers._act`'s verdict rule). Returns "stripped", "unchanged" or "skipped: <reason>".
+        Idempotent (no label, nothing written). Mode "off" returns before any call. Fail-open."""
+        if self.blocker_promotion_mode == "off":
+            return "skipped: off"
+        try:
+            b = self._read_issue(blocker, ["number", "state", "labels"])
+            names = [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (b.get("labels") or [])]
+            if str(b.get("state") or "open").lower() == "closed" or self.proposed_label not in names:
+                return "unchanged"
+            self._swap_labels(blocker, remove=[self.proposed_label])
+        except Exception as exc:
+            self._warn_unwritable_blockers(["#%s could not have its confirmation label removed (%s)" % (blocker, exc)])
+            return "skipped: failed"
+        try:
+            self.note(str(blocker), "removed the legacy confirmation label: this issue blocks other work, so it "
+                                    "is never left waiting on confirmation")
+        except Exception as exc:
+            self._note_scope(exc)
+        return "stripped"
 
     def _warn_promotion_comment_failed(self, ref, old_label, canon, exc):
         """The one #900 outcome that must never look like an ordinary, silently-swallowed failure:

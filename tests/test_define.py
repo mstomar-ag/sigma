@@ -67,7 +67,8 @@ class Runner:
     that actually changes when the code under test writes to it. `calls` is the observed argv order,
     which is what pins the step order."""
 
-    def __init__(self, branches=(), labels=(), head="main", fail_on=None):
+    def __init__(self, branches=(), labels=(), head="main", fail_on=None, refs=None):
+        self.refs = refs                     # None: every ref exists; else the set of refs show-ref finds
         self.branches = set(branches)
         self.labels = set(labels)
         self.head = head
@@ -85,6 +86,10 @@ class Runner:
             return "abc123\trefs/heads/%s" % wanted if wanted in self.branches else ""
         if argv[:2] == ["git", "rev-parse"]:
             return self.head
+        if argv[:2] == ["git", "show-ref"]:
+            if self.refs is not None and argv[-1] not in self.refs:
+                raise RuntimeError("git exited 1")
+            return ""
         if argv[:2] == ["git", "push"]:
             self.branches.add(argv[-1].split(":refs/heads/", 1)[-1])
             return ""
@@ -1284,3 +1289,32 @@ def test_the_cli_usage_mentions_the_shorthand_form():
     with contextlib.redirect_stdout(buf):
         define.main(["define.py"])
     assert "<name> <P0..P4>" in buf.getvalue()
+
+
+def _pushed(run):
+    return [a for a in run.calls if a[:2] == ["git", "push"]][0][-1]
+
+
+def test_a_fresh_clone_pushes_the_remote_tracking_base(tmp_path):
+    """#1397: no local branch of the base's name, only the remote-tracking ref -- the unit branch
+    is cut from `<remote>/<base>` instead of failing with `src refspec ... does not match any`."""
+    run = Runner(refs={"refs/remotes/origin/main"})
+    report = define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path,
+                              base="main", remote="origin")
+    assert report["ok"]
+    assert _pushed(run) == "origin/main:refs/heads/feature/voice"
+
+
+def test_a_local_base_keeps_the_old_refspec(tmp_path):
+    """With the local branch present the pushed refspec is exactly what it was before #1397."""
+    run = Runner(refs={"refs/heads/main", "refs/remotes/origin/main"})
+    define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, base="main",
+                     remote="origin")
+    assert _pushed(run) == "main:refs/heads/feature/voice"
+
+
+def test_no_base_ref_anywhere_leaves_git_to_report_it(tmp_path):
+    run = Runner(refs=set())
+    define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, base="main",
+                     remote="origin")
+    assert _pushed(run) == "main:refs/heads/feature/voice"

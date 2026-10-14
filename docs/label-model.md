@@ -170,7 +170,8 @@ it is **being worked**. A thing does not stop being a noun while the verb is hap
 `sdlc:blocking` is applied automatically to an issue that other work is waiting on. It is a
 **signal**, not a queue: it re-ranks issues that are **already** eligible. While
 `discovery.blocking_priority_override` is on (the default; only the literal `false` turns it off), an
-eligible issue carrying it sorts ahead of every other pending one, whatever its priority tier.
+eligible issue carrying it sorts ahead of its tier peers. It orders within a tier, never across one: a
+blocker is raised to the priority of what it blocks, so it already sits in the right tier.
 
 ```
       What people assume                    What actually happens

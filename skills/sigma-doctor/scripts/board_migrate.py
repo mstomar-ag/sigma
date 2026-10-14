@@ -207,7 +207,9 @@ def main(argv, run=None):
         print("project %s already has a %r lane (%s)" % (number, ready, " | ".join(names)))
     else:
         print("before: %s" % " | ".join(names))
-        print("after:  %s" % " | ".join(names + [ready]))
+        # #1403: the same order the apply builds -- Ready before a `Parked` lane, else last
+        at = next((i for i, n in enumerate(names) if str(n or "").strip().casefold() == "parked"), len(names))
+        print("after:  %s" % " | ".join(names[:at] + [ready] + names[at:]))
     print("to seed: %d card(s) open, labelled %s, still in %s" % (len(cards), goal_label, backlog))
     if have_lane and not cards:
         print("\nnothing to do — the lane exists and no card is waiting in %s." % backlog)

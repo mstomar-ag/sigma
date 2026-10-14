@@ -1898,8 +1898,8 @@ def test_edge_respected_across_waves():
 # node lists, same "algorithmic core" scope as the aliases group above ----------------------------
 
 
-def test_schedule_waves_default_blocker_promotion_mode_is_off_and_matches_pre_900_order():
-    """Regression pin -- the single most important test in this slice. #10 (P2) blocks #30 (P0);
+def test_schedule_waves_explicit_off_matches_pre_900_order_and_default_is_the_full_rule():
+    """(#1406: the default is now the full rule; explicit off is the pre-900 order.) Regression pin -- the single most important test in this slice. #10 (P2) blocks #30 (P0);
     #20 (P1) is unrelated and ready from the start. If blocker promotion were wired in and left ON
     by default, #10 would jump ahead of #20 (see test_blocker_promotion_always_mode_promotes_a_
     blocker_ahead_of_its_own_tier below, identical graph). It must NOT: `schedule_waves` called
@@ -1912,8 +1912,8 @@ def test_schedule_waves_default_blocker_promotion_mode_is_off_and_matches_pre_90
     omitted = [n["id"] for w in triage.schedule_waves(nodes, cap=1) for n in w]
     explicit_off = [n["id"] for w in triage.schedule_waves(nodes, cap=1, blocker_promotion_mode="off")
                     for n in w]
-    assert omitted == [20, 10, 30]      # #10 (P2) NOT promoted by #30's P0 -- natural priority order
-    assert explicit_off == omitted
+    assert explicit_off == [20, 10, 30]  # #10 (P2) NOT promoted by #30's P0 -- natural priority order
+    assert omitted == [10, 30, 20]       # #1406: the default is the full rule, #10 rides #30's P0
 
 
 def test_schedule_waves_unrecognised_blocker_promotion_mode_behaves_like_off():
@@ -2020,7 +2020,8 @@ def test_blocker_promotion_transitive_chain_promotes_the_root_blocker_through_ev
         {"number": 999, "title": "Unrelated control, ready immediately", "priority": "P2"},
     ]})
     edges = [(502, 503), (501, 502)]    # cli_edges are (blocked, by): #502 blocked-by #503, #501 blocked-by #502
-    off = triage.compile_plan([503, 502, 501, 999], edges, [], 1, survey=survey, now=0)
+    off = triage.compile_plan([503, 502, 501, 999], edges, [], 1, survey=survey, now=0,
+                              blocker_promotion_mode="off")
     always = triage.compile_plan([503, 502, 501, 999], edges, [], 1, survey=survey, now=0,
                                  blocker_promotion_mode="always")
     assert [w[0]["id"] for w in off["waves"]] == [999, 503, 502, 501]
@@ -2194,13 +2195,16 @@ def test_compile_plan_resolves_configured_blocker_promotion_mode():
     assert [w[0]["id"] for w in result["waves"]] == [10, 30, 20]   # #10 promoted ahead of #20
 
 
-def test_compile_plan_unset_blocker_promotion_mode_leaves_wave_order_unpromoted():
+def test_compile_plan_unset_blocker_promotion_mode_is_the_full_rule_and_off_is_unpromoted():
     triage = _mod("triage")
     survey = _survey_fixture({"active": [{"number": 10, "title": "Low-tier blocker", "priority": "P2"},
                                          {"number": 20, "title": "Unrelated P1", "priority": "P1"},
                                          {"number": 30, "title": "Urgent, blocked", "priority": "P0"}]})
     result = triage.compile_plan([10, 20, 30], [(30, 10)], [], 1, survey=survey, now=0)
-    assert [w[0]["id"] for w in result["waves"]] == [20, 10, 30]   # natural order, #10 NOT promoted
+    assert [w[0]["id"] for w in result["waves"]] == [10, 30, 20]   # #1406: default promotes #10
+    off = triage.compile_plan([10, 20, 30], [(30, 10)], [], 1, survey=survey, now=0,
+                              blocker_promotion_mode="off")
+    assert [w[0]["id"] for w in off["waves"]] == [20, 10, 30]      # explicit off: natural order
 
 
 def test_plan_cmd_threads_blocker_promotion_mode_from_config(tmp_path):

@@ -115,9 +115,10 @@ def next_pending(goals_dir, skip=(), order=DEFAULT_ORDER, aliases=None):
 #: above) -- but the valid-values tuple and its safe default live here, next to the ranking domain
 #: they describe, mirroring ORDERS/DEFAULT_ORDER above.
 BLOCKER_PROMOTION_MODES = ("off", "smart", "always")
-#: "off" is the conservative default: a blocker's rank is never touched unless a repo opts in, so an
-#: adopter who never sets this key gets behavior byte-identical to before this feature existed.
-DEFAULT_BLOCKER_PROMOTION_MODE = "off"
+#: "always" is the default (#1406): a blocker's priority must never be below what it blocks, so an
+#: adopter who never sets this key gets the full rule. An explicit "off" stays byte-identical to
+#: the behaviour before the rule existed (a blocker's rank is never touched).
+DEFAULT_BLOCKER_PROMOTION_MODE = "always"
 
 
 def blocker_promotion_rank(own_rank, dependents=(), mode=DEFAULT_BLOCKER_PROMOTION_MODE):
@@ -173,6 +174,68 @@ def blocker_promotion_rank(own_rank, dependents=(), mode=DEFAULT_BLOCKER_PROMOTI
             continue
         ranks.append(dependent_rank)
     return min(ranks)
+
+
+def blocker_required_ranks(edges, ranks):
+    """The shared blocker-priority rule (#1406): a blocker's priority is never below what it blocks.
+
+    Signature: `blocker_required_ranks(edges, ranks) -> (required, cycles)`.
+      - `edges`: an iterable of `(blocker_ref, blocked_ref)` pairs, one per direct "blocker blocks
+        blocked" edge. Refs are any hashable value; a duplicate or self edge is ignored.
+      - `ranks`: a mapping of ref to its CURRENT rank (the `priority_rank` scale, lower is more
+        urgent). A ref missing from the mapping, or mapped to None, is unprioritised: the lowest
+        urgency (`UNPRIORITISED`).
+      - returns `required`: a dict mapping each blocker whose rank must RISE to
+        `(new_rank, cause_ref)`, where `cause_ref` is the most urgent direct dependent (the first
+        one in edge order on a tie). Raise only: a ref already at least as urgent as everything it
+        blocks is absent. Transitive: C blocks B blocks A raises C to A's rank when A is the most
+        urgent.
+      - returns `cycles`: a sorted list of every ref that sits in a blocking cycle, each reported
+        once. A cycle never loops and never hangs: a back-edge contributes no pressure beyond the
+        re-entered ref's own current rank.
+    Pure: neither argument is mutated, and no I/O happens. Callers do the reading and the writing.
+    """
+    ranks = ranks or {}
+
+    def rank_of(ref):
+        value = ranks.get(ref)
+        return UNPRIORITISED if value is None else value
+
+    blocks = {}
+    for by, blocked in edges:
+        if by == blocked:
+            continue
+        lst = blocks.setdefault(by, [])
+        if blocked not in lst:
+            lst.append(blocked)
+
+    resolved, in_progress, stack, cycles = {}, set(), [], set()
+
+    def resolve(ref):
+        if ref in resolved:
+            return resolved[ref]
+        if ref in in_progress:
+            cycles.update(stack[stack.index(ref):])
+            return rank_of(ref)
+        in_progress.add(ref)
+        stack.append(ref)
+        best = rank_of(ref)
+        for dep in blocks.get(ref, ()):
+            best = min(best, resolve(dep))
+        stack.pop()
+        in_progress.discard(ref)
+        resolved[ref] = best
+        return best
+
+    for ref in list(blocks):
+        resolve(ref)
+    required = {}
+    for ref, new_rank in resolved.items():
+        if ref not in blocks or new_rank >= rank_of(ref):
+            continue
+        cause = next((d for d in blocks[ref] if resolved.get(d, rank_of(d)) == new_rank), None)
+        required[ref] = (new_rank, cause)
+    return required, sorted(cycles, key=str)
 
 
 LANES = ("small", "medium", "large")

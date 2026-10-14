@@ -473,11 +473,17 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
         if apply_actions:
             done = dict(stored)   # only applies that landed advance the counter
             moved = False
+            refused = False
+            if source is None and actions:    # #1392: one source per tick; a refusal fails each ask once, unretried
+                try:
+                    source = _load("sources").GitHubSource(config, run=run)
+                except Exception:
+                    refused = True
             for a, key, text in zip(actions, eligible, loud):
                 if key is not None:   # #1361: the slot is decided now, from the landed count
                     a["silent"] = (done.get(key, 0) + 1) % settings(config)["spot_check_one_in"] != 0
                     a["text"] = "" if a["silent"] else text
-                a["result"] = apply(a, sdlc_dir, config, now, source=source, run=run, clock=clock)
+                a["result"] = "failed" if refused else apply(a, sdlc_dir, config, now, source=source, run=run, clock=clock)
                 if key is not None and a["result"] == "done":
                     done[key] = done.get(key, 0) + 1
                     moved = True
@@ -552,6 +558,16 @@ def apply(action, sdlc_dir, config, now, source=None, run=None, clock=None):
         if source is None:
             source = _load("sources").GitHubSource(config, run=run)
         issue = action["issue"]
+        # #1395: a person may have unparked it since the ask opened; the read failing keeps the ask pending.
+        # A promote starts from a proposed issue, not a parked one, so only the other gestures check.
+        data = {"labels": []} if action["kind"] == "promote" else source._read_issue(issue, ["labels"])
+        if not isinstance(data, dict) or not isinstance(data.get("labels"), list):
+            return "failed"
+        names = {(l.get("name") if isinstance(l, dict) else l) for l in data["labels"]}
+        if action["kind"] != "promote" and source.parked_label not in names:
+            ask.update(state="answered", answer="already unparked", answered_at=now.isoformat())
+            _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
+            return "skipped"
         board_failed = False
         if action["kind"] == "promote":
             os.environ[_APPLYING_ENV] = "1"      # its own gesture must not close the ask it applies
@@ -623,6 +639,9 @@ def main(argv):
         done = [a for a in acts if a.get("result") == "done"]
         if done:
             print("applier: %d answer(s) applied or vetoed" % len(done))
+        failed = [a for a in acts if a.get("result") == "failed"]
+        if failed:                                      # #1403: a failed ask stays pending; say so
+            print("applier: %d asks failed and will be retried" % len(failed), file=sys.stderr)
     except Exception as exc:  # noqa: BLE001 - a watcher tick is never fatal
         print("applier: tick failed (non-fatal): %s" % type(exc).__name__, file=sys.stderr)
         return 1

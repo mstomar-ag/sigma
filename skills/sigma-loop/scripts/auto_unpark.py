@@ -393,7 +393,7 @@ def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cach
 
 
 def compute_blocking_actions(sdlc_dir, config, source, blocked_issues, currently_blocking, run=None,
-                             open_cache=None):
+                             open_cache=None, edges_out=None):
     """#1351: `sdlc:blocking` — derived, self-healing, applied to the BLOCKER issue itself (not the
     blocked goal `compute_unpark_actions` above manages). `blocked_issues` is the SAME list
     `_fetch_parked_issues` already returned for this pass (no second fetch); `currently_blocking` is
@@ -452,6 +452,8 @@ def compute_blocking_actions(sdlc_dir, config, source, blocked_issues, currently
         docs = [{"ref": r, "open": _ref_is_open(source, r, open_cache)} for r in refs]
         findings = backlog_check._explicit_blockers(goal_doc, docs, extra_text)
         live_blocker_refs.update(f["ref"] for f in findings)
+        if edges_out is not None:                       # #1407: (blocker, blocked) pairs, for the rank raise
+            edges_out.extend((str(f["ref"]), n) for f in findings)
 
     to_add = live_blocker_refs - currently_blocking
     to_remove = currently_blocking - live_blocker_refs
@@ -492,6 +494,19 @@ def compute_blocking_actions(sdlc_dir, config, source, blocked_issues, currently
     actions += [{"action": "remove-label", "issue": r, "detail": source.blocking_label,
                 "result": None, "error": None} for r in sorted(to_remove, key=int)]
     return actions
+
+
+def _raise_blocker_ranks(source, edges, apply):
+    """#1407: raise each live blocker to the rank of what it blocks. Fail-open, never raises."""
+    if not apply or not hasattr(source, "raise_blocker_priority"):
+        return
+    for blocker, blocked in sorted(set(edges)):
+        try:
+            if hasattr(source, "strip_blocker_confirmation"):
+                source.strip_blocker_confirmation(blocker)    # #1408
+            source.raise_blocker_priority(blocker, blocked)
+        except Exception:
+            pass
 
 
 _UNPARK_COMMENT = ("Auto-unparked by Sigma — blocker(s) {refs} closed; re-added {label} "
@@ -548,13 +563,13 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
     open_cache = {}
     unpark_actions, resolved = compute_unpark_actions(sdlc_dir, config, source, issues, run=run,
                                                        open_cache=open_cache)
-    blocking_actions = []
+    blocking_actions, edges = [], []
     if complete:
         try:
             currently_blocking = _fetch_blocking_issues(source)
             blocking_actions = compute_blocking_actions(sdlc_dir, config, source, issues,
                                                          currently_blocking, run=run,
-                                                         open_cache=open_cache)
+                                                         open_cache=open_cache, edges_out=edges)
         except Exception:
             blocking_actions = []
     n_unpark = len(unpark_actions)
@@ -568,6 +583,7 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
     if apply and actions:
         source._ensure_labels()
     actions = triage.apply_actions(source, actions, apply)
+    _raise_blocker_ranks(source, edges, apply)          # #1407: blocker >= blocked, same sweep
     unpark_results = actions[:n_unpark]
     unparked = []
     if apply:

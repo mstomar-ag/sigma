@@ -1231,6 +1231,9 @@ def settings(config):
     for key, label in (("remote", "work.remote"), ("base", "work.base"),
                        ("branch_prefix", "work.branch_prefix")):
         s[key] = state.safe_ref(label, s.get(key))      # #710: option injection into git
+    lead = "%s/" % s["remote"] if isinstance(s.get("remote"), str) and s["remote"] else ""
+    if lead and isinstance(s["base"], str) and s["base"].startswith(lead) and len(s["base"]) > len(lead):
+        s["base"] = s["base"][len(lead):]               # #1403: `origin/main` means `main`
     return s
 
 
@@ -5800,8 +5803,8 @@ def review_gate(sdlc_dir, config, goal, run=None, mode=None):
     (#635). An unreadable COMMENT list fails closed (parks), and so does an unreadable REVIEW LIST (REST
     `pulls/N/reviews`, #895 4a-2 PR B) in every mode: the old changes-mode fail-open on an unreadable
     combined read is gone. `reviewDecision` (GraphQL; APPROVED is not derivable from REST) is read after it,
-    skipped when GraphQL is unavailable: `approval` then parks (even with a `sigma:approve` comment, a known
-    limitation), `changes` goes on to the thread check with the decision unknown. A CHANGES_REQUESTED followed
+    skipped when GraphQL is unavailable: `approval` then parks unless a trusted `sigma:approve` comment is
+    present (#1398), `changes` goes on to the thread check with the decision unknown. A CHANGES_REQUESTED followed
     by a COMMENTED from the same reviewer still blocks (stricter than `latestReviews`). Unresolved-thread
     count errors stay open when GraphQL is available; without it the thread check is one REST read of the
     PR's line comments (none => pass, any or unreadable => refuse).
@@ -5846,7 +5849,7 @@ def review_gate(sdlc_dir, config, goal, run=None, mode=None):
                        "address them, then re-queue the issue")
     # The residual GraphQL read: `reviewDecision` (APPROVED / REVIEW_REQUIRED are not derivable from REST).
     # Skipped when GraphQL is unavailable (cloud, SIGMA_GH_GRAPHQL=off). Approval mode: unknown is not met,
-    # so it parks (even with a `sigma:approve` comment: known limitation). Changes mode: unknown -> go on.
+    # so it parks unless a trusted `sigma:approve` comment is present (#1398). Changes mode: unknown -> go on.
     decision = None
     if gh_api.graphql_available()["available"]:
         try:
@@ -5858,7 +5861,8 @@ def review_gate(sdlc_dir, config, goal, run=None, mode=None):
             unreadable = False
     else:
         unreadable = True
-    if unreadable and mode == REVIEW_APPROVAL:  # #635: an approval is a positive requirement; unknown is not met
+    # #1398 (provisional): a `sigma:approve` directive satisfies approval when the decision is unreadable.
+    if unreadable and mode == REVIEW_APPROVAL and directive != "approve":  # #635: an approval is a positive requirement; unknown is not met
         return False, (f"could not read PR #{rec['pr']}'s review decision (it needs GraphQL, which is "
                        "unavailable or failed), so `require_review: approval` cannot be satisfied — "
                        "re-queue the issue once `gh` works")

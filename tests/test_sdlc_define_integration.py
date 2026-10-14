@@ -88,6 +88,8 @@ class FakeHost:
             return ""
         if argv[:2] == ["git", "rev-parse"]:
             return self.head
+        if argv[:2] == ["git", "show-ref"]:
+            return ""
         if argv[:2] == ["git", "push"]:
             self.branches.add(argv[-1].split(":refs/heads/", 1)[-1])
             return ""

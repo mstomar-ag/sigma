@@ -286,8 +286,24 @@ def _step_branch(ctx):
     if ctx.run(ctx.cwd, ["git", "ls-remote", "--heads", ctx.remote, ctx.branch]).strip():
         return EXISTS, ctx.branch
     base = ctx.resolved_base()
-    ctx.run(ctx.cwd, ["git", "push", ctx.remote, "%s:refs/heads/%s" % (base, ctx.branch)])
-    return CREATED, "%s -> %s" % (base, ctx.branch)
+    source = _push_source(ctx, base)
+    ctx.run(ctx.cwd, ["git", "push", ctx.remote, "%s:refs/heads/%s" % (source, ctx.branch)])
+    return CREATED, "%s -> %s" % (source, ctx.branch)
+
+
+def _push_source(ctx, base):
+    """The ref to push as the unit branch: the local `base` when it exists, else `<remote>/<base>`
+    (#1397: a fresh clone has no local branch of the default name, and `git push` then fails with
+    `src refspec ... does not match any`). When neither is found the bare base is returned so git
+    reports the same error it always did."""
+    for ref, source in (("refs/heads/" + base, base),
+                        ("refs/remotes/%s/%s" % (ctx.remote, base), "%s/%s" % (ctx.remote, base))):
+        try:
+            ctx.run(ctx.cwd, ["git", "show-ref", "--verify", "--quiet", ref])
+            return source
+        except RuntimeError:
+            continue
+    return base
 
 
 def _repo_labels(ctx):
@@ -314,8 +330,12 @@ def _repo_labels(ctx):
     labels than `_LABEL_PAGE` can still miss one. That direction is safe -- it falls through to the
     create, and `_already_exists` turns the duplicate into `exists` -- which is precisely why the
     backstop is kept even though this call makes it almost unreachable."""
-    got = ctx.run(ctx.cwd, ["gh", "label", "list", "--limit", str(_LABEL_PAGE),
-                            "--json", "name", "-q", ".[].name"])
+    try:
+        got = ctx.run(ctx.cwd, ["gh", "label", "list", "--limit", str(_LABEL_PAGE),
+                                "--json", "name", "-q", ".[].name"])
+    except Exception:                      # noqa: BLE001 - #1398: `gh label list` is GraphQL; REST read
+        got = ctx.run(ctx.cwd, ["gh", "api", "--paginate", "-q", ".[].name",
+                                "repos/{owner}/{repo}/labels?per_page=100"])
     return [ln.strip() for ln in (got or "").splitlines() if ln.strip()]
 
 
@@ -448,7 +468,10 @@ def open_unit(sdlc_dir, name, kind, *, config=None, run=None, cwd=None, remote=N
             return report                 # a refusal stops the gesture: see the module docstring
         except Exception as exc:          # noqa: BLE001 - every failure is a report, never a raise
             report["steps"].append({"step": step, "outcome": FAILED, "detail": _flat(exc)})
-            report["why"] = "%s: %s%s" % (step, _flat(exc), _STEP_HINTS.get(step, ""))
+            hint = _STEP_HINTS.get(step, "")
+            if "rate limit" in str(exc).lower():     # #1398: a quota refusal is not a login problem
+                hint = " -- GitHub rate limit; wait for it to reset and re-run"
+            report["why"] = "%s: %s%s" % (step, _flat(exc), hint)
             return report
         report["steps"].append({"step": step, "outcome": outcome, "detail": detail})
     report["ok"] = True

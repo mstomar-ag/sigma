@@ -2548,7 +2548,7 @@ def test_github_release_no_op_returns_false_and_clears_an_earlier_release_warnin
 
     def run(a):
         verb = _issues_verb(a)
-        rest = gqlfake.rest_issue(a, lambda n, f: {"state": "CLOSED" if state["closed"] else "OPEN", "labels": []})
+        rest = gqlfake.rest_issue(a, lambda n, f: {"state": "CLOSED" if state["closed"] else "OPEN", "labels": [{"name": "sdlc:in-progress"}]})
         if rest is not None:
             return rest
         if verb == "edit" and "--remove-label" in _legacy(a):
@@ -2672,7 +2672,7 @@ def test_github_release_label_failure_leaves_the_audit_comment_body_untouched():
 
 def test_github_release_returns_true_when_it_actually_releases():
     src = _mod("sources")
-    run = _recording_runner({"rest": {"state": "OPEN", "labels": []}})
+    run = _recording_runner({"rest": {"state": "OPEN", "labels": [{"name": "sdlc:in-progress"}]}})
     gh = src.GitHubSource({"discovery": {"source": "github"}}, run=run)
     assert gh.release("42", "claimed but never dispatched") is True
 
@@ -3427,11 +3427,11 @@ def test_local_source_park_with_no_tier_omits_the_queue_line():
 
 # --- _blocker_promotion (#900) ---
 
-def test_blocker_promotion_defaults_to_off_when_unset():
+def test_blocker_promotion_defaults_to_always_when_unset():
     src = _mod("sources")
-    assert src._blocker_promotion({}) == "off"
-    assert src._blocker_promotion(None) == "off"
-    assert src._blocker_promotion({"discovery": {}}) == "off"
+    assert src._blocker_promotion({}) == "always"
+    assert src._blocker_promotion(None) == "always"
+    assert src._blocker_promotion({"discovery": {}}) == "always"
 
 
 def test_blocker_promotion_reads_the_configured_mode():
@@ -3441,16 +3441,16 @@ def test_blocker_promotion_reads_the_configured_mode():
         assert src._blocker_promotion(cfg) == mode
 
 
-def test_blocker_promotion_falls_back_to_off_on_an_unrecognised_value():
+def test_blocker_promotion_falls_back_to_the_default_on_an_unrecognised_value():
     src = _mod("sources")
     cfg = {"discovery": {"blocker_promotion": {"mode": "urgent-ish"}}}
-    assert src._blocker_promotion(cfg) == "off"
+    assert src._blocker_promotion(cfg) == "always"
 
 
-def test_blocker_promotion_falls_back_to_off_on_a_malformed_block():
+def test_blocker_promotion_falls_back_to_the_default_on_a_malformed_block():
     src = _mod("sources")
-    assert src._blocker_promotion({"discovery": {"blocker_promotion": "always"}}) == "off"
-    assert src._blocker_promotion({"discovery": {"blocker_promotion": None}}) == "off"
+    assert src._blocker_promotion({"discovery": {"blocker_promotion": "always"}}) == "always"
+    assert src._blocker_promotion({"discovery": {"blocker_promotion": None}}) == "always"
 
 
 # --- #900 s1: GitHubSource wiring -- blocker_promotion_mode + sdlc_dir --------------------------
@@ -3469,10 +3469,10 @@ def test_github_source_stores_the_resolved_blocker_promotion_mode():
         assert gh.blocker_promotion_mode == mode
 
 
-def test_github_source_blocker_promotion_mode_defaults_to_off():
+def test_github_source_blocker_promotion_mode_defaults_to_always():
     src = _mod("sources")
     gh = src.GitHubSource({"discovery": {"source": "github"}}, run=_recording_runner())
-    assert gh.blocker_promotion_mode == "off"
+    assert gh.blocker_promotion_mode == "always"
 
 
 def test_github_source_defaults_sdlc_dir_to_none():
@@ -3544,12 +3544,11 @@ def test_blocking_priority_override_falls_back_to_the_default_on_a_non_boolean_v
 # board-authoritative half lives in test_github_project.py (_board_queue/_card_rank), since it
 # needs that file's board-world fixtures.
 
-def test_github_blocking_priority_override_sorts_a_low_priority_blocking_issue_first():
-    """A P3 issue carrying sdlc:blocking must outrank a plain P0 issue when the override is on --
-    a structural sort, not a priority nudge."""
+def test_github_blocking_priority_override_sorts_a_blocking_issue_first_within_its_tier():
+    """#1409: tier first. A P3 blocker no longer passes a P0; a blocker of the SAME tier does."""
     src = _mod("sources")
     p0_issue = {"number": 9, "labels": [{"name": "sdlc:goal"}, {"name": "priority:P0"}]}
-    blocking_issue = {"number": 3, "labels": [{"name": "sdlc:goal"}, {"name": "priority:P3"},
+    blocking_issue = {"number": 3, "labels": [{"name": "sdlc:goal"}, {"name": "priority:P0"},
                                               {"name": "sdlc:blocking"}]}
 
     def run(a):

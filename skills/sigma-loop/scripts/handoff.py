@@ -820,6 +820,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         labels = [f"priority:{priority}", f"area:{area}", *extra_labels]
         if triage is not None and triage["kind"] == "arm":
             labels[0] = f"priority:{triage['priority']}"
+        if blocks_goal and goal and hasattr(source, "blocker_filing_priority"):    # #1408: never below the blocked goal
+            labels[0] = f"priority:{source.blocker_filing_priority(str(goal), labels[0]) or labels[0][9:]}"
         # #1347: guaranteed, not a caller-supplied extra — dedup against a caller that already
         # passed it explicitly (harmless either way, but a repeated label in one `gh` call is
         # needless noise).
@@ -1184,6 +1186,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                 source.mark_blocked(str(goal))
             except Exception as exc:                            # noqa: BLE001
                 report["warnings"].append(f"could not transition the goal to sdlc:blocked: {exc}")
+        if marker_written and hasattr(source, "raise_blocker_priority"):    # #1407: blocker >= blocked
+            source.raise_blocker_priority(str(report["issue"]), str(goal))
 
     # #469/#726: blocks_goal=True has exactly ONE enforcement channel when same_area=True — the body
     # marker just above. Unlike (not same_area) and blocks_goal, which is ALSO backed by the ledger's

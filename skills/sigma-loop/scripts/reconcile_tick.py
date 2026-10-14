@@ -33,8 +33,10 @@ real privacy boundary between sibling scripts in this skill, and `autowatch.py`'
     python3 reconcile_tick.py <sdlc_dir>
 """
 import importlib.util
+import json
 import pathlib
 import sys
+import time
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -67,6 +69,7 @@ def tick(sdlc_dir, config=None, run=None, now=None):
     # after half of SIGMA_WATCH_CALL_TIMEOUT, the bound this very call is killed by.
     merged = loop._reconcile_awaiting_merges(sdlc_dir, config, run=run, now=now)
     backfilled = _board_backfill(sdlc_dir, config, run)
+    repaired = _blocker_rank_repair(sdlc_dir, config, run, now)
     parts = []
     if swept:
         parts.append("%d issue(s) reconciled — %s" % (
@@ -76,7 +79,76 @@ def tick(sdlc_dir, config=None, run=None, now=None):
             len(merged), ", ".join("%s %s" % (goal, outcome) for goal, outcome, _pr in merged)))
     if backfilled:
         parts.append("%d board card(s) backfilled" % backfilled)
+    if repaired:
+        parts.append(repaired)
     return "; ".join(parts)
+
+
+STATE_NAME = "blocker-repair.meta.json"
+
+
+def _state_path(sdlc_dir):
+    return pathlib.Path(sdlc_dir) / "state" / STATE_NAME
+
+
+def read_repair_state(sdlc_dir):
+    """-> {violations, last_repair, first_seen_nonzero, rollout_reported}; {} when absent or unreadable."""
+    try:
+        data = json.loads(_state_path(sdlc_dir).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:                       # noqa: BLE001
+        return {}
+
+
+def _write_repair_state(sdlc_dir, record):
+    """One small record, atomic replace. A failure costs one extra measurement, never a crash."""
+    try:
+        path = _state_path(sdlc_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _load("state").atomic_write_text(path, json.dumps(record, sort_keys=True))
+    except Exception:                       # noqa: BLE001
+        pass
+
+
+def _blocker_rank_repair(sdlc_dir, config, run=None, now=None):
+    """#1410: repair blockers ranked below what they block (`GitHubSource.repair_blocker_ranks`), after
+    the board back-fill. Github source only; zero calls and no state file when the rule is off. Never
+    fatal. The first run records a dry count on stderr before it raises anything. -> a summary part or ""."""
+    try:
+        disc = config.get("discovery") or {}
+        if disc.get("source") != "github":
+            return ""
+        sources = _load("sources")
+        src = sources.GitHubSource(config, run=run, sdlc_dir=sdlc_dir)
+        if src.blocker_promotion_mode != "always":
+            return ""
+        now = now if now is not None else time.time()
+        prior = read_repair_state(sdlc_dir)
+        if not prior.get("rollout_reported"):
+            dry = src.repair_blocker_ranks(apply=False)
+            print("reconcile_tick: blocker rank repair, first run: %d blocker(s) ranked below what they "
+                  "block would be raised" % dry["violations"], file=sys.stderr)
+        res = src.repair_blocker_ranks()
+        if res.get("skipped"):
+            return ""
+        wrote = res["raised"] or res["stripped"] or res["unmarked"]
+        found = res["violations"]
+        first = prior.get("first_seen_nonzero")
+        _write_repair_state(sdlc_dir, {
+            "violations": found,
+            "last_repair": now if wrote else prior.get("last_repair"),
+            "first_seen_nonzero": (first or now) if found else None,
+            "rollout_reported": True})
+        bits = []
+        if res["raised"]:
+            bits.append("%d blocker(s) raised" % len(res["raised"]))
+        if res["stripped"]:
+            bits.append("%d confirmation label(s) stripped" % len(res["stripped"]))
+        if res["unmarked"]:
+            bits.append("%d blocking mark(s) removed" % len(res["unmarked"]))
+        return ", ".join(bits)
+    except Exception:                       # noqa: BLE001 - a watcher tick is never fatal
+        return ""
 
 
 def _board_backfill(sdlc_dir, config, run=None):

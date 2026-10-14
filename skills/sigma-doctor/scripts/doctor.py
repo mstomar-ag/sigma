@@ -1175,6 +1175,48 @@ def _awaiting_merge_row(sdlc_dir, now=None):
     return _chk(f"goals {line} -- {'; '.join(parts)}", False, fix)
 
 
+def _blocker_rank_row(cfg, sdlc_dir, now=None):
+    """#1410: one row for blockers ranked below what they block. Reads only the small state file the
+    reconcile tick writes (count, last repair, when the count first went above zero); no gh call.
+    Not OK when the count is above zero for over two reconcile intervals. Never raises; None when the
+    source is not github or the rule is explicitly off."""
+    try:
+        disc = (cfg or {}).get("discovery") or {}
+        block = disc.get("blocker_promotion")
+        if disc.get("source") != "github" or (isinstance(block, dict) and block.get("mode") == "off"):
+            return None
+        tick = _load_loop_script("reconcile_tick")
+        loop = tick.loop
+        st = tick.read_repair_state(sdlc_dir)
+        if not st:
+            return _chk("blockers ranked below what they block: not yet checked (the reconcile tick has not run)",
+                        True, "")
+        now = now if now is not None else time.time()
+        n = int(st.get("violations") or 0)
+        last = st.get("last_repair")
+        when = ("last repair %s ago" % _age_words(now - float(last))) if last else "no repair yet"
+        if n == 0:
+            return _chk("blockers ranked below what they block: 0 (%s)" % when, True, "")
+        since = float(st.get("first_seen_nonzero") or now)
+        limit = 2 * loop._reconcile_ttl_minutes(cfg) * 60
+        stale = (now - since) > limit
+        name = "blockers ranked below what they block: %d (%s)" % (n, when)
+        return _chk(name, not stale,
+                    "still %d after two reconcile intervals -- check that the watcher is running and that "
+                    "gh can write labels, then run `python3 skills/sigma-loop/scripts/reconcile_tick.py .sdlc`" % n)
+    except Exception as exc:                 # noqa: BLE001 - a detector that cannot run says so
+        return _chk("blockers ranked below what they block: could not check (%s)" % type(exc).__name__, True, "")
+
+
+def _age_words(seconds):
+    seconds = max(0, int(seconds))
+    if seconds < 3600:
+        return "%dm" % (seconds // 60)
+    if seconds < 86400:
+        return "%dh" % (seconds // 3600)
+    return "%dd" % (seconds // 86400)
+
+
 def _load_log_script(name):
     """`_load_loop_script`'s sibling, pointed at the `sigma-log` skill instead of `sigma-loop`
     (skills/sigma-doctor/scripts/doctor.py -> skills/sigma-log/scripts/<name>.py) — issue #1779 is
@@ -1708,6 +1750,34 @@ def _legacy_confirmation_scan(gh_cfg, config, run):
     if issues is None:
         return []
     return [i.get("number") for i in issues if isinstance(i, dict) and "number" in i]
+
+
+def _blocker_hygiene_scan(gh_cfg, config, run):
+    """#1408: open `sdlc:blocking` issues that still carry the legacy confirmation label or carry no
+    priority. Read-only and advisory; mode "off" (`discovery.blocker_promotion.mode`) returns `[]`
+    before any call, so the closed gate adds nothing. Fail-open: an unreadable response yields `[]`."""
+    try:
+        sources = _load_loop_script("sources")
+        discovery = _load_loop_script("discovery")
+        if sources._blocker_promotion(config) == "off":
+            return []
+        aliases = sources._priority_aliases(config)
+    except Exception:
+        return []
+    legacy = (_block(_block(config, "ledger"), "handoff").get("proposed_label")
+              or "sdlc:needs-confirmation")
+    issues = _list(run, gh_cfg, ["number", "labels"], [gh_cfg.get("blocking_label", "sdlc:blocking")])
+    if issues is None:
+        return []
+    flagged = []
+    for i in issues:
+        if not isinstance(i, dict) or "number" not in i:
+            continue
+        names = [(l.get("name") or "") if isinstance(l, dict) else str(l or "") for l in (i.get("labels") or [])]
+        ranked = any(discovery.priority_rank(n, aliases) < discovery.UNPRIORITISED for n in names)
+        if legacy in names or not ranked:
+            flagged.append(i["number"])
+    return flagged
 
 
 def _orphan_in_progress_scan(gh_cfg, config, run):
@@ -2958,6 +3028,18 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                     "this is a leftover from an older board: the loop will never pick these. " + how +
                     "`/sigma-promote` to approve or clear each one. Advisory only -- nothing was changed."))
 
+            # #1408: a blocker that still carries the legacy label or has no priority (advisory).
+            hygiene = _blocker_hygiene_scan(gh_disc, cfg, run)
+            if hygiene:
+                shown = ", ".join(f"#{n}" for n in hygiene[:10])
+                more = f" (+{len(hygiene) - 10} more)" if len(hygiene) > 10 else ""
+                out.append(_chk(
+                    "every sdlc:blocking issue carries a priority and no legacy confirmation label",
+                    False,
+                    f"{shown}{more} block other work but carry the legacy confirmation label or no "
+                    "priority. The next blocker sweep strips the label and raises the priority to the "
+                    "blocked goal's; or set `priority:P<n>` by hand. Advisory only -- nothing was changed."))
+
             # #1392: blockers nothing can pick -- see `_unreachable_blocker_scan` for why
             # `sdlc:blocking` is a tie-break rather than a queue, and why this is report-only.
             unreachable = _unreachable_blocker_scan(gh_disc, run)
@@ -3241,6 +3323,11 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     # records), so it is not gated by `cheap_only`; silent (no row) when work is off.
     if _block(cfg, "work").get("enabled") is True:
         out.append(_awaiting_merge_row(sdlc_dir))
+
+    # #1410: blockers ranked below what they block. Local state read only; silent unless github + rule on.
+    _br = _blocker_rank_row(cfg, sdlc_dir)
+    if _br is not None:
+        out.append(_br)
 
     # #1555: BEFORE the loop ever commits. `work.commit()` stages with `git add -A`, which honours
     # .gitignore and nothing else, so "is this repo's `.env` ignored?" decides whether an unattended
@@ -5058,12 +5145,29 @@ def _model_max_tier(cfg):
 _STALE_RULEBOOK_KEY = "`decision_rubric` was renamed `rulebook`; it is not read"
 
 
-def _real_repo_public(cfg, run):
+def _real_repo_slug(cfg, run, sdlc_dir):
+    """A plain owner/name for the REST read: discovery.github.repo, else origin parsed (host aliases
+    included), else None. A failed git read yields None."""
+    try:
+        disc = cfg.get("discovery") if isinstance(cfg, dict) else None
+        gh = disc.get("github") if isinstance(disc, dict) else None
+        conf = str((gh.get("repo") if isinstance(gh, dict) else None) or "").strip()
+        parts = conf.split("/")
+        if len(parts) == 2 and all(parts) and not any(c.isspace() or c in "{}" for c in conf):
+            return conf
+        if sdlc_dir is None:
+            return None
+        url = str(run(["git", "-C", str(pathlib.Path(sdlc_dir).parent), "remote", "get-url", "origin"]) or "").strip()
+        return _load_loop_script("feature_sync").slug_from_remote_url(url) if url else None
+    except Exception:
+        return None
+
+
+def _real_repo_public(cfg, run, sdlc_dir=None):
     """True/False from ONE REST read of the repository's `private` field, None when it cannot be read
     (no gh, a failed call, an unexpected reply). Only called when records are on and a runner was given."""
     try:
-        gh_cfg = cfg.get("gh") if isinstance(cfg, dict) else None
-        repo = (gh_cfg.get("repo") if isinstance(gh_cfg, dict) else None) or "{owner}/{repo}"
+        repo = _real_repo_slug(cfg, run, sdlc_dir) or "{owner}/{repo}"
         raw = run(["gh", "api", "repos/" + repo, "--jq", ".private"])
         if isinstance(raw, _RawFailure):
             return None
@@ -5110,7 +5214,7 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
                 if mod.visibility(cfg) == "public":
                     extra.append(public_msg)
             else:
-                real = _real_repo_public(cfg, run)
+                real = _real_repo_public(cfg, run, sdlc_dir)
                 if real is True:
                     extra.append(public_msg + " (read from GitHub)")
                 elif real is None:

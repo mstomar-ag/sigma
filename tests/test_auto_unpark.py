@@ -791,7 +791,7 @@ def test_sweep_unpark_a_failed_label_edit_suppresses_only_that_issues_comment():
                         # #1392: the label write is a graphql swap now, so the
                         # per-issue failure is injected at that issue's own node-id lookup --
                         # `_swap_labels` raises, and `apply_actions` records `failed` for it.
-                        fail_on=["issue(number: 1)"])
+                        fail_on=["issue(number: 1)", "issues/1/labels"])  # #1398: the REST twin fails too
     result = au.sweep_unpark(".sdlc", _config(), apply=True, run=run)
     failed_issue_1 = [a for a in result["actions"] if a["issue"] == "1"]
     ok_issue_2 = [a for a in result["actions"] if a["issue"] == "2"]

@@ -837,7 +837,20 @@ def rotate_log(p, config):
         return False
 
 
-def tick(p, sdlc_dir, call_timeout, n, config=None):
+def reconcile_call_timeout(call_timeout, interval):
+    """#1403: the reconcile tick's limit, as the string `run_with_timeout.py` takes. At a watcher
+    interval above 60 s it is `max(call_timeout, 2 x interval)` (the default 120 s limit was hit by
+    the first ticks at a 120 s interval); otherwise `call_timeout` unchanged. Below the stale bound
+    (`3 x interval`), so it cannot make a hung call read as a live one for longer than that."""
+    try:
+        if interval is None or float(interval) <= 60:
+            return call_timeout
+        return f"{max(float(call_timeout), 2 * float(interval)):g}"
+    except (TypeError, ValueError):
+        return call_timeout
+
+
+def tick(p, sdlc_dir, call_timeout, n, config=None, interval=None):
     """B-30 step 4 through B-34. The tick line is LOG-ONLY, never stdout (§1.8, control S16).
 
     #2499: `rotate_log` is the FIRST statement, outside the `try` and unguarded here -- its own
@@ -862,7 +875,8 @@ def tick(p, sdlc_dir, call_timeout, n, config=None):
         log_line(p, f"watch: tick #{n} — {time.strftime('%a %b %d %H:%M:%S %Z %Y')}")
         for script, subcmd, mode in TICK_CALLS:
             touch_heartbeat(p)                       # B-33: BEFORE the call, all eight of them
-            summary = run_call(p, sdlc_dir, call_timeout, script, subcmd, mode)
+            limit = reconcile_call_timeout(call_timeout, interval) if script == "reconcile_tick.py" else call_timeout
+            summary = run_call(p, sdlc_dir, limit, script, subcmd, mode)
             if mode == "summary" and summary:        # B-34: an empty summary produces NO line
                 tee(p, f"watch: {summary}")
         scheduler_step(p, sdlc_dir, call_timeout)
@@ -981,7 +995,7 @@ def _run(p, sdlc_dir):
             tee(p, f"watch: max ticks ({max_ticks}) reached — exiting")   # prints MAX_TICKS, not ticks
             return 0
         ticks += 1
-        tick(p, sdlc_dir, call_timeout, ticks, config)
+        tick(p, sdlc_dir, call_timeout, ticks, config, interval=interval)
         sleep_for = interval * scale                                  # B-35: SCALE=0 means NO sleep
         if sleep_for > 0:
             time.sleep(sleep_for)
