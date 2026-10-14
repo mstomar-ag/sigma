@@ -504,6 +504,7 @@ def test_cli_release_on_an_already_done_goal_prints_a_clear_message_and_leaves_i
         assert "status: done" in pathlib.Path(g).read_text()     # goal itself untouched
         err = capsys.readouterr().err
         assert "already done/parked/failed" in err and g in err
+        assert "never claimed" in err                           # #1413: the message also covers an unclaimed goal
 
 
 def test_cli_release_does_not_consume_the_iteration_budget():

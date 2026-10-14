@@ -1320,19 +1320,24 @@ class GitHubSource:
             return self._raw_run(args)
         for attempt in range(self._PROJECT_RETRIES):
             try:
-                return self._raw_run(args)
+                out = self._raw_run(args)
+                self._project_refusals = 0         # #1402: any answered project call clears the streak
+                return out
             except Exception as e:
                 # #233: a runner that already KILLED a hung call marks it `no_retry` -- a timeout is
                 # not a blip, and retrying it would spend the whole boundary budget on one card.
                 if attempt == self._PROJECT_RETRIES - 1 or getattr(e, "no_retry", False) \
                         or not self._is_transient(e):
                     limited = self._rate_limit_error(e, args)
+                    if limited is not None or "unknown owner type" in str(e).lower():
+                        self._project_refusals += 1    # #1402: consecutive refused project calls
                     if limited is not None:
                         raise limited from e
                     raise
                 time.sleep(self._RETRY_BASE * (2 ** attempt))
 
     _RATE_LIMIT = ("rate limit", "secondary rate")
+    _project_refusals = 0                            # #1402: consecutive refused `gh project` calls
 
     @classmethod
     def _rate_limit_error(cls, exc, args):
@@ -4546,6 +4551,13 @@ class GitHubSource:
         if cap is None:
             cap = self._project_cfg.get("backfill_cap", 20)
         if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+            return 0
+        # #1402 (PROVISIONAL default 1): a refused project call outranks the REST counter, which can
+        # read thousands while the project API refuses. Skip until a project call is answered again.
+        mx = self._project_cfg.get("backfill_max_refusals", 1)
+        if isinstance(mx, bool) or not isinstance(mx, int) or mx <= 0:
+            mx = 1
+        if self._project_refusals >= mx:
             return 0
         floor = self._project_cfg.get("backfill_min_graphql", 1000)
         try:
