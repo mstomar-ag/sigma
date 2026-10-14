@@ -125,13 +125,13 @@ def test_a_legacy_confirmation_label_is_stripped_from_a_blocker_not_raised():
                for c in run.calls)
 
 
-def test_a_closed_blocker_loses_the_blocking_mark_and_an_open_one_blocking_nothing_too():
+def test_a_closed_blocker_loses_the_blocking_mark_and_an_open_one_keeps_it():
     issues = [_issue(5, [GOAL, "sdlc:blocking"], state="closed"),
               _issue(6, [GOAL, "sdlc:blocking"]),
               _issue(9, [GOAL, "priority:P0"], body="blocked by #7"),
               _issue(7, [GOAL, "priority:P0", "sdlc:blocking"])]
     res = _src(_runner(issues)).repair_blocker_ranks()
-    assert res["unmarked"] == ["5", "6"]                     # 7 still blocks #9: its mark stays
+    assert res["unmarked"] == ["5"]                          # open marks (6, 7) belong to the unpark sweep
 
 
 def test_the_write_cap_is_respected():

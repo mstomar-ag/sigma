@@ -5172,16 +5172,14 @@ class GitHubSource:
             return True
 
     def _repair_blocking_marks(self, blocker_refs, budget, out):
-        """Remove the blocking mark from a closed blocker, or an open one no edge names. Reads only."""
+        """Remove the blocking mark from a closed blocker. An open blocker's mark is left to the unpark
+        sweep, which also reads comments (PROVISIONAL, owner to ratify: one writer for open marks)."""
         label = self.blocking_label
         stale = []
         try:
             closed = fetch_issues_rest(self._run, self.repo, [label], self._BOARD_ITEM_LIMIT, state="closed",
                                        page_size=self._REST_PAGE_SIZE)
             stale += [str(i["number"]) for i in closed if i.get("number") is not None]
-            opened = self._fetch_issues_rest([label], self._BOARD_ITEM_LIMIT)
-            stale += [str(i["number"]) for i in opened
-                      if i.get("number") is not None and str(i["number"]) not in blocker_refs]
         except Exception as exc:
             self._note_scope(exc)
             return
