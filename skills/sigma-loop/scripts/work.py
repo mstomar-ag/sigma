@@ -5861,7 +5861,8 @@ def review_gate(sdlc_dir, config, goal, run=None, mode=None):
             unreadable = False
     else:
         unreadable = True
-    if unreadable and mode == REVIEW_APPROVAL:  # #635: an approval is a positive requirement; unknown is not met
+    # #1398 (provisional): a `sigma:approve` directive satisfies approval when the decision is unreadable.
+    if unreadable and mode == REVIEW_APPROVAL and directive != "approve":  # #635: an approval is a positive requirement; unknown is not met
         return False, (f"could not read PR #{rec['pr']}'s review decision (it needs GraphQL, which is "
                        "unavailable or failed), so `require_review: approval` cannot be satisfied — "
                        "re-queue the issue once `gh` works")

@@ -1679,6 +1679,17 @@ class GitHubSource:
             raise RuntimeError(f"issue {issue} has no resolvable node id")
         return node
 
+    def _swap_labels_rest(self, issue, add, remove, cause):
+        """#1398: the REST twin of the GraphQL swap, reached only when GraphQL could not even resolve
+        the ids. Existing gh_api helpers only (add, then remove: same order). One stderr line."""
+        sys.stderr.write("sigma: label swap on #%s: GraphQL unavailable (%s); using REST\n"
+                         % (issue, " ".join(str(cause).split())[:120]))
+        if add:
+            self._issue_add_labels(issue, list(add))
+        for label in remove:
+            self._issue_remove_label(issue, label)
+        return True
+
     def _swap_labels(self, issue, add=(), remove=(), retries=None, retry_base=None):
         """Apply a lifecycle label change to `issue` as ONE mutation request. See the block comment
         above for why this shape and not `gh issue edit` or the REST set-replace.
@@ -1709,11 +1720,18 @@ class GitHubSource:
         add, remove = [l for l in add if l], [l for l in remove if l]
         if not add and not remove:
             return False
-        node = self._issue_node_id(issue)
+        try:
+            node = self._issue_node_id(issue)
+            ids = self._label_node_ids((*add, *remove))
+        except Exception as exc:                          # noqa: BLE001 - GraphQL refused: use REST
+            # #1398: a refused/rate-limited GraphQL budget must not strand a lifecycle label (the
+            # claim above all). REST has its own budget; same helpers every other label write uses.
+            if any(m in str(exc) for m in ("has no resolvable node id", "could not identify a repository", "control character")):
+                raise
+            return self._swap_labels_rest(issue, add, remove, exc)
         # Ask for exactly the labels this swap is about. `_label_node_ids` caches only what it
         # FOUND, so a name still missing here is genuinely absent from the repo -- no second
         # invalidate-and-refetch round is needed (or possible: the old one re-ran the same query).
-        ids = self._label_node_ids((*add, *remove))
         missing = [l for l in (*add, *remove) if l not in ids]
         if missing:
             raise RuntimeError(f"unknown label(s) on this repo: {', '.join(sorted(missing))}")
