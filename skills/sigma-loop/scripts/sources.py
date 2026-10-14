@@ -3031,6 +3031,10 @@ class GitHubSource:
             state_now = (info.get("state") or "").upper()
             label_names = {(l.get("name") or "") for l in (info.get("labels") or [])}
             terminal = state_now == "CLOSED" or self.parked_label in label_names
+            # #1394: a probe that SUCCEEDED and shows no claim label means there is nothing to
+            # release (never claimed, or already released) -- same silent no-op as terminal.
+            # Only a successful read reaches here; a failed probe stays fail-open below.
+            terminal = terminal or self.in_progress_label not in label_names
         except Exception:
             pass   # best-effort probe; a transient gh error must fall through to the pre-existing
                    # (fire-anyway) release behavior, never block a legitimate one on a read that
