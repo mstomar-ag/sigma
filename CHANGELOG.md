@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **The applier builds its board source once per tick (#1392).** Each ask in a tick built its own source, so a board that refused the project read was retried per ask; the tick now builds one and shares it, and a refused build still fails each ask as before. A closed gate is unchanged.
+
 - **Applier stamps each applied ask when its own gesture lands (#1390).** The applied time was the tick's start for every ask, so in a long tick an owner `no` posted soon after the applied comment could fall outside the veto window and be missed; each ask is now stamped from a clock that advances through the tick, and the veto window runs from that moment. A closed gate is unchanged.
 - **Publishing recorded decisions now skips a registered unit branch (#1391).** The unit-branch check read a top-level branch key that real unit records do not have, so it never matched and a decision commit could land on a unit branch; it now reads the branch of every repo in the unit record, and one unreadable record no longer hides the rest.
 - **A project board no longer turns a gh login blip into a login instruction (#1399).** When the session-start check cannot confirm the login and the board scope row fails with it, it now retries once and shows the short could-not-confirm step instead of advising a fresh login; scope alone, or any other failing row, behaves as before.
