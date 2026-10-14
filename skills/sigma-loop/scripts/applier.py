@@ -473,11 +473,17 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
         if apply_actions:
             done = dict(stored)   # only applies that landed advance the counter
             moved = False
+            refused = False
+            if source is None and actions:    # #1392: one source per tick; a refusal fails each ask once, unretried
+                try:
+                    source = _load("sources").GitHubSource(config, run=run)
+                except Exception:
+                    refused = True
             for a, key, text in zip(actions, eligible, loud):
                 if key is not None:   # #1361: the slot is decided now, from the landed count
                     a["silent"] = (done.get(key, 0) + 1) % settings(config)["spot_check_one_in"] != 0
                     a["text"] = "" if a["silent"] else text
-                a["result"] = apply(a, sdlc_dir, config, now, source=source, run=run, clock=clock)
+                a["result"] = "failed" if refused else apply(a, sdlc_dir, config, now, source=source, run=run, clock=clock)
                 if key is not None and a["result"] == "done":
                     done[key] = done.get(key, 0) + 1
                     moved = True
