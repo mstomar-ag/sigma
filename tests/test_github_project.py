@@ -2187,16 +2187,11 @@ def _promo_src(run, mode="smart", sdlc_dir=None, **project):
     return gh
 
 
-def test_mode_unset_is_byte_identical_to_before_the_feature_existed():
-    """The regression the spec calls out explicitly: an adopter who never sets
-    discovery.blocker_promotion.mode must see zero extra gh calls or writes from this mechanism
-    piggybacking on `_sync_backlog`'s own open-goal-issue listing -- genuinely off by default, not
-    merely "off once configured". #1833: `_sync_backlog`'s listing is REST now, which has no
-    field-selection concept at all -- title/body come back on EVERY fetch regardless of mode, so
-    the old "identical --json fields" assertion this test used to make is no longer meaningful
-    (there is no `--json` at all to compare); what still matters, unchanged, is that this stays
-    exactly ONE issues-listing call with zero promotion writes."""
-    issues = [_gissue(5, "priority:P2", body="Blocked by: #9"), _gissue(9, "priority:P0")]
+def test_mode_unset_is_the_full_rule_and_explicit_off_is_byte_identical():
+    """#1406: an unset mode is now the full rule ("always"): a P2 blocker behind a P0 is raised, with
+    exactly ONE open-goal listing. An explicit "off" is what is byte-identical to before the feature
+    existed: the same fixture makes zero promotion writes."""
+    issues = [_gissue(9, "priority:P0", body="Blocked by: #5"), _gissue(5, "priority:P2")]
     run = _promo_world(issues)
     p = {"enabled": True, "number": 4, "owner": "acme"}
     cfg = {"discovery": {"source": "github", "github": {"repo": "acme/widget", "project": p}}}
@@ -2204,9 +2199,12 @@ def test_mode_unset_is_byte_identical_to_before_the_feature_existed():
     gh._RETRY_BASE = 0
     _synced(gh).mark_in_progress("9")
     listings = [c for c in run.calls if _is_issues_list_call(c) and _rest_field(c, "state") == "open"]
-    assert len(listings) == 1, "expected exactly one open-goal listing, no extra calls from the mode"
-    assert not any(c[:2] == ["issue", "comment"] for c in run.calls)
-    assert not any(c[:2] == ["issue", "edit"] and "priority:" in " ".join(c) for c in run.calls)
+    assert len(listings) == 1
+    assert any(c[:2] == ["issue", "comment"] and c[2] == "5" for c in run.calls)
+    off_run = _promo_world(issues)
+    _synced(_promo_src(off_run, mode="off")).mark_in_progress("9")
+    assert not any(c[:2] == ["issue", "comment"] for c in off_run.calls)
+    assert not any(c[:2] == ["issue", "edit"] and "priority:" in " ".join(c) for c in off_run.calls)
 
 
 def test_mode_off_explicitly_configured_makes_no_promotion_writes():
@@ -2844,3 +2842,67 @@ def test_a_failing_remove_raises_and_leaves_the_add_done_both_self_heal_directio
         assert gh._priority_name(_lbls(*labels)) == want_after
     # demotion: effective priority P0 != the desired P2 -> disagreement persists (retry next pass)
     # promotion: effective priority P0 == the desired P0 -> undetected, stale lower label stays
+
+
+# --- #1406: the full rule through the real `_sync_backlog` gesture ----------------------------
+
+def _with_outside(run, outside):
+    """Answer a single-issue REST read for issues outside the listing, `outside` maps number ->
+    (state, [labels]) or an Exception to raise. Everything else goes to the world fake."""
+    reads = []
+
+    def wrapped(a):
+        m = re.match(r"repos/[^/]+/[^/]+/issues/(\d+)$", str(a[1])) if a[:1] == ["api"] and len(a) > 1 else None
+        if m and int(m.group(1)) in outside:
+            reads.append(int(m.group(1)))
+            run.calls.append(list(a))
+            v = outside[int(m.group(1))]
+            if isinstance(v, Exception):
+                raise v
+            return json.dumps({"number": int(m.group(1)), "state": v[0], "comments": 0,
+                               "labels": [{"name": l} for l in v[1]]})
+        return run(a)
+
+    wrapped.calls, wrapped.state, wrapped.reads = run.calls, run.state, reads
+    return wrapped
+
+
+def test_promotion_default_raises_a_non_goal_member_blocker_through_sync_backlog(capsys):
+    issues = [_gissue(9, "priority:P0", body="Blocked by: #77")]
+    run = _with_outside(_promo_world(issues), {77: ("open", ["priority:P3"])})
+    p = {"enabled": True, "number": 4, "owner": "acme"}
+    cfg = {"discovery": {"source": "github", "github": {"repo": "acme/widget", "project": p}}}
+    gh = _mod("sources").GitHubSource(cfg, run=run)
+    gh._RETRY_BASE = 0
+    _synced(gh).mark_in_progress("9")
+    assert run.reads == [77]                    # one bounded read, not a listing
+    assert any(c[:2] == ["issue", "comment"] and c[2] == "77" for c in run.calls)
+    assert any("77" in " ".join(c) and "priority:P0" in " ".join(c) for c in run.calls
+               if c[:2] == ["issue", "edit"])
+
+
+def test_promotion_never_treats_a_confirmation_waiting_issue_as_a_blocker():
+    issues = [_gissue(9, "priority:P0", body="Blocked by: #77"),
+              _gissue(8, "priority:P3", "sdlc:needs-confirmation"),
+              _gissue(7, "priority:P0", body="Blocked by: #8")]
+    run = _with_outside(_promo_world(issues), {77: ("open", ["sdlc:needs-confirmation", "priority:P3"])})
+    p = {"enabled": True, "number": 4, "owner": "acme"}
+    cfg = {"discovery": {"source": "github", "github": {"repo": "acme/widget", "project": p}}}
+    gh = _mod("sources").GitHubSource(cfg, run=run)
+    gh._RETRY_BASE = 0
+    _synced(gh).mark_in_progress("9")
+    assert not any(c[:2] == ["issue", "comment"] for c in run.calls)
+    assert not any(c[:2] == ["issue", "edit"] and "priority:" in " ".join(c) for c in run.calls)
+
+
+def test_promotion_reports_an_unreadable_or_cross_repo_blocker_on_stderr(capsys):
+    issues = [_gissue(9, "priority:P0", body="Blocked by: #77\nBlocked by: other/repo#5")]
+    run = _with_outside(_promo_world(issues), {77: RuntimeError("boom")})
+    p = {"enabled": True, "number": 4, "owner": "acme"}
+    cfg = {"discovery": {"source": "github", "github": {"repo": "acme/widget", "project": p}}}
+    gh = _mod("sources").GitHubSource(cfg, run=run)
+    gh._RETRY_BASE = 0
+    _synced(gh).mark_in_progress("9")
+    err = capsys.readouterr().err
+    assert "#77" in err and "other repository" in err
+    assert not any(c[:2] == ["issue", "comment"] for c in run.calls)
