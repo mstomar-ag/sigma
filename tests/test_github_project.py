@@ -1624,8 +1624,8 @@ def _src_override(run, override=True, **project):
 def test_blocking_priority_override_sorts_a_low_priority_blocking_card_first():
     """A structural sort, not a priority nudge: a P3 card carrying sdlc:blocking must outrank a
     plain P0 card when the override is on."""
-    run = _pworld([_ready(9, "P0"), _ready(3, "P3", ("sdlc:goal", "sdlc:blocking"))])
-    assert _src_override(run).next_pending() == "3"
+    run = _pworld([_ready(9, "P0"), _ready(3, "P0", ("sdlc:goal", "sdlc:blocking"))])
+    assert _src_override(run).next_pending() == "3"      # #1409: same tier; a P3 no longer passes
 
 
 def test_blocking_priority_override_can_be_turned_off_on_the_board_path_too():
@@ -1641,7 +1641,7 @@ def test_a_blocking_card_sorts_first_by_default_on_the_board_path():
     """The counterpart, and the default: the board path honours the override with no config at all,
     exactly as the label path does. A fix to only one of the two would silently fail on whichever
     path a repo happens to route through -- the finding this feature's own plan review raised."""
-    run = _pworld([_ready(9, "P0"), _ready(3, "P3", ("sdlc:goal", "sdlc:blocking"))])
+    run = _pworld([_ready(9, "P0"), _ready(3, "P0", ("sdlc:goal", "sdlc:blocking"))])
     assert _src(run).next_pending() == "3"
 
 
@@ -1682,7 +1682,7 @@ def test_blocking_priority_override_composes_with_priority_aliases():
     """Two independently-legal config keys used together: the override still promotes a blocking
     card over an alias-labelled non-blocking one, proving the two features don't fight (the same
     class of interaction #813/#815/#854/#861 have each caught before in this exact area)."""
-    run = _pworld([_ready(9, "Critical"), _ready(3, "P3", ("sdlc:goal", "sdlc:blocking"))])
+    run = _pworld([_ready(9, "Critical"), _ready(3, "Critical", ("sdlc:goal", "sdlc:blocking"))])
     assert _src_override_aliases(run, {"critical": "P0"}).next_pending() == "3"
 
 

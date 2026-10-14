@@ -6678,7 +6678,7 @@ def _dispatch(argv):
         # goal. `is False` (not falsy) so a legacy test double whose release() has no return
         # statement (implicit None) is never misread as a refusal.
         if released is False:
-            print(f"loop.py release: {argv[3]} is already done/parked/failed — no change made",
+            print(f"loop.py release: {argv[3]} was never claimed, or is already done/parked/failed — no change made",
                   file=sys.stderr)
         return 0
     # issue #1091 (the 4th disposition #1013 missed): this call site IS unconditional and real too

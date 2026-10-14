@@ -458,9 +458,9 @@ def _blocking_priority_override(config):
     boolean `True` turns it on, anything else (missing, a typo'd string, a number, null) reads as
     off, so a config mistake can never silently activate a scheduling override nobody asked for.
 
-    When on: any `goal_label` issue that ALSO carries `blocking_label` sorts ahead of EVERY other
-    pending issue, regardless of priority tier -- a STRUCTURAL override, not a priority nudge (a
-    promoted P0 can still tie with other real P0s; this doesn't). See `GitHubSource.
+    When on: any `goal_label` issue that ALSO carries `blocking_label` sorts ahead of every other
+    pending issue OF ITS OWN priority tier (#1409): a blocker is never below what it blocks, and
+    the writers raise it to that tier, so it never jumps a higher tier. See `GitHubSource.
     _blocking_priority_pending` (label-queue path) and `_board_queue` (board-authoritative path) --
     both need this, independently, per the epic's own adversarial plan-review finding (§10.3 of the
     design doc): a fix to only one would silently fail to surface a blocker on whichever path a
@@ -1320,28 +1320,42 @@ class GitHubSource:
             return self._raw_run(args)
         for attempt in range(self._PROJECT_RETRIES):
             try:
-                return self._raw_run(args)
+                out = self._raw_run(args)
+                self._project_refusals = 0         # #1402: any answered project call clears the streak
+                return out
             except Exception as e:
                 # #233: a runner that already KILLED a hung call marks it `no_retry` -- a timeout is
                 # not a blip, and retrying it would spend the whole boundary budget on one card.
                 if attempt == self._PROJECT_RETRIES - 1 or getattr(e, "no_retry", False) \
                         or not self._is_transient(e):
                     limited = self._rate_limit_error(e, args)
+                    if limited is not None or "unknown owner type" in str(e).lower():
+                        self._project_refusals += 1    # #1402: consecutive refused project calls
                     if limited is not None:
                         raise limited from e
                     raise
                 time.sleep(self._RETRY_BASE * (2 ** attempt))
 
     _RATE_LIMIT = ("rate limit", "secondary rate")
+    _project_refusals = 0                            # #1402: consecutive refused `gh project` calls
 
     @classmethod
     def _rate_limit_error(cls, exc, args):
         """#1319 (PROVISIONAL): a rate-limited owner lookup comes back from `gh project` as the
         misleading "unknown owner type". When the error text carries the rate-limit wording, return
         one clear RuntimeError naming it; else None (the original error propagates unchanged)."""
-        if not any(m in str(exc).lower() for m in cls._RATE_LIMIT):
-            return None
+        text = str(exc).lower()
         verb = " ".join(str(a) for a in args[:2])
+        if not any(m in text for m in cls._RATE_LIMIT):
+            # #1400: the bare owner-lookup text is usually the GraphQL rate limit; keep the phrase
+            # (doctor matches it as "board gone") and say what to check.
+            if "unknown owner type" not in text:
+                return None
+            msg = ("`gh %s` failed with 'unknown owner type', which is usually the GraphQL rate limit "
+                   "(check `gh api rate_limit`); wait for the reset, then retry" % verb)
+            err = RuntimeError(msg)
+            err.hint = msg
+            return err
         msg = ("GitHub API rate limit reached on `gh %s` (gh may report it as 'unknown owner type'); "
                "wait for the limit to reset, then retry" % verb)
         err = RuntimeError(msg)
@@ -2131,7 +2145,7 @@ class GitHubSource:
         priority — drag to reorder and the loop obeys.
 
         #1352: when `blocking_priority_override` is on, a Ready card also carrying `blocking_label`
-        sorts ahead of every non-blocking Ready card, before priority — the SAME structural override
+        sorts ahead of every non-blocking Ready card of its own tier (#1409: tier first) — the SAME override
         `_blocking_priority_pending` applies on the label-queue path (this is the board-authoritative
         half of that same feature; the design doc's own adversarial review flagged that a fix to only
         one of the two paths would silently fail on whichever path a given repo's config routes
@@ -2228,7 +2242,7 @@ class GitHubSource:
                 # (#254, #318) queued 10th and 11th behind eight P1s.
                 is_blocking = (self.blocking_priority_override
                               and self.blocking_label in names)
-                ready.append((0 if is_blocking else 1, self._card_rank(it),
+                ready.append((self._card_rank(it), 0 if is_blocking else 1,
                              self._board_feature_rank(names), pos, int(n)))
             elif it.get("status") not in in_flight:
                 names = set(it.get("labels") or [])
@@ -2622,8 +2636,8 @@ class GitHubSource:
 
     def _blocking_priority_pending(self, skip, primary=True):
         """#1352: `blocking_priority_override`'s structural override on the LABEL-QUEUE path — any
-        `goal_label` issue that ALSO carries `blocking_label` sorts ahead of EVERY other pending
-        issue, regardless of priority tier. Reuses `_fetch_pending` completely UNCHANGED with an
+        `goal_label` issue that ALSO carries `blocking_label` sorts ahead of other pending issues
+        of its own tier (#1409: never across tiers). Reuses `_fetch_pending` completely UNCHANGED with an
         extra `--label blocking_label` filter — `gh issue list --label` ANDs repeated flags, so this
         is naturally scoped to issues carrying BOTH labels, and it inherits every existing safeguard
         for free: the retry/degraded-read machinery, the parked/in-progress/blocked exclusion, and
@@ -2686,9 +2700,15 @@ class GitHubSource:
         if self.blocking_priority_override and self.order == "priority":
             blocking_pending = self._blocking_priority_pending(skip, primary=primary) or []
             if blocking_pending:
+                # #1409: tier first, blocker first WITHIN its tier, then the usual pick key.
                 blocking_numbers = {p["number"] for p in blocking_pending}
-                rest = [p for p in pending if p["number"] not in blocking_numbers]
-                return blocking_pending + rest
+                seen = {p["number"] for p in pending}
+                merged = pending + [p for p in blocking_pending if p["number"] not in seen]
+
+                def _tiered(p):
+                    k = self._pick_key(p)
+                    return (k[0], 0 if p["number"] in blocking_numbers else 1) + k[1:]
+                return sorted(merged, key=_tiered)
         return pending
 
     def _pending_by_priority(self, skip, primary=True):
@@ -4531,6 +4551,13 @@ class GitHubSource:
         if cap is None:
             cap = self._project_cfg.get("backfill_cap", 20)
         if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+            return 0
+        # #1402 (PROVISIONAL default 1): a refused project call outranks the REST counter, which can
+        # read thousands while the project API refuses. Skip until a project call is answered again.
+        mx = self._project_cfg.get("backfill_max_refusals", 1)
+        if isinstance(mx, bool) or not isinstance(mx, int) or mx <= 0:
+            mx = 1
+        if self._project_refusals >= mx:
             return 0
         floor = self._project_cfg.get("backfill_min_graphql", 1000)
         try:
