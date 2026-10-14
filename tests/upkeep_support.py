@@ -95,7 +95,7 @@ def template_cfg():
 #: forgetting either red.
 REGISTERED_ENTRY_POINTS = {"feature_upkeep_pass": {"upkeep_pass", "ack_union", "ledger_note", "run_unit_pass"},
                            "feature_upkeep_sched": {"scheduler_tick"},
-                           "feature_upkeep_job": {"run_job", "run_engine"}}
+                           "feature_upkeep_job": {"run_job", "run_sweep", "run_engine"}}
 
 PROBE_SOURCE = '''
 import os
@@ -154,9 +154,11 @@ def drivers(gate_module):
             ("feature_upkeep_pass", "ack_union"): lambda c, s, e: pass_.ack_union(
                 c, s, "u", [{"sha": "a" * 40, "patch_id": "p"}]),
             ("feature_upkeep_sched", "scheduler_tick"): lambda c, s, e: sched.scheduler_tick(
-                c, s, environ=e),
+                c, s, environ=e, deps={"spawn": lambda *a: None}),    # #1387: an open window would start a real sweep
             ("feature_upkeep_job", "run_job"): lambda c, s, e: job.run_job(
                 c, s, ".", "u", "r", 5, environ=e),
+            ("feature_upkeep_job", "run_sweep"): lambda c, s, e: job.run_sweep(
+                c, s, ".", "r", 5, environ=e),
             ("feature_upkeep_job", "run_engine"): lambda c, s, e: job.run_engine(
                 c, s, ".", "u", environ=e),
             ("feature_upkeep_pass", "ledger_note"): lambda c, s, e: pass_.ledger_note(

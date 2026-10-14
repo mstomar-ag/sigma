@@ -5,15 +5,14 @@ in its own guard. The decorator is the first action: gate closed means nothing i
 no line and the heartbeat is not touched. The machine door needs the project opt-in, the machine variable AND the shared
 ledger switch (see `feature_upkeep`). Nothing here reads the config block itself; settings come from the gate's reader.
 
-WHAT ONE OPEN TICK DOES. (1) reaps a finished job and writes its outcome as an UNADDRESSED ledger note, in THIS process; (2) if
-a job is still alive, stops there; (3) otherwise lists the registry's units (the include and exclude lists decide which),
-drops those in their cooldown with a state read alone (no git), measures the rest within a per-tick time budget, and picks AT
-MOST ONE due unit, the most behind first; (4) records the attempt BEFORE the work and starts the detached job; (5) writes the
-status file. A unit it had no time to measure is not skipped for good: the status file keeps a cursor, and the
-next tick resumes after it.
+WHAT ONE OPEN TICK DOES (#1387: a window, not a per-unit poll). (1) reaps a finished job and writes its outcome as an
+UNADDRESSED ledger note, in THIS process; (2) if a job is still alive, stops there; (3) reads the window stamp
+(`feature_upkeep_window`, one small file): window closed means decision `window-closed` and NOTHING else, no unit listing, no
+git, no gh; (4) window open: stamps the attempt BEFORE the work and starts ONE detached sweep job over every unit; (5) writes
+the status file. The per-unit drift, backstop and cooldown rule no longer decides when upkeep runs.
 
-CEILING (stated, not discovered). One unit per tick is `86400 / interval` units a day: 96 at the 900 s default. A first
-enable on N units with no state drains in N ticks, N / 96 days.
+CEILING (stated, not discovered). One sweep per window: `24 / window_hours` sweeps a day per repository at most (2 at the 12 h
+default), each bounded by one total cap; units the cap leaves unreached wait for the next window and are reported.
 
 WHY THE WATCHER WRITES THE NOTES. A new writer process per run adds one ledger file and one inbox-cursor key per run, whatever
 actor it is pinned to (measured: 1000 runs = 1000 files, 1000 keys). The watcher is one long-lived process: one file, one key,
@@ -168,17 +167,6 @@ def unit_base_configured(config):
     return bool(base) and rebase.is_unit_base(base, rebase._remote(config), config)
 
 
-class _Opaque:
-    """A drift nobody measured: only the cooldown can hold on it, which is exactly the state-only filter."""
-    behind = drift = threshold = dormant = None
-
-
-def _rank(item):
-    drift = item[2]
-    known = type(drift.behind) is int                     # an unmeasurable count cannot be ordered: it sorts after every known one
-    return (0 if known else 1, -(drift.behind if known else 0), item[1])
-
-
 def _drift_runner(cwd, argv):
     """The drift module's `run(cwd, argv)` convention has argv start with `git`; the pass default runner prepends it itself."""
     argv = list(argv)
@@ -241,13 +229,13 @@ def cap_seconds(settings):
     return settings["verify.timeout_minutes"] * 60 + CAP_MARGIN_SECONDS
 
 
-def start_job(sdlc_dir, root, unit, run_id, config, settings, environ=None):
+def start_job(sdlc_dir, root, unit, run_id, config, settings, environ=None, sweep=False):
     """Start the detached job: its own session, all three stdio on the null device (an inherited stdout would hold the tick's
     call for the child's whole life), an absolute state path and the project root as its working directory.
     -> the Popen handle (kept so it is polled, never left a zombie). Raises OSError when it cannot start."""
     argv = [sys.executable, "-I", str(_HERE.joinpath("feature_upkeep_job.py")), "--sdlc", str(pathlib.Path(sdlc_dir).resolve()),
             "--root", str(pathlib.Path(root).resolve()), "--unit", unit, "--run-id", run_id,
-            "--cap", str(cap_seconds(settings))]
+            "--cap", str(cap_seconds(settings))] + (["--sweep"] if sweep else [])
     proc = subprocess.Popen(argv, cwd=str(root), env=job_env(config, settings, environ), stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
     _JOBS.append(proc)
@@ -280,7 +268,7 @@ def _close_killed(sdlc_dir, record, now):
     record still says running. Close it as a `failed` outcome so the same path notes it, and count it against the unit."""
     closed = dict(record, state="done", outcome="failed", unit_tip=None, finished_at=now, killed=True)
     write_json(sdlc_dir, RECORD_REL, closed)
-    if record.get("unit"):
+    if record.get("unit") and not record.get("sweep_job"):
         _sibling("feature_upkeep_state").record_outcome(sdlc_dir, str(record["unit"]), now, "failed")
     return closed
 
@@ -322,9 +310,9 @@ def _status(sdlc_dir, now, **fields):
 def scheduler_tick(config, sdlc_dir, *, environ=None, now=None, budget=30, clock=time.monotonic, deps=None,
                    started_by="tick"):
     """One open tick (see the module docstring). -> a dict with `decision`: refused, job-running, idle (nothing due),
-    started, state-unwritable, spawn-failed. `started_by` "tick" is the watcher; any other value (the merge trigger) is a
+    window-closed, started, state-unwritable, spawn-failed. `started_by` "tick" is the watcher; any other value (the merge trigger) is a
     quiet pass: it neither rewrites the tick status file (its age is tick liveness) nor collects outcome notes (the watcher
-    is their one writer). Both write the last-start record when they start a job. `deps` injects list_units, measure, spawn, append (tests only)."""
+    is their one writer). Both write the last-start record when they start a job. `deps` injects spawn and append (tests only)."""
     deps = deps or {}
     if started_by not in STARTED_BY:
         raise ValueError("started_by must be one of %s" % ", ".join(STARTED_BY))
@@ -342,95 +330,19 @@ def scheduler_tick(config, sdlc_dir, *, environ=None, now=None, budget=30, clock
     alive = job_alive(sdlc_dir, now)
     if alive != "idle" or collected == "running":
         return status(sdlc_dir, now, decision="job-running", job=alive, noted=collected)
-    state, drift_mod = _sibling("feature_upkeep_state"), _sibling("feature_upkeep_drift")
-    sched = state.schedule(settings)
+    window = _sibling("feature_upkeep_window")
+    if not window.is_open(settings, sdlc_dir, now):          # a stamp read and arithmetic: no unit listing, no git, no gh
+        return status(sdlc_dir, now, decision="window-closed", noted=collected)
     root = str(pathlib.Path(sdlc_dir).resolve().parent)
-    names = selected((deps.get("list_units") or list_units)(sdlc_dir), settings["units.include"], settings["units.exclude"])
-    reads = {n: state.read_state(sdlc_dir, n, now) for n in names}
-    waiting = [n for n in names if state.decide(sched, reads[n], _Opaque, now).reason != "cooldown"]
-    cursor = (read_json(sdlc_dir, STATUS_REL) or {}).get("cursor")                       # where the last out-of-time tick stopped
-    if isinstance(cursor, str):
-        waiting = [n for n in waiting if n > cursor] + [n for n in waiting if n <= cursor]
-    deadline, due, examined = clock() + budget, [], 0
-    measure = deps.get("measure") or make_measure(config, settings, sdlc_dir, root, now, expired=lambda: clock() >= deadline)
-    for name in waiting:
-        if clock() >= deadline:
-            break
-        try:
-            drift = measure(name, reads[name].doc)
-        except OutOfTime:                                  # the budget ran out inside this unit: it is retried first next tick
-            break
-        examined += 1
-        verdict = state.decide(sched, reads[name], drift, now)
-        if verdict.due:
-            due.append((0, name, drift, verdict))
-    out_of_time = examined < len(waiting)
-    resume = waiting[examined - 1] if out_of_time and examined else None               # the next tick starts after this unit
-    if not due:
-        return status(sdlc_dir, now, decision="idle", examined=examined, waiting=len(waiting), out_of_time=out_of_time,
-                       cursor=resume, noted=collected)
-    due.sort(key=_rank)
-    _, name, drift, verdict = due[0]
-    claim = state.claim(sdlc_dir, name, sched, drift, now)
-    if not claim.started:
-        return status(sdlc_dir, now, decision="state-unwritable", unit=name, detail=claim.detail, examined=examined)
+    if not window.stamp(sdlc_dir, now, "attempted", (window.read(sdlc_dir) or {}).get("unreached") or []):
+        return status(sdlc_dir, now, decision="state-unwritable", unit="*", detail="window stamp")
     run_id = "%d-%d" % (now, os.getpid())
     try:
-        (deps.get("spawn") or start_job)(sdlc_dir, root, name, run_id, config, settings, environ)
+        (deps.get("spawn") or start_job)(sdlc_dir, root, "*", run_id, config, settings, environ, True)
     except OSError:
-        state.record_outcome(sdlc_dir, name, now, "failed")        # a failed start costs the cooldown, and is counted
-        return status(sdlc_dir, now, decision="spawn-failed", unit=name, examined=examined)
-    write_json(sdlc_dir, LAST_START_REL, {"schema": "upkeep-start/1", "by": started_by, "unit": name, "run_id": run_id, "at": now})
-    return status(sdlc_dir, now, decision="started", unit=name, reason=claim.reason, run_id=run_id, examined=examined,
-                   waiting=len(waiting), out_of_time=out_of_time, cursor=resume,
-                   noted=collected)
-
-
-def due_units(config, sdlc_dir, *, now=None, budget=30, clock=time.monotonic, deps=None):
-    """READ-ONLY look at which units the next upkeep pass would take (#1224); the session-start report, never the mechanism.
-    -> {"due": [{unit, behind, base, last_success_age, reason}], "unknown": [unit], "out_of_time": bool}, most behind first.
-    Project door only (the session shell does not carry the machine variable). Same gate reader, include and exclude lists,
-    cooldown filter, measure and due rule as `scheduler_tick`, inside the same kind of time budget; it writes nothing, not
-    even the status file. A unit whose count cannot be measured is listed under `unknown` and is never due."""
-    deps = deps or {}
-    out = {"due": [], "unknown": [], "out_of_time": False}
-    reading = feature_upkeep.read(config)
-    if not reading.enabled:
-        return out
-    now = int(time.time() if now is None else now)
-    settings = reading.settings
-    state = _sibling("feature_upkeep_state")
-    sched = state.schedule(settings)
-    root = str(pathlib.Path(sdlc_dir).resolve().parent)
-    names = selected((deps.get("list_units") or list_units)(sdlc_dir), settings["units.include"], settings["units.exclude"])
-    reads = {n: state.read_state(sdlc_dir, n, now) for n in names}
-    waiting = [n for n in names if state.decide(sched, reads[n], _Opaque, now).reason != "cooldown"]
-    deadline = clock() + budget
-    measure = deps.get("measure") or make_measure(config, settings, sdlc_dir, root, now, expired=lambda: clock() >= deadline)
-    found = []
-    for name in waiting:
-        if clock() >= deadline:
-            out["out_of_time"] = True
-            break
-        try:
-            drift = measure(name, reads[name].doc)
-        except OutOfTime:
-            out["out_of_time"] = True
-            break
-        if type(drift.behind) is not int:
-            out["unknown"].append(name)
-            continue
-        verdict = state.decide(sched, reads[name], drift, now)
-        if verdict.due:
-            success = (reads[name].doc or {}).get("last_success_at")
-            age = max(0, now - success) if isinstance(success, int) and type(success) is not bool else None
-            found.append((0, name, drift, verdict, age))
-    found.sort(key=lambda item: _rank(item[:3]))
-    base_ref = refs_of(config, "x")[0]
-    base = base_ref.split("/", 1)[-1] if base_ref else None
-    out["due"] = [{"unit": n, "behind": d.behind, "base": base, "last_success_age": a, "reason": v.reason}
-                  for _, n, d, v, a in found]
-    return out
+        return status(sdlc_dir, now, decision="spawn-failed", unit="*")
+    write_json(sdlc_dir, LAST_START_REL, {"schema": "upkeep-start/1", "by": started_by, "unit": "*", "run_id": run_id, "at": now})
+    return status(sdlc_dir, now, decision="started", unit="*", run_id=run_id, noted=collected)
 
 
 # ------------------------------------------------------------------------------------------ the doctor's rows
@@ -474,6 +386,14 @@ def health(config, sdlc_dir, now=None):
         ok = age is not None and age <= stale
         rows.append(("upkeep scheduler liveness", ok, "last tick %ss ago, decision %s%s" % (
             age, status.get("decision"), "" if ok else " (older than %ss: the watcher may be down)" % stale)))
+    window = _sibling("feature_upkeep_window")
+    settings = feature_upkeep.read(config).settings
+    stamp = window.read(sdlc_dir)
+    old, age = window.stamp_age(settings, sdlc_dir, now) if stamp else (False, None)
+    left = ", unreached: " + ", ".join(stamp.get("unreached") or []) if stamp and stamp.get("unreached") else ""
+    rows.append(("upkeep window", not old, "%d h window (triggers.* no longer schedule); %s%s%s" % (
+        window.hours_of(settings), window.describe(settings, sdlc_dir, now), left,
+        " -- older than %d windows: no sweep is running" % window.STALE_WINDOWS if old else "")))
     last = read_json(sdlc_dir, LAST_START_REL)
     if isinstance(last, dict) and last.get("by") in STARTED_BY:
         rows.append(("upkeep last start", True, "started by %s, unit %s, %ss ago" % (

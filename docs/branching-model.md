@@ -1636,22 +1636,35 @@ record that tip first if you may want it back.
 
 ### 13d. The upkeep scheduler (off by default, three opt-ins)
 
-Without the scheduler, a unit branch is brought forward only when a goal of that unit is picked. With it, the ledger
-watcher also decides, once per tick, whether one unit is due for a maintenance pass and starts that pass as a detached,
-bounded job. Nothing of it exists until all three opt-ins are on: `upkeep.enabled` is the boolean true in the project
-config, `ledger.enabled` is exactly true, and the environment variable `SIGMA_UPKEEP_JOB` is exactly the text `1` in the
-environment of the watcher. Any other spelling (the text `true`, the number 1) leaves it closed, and with it closed the
-watcher's tick, files and output are byte for byte what they were.
+Without the scheduler, a unit branch is brought forward only when a goal of that unit is picked. With it, upkeep runs on a
+**window** (`upkeep.window_hours`, default 12, so about twice a day): when the window has passed, whichever user or machine
+reaches it first starts ONE detached, bounded sweep that brings every unit behind its base up to the base. Nothing of it
+exists until all three opt-ins are on: `upkeep.enabled` is the boolean true in the project config, `ledger.enabled` is
+exactly true, and the environment variable `SIGMA_UPKEEP_JOB` is exactly the text `1` in the environment of the process
+that starts it. Any other spelling (the text `true`, the number 1) leaves it closed, and with it closed the watcher's tick,
+files and output are byte for byte what they were.
 
-What one open tick does, in order: it notes the outcome of a job that finished (as one unaddressed ledger note, written by
-the watcher itself); it stops there if a job is still alive; otherwise it lists the units in the registry that
-`upkeep.units` admits (an exclude always wins), skips those inside their cooldown without touching git, measures the rest
-within a time budget, and picks at most one due unit, the most behind first. It records the attempt before the work, then
-starts the job. A unit is due when it is behind its base by `triggers.drift_merges` arrivals (`auto` derives that
-number from recent history, between `auto.floor` and `auto.ceiling`), or when the last success is older than
-`triggers.every_hours` (`triggers.dormant_every_hours` for a unit with no arrival of its own for `triggers.dormant_days`).
-A unit that cannot be measured counts as behind for the backstop and never fires the drift trigger. A pass that failed
-or was parked restarts only the cooldown, `triggers.min_interval_minutes`.
+Two things can open the window, and both ask the same cheap question first: the first session start on a machine
+(`upkeep_session.py start`, run by the session-start hook, which never waits for it) and the watcher's normal tick. The
+question reads one per-machine stamp, `upkeep/window.json` (when the last sweep was attempted, the units it did not reach,
+how it ended) and does arithmetic. A closed window costs that one file read: no unit listing, no git, no GitHub call. A
+missing, unreadable or future-dated stamp reads as open. The stamp is written when the window opens, before the work, and
+rewritten when the sweep ends.
+
+What the sweep does, in order: it takes the job lock (when another sweep or job holds it, this one backs off and the stamp
+records `busy`, a refusal and not a failure); it lists the units in the registry that `upkeep.units` admits (an exclude
+always wins); then, one unit at a time, it runs the same per-unit engine as the pick-time pass (lease, backup ref in the
+same atomic push, direct-commit refusal, conflict handling, parking). "Done by another" means the unit is not behind the
+base on the remote, read after the engine's bounded fetch: the engine reports `current` and does nothing, so a user whose
+window opens right after a colleague's sweep stamps the window and changes nothing (no rebase, no force push, no comment).
+A refused, parked or failed unit does not stop the others. All units share ONE total time cap; a unit the cap or a stop
+file prevented is listed as unreached in the job record and the stamp (and shown by the doctor), and waits for the next
+window. The watcher notes the sweep's outcome as one unaddressed ledger note under the key `window`.
+
+**What no longer schedules.** The per-unit rule (`triggers.drift_merges`, `triggers.every_hours`,
+`triggers.min_interval_minutes`, `triggers.dormant_days`, `triggers.dormant_every_hours`, and the `auto` section) no longer
+decides when upkeep runs. The keys are still read and validated for one release so an existing config does not break; the
+doctor row and `docs/configuration.md` say so.
 
 The job runs the same engine as the pick-time pass, so a rewrite keeps a backup ref (section 13c). It runs in its own
 session with an allowlisted environment (exactly the list below), under a wall-clock cap derived from `verify.timeout_minutes` plus a stated
@@ -1667,10 +1680,13 @@ plants such variables and fails if either child can read them.
 Levers and signs of life, all under `.sdlc/state/`: the file `upkeep.stop` (create it to stop a running job and prevent
 the next; Sigma never deletes it), the watcher's own `watch.stop` (which also stops a running job), and the status file
 `upkeep/scheduler.json`, rewritten on every open tick, so its age is the tick's liveness. `/sigma-doctor` shows the
-scheduler rows only while the block is on: tick age, the job's heartbeat and the last outcome.
+scheduler rows only while the block is on: tick age, the window (hours, last sweep, units left unreached; a warning when
+no sweep has run for more than two windows), the job's heartbeat and the last outcome.
 
-**Ceiling.** One unit per tick is `86400 / interval` units a day: 96 at the 900 second default. A first enable on N units
-with no recorded state drains in N ticks, so N / 96 days.
+**Ceiling.** One sweep per window: `24 / window_hours` per machine a day, at most 2 at the default, each bounded by one
+total cap (the verify timeout plus the stated margin). A sweep is serial, so a repository with N units that each need a
+rebase takes the sum of their passes and may leave the tail unreached (reported, retried at the next window). The
+session-start line `upkeep: last sweep <age> ago, next window opens in <time>` reads the stamp only.
 
 **One opted-in machine per set of units.** The scheduler has no cross-machine lock beyond the per-unit rebase lock the
 pass takes and the lease on the push. Two machines opted in for the same units would both start passes; the lease makes the
@@ -1702,11 +1718,12 @@ of settings that contradicts itself closes the whole block, and `/sigma-doctor` 
 | Key | Default | Range | What it does |
 | --- | --- | --- | --- |
 | enabled | false | boolean | project opt-in; only the boolean true opens it |
+| window_hours | 12 | 1 to 8760 | the sweep window: once this many hours have passed since this machine's last sweep, the next session start or watcher tick starts one sweep of every unit |
 | units.include | ["*"] | list of unit names, at least one | units the scheduler may pick (case-folded globs) |
 | units.exclude | [] | list of unit names | units it never picks; wins over include |
-| triggers.drift_merges | "auto" | "auto", a whole number 1 to 1000, or null | arrivals on the base that make a unit due; null turns the trigger off |
-| triggers.every_hours | 24 | 1 to 8760 | backstop: a pass at least this long after the last success |
-| triggers.min_interval_minutes | 120 | 1 to 10080 | cooldown after any attempt, failed or not |
+| triggers.drift_merges | "auto" | "auto", a whole number 1 to 1000, or null | no longer schedules (read for one release); was: arrivals on the base that make a unit due; null turns the trigger off |
+| triggers.every_hours | 24 | 1 to 8760 | no longer schedules; was the backstop |
+| triggers.min_interval_minutes | 120 | 1 to 10080 | no longer schedules; was the cooldown |
 | triggers.dormant_days | 14 | 1 to 3650 | a unit with no arrival of its own for this long is dormant |
 | triggers.dormant_every_hours | 72 | 1 to 8760 | the longer backstop for a dormant unit |
 | auto.window_days | 21 | 1 to 365 | history the auto threshold reads |

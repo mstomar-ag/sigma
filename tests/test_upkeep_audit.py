@@ -29,6 +29,8 @@ KNOWN_READERS = {
     "skills/sigma-loop/scripts/work.py": "pick-time: goal replay base, conflict level, the readiness hint",
     "skills/sigma-loop/scripts/drift_watch.py": "reads the project door only to size the drift note",
     "skills/sigma-loop/scripts/feature_backup.py": "backup push, restore and prune: each asks the project door itself first",
+    "skills/sigma-loop/scripts/feature_upkeep_job.py": "the sweep reads the include and exclude lists after its own decorated gate",
+    "skills/sigma-loop/scripts/upkeep_session.py": "session-start line reads the project door; the start verb goes through the decorated tick",
     "skills/sigma-loop/scripts/feature_upkeep_sched.py": "the scheduler's own doctor rows and status; the tick itself is decorated",
     "skills/sigma-loop/scripts/feature_land_approval.py": "landing approval check, project door, closed means the old path",
     "skills/sigma-loop/scripts/feature_upkeep_landing.py": "landing helper behind the project door",
@@ -322,5 +324,5 @@ def test_the_matrix_is_closed_under_a_cold_bytecode_cache(tmp_path, monkeypatch)
     closed run is charged for. Run the job drivers (the ones that import siblings) with the cache cold."""
     _cold_bytecode(tmp_path, monkeypatch)
     drivers = support.drivers(support.gate())
-    for fn in ("run_job", "run_engine"):
+    for fn in ("run_job", "run_sweep", "run_engine"):
         assert proof.offences(tmp_path / fn, monkeypatch, drivers[("feature_upkeep_job", fn)], proof.machine_cases()[:3]) == []

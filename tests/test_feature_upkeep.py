@@ -19,6 +19,7 @@ OPEN_ENV = support.OPEN_ENV
 
 EXPECTED_SCHEMA = {   # key -> (kind, lo, hi, min_items)
     "enabled": ("bool", None, None, None),
+    "window_hours": ("int", 1, 8760, None),
     "units.include": ("name_list", None, None, 1),
     "units.exclude": ("name_list", None, None, 0),
     "triggers.drift_merges": ("auto_int_null", 1, 1000, None),
@@ -40,7 +41,7 @@ EXPECTED_SCHEMA = {   # key -> (kind, lo, hi, min_items)
     "backup.former_prefixes": ("name_list", None, None, 0),
 }
 DEFAULT_TABLE = {
-    "enabled": False, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
+    "enabled": False, "window_hours": 12, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
     "triggers.every_hours": 24, "triggers.min_interval_minutes": 120, "triggers.dormant_days": 14,
     "triggers.dormant_every_hours": 72, "auto.window_days": 21, "auto.burst_window_hours": 24,
     "auto.target_hours": 12, "auto.floor": 3, "auto.ceiling": 40, "verify.clean_rebase": False,
@@ -75,8 +76,8 @@ def cross_ok(eff):                                    # the cross-checks, restat
 
 def block_for(key, v, flag):
     block = {"enabled": flag}
-    if key == "enabled":
-        block["enabled"] = v
+    if key in ("enabled", "window_hours"):
+        block[key] = v
     else:
         head, _, tail = key.rpartition(".")
         block[head] = {tail: v}
@@ -152,12 +153,12 @@ STRICT_MUTANTS = ["return bool(value)", "return value == True or value == False"
 # ------------------------------------------------------------------------------------------ schema and defaults
 
 def test_schema_is_locked():
-    """The schema is exactly the 20 keys the gate reads, with the documented kinds and bounds."""
+    """The schema is exactly the 21 keys the gate reads, with the documented kinds and bounds."""
     g = support.gate()
     got = {k: (s["kind"], s.get("lo"), s.get("hi"), s.get("min_items")) for k, s in g.SCHEMA.items()}
     assert got == EXPECTED_SCHEMA
     assert {k.split(".")[0] for k in g.SCHEMA if "." in k} == set(SECTIONS)
-    assert [k for k in g.SCHEMA if "." not in k] == ["enabled"]
+    assert [k for k in g.SCHEMA if "." not in k] == ["enabled", "window_hours"]
 
 
 def test_defaults_pinned():

@@ -86,20 +86,20 @@ def test_control_the_trigger_call_is_in_merge_and_removing_it_is_seen():
 
 # ------------------------------------------------------------------------------------------ the scheduler side
 
-def test_trigger_pass_starts_the_due_unit_once_and_leaves_tick_liveness_alone(tmp_path):
+def test_trigger_starts_the_window_sweep_once_and_leaves_tick_liveness_alone(tmp_path):
     m, sdlc, spawned = sched(), project(tmp_path), []
     first = tick(m, open_config(), sdlc, ["a"], {"a": 4}, spawned, started_by="trigger")
     second = tick(m, open_config(), sdlc, ["a"], {"a": 4}, spawned, now=1_000_001, started_by="trigger")
-    assert first["decision"] == "started" and spawned == ["a"], (first, second, spawned)   # cooldown: one rebase, not two
+    assert first["decision"] == "started" and spawned == ["*"], (first, second, spawned)   # the window: one sweep, not two
     assert not pathlib.Path(sdlc, m.STATUS_REL).exists()                                    # no masked tick liveness
     assert json.loads(pathlib.Path(sdlc, m.LAST_START_REL).read_text())["by"] == "trigger"
 
 
-def test_without_the_trigger_the_unit_is_found_only_on_the_next_tick(tmp_path):
+def test_without_the_trigger_the_sweep_starts_only_on_the_next_tick(tmp_path):
     m, sdlc, spawned = sched(), project(tmp_path), []
     assert spawned == [] and not pathlib.Path(sdlc, m.LAST_START_REL).exists()   # a merge happened; nothing ran
     tick(m, open_config(), sdlc, ["a"], {"a": 4}, spawned, now=1_000_900)        # the next tick
-    assert spawned == ["a"]
+    assert spawned == ["*"]
     assert json.loads(pathlib.Path(sdlc, m.LAST_START_REL).read_text())["by"] == "tick"
     assert json.loads(pathlib.Path(sdlc, m.STATUS_REL).read_text())["decision"] == "started"
 
@@ -109,7 +109,7 @@ def test_doctor_row_shows_who_started_the_last_pass(tmp_path):
     assert "upkeep last start" not in dict((l, d) for l, _, d in m.health(open_config(), sdlc, 1_000_000))
     tick(m, open_config(), sdlc, ["a"], {"a": 4}, spawned, started_by="trigger")
     rows = dict((l, d) for l, _, d in m.health(open_config(), sdlc, 1_000_010))
-    assert "trigger" in rows["upkeep last start"] and "a" in rows["upkeep last start"]
+    assert "trigger" in rows["upkeep last start"] and "*" in rows["upkeep last start"]
 
 
 def test_cli_decision_with_the_gate_closed_prints_nothing(tmp_path):

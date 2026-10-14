@@ -145,7 +145,7 @@ def inert_failures(tmp):
     S.expect(bad, "the registered entry points (#922: the pass, its acks file, its ledger note)", support.REGISTERED_ENTRY_POINTS,
              {"feature_upkeep_pass": {"upkeep_pass", "ack_union", "ledger_note", "run_unit_pass"},   # #1085
               "feature_upkeep_sched": {"scheduler_tick"},                  # #923
-              "feature_upkeep_job": {"run_job", "run_engine"}})
+              "feature_upkeep_job": {"run_job", "run_sweep", "run_engine"}})   # #1387
     ws = tool("write_surface")
     S.expect(bad, "the write-surface scanner sees no write site", ws.scan_paths(S.ROOT, module_paths()), [])
     for path in module_paths():

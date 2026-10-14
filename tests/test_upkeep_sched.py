@@ -61,55 +61,20 @@ def tick(m, cfg, sdlc, units, behind, spawned, now=1_000_000, **kw):
 
 # ------------------------------------------------------------------------------------------ the decision step
 
-def test_open_tick_picks_one_due_unit_the_most_behind(tmp_path):
+def test_open_window_starts_one_sweep_over_all_units_not_one_unit(tmp_path):
+    """#1387: the tick no longer picks a unit; an open window starts ONE sweep ("*") and stamps the attempt first."""
     m, sdlc, spawned = sched(), project(tmp_path), []
     result = tick(m, open_config(), sdlc, ["a", "b", "c"], {"a": 5, "b": 9, "c": 2}, spawned)
-    assert spawned == ["b"], spawned
-    assert result["decision"] == "started" and result["unit"] == "b"
+    assert spawned == ["*"], spawned
+    assert result["decision"] == "started" and result["unit"] == "*"
     assert json.loads(pathlib.Path(sdlc, "state/upkeep/scheduler.json").read_text())["decision"] == "started"
-    assert pathlib.Path(sdlc, "state/upkeep/units/b.json").is_file()          # the attempt was recorded BEFORE the work
-
-
-def test_an_unmeasurable_unit_sorts_after_every_measured_one(tmp_path):
-    m, sdlc, spawned = sched(), project(tmp_path), []
-    unknown = m._sibling("feature_upkeep_drift").UNKNOWN
-    tick(m, open_config(), sdlc, ["a", "b"], {"a": unknown, "b": 1}, spawned)
-    assert spawned == ["b"], spawned
-
-
-def test_the_time_budget_stops_measuring_and_the_next_tick_resumes_after_it(tmp_path):
-    m, sdlc = sched(), project(tmp_path)
-    clock = {"t": 0.0}
-    seen = []
-
-    def measure(name, _doc):
-        seen.append(name)
-        clock["t"] += 10
-        return drift_of(m, 0)                                  # nothing behind: nothing is due, nothing is recorded
-
-    deps = {"list_units": lambda _s: ["a", "b", "c", "d"], "measure": measure, "spawn": lambda *a: None}
-    kw = dict(environ=ENV, now=1_000_000, deps=deps, budget=15, clock=lambda: clock["t"])
-    first = m.scheduler_tick(open_config(), sdlc, **kw)
-    assert first["decision"] == "idle" and seen == ["a", "b"] and first["out_of_time"] is True, (first, seen)
-    clock["t"] = 0.0
-    m.scheduler_tick(open_config(), sdlc, **kw)
-    assert seen[2:4] == ["c", "d"], seen
+    assert json.loads(pathlib.Path(sdlc, "state/upkeep/window.json").read_text())["outcome"] == "attempted"
 
 
 def test_include_and_exclude_choose_the_units_and_exclude_wins():
     m = sched()
     assert m.selected(["Voice", "voice-2", "x"], ["voice*"], []) == ["Voice", "voice-2"]
     assert m.selected(["Voice", "voice-2", "x"], ["*"], ["VOICE-2"]) == ["Voice", "x"]
-
-
-def test_a_unit_in_its_cooldown_is_never_measured(tmp_path):
-    m, sdlc = sched(), project(tmp_path)
-    state = m._sibling("feature_upkeep_state")
-    assert state.record_attempt(sdlc, "a", 1_000_000, "backstop").ok
-    asked = []
-    deps = {"list_units": lambda _s: ["a"], "measure": lambda n, d: asked.append(n), "spawn": lambda *a: None}
-    result = m.scheduler_tick(open_config(), sdlc, environ=ENV, now=1_000_010, deps=deps)
-    assert asked == [] and result["decision"] == "idle", (asked, result)
 
 
 def test_a_live_job_means_no_new_unit_is_started(tmp_path):
@@ -123,15 +88,14 @@ def test_a_live_job_means_no_new_unit_is_started(tmp_path):
     assert spawned == [] and result["decision"] == "job-running", (spawned, result)
 
 
-def test_a_failed_start_is_recorded_and_costs_the_cooldown(tmp_path):
+def test_a_failed_start_is_reported_and_the_attempt_stays_stamped(tmp_path):
     m, sdlc = sched(), project(tmp_path)
 
     def refuse(*_a):
         raise OSError("no")
-    deps = {"list_units": lambda _s: ["a"], "measure": lambda n, d: drift_of(m, 3), "spawn": refuse}
-    result = m.scheduler_tick(open_config(), sdlc, environ=ENV, now=1_000_000, deps=deps)
-    doc = json.loads(pathlib.Path(sdlc, "state/upkeep/units/a.json").read_text())
-    assert result["decision"] == "spawn-failed" and doc["outcome"] == "failed" and doc["consecutive_failures"] == 1, doc
+    result = m.scheduler_tick(open_config(), sdlc, environ=ENV, now=1_000_000, deps={"spawn": refuse})
+    assert result["decision"] == "spawn-failed"
+    assert json.loads(pathlib.Path(sdlc, "state/upkeep/window.json").read_text())["last_at"] == 1_000_000
 
 
 def test_windows_is_refused_and_the_refusal_is_recorded_once(tmp_path, monkeypatch):
@@ -379,22 +343,6 @@ def test_a_running_record_with_the_lock_held_is_a_live_job_not_a_killed_one(tmp_
     assert got == "running" and not calls, (got, calls)
 
 
-def test_the_budget_is_checked_inside_the_unit_not_only_between_units(tmp_path):
-    m, sdlc = sched(), project(tmp_path)
-    seen = []
-
-    def measure(name, _doc):
-        seen.append(name)
-        if name == "b":
-            raise m.OutOfTime()                                # the unit's own measurement found the budget spent
-        return drift_of(m, 0)
-
-    deps = {"list_units": lambda _s: ["a", "b", "c"], "measure": measure, "spawn": lambda *a: None}
-    out = m.scheduler_tick(open_config(), sdlc, environ=ENV, now=1_000_000, deps=deps)
-    assert seen == ["a", "b"] and out["out_of_time"] is True, (seen, out)
-    assert json.loads(pathlib.Path(sdlc, m.STATUS_REL).read_text())["cursor"] == "a"           # b is retried first next tick
-
-
 def test_make_measure_stops_before_the_git_reads_when_the_deadline_has_passed(tmp_path):
     m, sdlc = sched(), project(tmp_path)
     cfg = open_config()
@@ -531,13 +479,6 @@ def test_control_a_stdout_left_inherited_is_caught(tmp_path, monkeypatch):
     monkeypatch.setattr(broken.subprocess, "Popen", lambda argv, **kw: seen.update(kw) or type("F", (), {"poll": lambda s: None})())
     broken.start_job(project(tmp_path), str(tmp_path), "a", "r", open_config(), broken.feature_upkeep.read(open_config()).settings, {})
     assert seen.get("stdout") != subprocess.DEVNULL
-
-
-def test_control_b_ranking_least_behind_first_picks_the_wrong_unit(tmp_path):
-    broken = sched(("-(drift.behind if known else 0)", "(drift.behind if known else 0)"))
-    spawned = []
-    tick(broken, open_config(), project(tmp_path), ["a", "b", "c"], {"a": 5, "b": 9, "c": 2}, spawned)
-    assert spawned == ["c"], spawned
 
 
 def test_control_c_a_refusal_written_every_tick_is_caught(tmp_path, monkeypatch):

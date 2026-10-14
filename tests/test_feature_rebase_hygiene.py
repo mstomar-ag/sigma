@@ -370,7 +370,7 @@ def test_upkeep_note_describes_what_runs_today():
     note = support.template_cfg()["_upkeep"]
     assert "NOTHING ELSE RUNS" not in note and "no schedule or resolver exists" not in note
     assert "will be needed" not in note and "a later release adds" not in note
-    assert "feature_upkeep_sched.py" in note and "once per ledger-watcher tick" in note
+    assert "feature_upkeep_sched.py" in note and "runs on a window" in note
     assert "_upkeep_conflicts" in note and "SIGMA_UPKEEP_JOB" in note and "no credential route or cap exists yet" in note
 
 

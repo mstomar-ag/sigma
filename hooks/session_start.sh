@@ -67,13 +67,15 @@ PY
 )" || HOOK_COEXIST_NOTICE=""
 fi
 
-# --- Units upkeep will rebase (issue #1224) --------------------------------------------------------
+# --- Upkeep window line and sweep start (issues #1224, #1387) --------------------------------------------------------
 # ACCELERATOR only: reports, never rebases or pushes. The facts and wording live in Sigma's own Python
 # (skills/sigma-loop/scripts/upkeep_session.py, callable on a host without hooks); this only runs it. Its lines ride
 # with the coexistence notice (one additionalContext per invocation). Gate closed, nothing due, any failure: no
 # output at all, so the hook is byte-identical to before. Headless skip as above.
 if [ -z "${SIGMA_RUN_ID:-}" ] && [ -f "$PROJECT/.sdlc/config.json" ]; then
     HOOK_UPKEEP_LINES="$(python3 "$PLUGIN_ROOT/skills/sigma-loop/scripts/upkeep_session.py" lines "$PROJECT/.sdlc" 2>/dev/null)" || HOOK_UPKEEP_LINES=""
+    # #1387: window open + machine opt-in starts ONE detached sweep (prints nothing, never waited on; gates inside the script).
+    python3 "$PLUGIN_ROOT/skills/sigma-loop/scripts/upkeep_session.py" start "$PROJECT/.sdlc" >/dev/null 2>&1 </dev/null || true
     if [ -n "$HOOK_UPKEEP_LINES" ]; then
         if [ -n "$HOOK_COEXIST_NOTICE" ]; then
             HOOK_COEXIST_NOTICE="$HOOK_COEXIST_NOTICE"$'\n\n'"Sigma: $HOOK_UPKEEP_LINES"
