@@ -54,6 +54,23 @@ def test_upkeep_feature_push_is_own():
     assert G.is_own("feature/voice", registry, OPEN) and not G.is_own("feature/voice", {}, OPEN)
 
 
+def test_pass_declared_unit_branch_missing_from_registry_is_own():
+    """#1393: the pass's own push of the unit branch it computed is own even when the checked-out registry lacks
+    the unit (record only on the default branch); an undeclared or non-feature branch is still a hard stop."""
+    text = "git push --force-with-lease origin HEAD:refs/heads/feature/voice"
+    assert G.guard(text, {"branch": "feature/voice", "registry": {}}, OPEN).blocked
+    assert not G.guard(text, {"branch": "feature/voice", "registry": {}, "pass_branch": "feature/voice"}, OPEN).blocked
+    other = {"branch": "main", "registry": {}, "pass_branch": "main"}
+    assert G.guard("git push --force origin main", other, OPEN).blocked
+    mismatch = {"branch": "feature/other", "registry": {}, "pass_branch": "feature/voice"}
+    assert G.guard("git push --force origin feature/other", mismatch, OPEN).blocked
+
+
+def test_rebase_pass_declares_its_branch_to_the_guard():
+    text = (SCRIPTS / "feature_rebase.py").read_text()
+    assert '"pass_branch": branch' in text
+
+
 def test_unregistered_feature_push_parks():
     v = G.guard("git push --force origin feature/other", {"branch": "feature/other", "registry": {"voice": {}}}, OPEN)
     assert v.blocked and v.cls == "rewrite_history"
