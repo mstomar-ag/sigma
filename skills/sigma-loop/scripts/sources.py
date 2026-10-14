@@ -1339,9 +1339,18 @@ class GitHubSource:
         """#1319 (PROVISIONAL): a rate-limited owner lookup comes back from `gh project` as the
         misleading "unknown owner type". When the error text carries the rate-limit wording, return
         one clear RuntimeError naming it; else None (the original error propagates unchanged)."""
-        if not any(m in str(exc).lower() for m in cls._RATE_LIMIT):
-            return None
+        text = str(exc).lower()
         verb = " ".join(str(a) for a in args[:2])
+        if not any(m in text for m in cls._RATE_LIMIT):
+            # #1400: the bare owner-lookup text is usually the GraphQL rate limit; keep the phrase
+            # (doctor matches it as "board gone") and say what to check.
+            if "unknown owner type" not in text:
+                return None
+            msg = ("`gh %s` failed with 'unknown owner type', which is usually the GraphQL rate limit "
+                   "(check `gh api rate_limit`); wait for the reset, then retry" % verb)
+            err = RuntimeError(msg)
+            err.hint = msg
+            return err
         msg = ("GitHub API rate limit reached on `gh %s` (gh may report it as 'unknown owner type'); "
                "wait for the limit to reset, then retry" % verb)
         err = RuntimeError(msg)
