@@ -4,11 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-<<<<<<< Updated upstream
 - Fix: with hard stops on, the rebase and landing pass no longer refuses to push a unit branch whose record exists only on the default branch; the pass declares its own branch, and undeclared force-pushes still stop (#1393).
-=======
 - **The applier no longer acts on an issue that is no longer parked (#1395).** Before applying, it reads the issue's labels; if the parked label is gone it closes the ask as answered with a fixed "already unparked" text and applies nothing, and a failed read leaves the ask pending for the next tick. PROVISIONAL: reusing the answered state for this closed ask is a stand-in until the owner ratifies the encoding. A closed gate is unchanged.
->>>>>>> Stashed changes
 - **A unit branch can be declared the integration base (#1389).** `work.integration_base` names a unit branch that is also `work.base`, so upkeep accepts it instead of refusing it as a unit base; undeclared unit bases are still refused.
 - **The applier builds its board source once per tick (#1392).** Each ask in a tick built its own source, so a board that refused the project read was retried per ask; the tick now builds one and shares it, and a refused build still fails each ask as before. A closed gate is unchanged.
 
