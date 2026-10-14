@@ -90,7 +90,7 @@ def test_the_scheduler_drift_note_says_unit_base_and_differs_from_no_base():
     measure = lambda base: m.make_measure(_config(base), m.feature_upkeep.read(_config(base)).settings, "s", "r", 1_000_000)
     unit = measure(UNIT_BASE)("voice", None)
     empty = measure("")("voice", None)
-    assert unit.notes == ("base is a unit branch",) and empty.notes == ("no-base",)
+    assert unit.notes == (R._mod().UNIT_BASE_NOTE,) and "base is a unit branch" in unit.notes[0] and empty.notes == ("no-base",)
 
 
 def test_the_job_record_carries_the_refusal_reason_next_to_the_outcome(tmp_path):
@@ -111,3 +111,59 @@ def test_the_engine_refuses_a_qualified_unit_base_without_calling_either_pass(tm
                                   upkeep=lambda *a, **k: 1 / 0, unit_pass=lambda *a, **k: 1 / 0)
         assert line["outcome"] == "no-base" and "base is a unit branch" in line["reason"], base
     capsys.readouterr()
+
+
+# ---- #1389: a declared `work.integration_base` is the one unit branch that may serve as the base
+
+def _declared(base, declared):
+    cfg = _config(base)
+    cfg["work"]["integration_base"] = declared
+    return cfg
+
+
+def test_is_unit_base_accepts_the_declared_base_in_every_spelling_and_still_refuses_others():
+    rebase = R._mod()
+    cfg = {"work": {"integration_base": UNIT_BASE}}
+    for base in (UNIT_BASE,) + QUALIFIED:
+        assert not rebase.is_unit_base(base, None, cfg), base
+        assert rebase.is_unit_base(base), base          # no config: unchanged
+    assert rebase.is_unit_base("feature/third", None, cfg)
+    for declared in (None, "", "  ", 7, ["feature/other"]):
+        assert rebase.is_unit_base(UNIT_BASE, None, {"work": {"integration_base": declared}}), declared
+    assert not rebase.is_unit_base(UNIT_BASE, None, {"work": {"integration_base": "origin/feature/other"}})
+
+
+def test_the_scheduler_helpers_follow_the_declaration():
+    sched = T.sched()
+    assert sched.refs_of(_declared(UNIT_BASE, UNIT_BASE), "voice") == ("origin/feature/other", "origin/feature/voice")
+    assert not sched.unit_base_configured(_declared(UNIT_BASE, UNIT_BASE))
+    assert sched.refs_of(_declared(UNIT_BASE, "feature/third"), "voice") == (None, None)
+    assert sched.unit_base_configured(_declared(UNIT_BASE, "feature/third"))
+    assert sched.refs_of(_config(UNIT_BASE), "voice") == (None, None)
+
+
+def test_the_engine_runs_both_passes_for_a_declared_unit_base(tmp_path, capsys):
+    calls = []
+    quiet = lambda *a, **k: calls.append("older") or {"outcome": "current"}
+    entry = lambda *a, **k: calls.append("unit") or {"result": "rewritten"}
+    line = T.job().run_engine(_declared(UNIT_BASE, UNIT_BASE), T.project(tmp_path), str(tmp_path), "voice", environ=T.ENV,
+                              upkeep=quiet, unit_pass=entry)
+    assert calls == ["older", "unit"] and line["outcome"] == "current"
+    capsys.readouterr()
+
+
+def test_the_refusal_text_names_the_way_out():
+    rebase = R._mod()
+    assert "work.integration_base" in rebase.UNIT_BASE_WHY and "work.integration_base" in rebase.UNIT_BASE_NOTE
+
+
+def test_the_older_pass_accepts_a_unit_declared_as_the_integration_base(tmp_path):
+    """Control through upkeep(): the base is a registered unit branch; undeclared it is refused, declared it is not."""
+    m = R._mod()
+    world = R.World(tmp_path).build()
+    R._git(world.local, "checkout", "-q", "-b", UNIT_BASE, R.INTEGRATION)
+    R._git(world.local, "push", "-q", "origin", UNIT_BASE)
+    R._git(world.local, "checkout", "-q", R.INTEGRATION)
+    assert R._upkeep(m, world, config=R._cfg(base=UNIT_BASE))["outcome"] == m.NO_BASE
+    report = R._upkeep(m, world, config=R._cfg(base=UNIT_BASE, integration_base=UNIT_BASE))
+    assert report["outcome"] != m.NO_BASE, report
