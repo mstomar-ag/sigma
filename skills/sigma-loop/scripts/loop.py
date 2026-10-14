@@ -1554,14 +1554,15 @@ def _live_blocker_states(unknown, config, run, cache):
     undeterminable and the caller fails open. Read-only (GET)."""
     repo = (((config.get("discovery") or {}).get("github") or {}).get("repo")) or ""
     seen = cache.setdefault("live_blockers", {})
-    if not repo or run is None:
+    if run is None:
         return {}
+    base = "repos/%s" % repo if repo else "repos/{owner}/{repo}"   # gh resolves the placeholder
     out = {}
     for ref in unknown:
         if ref not in seen:
             state_ = None
             try:
-                rec = json.loads(run(["api", "repos/%s/issues/%s" % (repo, ref), "--method", "GET"]))
+                rec = json.loads(run(["api", "%s/issues/%s" % (base, ref), "--method", "GET"]))
                 if isinstance(rec, dict) and "pull_request" not in rec:
                     st = str(rec.get("state") or "").lower()
                     state_ = st if st in ("open", "closed") else None

@@ -398,6 +398,20 @@ def test_a_closed_prerequisite_the_mirror_does_not_carry_releases_the_goal(capsy
     assert "#4242" not in capsys.readouterr().err
 
 
+def test_an_unset_repo_still_reads_live_through_the_placeholder_endpoint():
+    """#1420 review: `discovery.github.repo` unset is a supported setup; `gh` resolves the
+    `{owner}/{repo}` placeholder from the checkout, so the live read must still happen."""
+    lp = _loop()
+    seen = []
+
+    def run(args):
+        seen.append(list(args))
+        return json.dumps({"number": 4242, "state": "open"})
+    got = lp._live_blocker_states(["4242"], {"discovery": {"source": "github"}}, run, {})
+    assert got == {"4242": "open"}
+    assert seen == [["api", "repos/{owner}/{repo}/issues/4242", "--method", "GET"]]
+
+
 def test_an_unknown_prerequisite_is_read_once_per_call_however_many_goals_name_it():
     lp = _loop()
     goals = [_blocked_by(1595, 4242), _blocked_by(1596, 4242), _issue(1594)]
