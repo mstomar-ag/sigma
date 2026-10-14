@@ -10,8 +10,9 @@ Only a completed sweep (it ran, with some units refused, parked or unreached) cl
 failed, one that was killed, hit its cap before starting a unit, found another sweep running or failed to spawn leaves an ATTEMPT stamp: it holds off a
 re-trigger for `upkeep.retry_minutes` (default 60) only, then the next session start or watcher tick starts the sweep again.
 
-READ-ONLY CHECK. `is_open` reads one small file and does arithmetic: no git, no gh, no unit listing. A missing, unreadable or
-future-dated stamp reads as OPEN (a clock set far ahead must not silence upkeep for good; the margin tolerates ordinary skew).
+READ-ONLY CHECK. `is_open` reads one small file and does arithmetic: no git, no gh, no unit listing. A missing or unreadable stamp
+reads as OPEN; a future-dated one counts as no completed sweep (a clock set far ahead must not silence upkeep for good; the margin
+tolerates ordinary skew) but a recent attempt still holds the retry window.
 Stdlib only.
 """
 import importlib.util
@@ -68,14 +69,13 @@ def read(sdlc_dir):
 
 def is_open(settings, sdlc_dir, now):
     """True when no usable stamp exists, the stamp is dated beyond the skew margin, or a whole window has passed since the last
-    COMPLETED sweep; an attempt newer than `retry_minutes` holds it closed (a future-dated attempt is ignored)."""
+    COMPLETED sweep; an attempt newer than `retry_minutes` holds it closed even when `last_at` is future-dated (such a stamp
+    counts as no completed sweep; a future-dated attempt is ignored)."""
     doc = read(sdlc_dir)
     if doc is None:
         return True
     age = int(now) - doc["last_at"]
-    if age < -FUTURE_SKEW_SECONDS:
-        return True
-    if age < hours_of(settings) * 3600:
+    if age >= -FUTURE_SKEW_SECONDS and age < hours_of(settings) * 3600:
         return False
     tried = doc["attempt_at"]
     if tried is not None and 0 <= int(now) - tried < retry_minutes_of(settings) * 60:
@@ -93,7 +93,10 @@ def stamp_attempt(sdlc_dir, now, outcome, unreached=()):
     """Record an ATTEMPT that did not complete: keeps the last completed sweep's time, so the window is not closed; only
     `retry_minutes` of re-trigger suppression follows. -> bool; never raises."""
     prior = read(sdlc_dir) or {}
-    return _write(sdlc_dir, {"schema": SCHEMA, "last_at": prior.get("last_at") or 0, "attempt_at": int(now),
+    kept = prior.get("last_at") or 0
+    if kept - int(now) > FUTURE_SKEW_SECONDS:                # a future-dated completed time is not carried forward
+        kept = 0
+    return _write(sdlc_dir, {"schema": SCHEMA, "last_at": kept, "attempt_at": int(now),
                              "outcome": str(outcome)[:40],
                              "unreached": [str(u)[:200] for u in list(unreached)[:MAX_UNREACHED]]})
 

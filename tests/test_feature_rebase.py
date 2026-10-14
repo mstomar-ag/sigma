@@ -2942,3 +2942,60 @@ def test_no_include_or_exclude_is_the_same_as_no_upkeep_block(tmp_path):
     plain = _upkeep(m, a)
     blank = _upkeep(m, b, config=_with_units())
     assert plain["outcome"] == blank["outcome"] == m.REBASED
+
+
+# ===========================================================================================
+# #1412 — the listed set is written only when the direct-commits issue is actually filed
+# ===========================================================================================
+
+
+def _push_direct(world, name, body, subject):
+    _git(world.local, "checkout", "-q", FEATURE)
+    _write(world.local / name, body + "\n")
+    _git(world.local, "add", name)
+    _git(world.local, "commit", "-q", "-m", subject)
+    _git(world.local, "push", "-q", "origin", FEATURE)
+    _git(world.local, "checkout", "-q", INTEGRATION)
+    return _git(world.local, "ls-remote", "--heads", "origin", FEATURE).split("\t")[0]
+
+
+def _two_pass_world(tmp_path, m):
+    """Pass one files the issue for the first direct commit; a second one lands after the filing and the
+    filer then fails, so the next pass sees it without telling anybody."""
+    world = World(tmp_path).build(feature_commits=(
+        ("f.txt", "f", "feat: land a goal (#11)"),
+        ("h.txt", "h", "quick fix, straight onto the branch")))
+    world.move_integration()
+    _filer(m)
+    first = _upkeep(m, world)
+    assert first["outcome"] == m.DIRECT_COMMITS and first["filing"] == m.FILED
+    filed_sha = first["direct"][0]["sha"]
+
+    def down(*_a, **_k):
+        raise RuntimeError("tracker down")
+
+    m._HANDOFF = types.SimpleNamespace(create_tracked_issue=down, DEFAULT_PRIORITY="P1")
+    late = _push_direct(world, "late.txt", "late", "landed after the issue was filed")
+    second = _upkeep(m, world)
+    assert second["filing"] == m.FILING_FAILED
+    assert late in {d["sha"] for d in second["direct"]}
+    return world, filed_sha, late
+
+
+def test_ack_all_after_a_later_commit_acks_only_the_filed_shas(tmp_path):
+    m = _mod()
+    world, filed_sha, late = _two_pass_world(tmp_path, m)
+    result = m.ack(str(world.sdlc), _cfg(), UNIT, [], all_=True)
+    assert result["ok"] is True, result
+    assert result["acked"] == [filed_sha]
+    assert late not in result["acked"]
+
+
+def test_ack_all_with_every_listed_sha_gone_is_a_clear_no_op(tmp_path):
+    m = _mod()
+    world, filed_sha, late = _two_pass_world(tmp_path, m)
+    m._listed_path(str(world.sdlc), UNIT).write_text(json.dumps(["0" * 40]), encoding="utf-8")
+    result = m.ack(str(world.sdlc), _cfg(), UNIT, [], all_=True)
+    assert result["ok"] is False
+    assert "listed" in result["why"] and "by sha" in result["why"]
+    assert not m.ack_path(str(world.sdlc), UNIT).exists(), "a no-op writes nothing"

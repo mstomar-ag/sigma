@@ -229,6 +229,16 @@ def blocker_required_ranks(edges, ranks):
 
     for ref in list(blocks):
         resolve(ref)
+    # #1415: the walk above finds the cycles, but a ref resolved while its ring was still open keeps a
+    # partial answer that depends on the entry point. Relax to the fixed point so the result is the same
+    # from any entry: each ref takes the most urgent rank among itself and everything it blocks.
+    changed = True
+    while changed:
+        changed = False
+        for ref in blocks:
+            best = min([resolved[ref]] + [resolved.get(d, rank_of(d)) for d in blocks[ref]])
+            if best < resolved[ref]:
+                resolved[ref], changed = best, True
     required = {}
     for ref, new_rank in resolved.items():
         if ref not in blocks or new_rank >= rank_of(ref):

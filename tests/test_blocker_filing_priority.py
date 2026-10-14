@@ -113,3 +113,51 @@ def test_doctor_names_a_blocker_with_the_legacy_label_or_no_priority(tmp_path):
     assert "Advisory" in hit["fix"]
     assert _NAME not in _doctor_names(tmp_path / "b", issues, mode="off")
     assert _NAME not in _doctor_names(tmp_path / "c", [issues[2]])
+
+
+# --- #1415: the legacy label is stripped after block recording and after filing ---------------------
+
+
+def test_filing_a_blocker_strips_the_legacy_label_it_was_given(tmp_path):
+    run = w._runner({"61": {"labels": [LEGACY, "priority:P3"]}, "9": {"labels": ["priority:P0"]}})
+    real = w._src(run)
+
+    class Src(th.FakeSource):
+        def raise_blocker_priority(self, blocker, dependent):
+            return real.raise_blocker_priority(blocker, dependent)
+
+        def strip_blocker_confirmation(self, blocker):
+            return real.strip_blocker_confirmation(blocker)
+    th.handoff.hand_off(th._project(tmp_path), th.ON, "9", "engine", "needs a flag", source=Src())
+    removed = [c for c in run.calls if "--remove-label" in c and LEGACY in c]
+    assert len(removed) == 1 and removed[0][:3] == ["issue", "edit", "61"]
+
+
+def test_filing_with_the_mode_off_makes_no_strip_call(tmp_path):
+    run = w._runner({"61": {"labels": [LEGACY]}, "9": {"labels": ["priority:P0"]}})
+    real = w._src(run, "off")
+
+    class Src(th.FakeSource):
+        def strip_blocker_confirmation(self, blocker):
+            return real.strip_blocker_confirmation(blocker)
+    th.handoff.hand_off(th._project(tmp_path), th.ON, "9", "engine", "needs a flag", source=Src())
+    assert run.calls == []
+
+
+def test_recording_a_parked_blocker_strips_the_legacy_label():
+    calls = []
+
+    class Src:
+        def raise_blocker_priority(self, blocker, dependent):
+            calls.append(("raise", blocker))
+
+        def strip_blocker_confirmation(self, blocker):
+            calls.append(("strip", blocker))
+    spec = importlib.util.spec_from_file_location("blockers", D.parent.parent.parent / "sigma-loop" / "scripts" / "blockers.py")
+    bl = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bl)
+    for verdict, expect in ((bl.CHAINED, [("strip", "7"), ("raise", "7")]),
+                            (bl.PICKABLE, [("raise", "7")])):
+        calls.clear()
+        bl._raise_rank(Src(), "7", "9", verdict, True)
+        assert calls == expect, verdict

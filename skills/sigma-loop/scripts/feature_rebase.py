@@ -676,6 +676,10 @@ def ack(sdlc_dir, config, unit, shas, all_=False, run=None, cwd=None, remote=Non
     if all_:
         listed = _read_listed(sdlc_dir, unit)       # #1403: only what the filed issue listed
         chosen = [d for d in found if d["sha"] in listed] if listed else list(found)
+        if listed and found and not chosen:
+            result["why"] = ("every commit the filed issue listed is gone from %s; the commits now on "
+                             "it were not listed -- ack them by sha (`feature_rebase.py show`)" % branch)
+            return result
     else:
         chosen, unknown = [], []
         for want in shas:
@@ -2783,13 +2787,14 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
         _settle_direct(sdlc_dir, config, run, cwd, remote, report, branch)
     if found:
         report["outcome"] = DIRECT_COMMITS
-        _record_listed(sdlc_dir, unit, found)
         _file_issue(sdlc_dir, config, goal, report,
                     slot="direct:%s" % branch, key=before,
                     title="Direct commits on %s block rebase upkeep" % branch,
                     why="%s carries %d commit(s) no pull request accounts for, so it was not "
                         "rebased onto %s" % (branch, len(found), base),
                     body=_direct_body(unit, branch, base, found))
+        if report.get("filing") == FILED:             # #1412: only what an issue really listed
+            _record_listed(sdlc_dir, unit, found)
         return report
 
     # THE BACKUP DESCRIPTOR. With the upkeep gate open (the project door; a pure query that adds no command) the push
