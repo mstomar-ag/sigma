@@ -159,17 +159,32 @@ def test_the_sweep_dry_run_and_mode_off_raise_nothing():
     assert not _raised(off, 7, "priority:P0")
 
 
-def test_handoff_filing_raises_the_new_blocker_for_the_blocked_goal(tmp_path):
+def test_mode_smart_makes_no_call_at_all():
+    run = _runner({"7": {"labels": ["priority:P3"]}, "9": {"labels": ["priority:P0"]}})
+    assert _src(run, "smart").raise_blocker_priority("7", "9") == "skipped: smart"
+    assert run.calls == []
+
+
+def _handoff(tmp_path, views, goal="9", **kw):
     import test_handoff as th
+    run = _runner(views)
+    real = _src(run)
     class Src(th.FakeSource):
-        raised = []
         def raise_blocker_priority(self, blocker, dependent):
-            self.raised.append((blocker, dependent))
+            return real.raise_blocker_priority(blocker, dependent)
     src = Src()
-    th.handoff.hand_off(th._project(tmp_path), th.ON, "0004-ui-restart.md", "engine", "needs a flag", source=src)
-    assert src.raised == [("61", "0004-ui-restart.md")]
-    src2 = Src(); Src.raised = []
-    th.handoff.create_tracked_issue(th._project(tmp_path / "b"), th.ON, "0008-x.md", "engine", "related",
-                                    same_area=True, immediately_actionable=False, blocks_goal=False,
-                                    source=src2)
-    assert Src.raised == []
+    if kw:
+        th.handoff.create_tracked_issue(th._project(tmp_path), th.ON, goal, "engine", "related",
+                                        same_area=True, immediately_actionable=False, source=src, **kw)
+    else:
+        th.handoff.hand_off(th._project(tmp_path), th.ON, goal, "engine", "needs a flag", source=src)
+    return run
+
+
+def test_handoff_filing_raises_the_new_blocker_for_the_blocked_goal(tmp_path):
+    for i, blocker_labels in enumerate(([], ["priority:P3"])):
+        run = _handoff(tmp_path / str(i), {"61": {"labels": blocker_labels}, "9": {"labels": ["priority:P0"]}})
+        assert _raised(run, 61, "priority:P0")
+    run = _handoff(tmp_path / "n", {"61": {"labels": ["priority:P3"]}, "9": {"labels": ["priority:P0"]}},
+                   blocks_goal=False)
+    assert not _raised(run, 61, "priority:P0") and _writes(run) == []

@@ -4975,10 +4975,14 @@ class GitHubSource:
         (`discovery.blocker_required_ranks`), single edge only, written through the same
         `_write_blocker_promotion` (label, board field, one comment). Returns "raised",
         "unchanged" or "skipped: <reason>". Raise-only and idempotent (an equal or higher rank
-        writes nothing). Mode "off" returns before any call. Fail-open: a read failure is reported
+        writes nothing). Mode "off" returns before any call. Mode "smart" also returns before any call
+        ("skipped: smart"): smart's "no other unblocked work" claim is only checked by the board
+        pass (`_promote_blockers`), so a per-edge write here would promote unconditionally. Fail-open: a read failure is reported
         on stderr and does less. A closed or confirmation-labelled blocker is never raised."""
         if self.blocker_promotion_mode == "off":
             return "skipped: off"
+        if self.blocker_promotion_mode == "smart":
+            return "skipped: smart"
         try:
             if str(blocker) == str(dependent):
                 return "skipped: self edge"
