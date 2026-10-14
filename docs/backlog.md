@@ -396,8 +396,8 @@ strict filing order still gets it.
 
 **A blocked issue is parked — but its blocker's own priority is never touched.** A P2 issue quietly
 blocking a P0 stays P2 forever: nothing in the queue reflects the urgency it's actually holding up.
-`discovery.blocker_promotion` closes that gap — opt-in, for repos that want a blocker's priority to
-rise to meet what it blocks:
+`discovery.blocker_promotion` closes that gap: a blocker's priority is never below what it blocks.
+It is on by default; to choose a mode explicitly:
 
 ```json
 "discovery": {
@@ -407,11 +407,15 @@ rise to meet what it blocks:
 }
 ```
 
-`discovery.blocker_promotion.mode` is `"off"` by default, and `off` is byte-identical to every
-release before this feature existed — unset, a blocker's priority is never touched, no matter what
-it blocks. Three modes:
+`discovery.blocker_promotion.mode` is `"always"` by default (the full rule), and an explicit `off` is
+byte-identical to every release before this feature existed: a blocker's priority is never touched,
+no matter what it blocks. The rule only ever raises, follows chains of blockers, reports a blocking
+cycle once, and treats an unknown priority as the lowest. A goal waiting on human confirmation is
+never counted as a blocker. A blocker that is not itself a goal is read with one bounded read per
+pass; a blocker that lives in another repository, or cannot be read, is reported on stderr rather
+than skipped silently. Three modes:
 
-- **`off`** (default) — no promotion; a blocker's rank never changes on account of what it blocks.
+- **`off`** — no promotion; a blocker's rank never changes on account of what it blocks.
 - **`smart`** — a blocker's rank is raised to match the most urgent issue it directly blocks, but
   only counting a dependent that would actually be affected by the promotion: one with no OTHER
   unblocked work already sitting at its own priority tier. A blocked P0 gains nothing from its
@@ -451,7 +455,7 @@ so the same "Blocked by #N" marker scan that finds edges in GitHub mode can neve
 local goal's body, by construction — nothing to promote, so the config key is simply never read
 there.
 
-Config: `discovery.blocker_promotion.mode` (`off` default | `smart` | `always`) is the only key this
+Config: `discovery.blocker_promotion.mode` (`always` default | `smart` | `off`) is the only key this
 feature reads.
 
 **A goal BLOCKED on another issue resumes by itself once that blocker is resolved (a closed issue or a merged pull request). A goal a human
