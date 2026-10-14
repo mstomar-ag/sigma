@@ -300,7 +300,7 @@ def test_an_attempt_holds_off_only_for_the_retry_window_and_never_closes_the_twe
     assert w.is_open(RETRY, sdlc, NOW + 2 * 60) is True                             # 61 minutes after the attempt
     assert w.is_open({"window_hours": 12, "retry_minutes": 5}, sdlc, NOW) is True   # the retry window is configurable
     assert w.retry_minutes_of({}) == 60 and w.retry_minutes_of({"retry_minutes": 0}) == 60
-    stamp_at(sdlc, NOW - 2 * HOUR)                                                  # a completed sweep closes the 12 hours
+    stamp_at(sdlc, NOW - 4 * HOUR)                                                  # a completed sweep closes the 12 hours
     w.stamp_attempt(sdlc, NOW - 3 * HOUR, "attempted")
     assert w.is_open(RETRY, sdlc, NOW) is False
 
@@ -313,6 +313,24 @@ def test_an_attempt_keeps_the_last_completed_time_and_a_completed_sweep_clears_t
     assert got["last_at"] == NOW - 13 * HOUR and got["attempt_at"] == NOW - 5
     stamp_at(sdlc, NOW)
     assert w.read(sdlc)["attempt_at"] is None and w.is_open(RETRY, sdlc, NOW + HOUR) is False
+
+
+def test_a_future_dated_stamp_neither_suppresses_nor_bypasses_the_retry_window(tmp_path):
+    w, sdlc = window(), T.project(tmp_path)
+    stamp_at(sdlc, NOW + 10 * HOUR)
+    assert w.is_open(RETRY, sdlc, NOW) is True                                      # no usable completed sweep: open
+    assert w.stamp_attempt(sdlc, NOW - 5, "attempted")
+    got = w.read(sdlc)
+    assert got["last_at"] == 0, got                                                 # the future time is not carried forward
+    assert w.is_open(RETRY, sdlc, NOW) is False                                     # the retry window holds
+    assert w.is_open(RETRY, sdlc, NOW + 61 * 60) is True
+    stamp_at(sdlc, NOW + 10 * HOUR)                                                 # a future stamp with a recent attempt on it
+    doc = w.read(sdlc)
+    doc["attempt_at"] = NOW - 5
+    pathlib.Path(sdlc, w.STAMP_REL).write_text(json.dumps(doc))
+    assert w.is_open(RETRY, sdlc, NOW) is False                                     # not bypassed
+    stamp_at(sdlc, NOW - HOUR)
+    assert w.is_open(RETRY, sdlc, NOW) is False                                     # a normal stamp behaves as before
 
 
 def test_the_scheduler_attempt_then_a_failed_spawn_retries_after_the_retry_window_not_after_twelve_hours(tmp_path):
@@ -381,7 +399,7 @@ def test_retry_minutes_is_validated_and_defaults_to_sixty():
 # ------------------------------------------------------------------------------------------ break-it controls
 
 def test_control_an_attempt_that_closes_the_window_is_caught(tmp_path):
-    broken = S.script("feature_upkeep_window", ('"last_at": prior.get("last_at") or 0, "attempt_at": int(now)', '"last_at": int(now), "attempt_at": int(now)'))
+    broken = S.script("feature_upkeep_window", ('"last_at": kept, "attempt_at": int(now)', '"last_at": int(now), "attempt_at": int(now)'))
     sdlc = T.project(tmp_path)
     broken.stamp_attempt(sdlc, NOW - 2 * HOUR, "attempted")
     assert broken.is_open(RETRY, sdlc, NOW) is False                                # the broken version silences 12 hours
