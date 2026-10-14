@@ -234,6 +234,22 @@ def test_a_stop_file_leaves_the_rest_unreached_and_is_not_deleted(tmp_path):
     assert log == [] and out["sweep"]["unreached"] == ["a", "b"] and stop.exists()
 
 
+def test_a_unit_cut_short_by_a_stop_file_is_itself_listed_unreached(tmp_path):
+    j, sdlc, log = T.job(), T.project(tmp_path), []
+    stop = pathlib.Path(sdlc, "state/upkeep.stop")
+    stop.parent.mkdir(parents=True, exist_ok=True)
+    base = engine(log, {})
+
+    def command(unit):
+        if unit != "b":
+            return base(unit)
+        log.append(unit)
+        return [sys.executable, "-c", "import pathlib,time; pathlib.Path(%r).write_text(''); time.sleep(30)" % str(stop)]
+    out = sweep(j, sdlc, tmp_path, ["a", "b", "c"], command)
+    assert log == ["a", "b"] and out["sweep"]["unreached"] == ["b", "c"], (log, out)
+    assert window().read(sdlc)["unreached"] == ["b", "c"]
+
+
 def test_include_and_exclude_lists_still_choose_the_units(tmp_path):
     j, log = T.job(), []
     cfg = T.open_config()

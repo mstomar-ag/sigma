@@ -220,8 +220,8 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
                     state.record_outcome(sdlc_dir, name, int(time.time()), word, tip if tip and len(tip) in (40, 64) else None)
                 elif word == "timeout":
                     state.record_outcome(sdlc_dir, name, int(time.time()), "failed")
-                if word in ("timeout", "stopped"):                 # the cap or a stop file ended this child: nothing after it ran
-                    unreached = names[index + 1:]
+                if word in ("timeout", "stopped"):                 # the cap or a stop file cut this child short: it and everything after it are left for the next trigger
+                    unreached = names[index:]
                     break
             outcome = "swept"
         finally:
