@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **The precheck no longer reports a closed blocker as unresolved (#1422).** A declared prerequisite the board mirror does not carry is read live when a transport is supplied; a closed one is dropped from `blocker_unresolved`, while an open or unreadable one is still reported.
 - **A sweep where every unit failed is an attempt (#1418).** It leaves an attempt stamp and the 12-hour window stays open; a sweep with some units refused or parked still closes it.
 - **A future-dated upkeep stamp no longer bypasses the retry window (#1419).** A completed-sweep time dated ahead counts as none and is not carried into an attempt stamp, so a recent attempt still holds off `upkeep.retry_minutes`.
 - **Blocker priority rule follow-ups (#1415).** A blocking cycle now raises every member that transitively blocks something more urgent, whichever member the walk enters through; filing a blocker and recording a block now also strip the legacy confirmation label from the open blocker (an ownership-held filing no longer keeps it). Membership still follows the existing verdict rules. With the mode off nothing changes.

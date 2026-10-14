@@ -2034,3 +2034,29 @@ def test_a_declared_blocker_absent_from_the_corpus_is_reported_unresolved():
         assert "blocker_unresolved:4242" in bc.cross_check(base, "1")["degraded"]
         assert not [x for x in bc.cross_check(base, "2")["degraded"]
                     if x.startswith("blocker_unresolved")]
+
+
+def _issue_run(states):
+    """A fake `gh` transport serving single-issue GETs from {ref: state}; anything else raises."""
+    def run(args):
+        ref = args[1].rsplit("/", 1)[-1]
+        if ref not in states:
+            raise RuntimeError("no such issue")
+        return json.dumps({"number": int(ref), "state": states[ref]})
+    return run
+
+
+def test_a_declared_blocker_closed_outside_the_mirror_window_is_not_reported_unresolved():
+    """#1422: a blocker the corpus cannot see but GitHub says is closed is dropped from `degraded`;
+    an open one and an unreadable one stay reported; with no transport nothing is read."""
+    bc = _mod("backlog_check")
+    body = "x\n\n**Blocked by:** #4242\n**Blocked by:** #4243\n**Blocked by:** #4244\n"
+    with tempfile.TemporaryDirectory() as d:
+        base = _gh_base(d, [_rec(1, "goal one", body=body)])
+        run = _issue_run({"4242": "closed", "4243": "open"})
+        got = [x for x in bc.cross_check(base, "1", run=run)["degraded"]
+               if x.startswith("blocker_unresolved")]
+        assert got == ["blocker_unresolved:4243", "blocker_unresolved:4244"]
+        bare = [x for x in bc.cross_check(base, "1")["degraded"]
+                if x.startswith("blocker_unresolved")]
+        assert len(bare) == 3

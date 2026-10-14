@@ -914,6 +914,30 @@ def _dense_channel(sdlc_dir, config, docs, goal_ref, embed_fn):
         return None, 0.0
 
 
+def _closed_blocker_refs(refs, config, run):
+    """{ref} among `refs` that GitHub says are CLOSED issues (#1422): a blocker closed before the
+    mirror's closed window is not in the corpus, and reporting it unresolved is noise.
+
+    One single-issue GET per ref, and only when the caller supplies a `run` transport, so a bare
+    `cross_check` stays offline. Anything undeterminable (error, pull request, malformed answer) is
+    simply not returned, so it stays reported: fail-open, and the same read-only GET as
+    `loop._live_blocker_states`."""
+    if run is None or not refs:
+        return set()
+    repo = (((config.get("discovery") or {}).get("github") or {}).get("repo")) or ""
+    base = "repos/%s" % repo if repo else "repos/{owner}/{repo}"
+    out = set()
+    for ref in refs:
+        try:
+            rec = json.loads(run(["api", "%s/issues/%s" % (base, ref), "--method", "GET"]))
+            if (isinstance(rec, dict) and "pull_request" not in rec
+                    and str(rec.get("state") or "").lower() == "closed"):
+                out.add(ref)
+        except Exception:                       # noqa: BLE001 - stays reported
+            continue
+    return out
+
+
 def cross_check(sdlc_dir, goal, config=None, run=None, now=None, velocity_measure=None, embed_fn=None):
     """The whole stage-1 pass. FAIL-OPEN: any error → an empty pack + degraded['error']."""
     goal_ref = str(goal)
@@ -933,8 +957,9 @@ def cross_check(sdlc_dir, goal, config=None, run=None, now=None, velocity_measur
         # #1420: a declared blocker the corpus does not carry cannot be judged open or closed here;
         # say so instead of skipping it silently.
         in_corpus = {d["ref"] for d in docs}
-        degraded.extend("blocker_unresolved:%s" % r
-                        for r in sorted(_referenced_blocker_refs(goal_doc)) if r not in in_corpus)
+        missing = sorted(r for r in _referenced_blocker_refs(goal_doc) if r not in in_corpus)
+        closed = _closed_blocker_refs(missing, config, run)
+        degraded.extend("blocker_unresolved:%s" % r for r in missing if r not in closed)
 
         idf = _idf(docs)
         sim_mode = (config.get("backlog_check") or {}).get("similarity", "tfidf")
