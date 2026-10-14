@@ -155,7 +155,7 @@ def refs_of(config, unit):
     rebase = _sibling("feature_rebase")
     remote = rebase._remote(config)
     base = (rebase._settings(config).get("base") or "").strip() if isinstance(rebase._settings(config), dict) else ""
-    if not base or rebase.is_unit_base(base, remote):             # #1311: a unit branch is no base; nothing is offered
+    if not base or rebase.is_unit_base(base, remote, config):             # #1311: a unit branch is no base; nothing is offered
         return None, None
     return "%s/%s" % (remote, base), "%s/%s%s" % (remote, _sibling("features").BRANCH_PREFIX, unit)
 
@@ -165,7 +165,7 @@ def unit_base_configured(config):
     rebase = _sibling("feature_rebase")
     settings = rebase._settings(config)
     base = (settings.get("base") or "").strip() if isinstance(settings, dict) else ""
-    return bool(base) and rebase.is_unit_base(base, rebase._remote(config))
+    return bool(base) and rebase.is_unit_base(base, rebase._remote(config), config)
 
 
 class _Opaque:
