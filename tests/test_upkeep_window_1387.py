@@ -346,6 +346,16 @@ def test_a_sweep_that_dies_or_is_cut_off_before_its_first_unit_is_an_attempt_not
     assert got["outcome"] == "failed" and got["last_at"] == 0 and got["attempt_at"] == NOW, got
 
 
+def test_a_sweep_whose_first_unit_is_cut_short_by_a_stop_file_is_an_attempt(tmp_path):
+    j, sdlc = T.job(), T.project(tmp_path)
+    stop = pathlib.Path(sdlc, "state/upkeep.stop")
+    stop.parent.mkdir(parents=True, exist_ok=True)
+    cmd = lambda unit: [sys.executable, "-c", "import pathlib,time; pathlib.Path(%r).write_text(''); time.sleep(30)" % str(stop)]   # noqa: E731
+    sweep(j, sdlc, tmp_path, ["a", "b"], cmd)
+    got = window().read(sdlc)
+    assert got["unreached"] == ["a", "b"] and got["last_at"] == 0 and got["attempt_at"] == NOW, got
+
+
 def test_a_sweep_that_finished_with_some_units_unreached_still_closes_the_window(tmp_path):
     j, sdlc, log = T.job(), T.project(tmp_path), []
     clock = {"t": 0.0}
