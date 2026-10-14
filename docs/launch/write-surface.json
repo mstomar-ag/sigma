@@ -1633,6 +1633,14 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/reconcile_tick.py",
+      "function": "_write_repair_state",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "discovery.source == github and blocker_promotion.mode is always; one small state record",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/release_manifest.py",
       "function": "publish_to_ledger_branch",
       "rule": "git-push",

@@ -4967,7 +4967,7 @@ class GitHubSource:
             self._note_scope(exc)
             return
         try:
-            item_id = self._item_id(int(ref))
+            item_id = None if getattr(self, "_no_field_writes", False) else self._item_id(int(ref))   # #1410
             if item_id:
                 self._write_priority_field(int(ref), new_rank, item_id)
         except Exception as exc:
@@ -5020,6 +5020,168 @@ class GitHubSource:
         except Exception as exc:
             self._warn_unwritable_blockers(["#%s could not be raised (%s)" % (blocker, exc)])
             return "skipped: read failed"
+
+    #: #1410: most edges looked at, and most repair writes made, in one reconcile tick (PROVISIONAL).
+    _REPAIR_EDGE_CAP = 200
+    _REPAIR_WRITE_CAP = 10
+
+    def repair_blocker_ranks(self, cap=None, apply=True):
+        """#1410: find every open blocking edge whose blocker ranks below what it blocks and repair it.
+        The same edge extraction as `_promote_blockers` (explicit phrases plus the ledger) over the open
+        goal and blocked-goal issues read through REST, the shared rule `discovery.blocker_required_ranks`
+        and the same `_write_blocker_promotion` (label, field, one comment). Also strips the legacy
+        confirmation label from a blocker and removes the blocking mark from a closed blocker or one that
+        blocks nothing. Raise-only and idempotent. Returns a dict: violations (blockers found below
+        what they block), raised, stripped, unmarked (issue refs written), unwritable (reported on
+        stderr), skipped (reason or ""). `apply=False` counts and writes nothing. Mode off returns
+        before any call; smart returns too (its claim is only checked by the board pass). At most `cap`
+        writes (default 10) and 200 edges; the board field write is skipped when GraphQL remaining is
+        low or unreadable, label writes stay REST. Fail-open."""
+        out = {"violations": 0, "raised": [], "stripped": [], "unmarked": [], "unwritable": [], "skipped": ""}
+        if self.blocker_promotion_mode == "off":
+            out["skipped"] = "off"
+            return out
+        if self.blocker_promotion_mode == "smart":
+            out["skipped"] = "smart"
+            return out
+        if cap is None:
+            cap = self._REPAIR_WRITE_CAP
+        if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+            out["skipped"] = "cap"
+            return out
+        try:
+            corpus = {}
+            for label in (self.goal_label, self.goal_blocked_label):
+                for it in self._fetch_issues_rest([label], self._BOARD_ITEM_LIMIT):
+                    if it.get("number") is not None:
+                        corpus.setdefault(str(it["number"]), it)
+            edges, cross_repo, blocker_refs = self._repair_edges(corpus, out)
+            edges = edges[:self._REPAIR_EDGE_CAP]
+            ext, proposed = {}, {}
+            for ref in sorted({b for b, _ in edges} - set(corpus))[:self._BLOCKER_READ_CAP]:
+                try:
+                    data = self._read_issue(ref, ["number", "state", "labels"])
+                except Exception as exc:
+                    cross_repo.append("#%s could not be read (%s)" % (ref, exc))
+                    continue
+                names = self._label_names(data.get("labels"))
+                if str(data.get("state") or "open").lower() == "closed":
+                    continue
+                if self.proposed_label in names:
+                    proposed[ref] = data
+                    continue
+                ext[ref] = {"number": int(ref), "labels": data.get("labels") or []}
+            for ref, it in corpus.items():
+                if ref in blocker_refs and self.proposed_label in self._label_names(it.get("labels")):
+                    proposed[ref] = it
+            edges = [(b, d) for b, d in edges if b in ext or (b in corpus and b not in proposed)]
+            item_of = lambda r: corpus[r] if r in corpus else ext[r]            # noqa: E731
+            ranks = {r: discovery.priority_rank(self._priority_name(item_of(r).get("labels")), self.priority_aliases)
+                     for r in {x for e in edges for x in e if x in corpus or x in ext}}
+            edges = [e for e in edges if e[0] in ranks and e[1] in ranks]
+            required, cyc = discovery.blocker_required_ranks(edges, ranks)
+            if cyc:
+                self._warn_blocking_cycle(set(cyc))
+            out["violations"] = len(required)
+            self._warn_unwritable_blockers(cross_repo)
+            out["unwritable"] = sorted(set(cross_repo))
+            if not apply:
+                return out
+            budget = [cap]
+            no_field = self._repair_graphql_low()
+            self._no_field_writes = no_field
+            try:
+                for ref, (new_rank, cause) in sorted(required.items()):
+                    if budget[0] <= 0:
+                        break
+                    budget[0] -= 1
+                    self._write_blocker_promotion(ref, item_of(ref), ranks[ref], new_rank, cause)
+                    out["raised"].append(ref)
+            finally:
+                self._no_field_writes = False
+            for ref, data in sorted(proposed.items()):
+                if budget[0] <= 0:
+                    break
+                budget[0] -= 1
+                try:
+                    self._issue_remove_label(ref, self.proposed_label)
+                    out["stripped"].append(ref)
+                except Exception as exc:
+                    self._note_scope(exc)
+            self._repair_blocking_marks(blocker_refs, budget, out)
+        except Exception as exc:
+            self._note_scope(exc)
+            out["skipped"] = out["skipped"] or "failed"
+        return out
+
+    @staticmethod
+    def _label_names(labels):
+        return [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (labels or [])]
+
+    def _repair_edges(self, corpus, out):
+        """-> (edges [(blocker, blocked)], unwritable notes, every ref seen as a blocker). The edge
+        extraction `_promote_blockers` uses: explicit phrases over title and body, plus the ledger."""
+        edges, cross_repo, blocker_refs = [], [], set()
+
+        def add(blocked, by):
+            by, blocked = str(by), str(blocked)
+            if by == blocked:
+                return
+            blocker_refs.add(by)                  # keeps its mark even when the blocked side is unseen
+            if blocked not in corpus:
+                return
+            if (by, blocked) not in edges:
+                edges.append((by, blocked))
+
+        backlog_check = _get_backlog_check()
+        for ref, it in corpus.items():
+            haystack = (it.get("title") or "") + "\n" + (it.get("body") or "")
+            for m in backlog_check._BLOCK_RE.finditer(haystack):
+                if backlog_check.blocker_scan.is_cross_repo(haystack, m):
+                    cross_repo.append("#%s blocked by another repository's #%s" % (ref, m.group(2)))
+                    continue
+                add(ref, m.group(2))
+        if self.sdlc_dir:
+            try:
+                for h in ledger.outstanding(ledger.read_all(self.sdlc_dir)):
+                    add(h.get("goal"), ledger.handoff_key(h))
+            except Exception:
+                pass
+        return edges, cross_repo, blocker_refs
+
+    def _repair_graphql_low(self):
+        """True when the board field write should be skipped: GraphQL remaining below the back-fill
+        floor or unreadable. Label writes never depend on it."""
+        try:
+            floor = self._project_cfg.get("backfill_min_graphql", 1000)
+            remaining = json.loads(self._run(["api", "rate_limit"]))["resources"]["graphql"]["remaining"]
+            return int(remaining) < int(floor)
+        except Exception:
+            return True
+
+    def _repair_blocking_marks(self, blocker_refs, budget, out):
+        """Remove the blocking mark from a closed blocker, or an open one no edge names. Reads only."""
+        label = self.blocking_label
+        stale = []
+        try:
+            closed = fetch_issues_rest(self._run, self.repo, [label], self._BOARD_ITEM_LIMIT, state="closed",
+                                       page_size=self._REST_PAGE_SIZE)
+            stale += [str(i["number"]) for i in closed if i.get("number") is not None]
+            opened = self._fetch_issues_rest([label], self._BOARD_ITEM_LIMIT)
+            stale += [str(i["number"]) for i in opened
+                      if i.get("number") is not None and str(i["number"]) not in blocker_refs]
+        except Exception as exc:
+            self._note_scope(exc)
+            return
+        for ref in sorted(set(stale), key=lambda r: (len(r), r)):
+            if budget[0] <= 0:
+                return
+            budget[0] -= 1
+            try:
+                self._issue_remove_label(ref, label)
+                out["unmarked"].append(ref)
+            except Exception as exc:
+                self._note_scope(exc)
 
     def _warn_promotion_comment_failed(self, ref, old_label, canon, exc):
         """The one #900 outcome that must never look like an ordinary, silently-swallowed failure:

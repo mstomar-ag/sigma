@@ -1175,6 +1175,48 @@ def _awaiting_merge_row(sdlc_dir, now=None):
     return _chk(f"goals {line} -- {'; '.join(parts)}", False, fix)
 
 
+def _blocker_rank_row(cfg, sdlc_dir, now=None):
+    """#1410: one row for blockers ranked below what they block. Reads only the small state file the
+    reconcile tick writes (count, last repair, when the count first went above zero); no gh call.
+    Not OK when the count is above zero for over two reconcile intervals. Never raises; None when the
+    source is not github or the rule is explicitly off."""
+    try:
+        disc = (cfg or {}).get("discovery") or {}
+        block = disc.get("blocker_promotion")
+        if disc.get("source") != "github" or (isinstance(block, dict) and block.get("mode") == "off"):
+            return None
+        tick = _load_loop_script("reconcile_tick")
+        loop = tick.loop
+        st = tick.read_repair_state(sdlc_dir)
+        if not st:
+            return _chk("blockers ranked below what they block: not yet checked (the reconcile tick has not run)",
+                        True, "")
+        now = now if now is not None else time.time()
+        n = int(st.get("violations") or 0)
+        last = st.get("last_repair")
+        when = ("last repair %s ago" % _age_words(now - float(last))) if last else "no repair yet"
+        if n == 0:
+            return _chk("blockers ranked below what they block: 0 (%s)" % when, True, "")
+        since = float(st.get("first_seen_nonzero") or now)
+        limit = 2 * loop._reconcile_ttl_minutes(cfg) * 60
+        stale = (now - since) > limit
+        name = "blockers ranked below what they block: %d (%s)" % (n, when)
+        return _chk(name, not stale,
+                    "still %d after two reconcile intervals -- check that the watcher is running and that "
+                    "gh can write labels, then run `python3 skills/sigma-loop/scripts/reconcile_tick.py .sdlc`" % n)
+    except Exception as exc:                 # noqa: BLE001 - a detector that cannot run says so
+        return _chk("blockers ranked below what they block: could not check (%s)" % type(exc).__name__, True, "")
+
+
+def _age_words(seconds):
+    seconds = max(0, int(seconds))
+    if seconds < 3600:
+        return "%dm" % (seconds // 60)
+    if seconds < 86400:
+        return "%dh" % (seconds // 3600)
+    return "%dd" % (seconds // 86400)
+
+
 def _load_log_script(name):
     """`_load_loop_script`'s sibling, pointed at the `sigma-log` skill instead of `sigma-loop`
     (skills/sigma-doctor/scripts/doctor.py -> skills/sigma-log/scripts/<name>.py) — issue #1779 is
@@ -3241,6 +3283,11 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     # records), so it is not gated by `cheap_only`; silent (no row) when work is off.
     if _block(cfg, "work").get("enabled") is True:
         out.append(_awaiting_merge_row(sdlc_dir))
+
+    # #1410: blockers ranked below what they block. Local state read only; silent unless github + rule on.
+    _br = _blocker_rank_row(cfg, sdlc_dir)
+    if _br is not None:
+        out.append(_br)
 
     # #1555: BEFORE the loop ever commits. `work.commit()` stages with `git add -A`, which honours
     # .gitignore and nothing else, so "is this repo's `.env` ignored?" decides whether an unattended
