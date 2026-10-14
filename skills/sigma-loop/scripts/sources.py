@@ -4969,6 +4969,39 @@ class GitHubSource:
         except Exception as exc:
             self._warn_promotion_comment_failed(ref, old_label, canon, exc)
 
+    def raise_blocker_priority(self, blocker, dependent):
+        """#1407: raise ONE blocker to the rank of the one goal it was just assigned to block, in the
+        same action batch as the blocked/blocking mark. Same shared rule as `_promote_blockers`
+        (`discovery.blocker_required_ranks`), single edge only, written through the same
+        `_write_blocker_promotion` (label, board field, one comment). Returns "raised",
+        "unchanged" or "skipped: <reason>". Raise-only and idempotent (an equal or higher rank
+        writes nothing). Mode "off" returns before any call. Fail-open: a read failure is reported
+        on stderr and does less. A closed or confirmation-labelled blocker is never raised."""
+        if self.blocker_promotion_mode == "off":
+            return "skipped: off"
+        try:
+            if str(blocker) == str(dependent):
+                return "skipped: self edge"
+            items = {}
+            for ref in (blocker, dependent):
+                data = self._read_issue(ref, ["number", "state", "labels"])
+                items[str(ref)] = data
+            b = items[str(blocker)]
+            names = [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (b.get("labels") or [])]
+            if str(b.get("state") or "open").lower() == "closed" or self.proposed_label in names:
+                return "skipped: blocker closed or awaiting confirmation"
+            ranks = {str(r): discovery.priority_rank(self._priority_name(d.get("labels")), self.priority_aliases)
+                     for r, d in items.items()}
+            required, _cyc = discovery.blocker_required_ranks([(str(blocker), str(dependent))], ranks)
+            if str(blocker) not in required:
+                return "unchanged"
+            new_rank, cause = required[str(blocker)]
+            self._write_blocker_promotion(str(blocker), b, ranks[str(blocker)], new_rank, cause)
+            return "raised"
+        except Exception as exc:
+            self._warn_unwritable_blockers(["#%s could not be raised (%s)" % (blocker, exc)])
+            return "skipped: read failed"
+
     def _warn_promotion_comment_failed(self, ref, old_label, canon, exc):
         """The one #900 outcome that must never look like an ordinary, silently-swallowed failure:
         the priority LABEL already changed (`_write_blocker_promotion` only ever reaches this point

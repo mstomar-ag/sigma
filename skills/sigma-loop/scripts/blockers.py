@@ -200,6 +200,7 @@ def resolve(sdlc_dir, config, source, goal, refs, run=None, apply=True):
         detail, acted = _act(source, goal, r, verdict, state, goal_label, proposed_label,
                              sdlc_dir, config, run, apply)
         out["results"].append({"ref": r, "verdict": verdict, "detail": detail, "acted": acted})
+        _raise_rank(source, r, goal, verdict, apply)    # #1407: the blocker is never below what it blocks
         # Review bug_001: bucket on what ACTUALLY HAPPENED, not on the verdict alone. `_act` returns
         # `acted=False` when `_swap_labels` raises (its documented contract: it retries, then RAISES
         # -- "callers decide what a failed lifecycle write means"), and the verdict is deliberately
@@ -287,6 +288,15 @@ def _route(sdlc_dir, config, goal, ref, state, run):
                            why="blocks goal #%s — made pickable so it can be worked" % goal)
     except Exception:                                   # noqa: BLE001 - enrichment, never required
         pass
+
+
+def _raise_rank(source, ref, goal, verdict, apply):
+    """#1407: raise a still-open blocker to the blocked goal's rank. Fail-open, never raises."""
+    if apply and verdict in (PICKABLE, PROMOTED, ROUTED, CHAINED) and hasattr(source, "raise_blocker_priority"):
+        try:
+            source.raise_blocker_priority(ref, goal)
+        except Exception:                               # noqa: BLE001 - priority is an enrichment
+            pass
 
 
 def _comment(source, number, text):
