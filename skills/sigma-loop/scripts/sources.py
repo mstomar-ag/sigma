@@ -5193,6 +5193,46 @@ class GitHubSource:
             except Exception as exc:
                 self._note_scope(exc)
 
+    def blocker_filing_priority(self, goal, own):
+        """#1408: the priority tier (`P0`..`P4`) a blocker about to be filed for `goal` should carry,
+        or None to leave `own` as it is. Raise-only: a goal that is no more urgent than `own` returns
+        None, as does an unprioritised goal. Mode "off" and "smart" return before any call. One bounded
+        read of the goal; a failed read is reported on stderr and returns None (file as before)."""
+        if self.blocker_promotion_mode != "always":
+            return None
+        try:
+            data = self._read_issue(goal, ["number", "labels"])
+            goal_rank = discovery.priority_rank(self._priority_name(data.get("labels")), self.priority_aliases)
+        except Exception as exc:
+            self._warn_unwritable_blockers(["blocker for #%s filed at its own priority: goal could not be read (%s)"
+                                            % (goal, exc)])
+            return None
+        own_rank = discovery.priority_rank(own, self.priority_aliases)
+        return discovery.PRIORITIES[goal_rank] if goal_rank < own_rank else None
+
+    def strip_blocker_confirmation(self, blocker):
+        """#1408: remove the legacy confirmation label from an open blocker, with one comment, through
+        the existing label swap and note writers. Strip only: membership is never granted here (that is
+        `blockers._act`'s verdict rule). Returns "stripped", "unchanged" or "skipped: <reason>".
+        Idempotent (no label, nothing written). Mode "off" returns before any call. Fail-open."""
+        if self.blocker_promotion_mode == "off":
+            return "skipped: off"
+        try:
+            b = self._read_issue(blocker, ["number", "state", "labels"])
+            names = [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (b.get("labels") or [])]
+            if str(b.get("state") or "open").lower() == "closed" or self.proposed_label not in names:
+                return "unchanged"
+            self._swap_labels(blocker, remove=[self.proposed_label])
+        except Exception as exc:
+            self._warn_unwritable_blockers(["#%s could not have its confirmation label removed (%s)" % (blocker, exc)])
+            return "skipped: failed"
+        try:
+            self.note(str(blocker), "removed the legacy confirmation label: this issue blocks other work, so it "
+                                    "is never left waiting on confirmation")
+        except Exception as exc:
+            self._note_scope(exc)
+        return "stripped"
+
     def _warn_promotion_comment_failed(self, ref, old_label, canon, exc):
         """The one #900 outcome that must never look like an ordinary, silently-swallowed failure:
         the priority LABEL already changed (`_write_blocker_promotion` only ever reaches this point
