@@ -1545,6 +1545,34 @@ def _mirror_age_phrase(mirror, sdlc_dir):
     return "%d minute(s) ago" % minutes if minutes else "seconds ago"
 
 
+def _live_blocker_states(unknown, config, run, cache):
+    """{ref: "open"|"closed"} for the `unknown` refs the mirror cannot carry, read LIVE (#1420).
+
+    One REST single-issue GET per ref (`gh api repos/<repo>/issues/<n>`; REST has no multi-get),
+    memoised in the per-call `cache` so each ref is read at most once per `_next` call. A pull
+    request, a read error or a malformed answer is simply absent from the result: that ref stays
+    undeterminable and the caller fails open. Read-only (GET)."""
+    repo = (((config.get("discovery") or {}).get("github") or {}).get("repo")) or ""
+    seen = cache.setdefault("live_blockers", {})
+    if not repo or run is None:
+        return {}
+    out = {}
+    for ref in unknown:
+        if ref not in seen:
+            state_ = None
+            try:
+                rec = json.loads(run(["api", "repos/%s/issues/%s" % (repo, ref), "--method", "GET"]))
+                if isinstance(rec, dict) and "pull_request" not in rec:
+                    st = str(rec.get("state") or "").lower()
+                    state_ = st if st in ("open", "closed") else None
+            except Exception:                   # noqa: BLE001 - fail-open: stays unknown
+                state_ = None
+            seen[ref] = state_
+        if seen[ref]:
+            out[ref] = seen[ref]
+    return out
+
+
 def _pick_dependency_hold(sdlc_dir, source, goal, config, cache):
     """#1499: the reason `goal` must NOT be claimed on this pick -- a prerequisite it declares that
     is still OPEN -- or `""` when it may be claimed.
@@ -1670,6 +1698,15 @@ def _pick_dependency_hold(sdlc_dir, source, goal, config, cache):
                 holding, unknown = _resolve_blockers(by_ref, refs)
             else:
                 unconfirmed = _mirror_age_phrase(mirror, sdlc_dir)
+        if unknown:
+            # #1420: a blocker the mirror cannot carry (other owner, no goal label, aged out) is
+            # read live; open holds, closed releases, anything else stays undeterminable.
+            phrases = {r: p for r, p in refs}
+            live_states = _live_blocker_states(unknown, config, run, cache)
+            for ref in unknown:
+                if live_states.get(ref) == "open":
+                    holding.append("#%s (%s)" % (ref, phrases.get(ref) or "blocked by"))
+            unknown = [r for r in unknown if r not in live_states]
         if unknown:
             print("loop.py: #%s names prerequisite(s) %s the board mirror does not carry — neither "
                   "an open goal nor a recent close, so their state is undeterminable and they are "

@@ -88,7 +88,8 @@ class _Board:
     `live` is what a `gh issue list` would return RIGHT NOW; the mirror on disk may legitimately be
     older than it, which is the `goal_not_in_corpus` case this gate has to handle.
     """
-    def __init__(self, order, live=TRIAL, calls=None):
+    def __init__(self, order, live=TRIAL, calls=None, single=None):
+        self.single = single or {}          # #1420: number -> record | raw string | Exception
         self.order = [str(g) for g in order]
         self.live = list(live)
         self.marked, self.released = [], []
@@ -108,12 +109,21 @@ class _Board:
         """#1833: the mirror's own fetch is `gh api repos/{owner}/{repo}/issues -f state=... ...`
         now, not `gh issue list --state ... --json ...` -- see `mirror.fetch_and_write`."""
         self.calls.append(list(args))
+        if len(args) > 1 and args[0] == "api" and "/issues/" in str(args[1]):
+            ans = self.single.get(int(str(args[1]).rsplit("/", 1)[1]), "")
+            if isinstance(ans, Exception):
+                raise ans
+            return ans if isinstance(ans, str) else json.dumps(ans)
         if not (len(args) > 1 and args[0] == "api" and str(args[1]).startswith("repos/")
                 and str(args[1]).endswith("/issues")):
             return ""
         want = next(v[len("state="):] for v in args
                     if isinstance(v, str) and v.startswith("state="))
         return json.dumps([i for i in self.live if str(i["state"]).lower() == want])
+
+    def live_reads(self):
+        """#1420: the single-issue GETs this fake saw."""
+        return [c for c in self.calls if len(c) > 1 and "/issues/" in str(c[1])]
 
     def mirror_fetches(self):
         """Every `gh` call the MIRROR made. #1833: REST has no field-selection concept at all
@@ -362,19 +372,49 @@ def test_a_goal_still_absent_after_the_refresh_is_claimed_and_says_why(capsys):
     assert "1597" in err and "mirror" in err             # but never silently
 
 
-def test_a_prerequisite_the_mirror_does_not_carry_is_claimed_and_says_why(capsys):
-    """The mirror's open half is `sdlc:goal`-filtered and its closed half is windowed, so a
-    prerequisite that is neither an open goal nor a recent close cannot be resolved from it. That is
-    an UNKNOWN state, not a closed one — claim, and name the ref that could not be resolved."""
-    lp = _loop()
-    orphan = [_blocked_by(1595, 4242)]
+def _run_orphan(lp, single, order=("1595",), goals=None, base_kw=None):
+    """One `_next` over goals blocked by a prerequisite the mirror does not carry (#4242)."""
+    orphan = goals or [_blocked_by(1595, 4242)]
     with tempfile.TemporaryDirectory() as d:
         base = _base(d, mirror=orphan)
-        src = _Board(["1595"], live=orphan)
-        kind, goal = lp._next(base, src, _cfg(lp, base))
+        src = _Board(list(order), live=orphan, single=single)
+        res = lp._next(base, src, _cfg(lp, base))
+    return res, src
+
+
+def test_an_open_prerequisite_the_mirror_does_not_carry_holds_the_goal(capsys):
+    """#1420: other-owner / no-goal-label blockers are invisible to the mirror; read live, an OPEN
+    one holds the dependent."""
+    lp = _loop()
+    (kind, goal), src = _run_orphan(lp, {4242: {"number": 4242, "state": "open"}})
+    assert src.marked == [] and (kind, goal) != ("goal", "1595")
+    assert src.live_reads() == [["api", "repos/acme/widget/issues/4242", "--method", "GET"]]
+
+
+def test_a_closed_prerequisite_the_mirror_does_not_carry_releases_the_goal(capsys):
+    lp = _loop()
+    (kind, goal), src = _run_orphan(lp, {4242: {"number": 4242, "state": "closed"}})
     assert (kind, goal) == ("goal", "1595")
-    err = capsys.readouterr().err
-    assert "#4242" in err
+    assert "#4242" not in capsys.readouterr().err
+
+
+def test_an_unknown_prerequisite_is_read_once_per_call_however_many_goals_name_it():
+    lp = _loop()
+    goals = [_blocked_by(1595, 4242), _blocked_by(1596, 4242), _issue(1594)]
+    _, src = _run_orphan(lp, {4242: {"number": 4242, "state": "open"}},
+                         order=("1595", "1596", "1594"), goals=goals)
+    assert len(src.live_reads()) == 1
+
+
+def test_a_prerequisite_that_cannot_be_read_live_is_claimed_and_says_why(capsys):
+    """Fail open: a read error, a malformed answer or a pull request stays undeterminable."""
+    lp = _loop()
+    for answer in (RuntimeError("boom"), "not json", "[1, 2]", "",
+                   {"number": 4242, "state": "open", "pull_request": {"url": "x"}},
+                   {"number": 4242, "state": "weird"}):
+        (kind, goal), src = _run_orphan(lp, {4242: answer})
+        assert (kind, goal) == ("goal", "1595"), answer
+        assert "#4242" in capsys.readouterr().err, answer
 
 
 # --- gates, and never breaking the pick ------------------------------------------------------------

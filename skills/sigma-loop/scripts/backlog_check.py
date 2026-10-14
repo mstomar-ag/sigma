@@ -930,6 +930,12 @@ def cross_check(sdlc_dir, goal, config=None, run=None, now=None, velocity_measur
         if goal_doc is None:
             return _pack(goal_ref, [], degraded + ["goal_not_in_corpus"])
 
+        # #1420: a declared blocker the corpus does not carry cannot be judged open or closed here;
+        # say so instead of skipping it silently.
+        in_corpus = {d["ref"] for d in docs}
+        degraded.extend("blocker_unresolved:%s" % r
+                        for r in sorted(_referenced_blocker_refs(goal_doc)) if r not in in_corpus)
+
         idf = _idf(docs)
         sim_mode = (config.get("backlog_check") or {}).get("similarity", "tfidf")
         avgdl = (sum(sum(d["tokens"].values()) for d in docs) / len(docs)) if docs else 0.0

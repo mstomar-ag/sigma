@@ -2022,3 +2022,15 @@ def test_a_weak_trigger_past_the_excerpt_cap_is_the_one_case_that_changed():
     corpus = [{"ref": "7", "open": True}]
     assert [f["ref"] for f in bc._explicit_blockers(bc._docs_from_records([inside])[0], corpus)] == ["7"]
     assert bc._explicit_blockers(bc._docs_from_records([past])[0], corpus) == []
+
+
+def test_a_declared_blocker_absent_from_the_corpus_is_reported_unresolved():
+    """#1420: a blocker the corpus cannot see is named in `degraded`, not skipped silently; a goal
+    with no marker gets no such entry."""
+    bc = _mod("backlog_check")
+    with tempfile.TemporaryDirectory() as d:
+        base = _gh_base(d, [_rec(1, "goal one", body="x\n\n**Blocked by:** #4242\n"),
+                            _rec(2, "goal two", body="plain")])
+        assert "blocker_unresolved:4242" in bc.cross_check(base, "1")["degraded"]
+        assert not [x for x in bc.cross_check(base, "2")["degraded"]
+                    if x.startswith("blocker_unresolved")]
