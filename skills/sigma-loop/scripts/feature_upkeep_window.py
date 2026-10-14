@@ -6,8 +6,8 @@ sweep of every unit; a unit another person's sweep already brought current needs
 
 STAMP. `state/upkeep/window.json`: `last_at` (when the last COMPLETED sweep ended; 0 when none has), `attempt_at` (when a sweep
 was last started or cut short before doing any work), `unreached` (units the last sweep ran out of time before), `outcome`.
-Only a completed sweep (it ran, with some units refused, parked or unreached) closes the window. A sweep that was killed, hit
-its cap before starting a unit, found another sweep running or failed to spawn leaves an ATTEMPT stamp: it holds off a
+Only a completed sweep (it ran, with some units refused, parked or unreached) closes the window. A sweep in which every unit
+failed, one that was killed, hit its cap before starting a unit, found another sweep running or failed to spawn leaves an ATTEMPT stamp: it holds off a
 re-trigger for `upkeep.retry_minutes` (default 60) only, then the next session start or watcher tick starts the sweep again.
 
 READ-ONLY CHECK. `is_open` reads one small file and does arithmetic: no git, no gh, no unit listing. A missing, unreadable or

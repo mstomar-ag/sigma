@@ -356,6 +356,18 @@ def test_a_sweep_whose_first_unit_is_cut_short_by_a_stop_file_is_an_attempt(tmp_
     assert got["unreached"] == ["a", "b"] and got["last_at"] == 0 and got["attempt_at"] == NOW, got
 
 
+def test_a_sweep_where_every_unit_failed_is_an_attempt_and_one_with_refused_or_parked_units_closes_the_window(tmp_path):
+    j, sdlc, log = T.job(), T.project(tmp_path), []
+    sweep(j, sdlc, tmp_path, ["a", "b"], engine(log, {"a": "failed", "b": "failed"}))
+    got = window().read(sdlc)
+    assert got["last_at"] == 0 and got["attempt_at"] == NOW and got["unreached"] == [], got
+    assert window().is_open(RETRY, sdlc, NOW + 61 * 60) is True                     # retried after the retry window, not 12 hours
+    sdlc2 = T.project(tmp_path / "two")
+    sweep(j, sdlc2, tmp_path, ["a", "b", "c"], engine(log, {"a": "failed", "b": "refused", "c": "parked"}))
+    got = window().read(sdlc2)
+    assert got["last_at"] == NOW and got["attempt_at"] is None, got
+
+
 def test_a_sweep_that_finished_with_some_units_unreached_still_closes_the_window(tmp_path):
     j, sdlc, log = T.job(), T.project(tmp_path), []
     clock = {"t": 0.0}

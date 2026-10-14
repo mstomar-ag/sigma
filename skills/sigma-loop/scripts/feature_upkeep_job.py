@@ -228,7 +228,8 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
             summary = {"counts": counts, "unreached": unreached}
             _record(sdlc_dir, dict(head, state="done", outcome=outcome, unit_tip=None, finished_at=stamp_now(), sweep=summary))
             done_units = sum(n for w, n in counts.items() if w not in ("timeout", "stopped"))
-            if outcome == "swept" and (done_units or not unreached):      # a sweep cut off before any unit finished is an attempt
+            every_failed = bool(counts) and set(counts) == {"failed"}       # nothing worked: an attempt, retried after retry_minutes
+            if outcome == "swept" and (done_units or not unreached) and not every_failed:      # a sweep cut off before any unit finished is an attempt
                 window.stamp(sdlc_dir, stamp_now(), outcome, unreached)
             else:
                 window.stamp_attempt(sdlc_dir, stamp_now(), outcome, unreached)
