@@ -756,3 +756,11 @@ def test_a_sub_minute_mirror_is_described_in_seconds_not_as_zero_minutes():
     assert lp._mirror_age_phrase(_Age(60), "x") == "1 minute(s) ago"
     assert lp._mirror_age_phrase(_Age(None), "x") == "at an unknown time"
     assert m.age_seconds("/nonexistent/.sdlc") is None       # the real source of that None
+
+
+def test_the_hold_docstring_describes_the_live_read_of_an_unseen_prerequisite():
+    """#1421: the docstring must name the live single-issue read, not claim an unseen prerequisite
+    is always claimed."""
+    doc = _mod("loop")._pick_dependency_hold.__doc__
+    assert "_live_blocker_states" in doc
+    assert "all three CLAIM" not in doc

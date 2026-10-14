@@ -1640,10 +1640,13 @@ def _pick_dependency_hold(sdlc_dir, source, goal, config, cache):
     mirror forces one refresh rather than proceeding on no evidence, bounded by `_MIRROR_FORCED` to
     once per process, and skipped entirely when this same call already fetched live.
 
-    FAIL OPEN, AND SAY SO. Three states cannot be determined, and all three CLAIM: no mirror at all,
-    a goal still absent after the forced refresh, and a prerequisite the mirror does not carry (its
+    FAIL OPEN, AND SAY SO. Three states can be undeterminable, and each CLAIMS: no mirror at all, a
+    goal still absent after the forced refresh, and a prerequisite the mirror does not carry (its
     open half is `sdlc:goal`-filtered and its closed half is windowed, so an open non-goal issue or
-    an old close resolves to nothing). Claiming is the recoverable direction -- a wrongly-held goal
+    an old close resolves to nothing there). The third is first read LIVE (#1420,
+    `_live_blocker_states`: one single-issue GET per ref, memoised for the call): open holds, closed
+    releases, and only a ref that read cannot answer (error, pull request, malformed) is left
+    undeterminable and claimed. Claiming is the recoverable direction -- a wrongly-held goal
     stalls the loop, which is the bug being fixed -- but an undeterminable state is never silent:
     each prints what it could not resolve. The outer `except` has the same posture as
     `_auto_unpark_sweep`'s: a gate that breaks must never be the thing that stops an unattended pick.
