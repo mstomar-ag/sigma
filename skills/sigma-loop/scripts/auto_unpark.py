@@ -502,6 +502,8 @@ def _raise_blocker_ranks(source, edges, apply):
         return
     for blocker, blocked in sorted(set(edges)):
         try:
+            if hasattr(source, "strip_blocker_confirmation"):
+                source.strip_blocker_confirmation(blocker)    # #1408
             source.raise_blocker_priority(blocker, blocked)
         except Exception:
             pass

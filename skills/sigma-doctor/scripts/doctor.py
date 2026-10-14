@@ -1710,6 +1710,34 @@ def _legacy_confirmation_scan(gh_cfg, config, run):
     return [i.get("number") for i in issues if isinstance(i, dict) and "number" in i]
 
 
+def _blocker_hygiene_scan(gh_cfg, config, run):
+    """#1408: open `sdlc:blocking` issues that still carry the legacy confirmation label or carry no
+    priority. Read-only and advisory; mode "off" (`discovery.blocker_promotion.mode`) returns `[]`
+    before any call, so the closed gate adds nothing. Fail-open: an unreadable response yields `[]`."""
+    try:
+        sources = _load_loop_script("sources")
+        discovery = _load_loop_script("discovery")
+        if sources._blocker_promotion(config) == "off":
+            return []
+        aliases = sources._priority_aliases(config)
+    except Exception:
+        return []
+    legacy = (_block(_block(config, "ledger"), "handoff").get("proposed_label")
+              or "sdlc:needs-confirmation")
+    issues = _list(run, gh_cfg, ["number", "labels"], [gh_cfg.get("blocking_label", "sdlc:blocking")])
+    if issues is None:
+        return []
+    flagged = []
+    for i in issues:
+        if not isinstance(i, dict) or "number" not in i:
+            continue
+        names = [(l.get("name") or "") if isinstance(l, dict) else str(l or "") for l in (i.get("labels") or [])]
+        ranked = any(discovery.priority_rank(n, aliases) < discovery.UNPRIORITISED for n in names)
+        if legacy in names or not ranked:
+            flagged.append(i["number"])
+    return flagged
+
+
 def _orphan_in_progress_scan(gh_cfg, config, run):
     """#1391 step 7: open issues carrying `in_progress_label` but NO primary lifecycle label at all.
 
@@ -2957,6 +2985,18 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                     "writes it any more, so "
                     "this is a leftover from an older board: the loop will never pick these. " + how +
                     "`/sigma-promote` to approve or clear each one. Advisory only -- nothing was changed."))
+
+            # #1408: a blocker that still carries the legacy label or has no priority (advisory).
+            hygiene = _blocker_hygiene_scan(gh_disc, cfg, run)
+            if hygiene:
+                shown = ", ".join(f"#{n}" for n in hygiene[:10])
+                more = f" (+{len(hygiene) - 10} more)" if len(hygiene) > 10 else ""
+                out.append(_chk(
+                    "every sdlc:blocking issue carries a priority and no legacy confirmation label",
+                    False,
+                    f"{shown}{more} block other work but carry the legacy confirmation label or no "
+                    "priority. The next blocker sweep strips the label and raises the priority to the "
+                    "blocked goal's; or set `priority:P<n>` by hand. Advisory only -- nothing was changed."))
 
             # #1392: blockers nothing can pick -- see `_unreachable_blocker_scan` for why
             # `sdlc:blocking` is a tie-break rather than a queue, and why this is report-only.

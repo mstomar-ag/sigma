@@ -820,6 +820,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         labels = [f"priority:{priority}", f"area:{area}", *extra_labels]
         if triage is not None and triage["kind"] == "arm":
             labels[0] = f"priority:{triage['priority']}"
+        if blocks_goal and goal and hasattr(source, "blocker_filing_priority"):    # #1408: never below the blocked goal
+            labels[0] = f"priority:{source.blocker_filing_priority(str(goal), labels[0]) or labels[0][9:]}"
         # #1347: guaranteed, not a caller-supplied extra — dedup against a caller that already
         # passed it explicitly (harmless either way, but a repeated label in one `gh` call is
         # needless noise).
