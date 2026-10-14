@@ -1188,6 +1188,11 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                 report["warnings"].append(f"could not transition the goal to sdlc:blocked: {exc}")
         if marker_written and hasattr(source, "raise_blocker_priority"):    # #1407: blocker >= blocked
             source.raise_blocker_priority(str(report["issue"]), str(goal))
+        if marker_written and hasattr(source, "strip_blocker_confirmation"):   # #1415: never left on the legacy label
+            try:
+                source.strip_blocker_confirmation(str(report["issue"]))
+            except Exception:                                   # noqa: BLE001 - enrichment, fail-open
+                pass
 
     # #469/#726: blocks_goal=True has exactly ONE enforcement channel when same_area=True — the body
     # marker just above. Unlike (not same_area) and blocks_goal, which is ALSO backed by the ledger's

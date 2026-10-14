@@ -83,3 +83,20 @@ def test_inputs_are_not_mutated():
 def test_the_default_mode_is_the_full_rule_and_smart_is_still_accepted():
     assert D.DEFAULT_BLOCKER_PROMOTION_MODE == "always"
     assert "smart" in D.BLOCKER_PROMOTION_MODES and "off" in D.BLOCKER_PROMOTION_MODES
+
+
+def test_a_cycle_member_is_raised_from_any_entry_point():
+    """#1415: a ring whose member also blocks something urgent raises every ring member, whichever edge
+    the walk enters through."""
+    import itertools
+    edges = [("a", "b"), ("b", "a"), ("a", "d")]
+    ranks = {"a": P3, "b": P3, "d": P0}
+    for order in itertools.permutations(edges):
+        required, cycles = D.blocker_required_ranks(list(order), ranks)
+        assert set(required) == {"a", "b"}, order
+        assert required["a"][0] == P0 and required["b"][0] == P0, order
+        assert cycles == ["a", "b"]
+    long_ring = [("a", "b"), ("b", "c"), ("c", "a"), ("c", "d")]
+    for order in itertools.permutations(long_ring):
+        required, _ = D.blocker_required_ranks(list(order), {"a": P3, "b": P3, "c": P3, "d": P1})
+        assert {k: v[0] for k, v in required.items()} == {"a": P1, "b": P1, "c": P1}, order
