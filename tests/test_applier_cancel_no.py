@@ -41,6 +41,9 @@ class Src:
     def _swap_labels(self, issue, add, remove):
         self.swaps.append((issue, add, remove))
 
+    def _read_issue(self, goal, fields, comment_limit=None):
+        return {"labels": [self.parked_label]}
+
     def note(self, issue, text):
         self.notes.append((issue, text))
 

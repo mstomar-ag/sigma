@@ -5,6 +5,19 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - **Release on a never-claimed goal is a no-op (#1394).** `GitHubSource.release` now returns False and writes nothing (no label call, no comment, no board move) when the state read succeeded and the issue does not carry the in-progress label; a failed read still falls through to the old release behaviour.
+- **Opening a unit on a fresh clone works (#1397).** When no local branch has the base's name, the unit branch is cut from the remote-tracking ref instead of failing with a missing source ref; a present local base pushes exactly as before.
+- **The applier builds its board source once per tick (#1392).** Each ask in a tick built its own source, so a board that refused the project read was retried per ask; the tick now builds one and shares it, and a refused build still fails each ask as before. A closed gate is unchanged.
+- **A unit opened by define-open is no longer closed by the next registry sync (#1396).** The closed rule now also requires that the unit's own `feature/<name>` branch is absent from the remote, so a unit whose record holds no branch but whose branch exists stays open and its record is not rewritten.
+- **The applier builds its board source once per tick (#1392).** Each ask in a tick built its own source, so a board that refused the project read was retried per ask; the tick now builds one and shares it, and a refused build still fails each ask as before. A closed gate is unchanged.
+
+- Fix: with hard stops on, the rebase and landing pass no longer refuses to push a unit branch whose record exists only on the default branch; the pass declares its own branch, and undeclared force-pushes still stop (#1393).
+- **The applier no longer acts on an issue that is no longer parked (#1395).** Before applying, it reads the issue's labels; if the parked label is gone it closes the ask as answered with a fixed "already unparked" text and applies nothing, and a failed read leaves the ask pending for the next tick. PROVISIONAL: reusing the answered state for this closed ask is a stand-in until the owner ratifies the encoding. A closed gate is unchanged.
+- **A unit branch can be declared the integration base (#1389).** `work.integration_base` names a unit branch that is also `work.base`, so upkeep accepts it instead of refusing it as a unit base; undeclared unit bases are still refused.
+- **The applier builds its board source once per tick (#1392).** Each ask in a tick built its own source, so a board that refused the project read was retried per ask; the tick now builds one and shares it, and a refused build still fails each ask as before. A closed gate is unchanged.
+
+- **Applier stamps each applied ask when its own gesture lands (#1390).** The applied time was the tick's start for every ask, so in a long tick an owner `no` posted soon after the applied comment could fall outside the veto window and be missed; each ask is now stamped from a clock that advances through the tick, and the veto window runs from that moment. A closed gate is unchanged.
+- **Publishing recorded decisions now skips a registered unit branch (#1391).** The unit-branch check read a top-level branch key that real unit records do not have, so it never matched and a decision commit could land on a unit branch; it now reads the branch of every repo in the unit record, and one unreadable record no longer hides the rest.
+- **A project board no longer turns a gh login blip into a login instruction (#1399).** When the session-start check cannot confirm the login and the board scope row fails with it, it now retries once and shows the short could-not-confirm step instead of advising a fresh login; scope alone, or any other failing row, behaves as before.
 
 ## 1.0.13 — 2026-10-14 — upkeep and Rulebook hardening from the two stress-test passes: backups, applier, landing, board back-fill, session start
 

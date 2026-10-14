@@ -286,8 +286,24 @@ def _step_branch(ctx):
     if ctx.run(ctx.cwd, ["git", "ls-remote", "--heads", ctx.remote, ctx.branch]).strip():
         return EXISTS, ctx.branch
     base = ctx.resolved_base()
-    ctx.run(ctx.cwd, ["git", "push", ctx.remote, "%s:refs/heads/%s" % (base, ctx.branch)])
-    return CREATED, "%s -> %s" % (base, ctx.branch)
+    source = _push_source(ctx, base)
+    ctx.run(ctx.cwd, ["git", "push", ctx.remote, "%s:refs/heads/%s" % (source, ctx.branch)])
+    return CREATED, "%s -> %s" % (source, ctx.branch)
+
+
+def _push_source(ctx, base):
+    """The ref to push as the unit branch: the local `base` when it exists, else `<remote>/<base>`
+    (#1397: a fresh clone has no local branch of the default name, and `git push` then fails with
+    `src refspec ... does not match any`). When neither is found the bare base is returned so git
+    reports the same error it always did."""
+    for ref, source in (("refs/heads/" + base, base),
+                        ("refs/remotes/%s/%s" % (ctx.remote, base), "%s/%s" % (ctx.remote, base))):
+        try:
+            ctx.run(ctx.cwd, ["git", "show-ref", "--verify", "--quiet", ref])
+            return source
+        except RuntimeError:
+            continue
+    return base
 
 
 def _repo_labels(ctx):
