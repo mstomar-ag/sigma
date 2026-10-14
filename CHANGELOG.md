@@ -5,6 +5,7 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - **Publishing recorded decisions now skips a registered unit branch (#1391).** The unit-branch check read a top-level branch key that real unit records do not have, so it never matched and a decision commit could land on a unit branch; it now reads the branch of every repo in the unit record, and one unreadable record no longer hides the rest.
+- **A project board no longer turns a gh login blip into a login instruction (#1399).** When the session-start check cannot confirm the login and the board scope row fails with it, it now retries once and shows the short could-not-confirm step instead of advising a fresh login; scope alone, or any other failing row, behaves as before.
 
 ## 1.0.13 — 2026-10-14 — upkeep and Rulebook hardening from the two stress-test passes: backups, applier, landing, board back-fill, session start
 
