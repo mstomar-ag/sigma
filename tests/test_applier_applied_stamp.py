@@ -38,6 +38,9 @@ class Src:
     def _swap_labels(self, issue, add, remove):
         pass
 
+    def _read_issue(self, goal, fields, comment_limit=None):
+        return {"labels": [self.parked_label]}
+
     def note(self, issue, text):
         pass
 

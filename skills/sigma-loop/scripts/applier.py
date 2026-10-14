@@ -558,6 +558,16 @@ def apply(action, sdlc_dir, config, now, source=None, run=None, clock=None):
         if source is None:
             source = _load("sources").GitHubSource(config, run=run)
         issue = action["issue"]
+        # #1395: a person may have unparked it since the ask opened; the read failing keeps the ask pending.
+        # A promote starts from a proposed issue, not a parked one, so only the other gestures check.
+        data = {"labels": []} if action["kind"] == "promote" else source._read_issue(issue, ["labels"])
+        if not isinstance(data, dict) or not isinstance(data.get("labels"), list):
+            return "failed"
+        names = {(l.get("name") if isinstance(l, dict) else l) for l in data["labels"]}
+        if action["kind"] != "promote" and source.parked_label not in names:
+            ask.update(state="answered", answer="already unparked", answered_at=now.isoformat())
+            _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
+            return "skipped"
         board_failed = False
         if action["kind"] == "promote":
             os.environ[_APPLYING_ENV] = "1"      # its own gesture must not close the ask it applies
