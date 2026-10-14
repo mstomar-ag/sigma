@@ -2548,7 +2548,7 @@ def test_github_release_no_op_returns_false_and_clears_an_earlier_release_warnin
 
     def run(a):
         verb = _issues_verb(a)
-        rest = gqlfake.rest_issue(a, lambda n, f: {"state": "CLOSED" if state["closed"] else "OPEN", "labels": []})
+        rest = gqlfake.rest_issue(a, lambda n, f: {"state": "CLOSED" if state["closed"] else "OPEN", "labels": [{"name": "sdlc:in-progress"}]})
         if rest is not None:
             return rest
         if verb == "edit" and "--remove-label" in _legacy(a):
@@ -2672,7 +2672,7 @@ def test_github_release_label_failure_leaves_the_audit_comment_body_untouched():
 
 def test_github_release_returns_true_when_it_actually_releases():
     src = _mod("sources")
-    run = _recording_runner({"rest": {"state": "OPEN", "labels": []}})
+    run = _recording_runner({"rest": {"state": "OPEN", "labels": [{"name": "sdlc:in-progress"}]}})
     gh = src.GitHubSource({"discovery": {"source": "github"}}, run=run)
     assert gh.release("42", "claimed but never dispatched") is True
 
