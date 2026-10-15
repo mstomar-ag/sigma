@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **`migrate-confirmation --apply` no longer reports complete when an armed card stayed off the Ready lane (#1469).** The card move's result was dropped, so a spent GraphQL budget left cards in Backlog under a green run; each such row now carries a note, the summary counts and names them, a board-queue repo exits non-zero, and a migrated park moves its card to Parked (falling back to Blocked).
+
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
 - **A person's free-text answer stays out of the applier ask file on a public repository (#1429).** The ask file kept the answer verbatim and the autonomy folder is published with the records; with `repo_visibility` public it now stores `recorded privately`, a private repository is unchanged.
