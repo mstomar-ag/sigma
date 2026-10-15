@@ -1042,7 +1042,8 @@ leftovers, run `/sigma-promote migrate-confirmation` once.
 #### Runbook: migrating a board in slices
 
 1. Dry run (the default, zero writes): `promote.py migrate-confirmation .sdlc`. Each line names the issue, its
-   destination (`armed` or `parked`), its population (human, follow-up, ownership hold, scope hold) and the
+   destination (`armed` or `parked`), its population (human, follow-up, ownership hold, scope hold, upkeep
+   finding; a rebase upkeep finding is always parked, never armed) and the
    reason. It exits non-zero when the fetch hit its cap or any issue could not be read; fix that before applying.
 2. Slice it: `--unit NAME` (issues carrying that unit's label), `--only N,N,...`, `--limit K` (first K open issues).
    Repeat the dry run with the same slice and read it.

@@ -2700,3 +2700,12 @@ def test_upkeep_finding_keyword_off_is_byte_identical_for_every_other_caller(tmp
         assert default.created == explicit.created
     _r, on = _file(tmp_path)
     assert on.created["goal_label"] is True and handoff.PROPOSED_LABEL not in on.created["labels"]
+
+
+# #1473: an upkeep finding is machine-recognisable by a body marker, so the legacy-label migration can park it.
+
+def test_upkeep_finding_body_carries_the_marker_once_and_other_filings_do_not(tmp_path):
+    _r, on = _file(tmp_path, upkeep_finding=True, body="a conflict body\n")
+    assert on.created["body"].count("<!-- sigma:upkeep-finding -->") == 1
+    _r, off = _file(tmp_path)
+    assert "sigma:upkeep-finding" not in off.created["body"]
