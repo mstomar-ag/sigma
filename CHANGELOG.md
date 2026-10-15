@@ -5,6 +5,7 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - The doctor row for the blocking priority override now says a blocking goal goes first within its own tier and a blocker is raised to the tier of what it blocks, not across tiers (#1509).
+- An unstamped legacy answers block is no longer counted for a newer stamped park, and a quota wait-it-out ask is applied only after its recorded reset time (unknown counts as not yet) (#1522).
 
 - A needs_decision closing answer is now normalised through the bank (case, spacing, a trailing recommended marker) into the stored `answer`; other text is `free` and never learnable (#1521).
 
