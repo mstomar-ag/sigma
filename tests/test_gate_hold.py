@@ -153,7 +153,7 @@ def _gate_view(labels=("sdlc:parked", tp.LABEL), kind="owner_hold", author="a-st
     return json.dumps({"number": 5, "title": "g", "body": "", "state": "OPEN",
                        "labels": [{"name": n} for n in labels],
                        "author": {"login": author},
-                       "comments": [{"body": c} for c in comments]})
+                       "comments": [{"body": c, "authorAssociation": "OWNER"} for c in comments]})
 
 
 def test_unpark_lists_gate_holds():
