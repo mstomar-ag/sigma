@@ -17,7 +17,7 @@ def test_area_of_cases():
     d = _mod("decision_record")
     assert d.area_of(["sdlc:goal", "area:docs"]) == "docs"
     assert d.area_of([{"name": "area:web"}]) == "web"
-    assert d.area_of(["area:b", "area:a"]) == "b"          # the first one wins
+    assert d.area_of(["area:b", "area:a"]) == "a"          # the first in sorted order wins
     assert d.area_of(["sdlc:goal", "areas:x", "area:"]) == "repo"
     assert d.area_of([]) == "repo" and d.area_of(None) == "repo"
 

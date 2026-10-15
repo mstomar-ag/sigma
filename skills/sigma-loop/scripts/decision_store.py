@@ -375,6 +375,47 @@ def _rulebook_rel(sdlc_dir, config):
         return ".sdlc/rulebook.json"
 
 
+def _default_ref(root):
+    """The remote default branch ref (origin/HEAD, else origin/main, origin/master), or None."""
+    head = _git(root, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD").stdout.strip()
+    for ref in ([head] if head else []) + ["origin/main", "origin/master"]:
+        if _git(root, "rev-parse", "-q", "--verify", ref + "^{commit}").returncode == 0:
+            return ref
+    return None
+
+
+def evidence_paths(sdlc_dir, config):
+    """(root, [paths relative to root]) of the records folder, the autonomy folder and the rulebook file."""
+    sdlc = os.path.abspath(str(sdlc_dir))
+    root = os.path.dirname(sdlc)
+    rel = os.path.relpath(sdlc, root)
+    return root, [os.path.join(rel, settings(config)["store_dir"]), os.path.join(rel, "autonomy"),
+                  _rulebook_rel(sdlc, config)]
+
+
+def commits_differing(sdlc_dir, config, behind=True):
+    """Commits touching the evidence paths: those on the default branch not in HEAD (`behind`), or those in
+    HEAD not on the default branch. Read-only. `(count, [path names touched])`; `(0, [])` when it cannot
+    be told (not a repository, no remote default branch, git missing): never a reason to refuse by itself."""
+    try:
+        root, paths = evidence_paths(sdlc_dir, config)
+        ref = _default_ref(root)
+        if ref is None:
+            return 0, []
+        span = "HEAD..%s" % ref if behind else "%s..HEAD" % ref
+        count = _git(root, "rev-list", "--count", span, "--", *paths)
+        if count.returncode != 0 or not count.stdout.strip().isdigit() or int(count.stdout) == 0:
+            return 0, []
+        files = _git(root, "log", "--name-only", "--format=", span, "--", *paths).stdout.split()
+        names = sorted({next((p for p in (("decisions" if x.startswith(paths[0] + "/") else None),
+                                          ("autonomy" if x.startswith(paths[1] + "/") else None),
+                                          ("rulebook" if x == paths[2] else None)) if p), "evidence")
+                        for x in files})
+        return int(count.stdout), names
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return 0, []
+
+
 def publish(sdlc_dir, config):
     """Commit (never push) the records folder, the autonomy folder and the rulebook file, and nothing else.
 
