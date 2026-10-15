@@ -5,6 +5,7 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - **Headless judge calls no longer read the caller's project (#1472).** The import classifier, drift judge and unit assigner/validator now run `claude -p` in a fresh empty temporary directory (refused under an instruction-file ancestor), without `CLAUDE_PROJECT_DIR`, and with `--setting-sources user`, `--strict-mcp-config` and `--no-session-persistence` when the installed CLI lists them; the privacy and rulebook docs state what each call sends.
+- **The model import classifier charges a cut-off call its real cost and stops at the first budget cut-off (#1471).** The CLI checks `--max-budget-usd` only after a turn, so the default 0.05 cut off every call yet billed about 3 times the charge; a failed call now costs its envelope cost, the first cut-off stops the run with a message naming `rulebook.import.max_budget_usd_per_call`, the drift judge charges known cost on an invalid verdict, and the default is 0.50.
 
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 

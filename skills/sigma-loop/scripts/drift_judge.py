@@ -225,7 +225,7 @@ def _judge(question, docs, config, spend_state, call, now, nonce_fn):
             kind, quote = ans.get("kind"), ans.get("quote")
             usd = _num(ans.get("cost_usd"))
             valid = kind in ("consistent", "not_covered", "conflicts")
-            _record(spend_state, records, now, usd if valid and usd is not None else budget)
+            _record(spend_state, records, now, usd if usd else budget)   # a cost of 0 means no envelope, not free
             if not valid:                      # a timeout or killed call is not a verdict
                 return _nj("call_failed")
             if kind == "conflicts" and any(verify_quote(quote, t) for _, t in docs):

@@ -250,15 +250,16 @@ def _run_group(argv, timeout=60, cwd=None, env=None):
     return _Done(out, proc.returncode)
 
 
-def ask_claude(prompt, json_schema, model="sonnet", timeout_s=60, max_budget_usd=0.50):
+def ask_claude(prompt, json_schema, model="sonnet", timeout_s=60, max_budget_usd=0.50, reason_out=None):
     """Subprocess shell-out to `claude -p`, schema-constrained, tool-denied, permission-wall-free.
     -> `(payload, cost_usd)`. NEVER RAISES: a launch failure, a timeout, a non-zero exit, a
     malformed JSON envelope, or a `result`/`structured_output` that does not parse as a dict all
     degrade to `payload=None` -- every caller treats `None` exactly like a refusal, never a thing
     to catch an exception for. `cost_usd` is read independently of `payload` (see
     `_extract_cost_usd`'s own docstring): it is 0.0 only when the ENVELOPE ITSELF could never be
-    parsed at all (empty/garbage stdout, a launch failure, a timeout) -- bounded, even then, by the
-    CLI's own `--max-budget-usd` hard per-call cap passed below.
+    parsed at all (empty/garbage stdout, a launch failure, a timeout). `--max-budget-usd` is NOT a
+    hard limit: the CLI checks it only after a model turn, so one call can bill more than it, and the
+    answer is then discarded. A list passed as `reason_out` gets the envelope's subtype/is_error appended.
 
     `subprocess.run(..., timeout=timeout_s)` is a Python-level timeout, deliberately -- no shell
     `timeout` wrapper (confirmed not installed on this machine), and safe to rely on alone
@@ -285,6 +286,8 @@ def ask_claude(prompt, json_schema, model="sonnet", timeout_s=60, max_budget_usd
     if not isinstance(envelope, dict):
         return None, 0.0
     cost_usd = _extract_cost_usd(envelope)
+    if reason_out is not None:
+        reason_out.append(str(envelope.get("subtype") or ("error" if envelope.get("is_error") else "")))
     if proc.returncode != 0:
         return None, cost_usd
     return _extract_payload(envelope), cost_usd
