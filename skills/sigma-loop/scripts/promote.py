@@ -431,6 +431,14 @@ def _scope_expansion(sdlc_dir, config, unit):
     return _feature("gate_hold").scope_expansion(sdlc_dir, config, unit)
 
 
+_UPPER_TIER_LABELS = ("epic", "story", "dossier", "spec")     # #1517: tiers above a goal; never armed
+
+
+def _upper_tier(names):
+    """The first upper-tier label among `names` (case-insensitive), or None."""
+    return next((n for n in names if str(n).strip().lower() in _UPPER_TIER_LABELS), None)
+
+
 def _refusal(source, number, names, closed, demote, hold=None, unresolved=None):
     """The one reason this issue must not be touched, or None. Every message names the ROUTE, not
     just the problem -- a refusal inside the tool built to remove dead ends must not itself be one.
@@ -451,6 +459,9 @@ def _refusal(source, number, names, closed, demote, hold=None, unresolved=None):
                 "/sigma-unpark on it instead." % (number, source.parked_label))
     if demote:
         return None
+    if _upper_tier(names):
+        return "#%s is an upper tier (%s), not a goal — it is never armed; slice it into goals." % (
+            number, _upper_tier(names))
     # #1468: `needs_label_label` is deliberately NOT folded in with the pair above it. It is not a
     # human's hold and `/sigma-unpark` is not its remedy -- the goal is already approved and already
     # carries `goal_label`; it is waiting on somebody creating one `feature:` label, after which the
@@ -691,11 +702,14 @@ MIGRATE_MARKER = "<!-- sigma:migrate-confirmation -->"
 _OWNER_MARKER = "<!-- sigma:feature-ownership -->"
 _SCOPE_MARKER = "<!-- sigma:feature-scope-expansion -->"
 _FOLLOWUP_LABEL = "sdlc:followup"
+_UPKEEP_MARKER = "<!-- sigma:upkeep-finding -->"
+#: #1473: findings filed before the marker existed carry this line instead.
+_UPKEEP_BODY_LINE = "Filed by Sigma's rebase upkeep for unit"
 #: PROVISIONAL: the most labelled issues one run will read; a fetch that reaches it reports itself incomplete.
 #: Override with `ai_filed.migration.max_issues`.
 MIGRATE_FETCH_CAP = 10000
 
-Arm = collections.namedtuple("Arm", "reason qkind")
+Arm = collections.namedtuple("Arm", "reason qkind held", defaults=((),))   # #1518: held = open blockers
 Park = collections.namedtuple("Park", "reason qkind")
 
 
@@ -708,13 +722,18 @@ def _comment_bodies(issue):
 
 
 def classify_population(issue):
-    """`ownership_hold`, `scope_hold`, `followup` or `human` for one labelled issue: the gate flag comments
-    first (they carry a registry decision), then the follow-up label, else a human-typed proposal."""
+    """`ownership_hold`, `scope_hold`, `upkeep_finding`, `followup` or `human` for one labelled issue: the gate
+    flag comments first (they carry a registry decision), then an upkeep finding (body marker, or the body line
+    older ones carry; it also carries the follow-up label, so it is tested first), then the follow-up label,
+    else a human-typed proposal."""
     bodies = _comment_bodies(issue)
     if any(_OWNER_MARKER in b for b in bodies):
         return "ownership_hold"
     if any(_SCOPE_MARKER in b for b in bodies):
         return "scope_hold"
+    body = issue.get("body") or ""
+    if _UPKEEP_MARKER in body or _UPKEEP_BODY_LINE in body:
+        return "upkeep_finding"
     if _FOLLOWUP_LABEL in _label_names(issue):
         return "followup"
     return "human"
@@ -729,10 +748,15 @@ def plan_for(issue, config, unresolved=(), hold=None):
         return Park("ownership hold: a non-owner filing; the unit owner decides through the registry", "owner_hold")
     if pop == "scope_hold":
         return Park("scope-expansion hold: the unit owner decides through the registry", "scope_hold")
-    if unresolved:
-        return Park("open blocker(s) not confirmed closed: " + ", ".join(unresolved), "dependency")
+    # #1518: an OPEN blocker is not a hold -- the pick-time dependency hold and auto-unpark handle it. Armed below.
+    held = [u.split(" ")[0] for u in unresolved if u.endswith("(OPEN)")]
     if hold:
         return Park("gate hold: " + str(hold), "needs_decision")
+    if pop == "upkeep_finding":                         # #1473: a report for a person, never armed
+        text = (issue.get("title") or "") + "\n" + (issue.get("body") or "")
+        direct = "Direct commits on" in text or "no pull request accounts for" in text
+        return Park("upkeep finding: a report for a person, never armed as a goal",
+                    "needs_decision" if direct else "merge_conflict")
     ft = _feature("file_triage")
     title, body = issue.get("title") or "", issue.get("body") or ""
     if pop == "human":
@@ -741,7 +765,8 @@ def plan_for(issue, config, unresolved=(), hold=None):
         d = ft.decide(title, body, {}, config)
     if d.kind != "arm":
         return Park(d.reason, "needs_decision")
-    return Arm("human-confirmed filing" if pop == "human" else d.reason, None)
+    why = "human-confirmed filing" if pop == "human" else d.reason
+    return Arm("armed (held by %s)" % ", ".join(held) if held else why, None, tuple(held))
 
 
 def _migrate_comment(plan, pop):
@@ -818,6 +843,16 @@ def _migrate_one(source, config, sdlc_dir, item, apply, rep_item, writes=None):
     if source.proposed_label not in names:
         rep_item.update(outcome="noop", detail="no longer carries %s" % source.proposed_label)
         return
+    if _upper_tier(names):                              # #1517: retire the label only; never arm, never park
+        reason = "upper tier: label removed, not armed"
+        rep_item.update(population="upper-tier", action="unlabel", reason=reason)
+        if not apply:
+            rep_item.update(outcome="would-unlabel", detail=reason)
+            return
+        (writes or _Writes(config, time.monotonic, time.sleep)).do(
+            lambda: source._swap_labels(n, add=[], remove=[source.proposed_label]))
+        rep_item.update(outcome="unlabelled", detail=reason)
+        return
     author = data.get("author")
     author = (author.get("login") if isinstance(author, dict) else "") or ""
     issue = {"title": item.get("title") or "", "body": data.get("body") or "", "labels": sorted(names),
@@ -835,10 +870,15 @@ def _migrate_one(source, config, sdlc_dir, item, apply, rep_item, writes=None):
     arm = isinstance(plan, Arm)
     rep_item.update(population=pop, action="arm" if arm else "park", reason=plan.reason,
                     destination="armed" if arm else "parked")
+    unread = [u for u in unresolved if u.endswith("(UNREADABLE)")]
+    if unread:                                          # #1518: reported, never parked on
+        rep_item.setdefault("notes", []).append("blocker(s) unreadable, not held on: " + ", ".join(unread))
     add, remove = ([source.goal_label], [source.proposed_label]) if arm else \
                   ([source.parked_label], [source.proposed_label])
     if not arm and source.goal_label in names:
         remove.append(source.goal_label)                # a half-promoted pair is repaired by the park
+    if arm and plan.held and getattr(source, "goal_blocked_label", None):
+        add.append(source.goal_blocked_label)           # #1518: label-model "Blocked" row; auto-unpark clears it
     add = [l for l in add if l not in names]
     detail = "%s (%s; %s)" % ("arm" if arm else "park", pop, plan.reason)
     if not apply:

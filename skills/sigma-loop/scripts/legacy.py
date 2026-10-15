@@ -75,6 +75,7 @@ MARKERS = frozenset({
     "sigma:dismissed-finding", "sigma:decompose-filed", "sigma:decompose-of=",
     "sigma:decomposed-from=", "sigma:design-filed", "sigma:design-of=",
     "sigma-qkind:", "sigma-depth:", "<!-- sigma:migrate-confirmation -->",
+    "<!-- sigma:upkeep-finding -->",
 })
 
 #: For a regex that must accept either spelling of a marker's brand segment.
