@@ -134,7 +134,7 @@ def test_state_is_per_area_not_per_login(tmp_path):
 
 
 def test_watch_records_are_pruned(tmp_path):
-    cfg = _cfg(watch={"retention_days": 30})
+    cfg = _cfg(levels={"l1_min_answers": 1, "l2_min_answers": 1, "l3_min_answers": 1, "l4_min_answers": 1}, watch={"retention_days": 30})  # keep-newest-N floor of 1
     old = NOW - datetime.timedelta(days=31)
     A.record_watch(tmp_path, "needs_decision", "docs", "a", "a", cfg, now=old, machine="m1")
     A.record_watch(tmp_path, "needs_decision", "docs", "a", "a", cfg, now=NOW - datetime.timedelta(days=29), machine="m1")
