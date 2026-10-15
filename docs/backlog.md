@@ -449,7 +449,7 @@ no de-priority path.
 
 **Explicit `off`.** `discovery.blocker_promotion.mode` is `"always"` when absent. Setting it to `"off"`
 is byte-identical to a release without the feature: no read, no write, no state file, and `/sigma-doctor`
-shows no row. The older `"smart"` value is still accepted for the board pass only and is not the rule above.
+shows no row. The older `"smart"` value is still accepted for the board pass only and is not the rule above. An existing config that sets `"smart"` therefore keeps the new rule off; the first reconcile tick prints one skip line and `/sigma-doctor` shows a not-OK "blocker priority rule inactive" row. Change the one word to `"always"` (or remove the key) to turn it on.
 
 **Rollout.** On the first reconcile tick after an upgrade, the reconciler prints one stderr line saying how
 many blockers it found (the count can read 0 when the board pass has already raised them in the same tick), then raises them; later ticks print nothing. The count is kept in a small

@@ -16,6 +16,11 @@ What changes by default after you update the plugin:
   one comment each). Writes per tick are bounded to 10, so a repository with many violations is repaired over several
   ticks. Set `discovery.blocker_promotion.mode` to `off` to keep the old behaviour exactly. See
   [backlog.md](backlog.md) and [label-model.md](label-model.md).
+- **An explicit `"smart"` keeps the blocker priority rule off.** A config that already sets
+  `discovery.blocker_promotion.mode` to `"smart"` keeps that value: only the board pass runs, and the reconcile repair
+  and the block-time raise are skipped. The first reconcile tick prints one stderr line saying so, and `/sigma-doctor`
+  shows a not-OK "blocker priority rule inactive" row. To turn the rule on, change that one word to `"always"` (or
+  remove the key).
 - **The picker orders by tier first.** A goal carrying `sdlc:blocking` now sorts ahead of its tier peers, and no
   longer ahead of a higher tier. This only matters if you had blockers below the tier of what they block; the rule
   above removes that case.
