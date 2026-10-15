@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **The confirmation migration no longer arms upper-tier items (#1517).** `promote.py migrate-confirmation` removes the retired label from an item labelled epic, story, dossier or spec and reports `upper tier: label removed, not armed` (no goal label, no park); `promote.py apply` refuses such an item with one line.
 - **Blocker repair no longer writes to merged pull requests, builds edges from prose, or lets the dry pass change the cache (#1475).** The four blocker-priority writers drop any blocker that is not OPEN (MERGED and CLOSED resolve) and never raise a pull request, whole-body scans use only blocked by / depends on / depends upon, the dry pass writes nothing, and outside blockers beyond the 10-read cap are reported on stderr and in the result (`unread`).
 - **The import `folders read:` line lists only folders actually found (#1523).** A project folder skipped as not found under any profile no longer appears in the line; it stays in the `skipped:` note.
 - **An optional shared weekly and monthly spend cap covers every paid model call (#1502).** `rulebook.spend.weekly_usd` and `rulebook.spend.monthly_usd` (both unset by default, which changes nothing) cap the real cost of the import classifier and the drift judge together over a rolling 7 and 30 days; a call that would run past a cap is refused with one line, counted in `.sdlc/state/spend-cap.jsonl`, and shown by the doctor with the reset time.
