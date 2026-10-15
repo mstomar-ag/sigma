@@ -351,7 +351,8 @@ def brief(sdlc_dir, config, number, source=None, run=None):
 
     answered = _recorded_answers(body)
     current, block = park_stamp(data.get("comments")), _block_stamp(body)
-    if current and block and block != current:          # M-01: that block answered an earlier park
+    if current and block != current and (block or decision_record.enabled(config)):
+        # M-01: that block answered an earlier park; #1522: with records open an unstamped (legacy) one did too
         answered = {}
     questions = _questions_for(reason_class, reason, open_refs, answered)
     learning = _load("autonomy").learning_line(sdlc_dir, reason_class, config)
