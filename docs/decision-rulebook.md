@@ -220,6 +220,19 @@ relative to the repository root, no parent escapes). Rule fields are a closed se
 - **Matching.** Exactly one sealed approved rule for a kind and area is a recommendation. None, or two or more, mean the
   question is asked. A hard-stop kind never matches.
 - **Re-ask.** Approved rules older than `reask_days` (default 90) are listed as due for confirmation again.
+- **Wording contract.** A rule's `option` is one of the question bank's own options for its kind, spelled exactly as the
+  bank spells it (a kind with no route question takes a closing answer: `start it again` or `leave it parked`). Anything
+  else is refused. The same text is what a person's answer is recorded as (`answer`), so a drafted rule, a hand-written
+  rule and a comparison all use one key. Each option also declares what it means: unpark, keep parked, or only
+  recommends; a rule never stores that, it is read from the bank. One valid hand-written rule:
+
+  ```
+  {"id": "r1", "qkind": "merge_conflict", "area": "repo", "option": "rebase it", "status": "proposed", "created": "2026-10-01T00:00:00+00:00"}
+  ```
+
+  `rule_draft.py show .sdlc <rule_id>` prints which of the three a rule does. `autonomy.py rekey .sdlc` (dry run;
+  `--apply` removes) clears comparisons written before the shared key. Answers of kind `unknown` and free-text answers
+  never count toward a level or a draft.
 
 Drafting is deliberate and conservative:
 
@@ -233,8 +246,8 @@ python3 skills/sigma-loop/scripts/rule_draft.py approve .sdlc <rule_id>       # 
 drafts the rule, and the other part is an exam: the draft passes only when the held-out answers agree with it at
 `rulebook.rules.draft.min_agreement` (default 0.90), with at least `min_held_out` (default 5) held-out answers. It
 fails closed on a small held-out set, a tie, a missing option, a hard-stop kind, a level below 2, or a pair that already
-has a rule. It needs the rules, autonomy and records parts all open. On a public repository it refuses (the free-text
-choice it needs was never stored).
+has a rule. It needs the rules, autonomy and records parts all open. On a public repository only answers that are bank options
+are stored, so drafts and comparisons work from those alone.
 
 `approve` refuses, with one line, for an unknown id, an already approved rule, a non-owner, an unresolved login or a
 closed gate. For a login that is not an owner it prints the line that asks an owner to approve, and the rule stays proposed.
@@ -343,6 +356,15 @@ python3 skills/sigma-loop/scripts/decision_import.py remove .sdlc --project-dir 
   profile, folder and cwd are short hashes. `plan` and `apply` print one line per folder (candidates, new records);
   folders other than this repository's own are marked `(extra)`. `--only-in-repo` (or `rulebook.import.require_repo_cwd`
   `true`, default `false`) keeps only answers whose transcript `cwd` is inside this repository and prints how many were dropped.
+- **Several folders, bash and zsh.** Give one folder per flag and repeat the flag:
+  `--project-dir A --project-dir B`. To build the list in a variable, use an array and expand it as a quoted list
+  (`dirs=(--project-dir A --project-dir B)` then `"${dirs[@]}"`). A single unquoted variable holding several words is one
+  argument in zsh (zsh does not split it), so it is read as one folder that does not exist and is skipped. Every scan,
+  `plan` and `apply` prints a `folders read:` line on stderr naming the folders it found and read (a folder skipped as not found is not listed).
+- **Profiles and missing folders.** Each `--project-dir` is searched under every `--profile` given.
+  A folder found under none of them is skipped with a `skipped: project folder ... not found under ...` note, and the run continues with the other folders.
+  One call with several `--profile` options is the intended way to cover several profiles.
+  `plan` and `apply` print these notices on stderr; when a time budget, size cap or candidate cap cut the import short, `apply` also prints `partial import: N files not read, raise rulebook.import.time_budget_s and run apply again`.
 - **Removing one folder's import.** `remove .sdlc --project-dir DIR` lists the imported records and watch files whose
   origin names that folder (add `--profile` to narrow); `--apply` deletes them. Records written before origins existed
   have none: they are counted ("N legacy records have no origin; not removed") and never deleted.
@@ -396,8 +418,23 @@ The per-call figure is passed to the CLI as `--max-budget-usd`, which the CLI ch
 bill more than it, and the answer is then discarded. A failed call is charged its real cost, and the first budget
 cut-off stops the import run with a message naming `rulebook.import.max_budget_usd_per_call`; a failed call whose cost is not reported is charged the larger of the per-call figure and the dearest real call so far, and `plan` warns when the figure is below 0.15, the lowest fixed per-call cost measured from a repository root (default 0.50).
 
-The import ceiling applies to **one run** only. There is no daily or cross-run cap, so repeated runs add up. All dollar
+The import ceiling applies to **one run** only. Without the shared cap below, repeated runs add up. All dollar
 defaults are provisional.
+
+### Shared weekly and monthly cap
+
+`rulebook.spend.weekly_usd` and `rulebook.spend.monthly_usd` are optional and unset by default; while both are unset
+nothing changes and no ledger file is created. A positive number sets a rolling cap (7 and 30 days) on the real cost of
+every paid model call, the import classifier and the drift judge counted together. Before each call the spend inside the
+window is read; once it has reached the cap the call is not made. The import prints one line,
+`spend cap reached (weekly $X of $Y, resets Day HH:MM): no model call made`, and the judge returns `not_judged`
+(`spend_cap_reached`). The doctor shows the cap, the spend and, once reached, the time the window frees up.
+
+The record of calls is `.sdlc/state/spend-cap.jsonl`, one line per call, appended in one write. A torn or garbage line is
+skipped; the file is pruned of records older than 30 days once it passes 64 KB. If a cap is set and the file cannot be
+read, the call is refused rather than made blind. The check is made before a call and cannot know that call's cost, so one
+call can end a window slightly over its cap; two callers racing can both pass the check. Neither the over-run nor the race
+has been measured. Setting a cap does not count calls made before it was set.
 
 ## Migrating the old confirmation label
 
@@ -488,6 +525,8 @@ flag, which closes the whole block.
 | `import.profile_dirs`, `import.project_dirs` | `[]` | same as `--profile`, `--project-dir` |
 | `import.classifier` | `"table"` | `"table"` or `"model"` |
 | `import.model` | `"haiku"` | model for the classifier |
+| `spend.weekly_usd` | `null` | rolling 7-day cap shared by classifier and judge; unset means none |
+| `spend.monthly_usd` | `null` | rolling 30-day cap shared by classifier and judge; unset means none |
 | `import.max_budget_usd_per_call` | `0.50` | classifier per call |
 | `import.max_budget_usd_per_run` | `1.0` | classifier per run |
 | `import.timeout_s` | `60` | classifier per call |

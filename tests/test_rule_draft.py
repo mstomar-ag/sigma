@@ -42,11 +42,12 @@ def _train(sd, cfg, choices, qkind="needs_decision", area="docs", watch=True):
     ids = ["r%03d" % i for i in range(40)]
     side = RD.split(ids)
     for rid in ids:
-        DS.append(sd, {"id": rid, "how": "human", "qkind": qkind, "area": area,
-                       "choice": choices(rid, "draft" if rid in side[0] else "held")}, cfg, now=T0)
+        c = choices(rid, "draft" if rid in side[0] else "held")
+        DS.append(sd, {"id": rid, "how": "human", "qkind": qkind, "area": area, "choice": c,
+                       "answer": c if c in ("start it again", "leave it parked") else "free"}, cfg, now=T0)
     if watch:
         for _ in range(8):
-            AU.record_watch(sd, qkind, area, "merge", "merge", cfg, now=T0, machine="m1")
+            AU.record_watch(sd, qkind, area, "start it again", "start it again", cfg, now=T0, machine="m1")
     return ids
 
 
@@ -60,27 +61,27 @@ def test_split_is_deterministic_and_order_free():
 
 def test_list_respects_level_and_threshold(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg()
-    _train(sd, cfg, lambda r, s: "merge")
+    _train(sd, cfg, lambda r, s: "start it again")
     rows = RD.list_patterns(sd, cfg)
-    assert [(r["qkind"], r["area"], r["option"]) for r in rows] == [("needs_decision", "docs", "merge")]
+    assert [(r["qkind"], r["area"], r["option"]) for r in rows] == [("needs_decision", "docs", "start it again")]
     assert rows[0]["level"] >= 2 and rows[0]["agreement"] == 1.0
     # level below 2: no watch comparisons
     sd2 = str(tmp_path / "b" / ".sdlc")
-    _train(sd2, cfg, lambda r, s: "merge", watch=False)
+    _train(sd2, cfg, lambda r, s: "start it again", watch=False)
     assert RD.list_patterns(sd2, cfg) == []
     # agreement below threshold
     sd3 = str(tmp_path / "c" / ".sdlc")
-    _train(sd3, cfg, lambda r, s: "merge" if int(r[1:]) % 2 else "wait")
+    _train(sd3, cfg, lambda r, s: "start it again" if int(r[1:]) % 2 else "leave it parked")
     assert RD.list_patterns(sd3, cfg) == []
 
 
 def test_draft_links_sources_and_only_proposes(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg()
-    ids = _train(sd, cfg, lambda r, s: "merge")
+    ids = _train(sd, cfg, lambda r, s: "start it again")
     out = RD.draft(sd, "needs_decision", "docs", cfg, now=T0)
     assert out["status"] == "drafted"
     rules = RB.load(sd, cfg)
-    assert len(rules) == 1 and rules[0]["status"] == "proposed" and rules[0]["option"] == "merge"
+    assert len(rules) == 1 and rules[0]["status"] == "proposed" and rules[0]["option"] == "start it again"
     assert set(out["sources"]) <= set(ids) and out["sources"]
     assert all(s in rules[0]["reason"] for s in out["sources"][:3])
     assert RB.match("needs_decision", "docs", None, rules, cfg) is None  # proposed never acts
@@ -89,7 +90,7 @@ def test_draft_links_sources_and_only_proposes(tmp_path):
 
 def test_exam_fails_closed_when_held_out_disagrees(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg()
-    _train(sd, cfg, lambda r, s: "merge" if s == "draft" else "wait")
+    _train(sd, cfg, lambda r, s: "start it again" if s == "draft" else "leave it parked")
     out = RD.draft(sd, "needs_decision", "docs", cfg, now=T0)
     assert out["status"] == "refused" and "exam" in out["reason"]
     assert RB.load(sd, cfg) == []
@@ -97,18 +98,18 @@ def test_exam_fails_closed_when_held_out_disagrees(tmp_path):
 
 def test_exam_fails_closed_when_held_out_too_small(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg(draft={"min_held_out": 500})
-    _train(sd, cfg, lambda r, s: "merge")
+    _train(sd, cfg, lambda r, s: "start it again")
     assert RD.draft(sd, "needs_decision", "docs", cfg, now=T0)["status"] == "refused"
     assert RB.load(sd, cfg) == []
 
 
 def test_refuses_low_level_unknown_pair_and_existing_rule(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg()
-    _train(sd, cfg, lambda r, s: "merge", watch=False)
+    _train(sd, cfg, lambda r, s: "start it again", watch=False)
     assert RD.draft(sd, "needs_decision", "docs", cfg)["status"] == "refused"
     assert RD.draft(sd, "needs_decision", "nope", cfg)["status"] == "refused"
     sd2 = str(tmp_path / "b" / ".sdlc")
-    _train(sd2, cfg, lambda r, s: "merge")
+    _train(sd2, cfg, lambda r, s: "start it again")
     assert RD.draft(sd2, "needs_decision", "docs", cfg, now=T0)["status"] == "drafted"
     assert RD.draft(sd2, "needs_decision", "docs", cfg, now=T0)["status"] == "refused"
     assert len(RB.load(sd2, cfg)) == 1
@@ -116,14 +117,14 @@ def test_refuses_low_level_unknown_pair_and_existing_rule(tmp_path):
 
 def test_hard_stop_kind_never_drafted(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg()
-    _train(sd, cfg, lambda r, s: "merge", qkind="irreversible")
+    _train(sd, cfg, lambda r, s: "start it again", qkind="irreversible")
     assert RD.list_patterns(sd, cfg) == []
     assert RD.draft(sd, "irreversible", "docs", cfg)["status"] == "refused"
 
 
 def test_closed_gates_are_inert(tmp_path):
     sd = _sd(tmp_path)
-    _train(sd, _cfg(), lambda r, s: "merge")
+    _train(sd, _cfg(), lambda r, s: "start it again")
     for cfg in (_cfg(rulebook=False), _cfg(autonomy=False), {}, None):
         assert RD.list_patterns(sd, cfg) == []
         assert RD.draft(sd, "needs_decision", "docs", cfg)["status"] == "refused"
@@ -137,12 +138,12 @@ def test_bad_threshold_reads_as_default():
 
 def test_cli_list_and_draft(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg()
-    _train(sd, cfg, lambda r, s: "merge")
+    _train(sd, cfg, lambda r, s: "start it again")
     pathlib.Path(sd, "config.json").write_text(json.dumps(cfg))
     run = lambda *a: subprocess.run([sys.executable, str(SCRIPTS / "rule_draft.py"), *a],
                                     capture_output=True, text=True, stdin=subprocess.DEVNULL)
     r = run("list", sd)
-    assert r.returncode == 0 and json.loads(r.stdout)[0]["option"] == "merge"
+    assert r.returncode == 0 and json.loads(r.stdout)[0]["option"] == "start it again"
     r = run("draft", sd, "needs_decision", "docs")
     assert r.returncode == 0 and json.loads(r.stdout)["status"] == "drafted"
     r = run("draft", sd, "needs_decision", "docs")
@@ -154,30 +155,30 @@ def _public(cfg):
     return cfg
 
 
-def test_public_visibility_says_plainly_it_cannot_draft(tmp_path):
+def test_public_visibility_drafts_from_bank_options_only(tmp_path):
+    """M-13: on public visibility a bank option survives redaction, so it can draft; free text cannot."""
     sd = _sd(tmp_path)
-    _train(sd, _cfg(), lambda r, s: "merge")  # private store has the choices
     cfg = _public(_cfg())
+    _train(sd, cfg, lambda r, s: "start it again")
     out = RD.draft(sd, "needs_decision", "docs", cfg, now=T0)
-    assert out["status"] == "refused" and "public" in out["reason"] and "cannot draft" in out["reason"]
-    assert not os.path.exists(os.path.join(sd, "rulebook"))
-    # a store really written under public visibility has no choice at all
+    assert out["status"] == "drafted" and out["option"] == "start it again"
+    # free-text answers are dropped by the public store: nothing to read, so no draft
     sd2 = str(tmp_path / "p" / ".sdlc")
-    _train(sd2, cfg, lambda r, s: "merge")
+    _train(sd2, cfg, lambda r, s: "improvise it")
     out2 = RD.draft(sd2, "needs_decision", "docs", cfg, now=T0)
-    assert out2["status"] == "refused" and "public" in out2["reason"]
+    assert out2["status"] == "refused" and not os.path.exists(os.path.join(sd2, "rulebook"))
 
 
-def test_public_visibility_cli_is_explicit_not_silent(tmp_path):
+def test_public_visibility_cli_lists_and_drafts_bank_options(tmp_path):
     sd, cfg = _sd(tmp_path), _public(_cfg())
-    _train(sd, cfg, lambda r, s: "merge")
+    _train(sd, cfg, lambda r, s: "start it again")
     pathlib.Path(sd, "config.json").write_text(json.dumps(cfg))
     run = lambda *a: subprocess.run([sys.executable, str(SCRIPTS / "rule_draft.py"), *a],
                                     capture_output=True, text=True, stdin=subprocess.DEVNULL)
     r = run("list", sd)
-    assert r.returncode == 1 and "public" in r.stderr and r.stdout.strip() == ""
+    assert r.returncode == 0 and json.loads(r.stdout)[0]["option"] == "start it again"
     r = run("draft", sd, "needs_decision", "docs")
-    assert r.returncode == 1 and "public" in json.loads(r.stdout)["reason"]
+    assert r.returncode == 0 and json.loads(r.stdout)["status"] == "drafted"
 
 
 def test_gate_closed_public_visibility_stays_inert_and_unchanged(tmp_path):
@@ -195,9 +196,9 @@ def test_gate_closed_public_visibility_stays_inert_and_unchanged(tmp_path):
 def _train_how(sd, cfg, qkind, how, area="docs"):
     ids = ["r%03d" % i for i in range(40)]
     for rid in ids:
-        DS.append(sd, {"id": rid, "how": how, "qkind": qkind, "area": area, "choice": "merge"}, cfg, now=T0)
+        DS.append(sd, {"id": rid, "how": how, "qkind": qkind, "area": area, "choice": "start it again"}, cfg, now=T0)
     for _ in range(8):
-        AU.record_watch(sd, qkind, area, "merge", "merge", cfg, now=T0, machine="m1")
+        AU.record_watch(sd, qkind, area, "start it again", "start it again", cfg, now=T0, machine="m1")
 
 
 def test_imported_unknown_records_never_feed_a_draft(tmp_path):

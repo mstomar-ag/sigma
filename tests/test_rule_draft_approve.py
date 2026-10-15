@@ -31,7 +31,7 @@ def _setup(tmp_path, monkeypatch, login="boss", cfg=None, propose=True):
     monkeypatch.setattr(RD, "_invoker", lambda config: login)
     path = None
     if propose:
-        path = RB.propose(sd, {"qkind": "needs_decision", "area": "docs", "option": "merge", "reason": "r"},
+        path = RB.propose(sd, {"qkind": "needs_decision", "area": "docs", "option": "start it again", "reason": "r"},
                           _cfg(), now=T0)
     return sd, path
 
@@ -51,7 +51,7 @@ def test_approve_by_id_makes_rule_match(tmp_path, monkeypatch, capsys):
     assert rid in capsys.readouterr().out
     rules = RB.load(sd, _cfg())
     assert rules[0]["status"] == "approved" and rules[0]["confirmed"] and rules[0]["seal"]
-    assert RB.match("needs_decision", "docs", "merge", rules, _cfg())
+    assert RB.match("needs_decision", "docs", "start it again", rules, _cfg())
 
 
 def test_unknown_id_refused_one_line(tmp_path, monkeypatch, capsys):

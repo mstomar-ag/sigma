@@ -5,7 +5,7 @@ import test_applier as T
 
 AP = T.AP
 T0, MIN = T.T0, T.MIN
-SILENT = {"allow_silent": ["needs_decision"], "max_auto_applied_per_day": 100}
+SILENT = {"allow_silent": ["merge_conflict"], "max_auto_applied_per_day": 100}
 
 
 def _counter(sd):
@@ -13,7 +13,7 @@ def _counter(sd):
 
 
 def _open(sd, cfg, issue, area="docs"):
-    return AP.open_ask(sd, issue, "needs_decision", area, ["merge", "wait"], cfg, T0)
+    return AP.open_ask(sd, issue, "merge_conflict", area, ["rebase it", "start fresh"], cfg, T0)
 
 
 def _run(sd, cfg, src, issues, area="docs", step=61):

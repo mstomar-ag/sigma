@@ -64,7 +64,8 @@ def test_lister_failure_one_stderr_line_stdout_unchanged(tmp_path, capsys):
     assert m.main(["scan", str(sdlc)], lister=lambda c, l: []) == 0
     clean = capsys.readouterr()
     assert bad.out == clean.out
-    assert len(bad.err.strip().splitlines()) == 1 and "decision_import" in bad.err
+    bad_err = [ln for ln in bad.err.splitlines() if not ln.startswith("folders read:")]
+    assert len(bad_err) == 1 and "decision_import" in bad.err
 
 
 def test_gate_closed_no_list_call_and_silent(tmp_path, capsys):
@@ -73,4 +74,4 @@ def test_gate_closed_no_list_call_and_silent(tmp_path, capsys):
     called = []
     assert m.main(["scan", str(sdlc)], lister=lambda c, l: called.append(1) or []) == 0
     out = capsys.readouterr()
-    assert called == [] and out.err == ""
+    assert called == [] and [ln for ln in out.err.splitlines() if not ln.startswith("folders read:")] == []

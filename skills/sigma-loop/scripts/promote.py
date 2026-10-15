@@ -847,11 +847,31 @@ def _migrate_one(source, config, sdlc_dir, item, apply, rep_item, writes=None):
     writes = writes or _Writes(config, time.monotonic, time.sleep)
     writes.do(lambda: source._swap_labels(n, add=add, remove=remove))   # ONE mutation: removal rides with the addition
     rep_item.update(outcome="armed" if arm else "parked", detail=detail)
+    board = bool(getattr(source, "board_active", False))
     if arm and hasattr(source, "_set_board_status"):
         try:
-            writes.do(lambda: source._set_board_status(n, source.col["ready"]))
+            moved = writes.do(lambda: source._set_board_status(n, source.col["ready"]))
+        except Exception:                               # noqa: BLE001 - the label landed; a raise is an unmoved card
+            moved = False
+        if not moved and board:
+            rep_item["card_unmoved"] = True
+            rep_item.setdefault("notes", []).append(
+                "label landed but the board card did not move to %r; on a board-queue repo the loop cannot "
+                "pick it until it is moved" % source.col["ready"])
+    elif not arm and board and hasattr(source, "_set_board_status"):
+        # Mirror `_offboard`: Parked, falling back to Blocked. Labels decide a park's eligibility, so an
+        # unmoved park card is a note, not an incomplete run.
+        col = source.col
+        try:
+            landed = writes.do(lambda: source._set_board_status(n, col.get("parked", "Parked"), warn=False))
+            if not landed:
+                landed = writes.do(lambda: source._set_board_status(n, col.get("blocked", "Blocked")))
         except Exception:                               # noqa: BLE001 - the label landed; the card is best-effort
-            rep_item.setdefault("notes", []).append("board card not moved")
+            landed = False
+        if not landed:
+            rep_item.setdefault("notes", []).append(
+                "label landed but the board card did not move to %r or %r" % (
+                    col.get("parked", "Parked"), col.get("blocked", "Blocked")))
     if not any(MIGRATE_MARKER in b for b in issue["comments"]):
         try:
             writes.do(lambda: source._issue_comment(n, _migrate_comment(plan, pop)))
@@ -942,6 +962,14 @@ def migrate(source, config, apply=False, sdlc_dir=".sdlc", unit=None, only=None,
     rep["covered"] = sum(1 for r in rep["items"] if r["outcome"] != "failed")
     rep["pauses"] = writes.pauses
     rep["complete"] = rep["covered"] == rep["total"] and not rep["truncated"]
+    rep["cards_unmoved"] = sum(1 for r in rep["items"] if r.get("card_unmoved"))
+    if rep["cards_unmoved"]:
+        try:
+            queue_is_board = bool(source._ready_lane())
+        except Exception:                               # noqa: BLE001 - unknown lane: treat as the board queue
+            queue_is_board = True
+        if queue_is_board:
+            rep["complete"] = False                     # an armed card off the Ready lane is unpickable
     if apply:
         try:
             left = sources.fetch_issues_rest(source._run, getattr(source, "repo", None), [source.proposed_label],
@@ -975,6 +1003,10 @@ def render_migrate(rep):
     counts = collections.Counter(r["outcome"] for r in rep["items"])
     lines.append("summary: " + (", ".join("%d %s" % (v, k) for k, v in sorted(counts.items())) or "nothing to do"))
     lines.append("covered %d of %d" % (rep["covered"], rep["total"]))
+    if rep.get("cards_unmoved"):
+        lines.append("INCOMPLETE: %d armed card(s) not moved to 'Ready': %s; move them by hand, or run the "
+                     "board-migration seed step" % (rep["cards_unmoved"], ", ".join(
+                         "#" + r["number"] for r in rep["items"] if r.get("card_unmoved"))))
     if rep.get("pauses"):
         lines.append("paused %d time(s) on a rate limit" % rep["pauses"])
     if rep.get("verify_error"):

@@ -1985,6 +1985,30 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/spend_cap.py",
+      "function": "_prune",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "off by default: runs only when rulebook.spend.weekly_usd or monthly_usd is set (a paid call records into it); writes only its own spend-cap ledger under the sigma state directory, append-only, pruned by age through a temp file then replace; never deletes user data",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/spend_cap.py",
+      "function": "_prune",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "off by default: runs only when rulebook.spend.weekly_usd or monthly_usd is set (a paid call records into it); writes only its own spend-cap ledger under the sigma state directory, append-only, pruned by age through a temp file then replace; never deletes user data",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/spend_cap.py",
+      "function": "append",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "off by default: runs only when rulebook.spend.weekly_usd or monthly_usd is set (a paid call records into it); writes only its own spend-cap ledger under the sigma state directory, append-only, pruned by age through a temp file then replace; never deletes user data",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/state.py",
       "function": "_patch_cursor",
       "rule": "fs-remove",
@@ -3566,6 +3590,14 @@
       "rule": "fs-remove",
       "count": 1,
       "gate": "rulebook.autonomy.enabled is exactly true; removes only watch files in the autonomy folder older than autonomy.watch.retention_days by embedded time; vetoes and links are never touched",
+      "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/autonomy.py",
+      "function": "rekey",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "operator-run verb, dry run unless --apply; rulebook.autonomy.enabled is exactly true; removes only watch files in the autonomy folder whose would is a bank option and whose actual is a closing answer; vetoes and links are never touched",
       "risk": "high"
     },
     {

@@ -286,6 +286,8 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
             refusals.append("project folder reference %s unknown: cannot be resolved" % r)
     profs = _profiles(config, limits, profile_dirs)
     seen = set()
+    unread = [0]
+    found_names = []                                # #1523: only folders resolved under a profile
     for name in dict.fromkeys(names):
         found = False
         for prof in profs:
@@ -293,21 +295,28 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
             if not folder.is_dir():
                 continue
             found = True
+            if name not in found_names:
+                found_names.append(name)
             try:
                 files = sorted(folder.glob("*.jsonl"))
             except OSError:
                 files = []
             for f in files:
-                if full or timed_out or f in seen:
+                if f in seen:
+                    continue
+                if full or timed_out:
+                    unread[0] += 1
                     continue
                 seen.add(f)
                 if clock() > deadline:
                     timed_out = True
+                    unread[0] += 1
                     continue
                 try:
                     size = f.stat().st_size
                     if size > limits["max_file_bytes"]:
                         stats["transcript"]["skipped"] += 1
+                        unread[0] += 1
                         refusals.append("%s (%d bytes) skipped: over the size cap of %d bytes" % (
                             f.name, size, limits["max_file_bytes"]))
                         continue
@@ -329,7 +338,8 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
                 cands += got
                 full = len(cands) >= cap
         if not found and name != names[0]:
-            refusals.append("project folder %s not found under the given profiles" % name)
+            refusals.append("project folder %s not found under %s; the other folders were read" % (
+                name, ", ".join(str(x) for x in profs) or "no profile"))
     comments_timed_out = False
     if not full and limits["comments"]:
         try:
@@ -365,10 +375,40 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
     for c in cands:
         stats[c["source"]]["candidates"] += 1
         stats[c["source"]]["superseded"] += 1 if c["superseded"] else 0
-    res = {"candidates": cands, "stats": stats, "refusals": refusals}
+    res = {"candidates": cands, "stats": stats, "refusals": refusals,
+           "unread": unread[0] + stats["transcript"]["partial"],
+           "folders": found_names}
     if filtering:
         res["dropped"] = dropped[0]
     return res
+
+
+_TRUNCATIONS = ("time budget reached", "candidate cap of", "over the size cap", "partially read")
+
+
+def _notice_lines(out):
+    """Scan notices as printed lines: a missing project folder is `skipped:`, the rest keep `refused:`."""
+    lines = []
+    for r in out.get("refusals", []):
+        skipped = r.startswith("project folder ") and " not found under " in r
+        lines.append(("skipped: " if skipped else "refused: ") + r)
+    return lines
+
+
+def _print_notices(out):
+    for line in _notice_lines(out):
+        print(line, file=sys.stderr)
+
+
+def _print_folders_read(out):
+    """#1503: name the project folders the scan found and read, on stderr (#1523: not-found ones are left out)."""
+    print("folders read: %s" % ", ".join(out.get("folders", [])), file=sys.stderr)
+
+
+def _print_partial(out):
+    if any(t in r for r in out.get("refusals", []) for t in _TRUNCATIONS):
+        print("partial import: %d files not read, raise rulebook.import.time_budget_s and run apply again" % (
+            out.get("unread", 0)))
 
 
 def candidates(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None):
@@ -489,6 +529,15 @@ def _declared_or(cand, kind, qkinds):
     return d if d in qkinds and d != UNKNOWN else kind
 
 
+def _cap_refused(sdlc_dir, config, info):
+    """True (and `info["cap_refused"]` set) when the shared weekly or monthly spend cap forbids another call."""
+    res = _load("spend_cap").check(sdlc_dir, config)
+    if res["ok"]:
+        return False
+    info["cap_refused"] = res
+    return True
+
+
 def classify_model(sdlc_dir, config, cands, call, skip=()):
     """-> (rows, info). Rows like `classify`. `call is None` sends nothing (plan): uncached rows are
     unknown and counted as would_send. An invalid answer is unknown and cached; an error or timeout is unknown, uncached and
@@ -515,6 +564,10 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
             info["stopped_after"] = info["sent"]
             rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
             continue
+        elif _cap_refused(sdlc_dir, config, info):
+            info["stopped_after"] = info["sent"]
+            rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
+            continue
         else:
             info["sent"] += 1
             try:
@@ -528,7 +581,9 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
             if ok:
                 info["max_real_cost"] = max(info["max_real_cost"], cost)
             # no envelope at all: the cap is not a hard limit, so charge the larger of it and the dearest real call
-            info["spent"] += cost if ok else max(lim["max_budget_usd_per_call"], info["max_real_cost"])
+            charged = cost if ok else max(lim["max_budget_usd_per_call"], info["max_real_cost"])
+            info["spent"] += charged
+            _load("spend_cap").record(sdlc_dir, config, "import", charged)   # shared rolling cap (#1502)
             if not isinstance(ans, dict) or ans.get("failed"):  # no answer: not cached, not stored, retried next run
                 info["timed_out"] += 1
                 if isinstance(ans, dict) and "budget" in str(ans.get("reason") or ""):
@@ -683,6 +738,7 @@ def apply(sdlc_dir, config, cands, call=None):
         out["stopped_after"] = info["stopped_after"]
         out["timed_out"] = info["timed_out"]
         out["over_budget"] = info.get("over_budget", 0)
+        out["cap_refused"] = info.get("cap_refused")
         out["model"] = info
     out["folders"] = folder_counts(cands, new)
     for r in new:
@@ -725,7 +781,8 @@ def _add_options(v):
     v.add_argument("--profile", action="append", default=[], metavar="DIR",
                    help="Claude Code profile directory (repeatable)")
     v.add_argument("--project-dir", action="append", default=[], metavar="DIR",
-                   help="extra project folder: a folder name or a path (repeatable); "
+                   help="extra project folder: a folder name or a path, one folder per flag "
+                        "(repeat the flag; one value holding several folders is read as one); "
                         "a dash-leading name works as: --project-dir -srv-demo-work-repo")
     v.add_argument("--only-in-repo", action="store_true",
                    help="keep only transcript answers whose cwd is inside this repository")
@@ -850,6 +907,9 @@ def main(argv=None, lister=None, comments_fn=None):
                 " ".join(str(exc).split())[:160] or type(exc).__name__), file=sys.stderr)
     out = scan(args.sdlc_dir, config, args.profile or None, issues=issues, comments_fn=comments_fn,
                project_dirs=args.project_dir or None, only_in_repo=True if args.only_in_repo else None)
+    _print_folders_read(out)
+    if args.verb in ("plan", "apply"):
+        _print_notices(out)
     if args.verb == "plan":
         pl = plan(args.sdlc_dir, config, out["candidates"])
         if not pl["gate"]:
@@ -879,11 +939,15 @@ def main(argv=None, lister=None, comments_fn=None):
                                                           (" (%s)" % res["note"]) if res["note"] else ""))
         _print_folders(res["folders"])
         _print_dropped(out)
+        _print_partial(out)
         if res.get("over_budget"):
             m = res["model"]
             print("%d call(s) exceeded the per-call budget $%.2f (real cost about $%.2f each, answers discarded, run "
                   "stopped): raise rulebook.import.max_budget_usd_per_call" % (
                       res["over_budget"], m["per_call"], m["max_real_cost"]))
+        elif res.get("cap_refused"):
+            print(_load("spend_cap").refusal_line(res["cap_refused"]) +
+                  ": the rest stay unclassified, run apply again later")
         elif res.get("stopped_after") is not None:
             print("ceiling stopped the run after %d model calls: the rest stay unclassified, run apply again" % (
                 res["stopped_after"]))
@@ -897,8 +961,8 @@ def main(argv=None, lister=None, comments_fn=None):
             name, st["files_read"], st["candidates"], st["skipped"], st["superseded"],
             st["partial"], st["bytes_read"]))
     _print_dropped(out)
-    for r in out["refusals"]:
-        print("refused: " + r)
+    for line in _notice_lines(out):
+        print(line)
     for c in out["candidates"][:SAMPLE_LINES]:
         print("  - [%s] %s -> %s%s" % (c["source"], _clip(c["question"]), _clip(c["choice"]),
                                        " (superseded)" if c["superseded"] else ""))
