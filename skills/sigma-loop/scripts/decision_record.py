@@ -60,7 +60,7 @@ def area_of(labels):
     return REPO_AREA
 
 
-def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None):
+def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None, answer=None):
     """A plain record dict. An unusable kind reads `unknown`; an empty choice gets a placeholder."""
     rec = {"gesture": gesture,
            "qkind": qkind_ if qkind_ in qkind.QKINDS else "unknown",
@@ -72,6 +72,8 @@ def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None):
         rec["rule_id"] = str(rule_id)
     if area:
         rec["area"] = str(area)
+    if answer:
+        rec["answer"] = str(answer)
     return rec
 
 
@@ -96,6 +98,73 @@ def point(sdlc_dir, rid, record, config):
         pass
 
 
+_UNPARK = []
+
+
+def _unpark():
+    """The question bank's owner, loaded once. Lazy: unpark loads this module at import."""
+    if not _UNPARK:
+        _UNPARK.append(_load("unpark"))
+    return _UNPARK[0]
+
+
+def visibility(config):
+    return decision_store._visibility(config)
+
+
+#: Gestures that are not an answer to a park question: they never feed a pair's answers, its
+#: majority, its draft or its level (F-10 by gesture; ack records are written as kind `unknown`).
+NOT_PARK_ANSWERS = ("promote", "demote", "ack")
+
+#: Keys that are never a prediction and never agreement (M-06): a non-bank answer, an unclassified kind.
+UNLEARNABLE_KEYS = ("free", "unknown")
+
+
+def is_park_answer(rec):
+    """True for a record that answers a park once: not a promote/demote/ack gesture, not a repeat of
+    an answer already counted for the same (issue, park)."""
+    return (isinstance(rec, dict) and rec.get("gesture") not in NOT_PARK_ANSWERS
+            and not rec.get("repeat"))
+
+
+def key_of(rec):
+    """The one comparison key of a record: `answer` (the route option, F-01), else the `reason` when
+    it names a bank option of the record's kind (M-07, records made before `answer` existed), else
+    `choice`. None when none is usable text."""
+    if not isinstance(rec, dict):
+        return None
+    ans = rec.get("answer")
+    if isinstance(ans, str) and ans:
+        return ans
+    kind = rec.get("qkind")
+    reason = rec.get("reason")
+    if isinstance(reason, str) and reason and isinstance(kind, str) and _unpark().route_slot(kind):
+        opt = _unpark().bank_option(kind, reason)
+        if opt:
+            return opt
+    ch = rec.get("choice")
+    return ch if isinstance(ch, str) and ch else None
+
+
+def answered_park(sdlc_dir, config, issue, park):
+    """True when a counted human record already exists for (issue, park). Never raises."""
+    try:
+        return any(str(r.get("issue")) == str(issue) and r.get("park") == park and r.get("how") == "human"
+                   and not r.get("repeat") for r in decision_store.list_by(sdlc_dir, config))
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def bank_key(kind, key):
+    """True when `key` is publishable for `kind`: a bank option (route or closing answer)."""
+    try:
+        u = _unpark()
+        return isinstance(key, str) and (u.bank_option(kind, key) is not None
+                                         or key in [o for o in u.CLOSING_QUESTION["options"]])
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
 def _would_pick(sdlc_dir, record, config):
     """The option a sealed approved rule gives, else the unique most common earlier human choice of
     the same kind and area once `l1_min_answers` of them exist, else None."""
@@ -104,9 +173,11 @@ def _would_pick(sdlc_dir, record, config):
     m = rb.match(kind, area, None, rb.load(sdlc_dir, config), config) if rb.enabled(config) else None
     if m:
         return m.option
-    earlier = [r.get("choice") for r in decision_store.list_by(sdlc_dir, config, qkind=kind)
-               if r.get("how") == "human" and (r.get("area") or REPO_AREA) == area
-               and isinstance(r.get("choice"), str) and r.get("choice")]
+    if kind == "unknown":
+        return None
+    earlier = [key_of(r) for r in decision_store.list_by(sdlc_dir, config, qkind=kind)
+               if r.get("how") == "human" and (r.get("area") or REPO_AREA) == area and is_park_answer(r)
+               and key_of(r) and key_of(r) not in UNLEARNABLE_KEYS]
     if len(earlier) < au._pair_settings(sdlc_dir, kind, area, config)[0]["l1_min_answers"]:
         return None
     counts = {}
@@ -128,12 +199,11 @@ def _safe(fn, *args):
 def would_for(sdlc_dir, record, config):
     """What the rulebook or the earlier human answers would have chosen for this record, or None.
     Call BEFORE the record is appended so the answer is not in its own majority. Skipped (None) for a
-    non-human record, closed autonomy, or public record visibility (the watch file would carry the
-    free-text choice). Best-effort: never raises."""
+    non-human record, closed autonomy, or a promote/demote/ack gesture. On public visibility the
+    comparison is written only when both sides are bank options (M-13). Best-effort: never raises."""
     try:
-        if record.get("how") != "human" or not _load("autonomy").enabled(config):
-            return None
-        if decision_store._visibility(config) == "public":
+        if (record.get("how") != "human" or not _load("autonomy").enabled(config)
+                or record.get("gesture") in NOT_PARK_ANSWERS):
             return None
         return _would_pick(sdlc_dir, record, config)
     except Exception:                                   # noqa: BLE001 - a watch problem never touches the gesture
@@ -143,10 +213,14 @@ def would_for(sdlc_dir, record, config):
 def record_comparison(sdlc_dir, record, would, config):
     """AFTER a successful append: write what `would` chose next to what the person chose. Never raises."""
     try:
-        if would is None:
+        if would is None or record.get("repeat") or record.get("gesture") in NOT_PARK_ANSWERS:
             return
+        actual = key_of(record)
+        if visibility(config) == "public" and not (bank_key(record.get("qkind"), actual)
+                                                   and bank_key(record.get("qkind"), would)):
+            return                                      # M-13: public only ever carries enumerated keys
         _load("autonomy").record_watch(sdlc_dir, record.get("qkind"), record.get("area") or REPO_AREA,
-                                       would, record.get("choice"), config)
+                                       would, actual, config)
     except Exception:                                   # noqa: BLE001
         pass
 
@@ -160,7 +234,7 @@ def write_all(sdlc_dir, record, config, source, text="", poster=None):
     if not enabled(config):
         return out
     try:
-        would = _safe(would_for, sdlc_dir, record, config)
+        would = None if record.get("repeat") else _safe(would_for, sdlc_dir, record, config)
         out["id"] = decision_store.append(sdlc_dir, record, config)
         point(sdlc_dir, out["id"], record, config)
         if out["id"]:

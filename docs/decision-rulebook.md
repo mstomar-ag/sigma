@@ -220,6 +220,19 @@ relative to the repository root, no parent escapes). Rule fields are a closed se
 - **Matching.** Exactly one sealed approved rule for a kind and area is a recommendation. None, or two or more, mean the
   question is asked. A hard-stop kind never matches.
 - **Re-ask.** Approved rules older than `reask_days` (default 90) are listed as due for confirmation again.
+- **Wording contract.** A rule's `option` is one of the question bank's own options for its kind, spelled exactly as the
+  bank spells it (a kind with no route question takes a closing answer: `start it again` or `leave it parked`). Anything
+  else is refused. The same text is what a person's answer is recorded as (`answer`), so a drafted rule, a hand-written
+  rule and a comparison all use one key. Each option also declares what it means: unpark, keep parked, or only
+  recommends; a rule never stores that, it is read from the bank. One valid hand-written rule:
+
+  ```
+  {"id": "r1", "qkind": "merge_conflict", "area": "repo", "option": "rebase it", "status": "proposed", "created": "2026-10-01T00:00:00+00:00"}
+  ```
+
+  `rule_draft.py show .sdlc <rule_id>` prints which of the three a rule does. `autonomy.py rekey .sdlc` (dry run;
+  `--apply` removes) clears comparisons written before the shared key. Answers of kind `unknown` and free-text answers
+  never count toward a level or a draft.
 
 Drafting is deliberate and conservative:
 
@@ -233,8 +246,8 @@ python3 skills/sigma-loop/scripts/rule_draft.py approve .sdlc <rule_id>       # 
 drafts the rule, and the other part is an exam: the draft passes only when the held-out answers agree with it at
 `rulebook.rules.draft.min_agreement` (default 0.90), with at least `min_held_out` (default 5) held-out answers. It
 fails closed on a small held-out set, a tie, a missing option, a hard-stop kind, a level below 2, or a pair that already
-has a rule. It needs the rules, autonomy and records parts all open. On a public repository it refuses (the free-text
-choice it needs was never stored).
+has a rule. It needs the rules, autonomy and records parts all open. On a public repository only answers that are bank options
+are stored, so drafts and comparisons work from those alone.
 
 `approve` refuses, with one line, for an unknown id, an already approved rule, a non-owner, an unresolved login or a
 closed gate. For a login that is not an owner it prints the line that asks an owner to approve, and the rule stays proposed.
