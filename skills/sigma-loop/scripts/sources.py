@@ -217,6 +217,31 @@ _backlog_check_module = None         # lazily filled by _get_backlog_check() bel
                                       # docstring for why this can NEVER be a top-level `_load(...)` here.
 
 
+def _explicit_text_edges(item):
+    """#1467: the ONLY text a blocker WRITER may read an edge from. -> (haystack, explicit matches,
+    weak-only ref count). Explicit means `blocker_scan._EXPLICIT_BLOCK_RE` ("blocked by", "depends
+    on", "depends upon") over the title+body with `/sigma-unpark` Q&A spans stripped; the weak words
+    ("needs", "after", "requires", "waiting on") match in prose and would write a priority label, a
+    board field and a comment on an unrelated third issue, so they are only counted for an advisory."""
+    bs = _get_backlog_check().blocker_scan
+    haystack = bs.strip_unpark_qa((item.get("title") or "") + "\n" + (item.get("body") or ""))
+    explicit = list(bs._EXPLICIT_BLOCK_RE.finditer(haystack))
+    seen = {m.group(2) for m in explicit}
+    weak = {m.group(2) for m in bs._BLOCK_RE.finditer(haystack)
+            if m.group(2) not in seen and not bs.is_cross_repo(haystack, m)}
+    return haystack, explicit, len(weak)
+
+
+def _warn_weak_blocker_mentions(count):
+    """#1467: weak-only prose mentions were ignored by a blocker writer. Best-effort, never raises."""
+    if count:
+        try:
+            sys.stderr.write("sigma: %d prose mention(s) ignored as blocker edges; write `Blocked by: #N` "
+                             "to make one count\n" % count)
+        except Exception:
+            pass
+
+
 def _get_backlog_check():
     """Lazy, cached, function-scoped load of backlog_check.py -- deliberately never a top-level
     `_load("backlog_check")` in this module (unlike `discovery`/`state`/`frontmatter`/`ledger`
@@ -4722,13 +4747,12 @@ class GitHubSource:
         REVERSE LOOKUP (given a blocker, what does it directly block?) — two independent, additive
         channels, mirroring backlog_check.py's own `_explicit_blockers()` + ledger-hand-off split
         for the FORWARD question ("what blocks THIS goal"):
-          1. EXPLICIT: `backlog_check._BLOCK_RE`, read LIVE off the module every call (via
-             `_get_backlog_check()` — never copied into a local pattern, so a monkeypatch of the
-             real regex is observable, the same live-attribute-read contract `triage.py`'s
-             `_scan_block_edges` already relies on), over each issue's own title+body — the exact
-             haystack shape and precision rule (the referenced issue must be a real OPEN member of
-             this corpus, never the referencing issue itself) as `_explicit_blockers()` /
-             `_scan_block_edges()`.
+          1. EXPLICIT: `blocker_scan._EXPLICIT_BLOCK_RE` ("blocked by", "depends on", "depends
+             upon" ONLY), read LIVE off the module every call (via `_get_backlog_check()`), over each
+             issue's own title+body with `/sigma-unpark` Q&A spans stripped. The weak words ("needs",
+             "after", "requires", "waiting on") never write (#1467): they are counted and reported on
+             stderr as advisory, because a prose mention would mutate a third issue. The referenced
+             issue must be a real OPEN member of this corpus, never the referencing issue itself.
           2. LEDGER: `ledger.outstanding()` hand-off entries — the entry's `goal` is the blocked
              issue, `ledger.handoff_key()` (its `issue` field, falling back to `goal`) is the
              blocker. This channel is what SURVIVES a park that strips `sdlc:goal` from the blocked
@@ -4798,13 +4822,16 @@ class GitHubSource:
                     directly_blocks[by].append(blocked)
 
             backlog_check = _get_backlog_check()
+            weak_ignored = 0
             for ref, it in by_ref.items():
-                haystack = (it.get("title") or "") + "\n" + (it.get("body") or "")
-                for m in backlog_check._BLOCK_RE.finditer(haystack):
+                haystack, matches, weak = _explicit_text_edges(it)
+                weak_ignored += weak
+                for m in matches:
                     if not smart and backlog_check.blocker_scan.is_cross_repo(haystack, m):
                         cross_repo.append("#%s blocked by another repository's #%s" % (ref, m.group(2)))
                         continue
                     add_edge(ref, m.group(2))
+            _warn_weak_blocker_mentions(weak_ignored)
 
             if self.sdlc_dir:
                 try:
@@ -5244,7 +5271,8 @@ class GitHubSource:
 
     def _repair_edges(self, corpus, out):
         """-> (edges [(blocker, blocked)], unwritable notes, every ref seen as a blocker). The edge
-        extraction `_promote_blockers` uses: explicit phrases over title and body, plus the ledger."""
+        extraction `_promote_blockers` uses: EXPLICIT markers only ("blocked by", "depends on", "depends
+        upon", unpark Q&A stripped; the weak words never write, #1467) over title and body, plus the ledger."""
         edges, cross_repo, blocker_refs = [], [], set()
 
         def add(blocked, by):
@@ -5258,13 +5286,16 @@ class GitHubSource:
                 edges.append((by, blocked))
 
         backlog_check = _get_backlog_check()
+        weak_ignored = 0
         for ref, it in corpus.items():
-            haystack = (it.get("title") or "") + "\n" + (it.get("body") or "")
-            for m in backlog_check._BLOCK_RE.finditer(haystack):
+            haystack, matches, weak = _explicit_text_edges(it)
+            weak_ignored += weak
+            for m in matches:
                 if backlog_check.blocker_scan.is_cross_repo(haystack, m):
                     cross_repo.append("#%s blocked by another repository's #%s" % (ref, m.group(2)))
                     continue
                 add(ref, m.group(2))
+        _warn_weak_blocker_mentions(weak_ignored)
         if self.sdlc_dir:
             try:
                 for h in ledger.outstanding(ledger.read_all(self.sdlc_dir)):
