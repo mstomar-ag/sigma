@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- The doctor row for the blocking priority override now says a blocking goal goes first within its own tier and a blocker is raised to the tier of what it blocks, not across tiers (#1509).
+
 - A needs_decision closing answer is now normalised through the bank (case, spacing, a trailing recommended marker) into the stored `answer`; other text is `free` and never learnable (#1521).
 
 - `promote.py migrate-confirmation` now arms an item whose only hold is an open blocker (`sdlc:goal` plus the `sdlc:blocked` overlay, reason `armed (held by #N)`) instead of parking it; the pick-time dependency hold and auto-unpark take it from there (#1518).
