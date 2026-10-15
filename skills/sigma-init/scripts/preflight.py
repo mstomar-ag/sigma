@@ -58,6 +58,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 
 _HERE = pathlib.Path(__file__).resolve().parent
 HERE = str(pathlib.Path(__file__).resolve())
@@ -495,7 +496,11 @@ def _active_logged_in(text):
         and bool(re.search(r"(?i)logged in to", active[0][0]))
 
 
-def check_gh_auth(host, runner, timeout):
+_AUTH_RETRY_PAUSE = 2.0
+_RATE_LIMIT_MARKERS = ("rate limit", "secondary rate", "abuse detection", "too many requests")
+
+
+def check_gh_auth(host, runner, timeout, sleep=time.sleep):
     """-> (check, parsed-status or None). Asks for the ACTIVE account only (`--active`, gh >= 2.40);
     an older gh that rejects the flag is asked again without it, and then only its active block is
     read, so a stale second account never fails a valid active one."""
@@ -521,6 +526,27 @@ def check_gh_auth(host, runner, timeout):
         return _chk("gh-auth", "gh auth", None, f"cannot verify: {printable(out.strip())}",
                     meanwhile="Re-run this check when the network is up (`gh auth status` runs the "
                               "same probe), or run /sigma-doctor."), None
+    # #1485: a refused GraphQL read (shared rate limit) makes `gh auth status` fail for a good token.
+    # Retry once, then ask REST, which is a different pool; only a REST 401 is "not logged in".
+    sleep(_AUTH_RETRY_PAUSE)
+    rc2, out2 = runner(["gh", "auth", "status", "--active", "--hostname", host], None, timeout)
+    if rc2 == 0:
+        return _chk("gh-auth", "gh auth", True, f"logged in to {printable(host)}"), \
+            parse_auth_status(out2)
+    argv = ["gh", "api", "user", "--jq", ".login"]
+    if host != "github.com":
+        argv[2:2] = ["--hostname", host]
+    rrc, rout = runner(argv, None, timeout)
+    login = (rout or "").strip()
+    limited = any(m in f"{out} {out2} {rout}".lower() for m in _RATE_LIMIT_MARKERS)
+    if (rrc == 0 and login) or (limited and "401" not in (rout or "")):
+        who = f"the token answers REST as {printable(login)}" if rrc == 0 and login else \
+            "GitHub is rate limiting this account"
+        return _chk("gh-auth", "gh auth", None,
+                    f"could not confirm the gh login: `gh auth status` failed but {who} (often the "
+                    "GraphQL rate limit); re-run /sigma-doctor after the reset",
+                    meanwhile="Re-run /sigma-doctor to check it; nothing here needs an interactive "
+                              "login."), None
     return _chk("gh-auth", "gh auth", False, f"gh is not logged in to {printable(host)} (or its "
                 "token is invalid)", [f"gh auth login -h {host} -s repo,workflow,read:org"],
                 interactive=True,

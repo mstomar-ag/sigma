@@ -431,6 +431,14 @@ def _scope_expansion(sdlc_dir, config, unit):
     return _feature("gate_hold").scope_expansion(sdlc_dir, config, unit)
 
 
+_UPPER_TIER_LABELS = ("epic", "story", "dossier", "spec")     # #1517: tiers above a goal; never armed
+
+
+def _upper_tier(names):
+    """The first upper-tier label among `names` (case-insensitive), or None."""
+    return next((n for n in names if str(n).strip().lower() in _UPPER_TIER_LABELS), None)
+
+
 def _refusal(source, number, names, closed, demote, hold=None, unresolved=None):
     """The one reason this issue must not be touched, or None. Every message names the ROUTE, not
     just the problem -- a refusal inside the tool built to remove dead ends must not itself be one.
@@ -451,6 +459,9 @@ def _refusal(source, number, names, closed, demote, hold=None, unresolved=None):
                 "/sigma-unpark on it instead." % (number, source.parked_label))
     if demote:
         return None
+    if _upper_tier(names):
+        return "#%s is an upper tier (%s), not a goal — it is never armed; slice it into goals." % (
+            number, _upper_tier(names))
     # #1468: `needs_label_label` is deliberately NOT folded in with the pair above it. It is not a
     # human's hold and `/sigma-unpark` is not its remedy -- the goal is already approved and already
     # carries `goal_label`; it is waiting on somebody creating one `feature:` label, after which the
@@ -817,6 +828,16 @@ def _migrate_one(source, config, sdlc_dir, item, apply, rep_item, writes=None):
         return
     if source.proposed_label not in names:
         rep_item.update(outcome="noop", detail="no longer carries %s" % source.proposed_label)
+        return
+    if _upper_tier(names):                              # #1517: retire the label only; never arm, never park
+        reason = "upper tier: label removed, not armed"
+        rep_item.update(population="upper-tier", action="unlabel", reason=reason)
+        if not apply:
+            rep_item.update(outcome="would-unlabel", detail=reason)
+            return
+        (writes or _Writes(config, time.monotonic, time.sleep)).do(
+            lambda: source._swap_labels(n, add=[], remove=[source.proposed_label]))
+        rep_item.update(outcome="unlabelled", detail=reason)
         return
     author = data.get("author")
     author = (author.get("login") if isinstance(author, dict) else "") or ""
