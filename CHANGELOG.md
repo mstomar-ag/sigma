@@ -9,6 +9,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 - **The doctor row for `blocking_priority_override` describes the within-tier order (#1509).** It said a blocking goal sorts ahead of every other issue regardless of priority tier; it now says a blocking goal goes first within its own tier and a blocker is raised to the tier of what it blocks.
 - **The doctor row for `blocking_priority_override` describes the within-tier order (#1509).** It said a blocking goal sorts ahead of every other issue regardless of priority tier; it now says a blocking goal goes first within its own tier and a blocker is raised to the tier of what it blocks.
+- **Session end and dead sessions now release goals they claimed but never started (#1529).** On a GitHub source, `loop.py session-end` hands back each goal in its own session marker that has no work record and no agent marker, through the same release as the over-capacity path (comment `claimed but not started: session ended`, ledger `release`, action-log `released`); a dead session's entry does the same on the next pick or start after `session_release.grace_minutes` (default 15). Started and live-session goals, a mismatched generation, and the local source are untouched.
+
 - An unstamped legacy answers block is no longer counted for a newer stamped park, and a quota wait-it-out ask is applied only after its recorded reset time (unknown counts as not yet) (#1522).
 
 - A needs_decision closing answer is now normalised through the bank (case, spacing, a trailing recommended marker) into the stored `answer`; other text is `free` and never learnable (#1521).

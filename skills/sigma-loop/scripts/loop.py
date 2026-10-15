@@ -2723,11 +2723,64 @@ def session_end(sdlc_dir, session_pid=None, generation=None):
             if isinstance(owner_generation, str) and owner_generation:
                 if generation != owner_generation:
                     return False
+            nonlocal_goals.extend(_session_read(path)["in_flight"])
             path.unlink(missing_ok=True); heartbeat.unlink(missing_ok=True)
             return True
-        _session_locked(sdlc_dir, pid, _end_if_owner, path=path, require_lock=True)
+        nonlocal_goals = []
+        ended = _session_locked(sdlc_dir, pid, _end_if_owner, path=path, require_lock=True)
+        # #1529: AFTER the lifecycle lock is released (`_release` takes the same per-session lock
+        # through `_session_release`), hand back what this session claimed and never started.
+        if ended and nonlocal_goals:
+            _release_unstarted(sdlc_dir, nonlocal_goals, "session ended")
     except (OSError, TypeError, ValueError):
         pass
+
+
+DEFAULT_SESSION_RELEASE_GRACE_MINUTES = 15
+
+
+def session_release_grace_seconds(config):
+    """#1529: how long a DEAD session's registry entry must have been quiet before its unstarted
+    claims are handed back -- `session_release.grace_minutes`, default 15. A bad value reads as
+    the default (a typo must not turn the grace into zero)."""
+    try:
+        minutes = float(((config or {}).get("session_release") or {}).get(
+            "grace_minutes", DEFAULT_SESSION_RELEASE_GRACE_MINUTES))
+        if minutes < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        minutes = DEFAULT_SESSION_RELEASE_GRACE_MINUTES
+    return minutes * 60
+
+
+def _goal_started(sdlc_dir, goal):
+    """#1529: True iff `goal` shows ANY sign of work: a work record (`work.py` writes it when a
+    goal is started: worktree and branch) or a registered agent marker (`agent_start`'s
+    heartbeat). Unsafe goal names fail toward True: never release what cannot be judged."""
+    try:
+        return work._record(sdlc_dir, goal) is not None or bool(agent_threads(sdlc_dir, goal))
+    except Exception:                                    # noqa: BLE001
+        return True
+
+
+def _release_unstarted(sdlc_dir, goals, why):
+    """#1529: release each claimed-but-never-started goal in `goals` through the SAME `_release`
+    the over-capacity path uses (label off, "claimed but not started" comment, ledger `release`,
+    action-log `released` with actor and reason). Only a GitHub source releases; the local path
+    does nothing here. Best-effort: never raises, so a stop or a prune is never blocked."""
+    try:
+        config = state.load_config(sdlc_dir)
+        if ((config.get("discovery") or {}).get("source")) != "github":
+            return
+        source = sources.get_source(sdlc_dir, config)
+        for goal in dict.fromkeys(str(g) for g in goals):
+            try:
+                if not _goal_started(sdlc_dir, goal):
+                    _release(sdlc_dir, source, goal, reason=why)
+            except Exception as exc:                     # noqa: BLE001
+                print(f"loop: unstarted release of {goal} skipped ({exc})", file=sys.stderr)
+    except Exception as exc:                             # noqa: BLE001
+        print(f"loop: unstarted release skipped ({exc})", file=sys.stderr)
 
 
 def session_active(sdlc_dir, config):
@@ -2788,17 +2841,30 @@ def _prune_dead_session_entries(sdlc_dir, config):
     for pid, path, _in_flight in _session_entries(sdlc_dir):
         if _session_pid_live(pid, path, config):
             continue
-        def _prune(path=path, pid=pid):
+        # #1529: a dead session past the grace hands back its unstarted claims; within the grace
+        # the entry stays (the session may be mid-restart), so a later pass decides.
+        if ((config.get("discovery") or {}).get("source")) == "github":
+            try:
+                quiet_for = now - path.stat().st_mtime
+            except OSError:
+                continue
+            if quiet_for < session_release_grace_seconds(config):
+                continue
+        released_goals = []
+        def _prune(path=path, pid=pid, released_goals=released_goals):
             # Re-check under this entry's own lock: a session may have re-announced itself after
             # the outer scan. Lock the enumerated path, not this pruner's Codex thread identity.
             if _session_pid_live(pid, path, config):
                 return False
+            released_goals.extend(_session_read(path)["in_flight"])
             path.unlink(missing_ok=True)
             return True
         try:
             _session_locked(sdlc_dir, pid, _prune, path=path, require_lock=True)
         except (OSError, RuntimeError):
-            pass
+            continue
+        if released_goals:
+            _release_unstarted(sdlc_dir, released_goals, "session ended")
 
 
 def _session_in_flight_goals(sdlc_dir, config):
