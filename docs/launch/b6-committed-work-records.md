@@ -24,7 +24,7 @@ outside the repository.
 | --- | --- | --- | --- |
 | `.sdlc/plans/<goal-stem>.md` | the Plan phase (`sigma-plan`), committed by `work.py commit` | the project's maintainers | yes |
 | `.sdlc/research/<goal-slug>.md`, and `.sdlc/research/235.md` (a citation in `skills/sigma-init/references/board.md`, not a writer) | the Research phase (`sigma-research`, `sigma-goal-design`) | the project's maintainers | yes |
-| `.sdlc/acceptance/<goal-stem>.md` | `acceptance.py record` | the project's maintainers | yes |
+| `.sdlc/acceptance/<goal-stem>.md` | `acceptance.py record` | the project's maintainers | yes, but only through the branch: `work.py commit` copies the root record into the worktree and `work.py pr` refuses a branch without it (#1474) |
 | `.sdlc/plans/<epic>-plan.md` | `sigma-scope`'s `assign.py` (one file per executed scope run) | the project's maintainers | yes |
 | `.sdlc/plans/<goal-stem>.slices.json` | the Plan phase, read by `slices.py` | the project's maintainers | yes |
 | `.sdlc/plans/scope/<slug>.plan.json` | the `sigma-scope` skill prose | the operator | no, gitignored |

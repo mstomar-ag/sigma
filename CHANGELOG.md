@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **The acceptance record now reaches the goal branch, and landed root copies are cleaned up (#1474).** `work.py commit` copies the root acceptance record into the worktree, `work.py pr` refuses a branch missing it, a confirmed merge removes untracked root plan, research and acceptance files byte-identical to what landed (differing or unlanded ones are reported, never removed), and doctor reports old untracked records and modified registry files.
+
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
 - **A person's free-text answer stays out of the applier ask file on a public repository (#1429).** The ask file kept the answer verbatim and the autonomy folder is published with the records; with `repo_visibility` public it now stores `recorded privately`, a private repository is unchanged.

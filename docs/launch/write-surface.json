@@ -2466,6 +2466,22 @@
     },
     {
       "path": "skills/sigma-loop/scripts/work.py",
+      "function": "_clean_landed_root_records",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "work.enabled; only after a confirmed merge; unlinks one file (never a directory) under the root .sdlc/plans, research or acceptance, only when untracked and byte-identical (blob id) to the copy that landed on <remote>/<base>; differing or unlanded copies are reported, never removed (#1474)",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/work.py",
+      "function": "_copy_acceptance_into_worktree",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "work.enabled; create-only byte copy of the root acceptance record into the goal worktree; skipped when the worktree already has it or the repo ignores the path (#1474)",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/work.py",
       "function": "_delete_remote_branch",
       "rule": "gh-api-write",
       "count": 1,
