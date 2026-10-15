@@ -211,9 +211,9 @@ def pointer_file_count(sdlc_dir):
         return 0
 
 
-def _own_files(led, base, who):
+def _own_files(led, base, who, config=None):
     """This actor's files written from THIS host, minus the rollup and any live process's file."""
-    host = led._host_token()
+    host = led._host_token(config)
     out = []
     for p in led.files_for(base, who):
         instance = p.stem.rpartition("-")[2]
@@ -255,7 +255,7 @@ def compact_pointers(sdlc_dir, now=None, config=None):
         base = led.entries_dir(sdlc_dir, led.ENTRIES)
         who = led.actor(cfg)
         plans = []
-        for p in _own_files(led, base, who):
+        for p in _own_files(led, base, who, cfg):
             if p.stat().st_mtime > cutoff:
                 continue
             lines = [l for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -264,7 +264,7 @@ def compact_pointers(sdlc_dir, now=None, config=None):
                 plans.append((p, ptr, [l for l in lines if not _is_pointer(l)]))
         if not plans:
             return 0
-        rollup = base / ("%s-%s.%s.jsonl" % (led._safe_name(who), led._host_token(), _ROLLUP_PID))
+        rollup = base / ("%s-%s.%s.jsonl" % (led._safe_name(who), led._host_token(cfg), _ROLLUP_PID))
         have = rollup.read_text(encoding="utf-8").splitlines() if rollup.exists() else []
         seen = set()
         for l in have:
