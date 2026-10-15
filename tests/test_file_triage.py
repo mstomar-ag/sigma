@@ -203,3 +203,47 @@ def test_money_amount_near_misses_still_arm():
     for text in ("The price is $40 in the invoice template.", "Fix the GPU docs. Costs 5 pages.",
                  "see log:\n```\ncost $40 gpu run\n```\ntidy the docs", "a run of 40 tests, no dollars"):
         assert m.decide("cleanup", text, {}, _cfg()).kind == "arm", text
+
+
+DESCRIPTIVE = (
+    "Redact SSH private keys at runtime so they never reach the log.",
+    "Wire the check so the gate gets production data only through the reader.",
+    "Irreversible actions are read by code and listed in the report.",
+    "Document what the one-command uninstall does when it would delete all caches.",
+    "Detect a force push in the hook and warn the author.",
+)
+ACTIONS = (
+    "drop table users in production",
+    "rotate the deploy credentials now",
+    "push --force to main, a force push after the rebase",
+    "Delete all the old branches.",
+)
+
+
+def test_descriptive_mentions_of_deny_words_arm():
+    m = _mod()
+    for text in DESCRIPTIVE:
+        d = m.decide("tidy the docs", text, {}, _cfg())
+        assert d.kind == "arm", (text, d)
+
+
+def test_action_sentences_still_park_and_name_the_sentence():
+    m = _mod()
+    for text in ACTIONS:
+        d = m.decide("tidy the docs", text, {}, _cfg())
+        assert d.kind == "park" and d.matched == "hard-stop word", (text, d)
+        assert "(in: " in d.reason and text.split()[0].lower() in d.reason.lower()
+
+
+def test_secret_and_spend_stay_hard_even_in_a_descriptive_sentence():
+    m = _mod()
+    d = m.decide("x", "Redact it: token = abcdef123456789", {}, _cfg())
+    assert d.kind == "park" and d.matched == "secret"
+    d = m.decide("x", "Document the plan; spend $40 on GPU time", {}, _cfg())
+    assert d.kind == "park" and d.matched == "spend phrase"
+
+
+def test_one_descriptive_one_action_sentence_parks():
+    m = _mod()
+    d = m.decide("x", "Redact private keys in logs. Then drop table users.", {}, _cfg())
+    assert d.kind == "park" and "drop table" in d.reason

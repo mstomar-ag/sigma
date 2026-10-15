@@ -101,6 +101,26 @@ def _load(name):
     return mod
 
 
+#: A sentence that describes detection, redaction, gating or documentation of a class of action is not an
+#: action (#1519): a deny word inside it does not hold the filing. Anything else holds (the safe side).
+_DESCRIPTIVE = re.compile(
+    r"\b(?:redact\w*|detect\w*|gates?|gated|gating|scrub\w*|mask\w*|prevent\w*|refus\w*|"
+    r"document\w*|describ\w*|classif\w*|warn\w*|guard\w*|protect\w*|"
+    r"never|so that|so the|uninstall\w*|are read|is read)\b", re.IGNORECASE)
+_SENTENCES = re.compile(r"(?<=[.!?;])\s+|\n+")
+
+
+def _action_sentence(text, word):
+    """-> the (trimmed) first sentence holding `word` that is not descriptive, else None."""
+    w = word.lower()
+    if not w:
+        return None
+    for sent in _SENTENCES.split(text):
+        if w in sent.lower() and not _DESCRIPTIVE.search(sent):
+            return " ".join(sent.split())[:100]
+    return None
+
+
 def _deny(title, body, blk):
     """-> (reason, class) when the deny-list matches, else None. Raises on a broken helper (caller parks)."""
     status = _load("spend_approval").parse_marker(body)[0]
@@ -110,10 +130,10 @@ def _deny(title, body, blk):
     words = blk.get("triage", {}).get("deny_words") if isinstance(blk.get("triage"), dict) else None
     if not (isinstance(words, (list, tuple)) and all(isinstance(w, str) for w in words)):
         words = DEFAULT_DENY_WORDS
-    low = text.lower()
     for w in words:
-        if w and w.lower() in low:
-            return "hard-stop word: " + w, "hard-stop word"
+        hit = _action_sentence(text, w)
+        if hit:
+            return "hard-stop word: %s (in: %s)" % (w, hit), "hard-stop word"
     tri = blk.get("triage") if isinstance(blk.get("triage"), dict) else {}
     phrases = tri.get("spend_phrases")
     if not (isinstance(phrases, (list, tuple)) and all(isinstance(w, str) for w in phrases)):
