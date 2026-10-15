@@ -46,7 +46,8 @@ def _world(options=None, statuses=None):
             state["mutated"] = q
             return json.dumps({"data": {"updateProjectV2Field": {"projectV2Field": {"id": "F_status"}}}})
         if "items(" in q:
-            nodes = [{"content": {"number": n}, "fieldValueByName": ({"name": s} if s else None)}
+            nodes = [{"id": "PVTI_%s" % n, "content": {"__typename": "Issue", "number": n},
+                      "fieldValueByName": ({"name": s} if s else None)}
                      for n, s in state["statuses"].items()]
             return json.dumps({"data": {"repositoryOwner": {"projectV2": {"items": {
                 "nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}})
@@ -209,7 +210,7 @@ def _world2(options, cards):
                                                     "color": "BLUE", "description": ""}]
             return json.dumps({"data": {"updateProjectV2Field": {"projectV2Field": {"id": "F_status"}}}})
         if "items(" in q:
-            nodes = [{"content": {"number": c["content"]["number"]},
+            nodes = [{"id": c["id"], "content": {"__typename": "Issue", "number": c["content"]["number"]},
                       "fieldValueByName": ({"name": c["status"]} if c.get("status") else None)}
                      for c in state["cards"]]
             return json.dumps({"data": {"repositoryOwner": {"projectV2": {"items": {
@@ -269,3 +270,81 @@ def test_nothing_to_seed_is_reported_not_treated_as_failure():
     run = _world2(OPTIONS, [_seedable(1, status="Done")])
     assert m.main(["x", "--owner", "acme", "--project", "8", "--apply"], run=run) == 0
     assert _seeds(run) == []
+
+
+# --- #1491: an honest summary, an equality post-condition, every card kind covered ----------------
+
+def _world10(lane=False, clobber_pr=False):
+    """10 cards: 7 issues with a Status (3 in Backlog with the goal label), 1 issue with none, 2 PRs."""
+    cards = []
+    for i, st in enumerate(["Backlog"] * 3 + ["In Progress", "In Progress", "Done", "Done"], 1):
+        cards.append({"id": "PVTI_%d" % i, "kind": "Issue", "num": i, "status": st, "labels": ["sdlc:goal"]})
+    cards.append({"id": "PVTI_8", "kind": "Issue", "num": 8, "status": None, "labels": []})
+    cards.append({"id": "PVTI_9", "kind": "PullRequest", "num": 1, "status": "Done", "labels": []})
+    cards.append({"id": "PVTI_10", "kind": "PullRequest", "num": 1, "status": "Done", "labels": []})  # same number, other repo
+    opts = OPTIONS + ([{"id": "o_ready", "name": "Ready", "color": "BLUE", "description": ""}] if lane else [])
+    state = {"options": opts, "cards": cards}
+    calls = []
+
+    def run(args):
+        calls.append(list(args))
+        if args[:3] == ["gh", "project", "item-edit"]:
+            for c in cards:
+                if c["id"] == args[args.index("--id") + 1]:
+                    c["status"] = "Ready"
+            return ""
+        if args[:3] == ["gh", "project", "item-list"]:
+            return json.dumps({"items": [{"id": c["id"], "content": {"number": c["num"]}} for c in cards
+                                         if c["status"] == "Backlog" and "sdlc:goal" in c["labels"]]})
+        q = next((a for a in args if a.startswith("query=")), "")
+        if "updateProjectV2Field" in q:
+            state["options"] = state["options"] + [{"id": "o_ready", "name": "Ready", "color": "BLUE", "description": ""}]
+            if clobber_pr:
+                cards[8]["status"] = "In Progress"
+            return json.dumps({"data": {"updateProjectV2Field": {"projectV2Field": {"id": "F_status"}}}})
+        if "items(" in q:
+            nodes = [{"id": c["id"], "content": ({"__typename": "Issue", "number": c["num"]} if c["kind"] == "Issue"
+                                                 else {"__typename": "PullRequest", "number": c["num"]}),
+                      "fieldValueByName": ({"name": c["status"]} if c["status"] else None)} for c in cards]
+            return json.dumps({"data": {"repositoryOwner": {"projectV2": {"items": {
+                "nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}})
+        return _field_payload(state["options"])
+
+    run.calls, run.state = calls, state
+    return run
+
+
+def test_ten_card_board_summary_counts_add_up(capsys):
+    m = _mod()
+    run = _world10()
+    assert m.main(["x", "--owner", "acme", "--project", "8", "--apply"], run=run) == 0
+    out = capsys.readouterr().out
+    assert "board: 10 card(s) (8 issues, 2 pull requests, 0 drafts)" in out
+    assert "10 unchanged (1 had no Status), 0 changed" in out
+    assert "3 moved Backlog -> 'Ready'" in out and "subset" in out
+    assert "now: 3 Ready, 7 elsewhere" in out
+    assert "kept their Status" not in out
+
+
+def test_a_pull_request_card_whose_status_changes_fails_the_post_condition(capsys):
+    m = _mod()
+    run = _world10(clobber_pr=True)
+    assert m.main(["x", "--owner", "acme", "--project", "8", "--apply"], run=run) == 1
+    assert "PVTI_9" in capsys.readouterr().out
+    assert not _seeds(run)
+
+
+def test_an_existing_lane_prints_no_kept_their_status_claim(capsys):
+    m = _mod()
+    run = _world10(lane=True)
+    assert m.main(["x", "--owner", "acme", "--project", "8", "--apply"], run=run) == 0
+    out = capsys.readouterr().out
+    assert "kept their Status" not in out and "unchanged" not in out
+    assert "no option write" in out and "3 moved Backlog -> 'Ready'" in out
+    assert not any("items(" in " ".join(c) for c in run.calls)
+
+
+def test_snapshot_keys_by_item_id_so_equal_numbers_do_not_collapse():
+    m = _mod()
+    snap = m.card_statuses("acme", 8, "Status", _world10())
+    assert len(snap) == 10
