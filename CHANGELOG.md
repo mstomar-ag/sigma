@@ -5,6 +5,7 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - **The two automatic blocker writers read explicit edges only (#1467).** The reconcile-tick repair and the board-pass promotion took edges from the broad pattern, so a sentence like "after #N lands" or "needs #N" raised an unrelated issue, wrote a board field and a comment on it, and stripped its legacy confirmation label. They now read only "blocked by", "depends on" and "depends upon" (unpark Q&A text excluded) plus ledger hand-offs; weak-word mentions are reported on stderr and never written.
+- **The model import classifier charges a cut-off call its real cost and stops at the first budget cut-off (#1471).** The CLI checks `--max-budget-usd` only after a turn, so the default 0.05 cut off every call yet billed about 3 times the charge; a failed call now costs its envelope cost, the first cut-off stops the run with a message naming `rulebook.import.max_budget_usd_per_call`, the drift judge charges known cost on an invalid verdict, and the default is 0.50.
 
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
