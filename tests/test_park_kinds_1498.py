@@ -273,8 +273,21 @@ def test_doctor_lists_a_deny_list_park_that_is_not_a_hard_stop_kind():
     rows = [{"number": 5, "title": "wipe", "body": "please drop table users", "labels": [{"name": "sdlc:parked"}]},
             {"number": 6, "title": "wipe", "body": "drop table users", "labels": [{"name": "sdlc:parked"}]},
             {"number": 7, "title": "tidy", "body": "polish docs", "labels": [{"name": "sdlc:parked"}]}]
+    def owned(number, text):
+        view = json.loads(_view(number=number))
+        view["comments"] = [{"body": text, "authorAssociation": "OWNER"}]
+        return json.dumps(view)
+
     run = _runner(by_label={"sdlc:parked": json.dumps(rows)},
-                  views={"5": _view(number=5, comments=[pk + "x\nsigma-qkind: needs_decision"]),
-                         "6": _view(number=6, comments=[pk + "x\nsigma-qkind: irreversible"]),
-                         "7": _view(number=7, comments=[pk + "x"])})
+                  views={"5": owned(5, pk + "x\nsigma-qkind: needs_decision"),
+                         "6": owned(6, pk + "x\nsigma-qkind: irreversible"),
+                         "7": owned(7, pk + "x")})
     assert d._mis_kinded_hardstop_parks(_config(), {"repo": "acme/widget"}, lambda argv: run(argv[1:])) == [5]
+
+
+def test_sigma_opener_without_association_cannot_declare_a_kind(capsys):
+    """Fail closed: a comment with no authorAssociation is untrusted even if its body opens like Sigma's."""
+    q = _mod("qkind")
+    spoof = {"body": "Parked by Sigma - x\nsigma-qkind: quota", "author": {"login": "someone"}}
+    assert q.resolve([spoof], 5) is None
+    assert "ignoring a sigma-qkind line" in capsys.readouterr().err

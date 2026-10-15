@@ -70,12 +70,10 @@ def parse_hardstop(comment):
 
 
 def _honoured(c, goal, note=True):
-    """True when comment `c` may declare a kind: a bare string or a Sigma park/migration comment with no
-    association recorded (Sigma's own text), or any comment by an OWNER/MEMBER/COLLABORATOR. Otherwise
+    """True when comment `c` may declare a kind: a bare string (Sigma's own text, already trusted by
+    the caller) or any comment by an OWNER/MEMBER/COLLABORATOR. Otherwise
     False, with one stderr note when `note`."""
     if isinstance(c, str):
-        return True
-    if "authorAssociation" not in c and (c.get("body") or "").startswith(_SIGMA_OPENERS):
         return True
     assoc = c.get("authorAssociation")
     if assoc in _TRUSTED:
