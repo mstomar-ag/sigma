@@ -2216,7 +2216,7 @@ def _as_host(monkeypatch, token):
     proves only that a helper is missing. Letting the patch be a no-op against code that does not
     consult a host makes each test fail on the REAL mechanism instead — two hosts collapsing to one
     filename, one id, one writer identity."""
-    monkeypatch.setattr(ledger, "_host_token", lambda: token, raising=False)
+    monkeypatch.setattr(ledger, "_host_token", lambda config=None: token, raising=False)
 
 
 def test_entry_file_differs_between_two_hosts_sharing_one_login_and_pid(tmp_path, monkeypatch):

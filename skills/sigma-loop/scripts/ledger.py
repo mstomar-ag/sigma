@@ -768,7 +768,7 @@ def entries_dir(sdlc_dir, stream=ENTRIES):
     return ledger_dir(sdlc_dir) / stream
 
 
-def _host_token():
+def _host_token(config=None):
     """A short, stable per-MACHINE component of the writer identity (#540).
 
     A pid alone stopped being unique the moment two machines shared one login. Several hosts
@@ -787,25 +787,61 @@ def _host_token():
     a persisted per-clone uuid is the strictly stronger option if that window ever bites.
 
     Never raises — an unresolvable hostname hashes the empty string, which is stable, so the worst
-    case degrades to exactly the pre-#540 behavior rather than to an error."""
+    case degrades to exactly the pre-#540 behavior rather than to an error.
+
+    #1514: the token is NEVER the raw host name, on any repository. Two opt-in settings change what it
+    is, both read from `config` (absent -> the plain hash above, byte-identical to before):
+    `ledger.host_alias` (a short label of your choosing, cut down to lowercase letters and digits) is
+    used as the token as it stands; `ledger.salt_host_token: true` salts the hash with the repository
+    name (`discovery.github.repo`) so the same machine reads as a different token in each repository."""
+    alias = host_alias(config)
+    if alias:
+        return alias
     try:
         name = platform.node() or ""
     except Exception:                # noqa: BLE001 - identity must never be what breaks an append
         name = ""
-    return hashlib.sha256(name.encode("utf-8", "replace")).hexdigest()[:8]
+    salt = ""
+    if settings(config).get("salt_host_token") is True:
+        gh = config.get("discovery", {}).get("github", {}) if isinstance(config.get("discovery"), dict) else {}
+        repo = gh.get("repo") if isinstance(gh, dict) else None
+        salt = (repo.strip().lower() + "\0") if isinstance(repo, str) else ""
+    return hashlib.sha256((salt + name).encode("utf-8", "replace")).hexdigest()[:8]
 
 
-def _instance_token():
+HOST_ALIAS_MAX = 12
+
+
+def host_alias(config):
+    """`ledger.host_alias` as a filename-safe token (lowercase letters and digits, at most
+    `HOST_ALIAS_MAX`), or None when unset or nothing usable is left. No `-` or `.`: the filename is
+    split on its last `-` and last `.`."""
+    raw = settings(config).get("host_alias")
+    if not isinstance(raw, str):
+        return None
+    return "".join(c for c in raw.lower() if c.isascii() and c.isalnum())[:HOST_ALIAS_MAX] or None
+
+
+def _config_for(sdlc_dir):
+    """The config for callers that hold only a directory; `{}` when it cannot be read."""
+    try:
+        cfg = _config(sdlc_dir)
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:                # noqa: BLE001 - naming a file must never raise
+        return {}
+
+
+def _instance_token(config=None):
     """`<host>.<pid>` — the ONE writer-instance string, shared verbatim by the filename
     (`entry_file`), the entry `id` (`append`) and the read-side writer identity (`my_writer`), so
     the three can never drift apart again. The `.` separator is deliberate: `files_for()` splits a
     filename on its LAST `-` to recover the actor, and an actor name may itself contain `-`, so
     adding a second `-`-delimited segment would have made that split ambiguous. A `.` keeps the
     actor recoverable by the same exact-match rule as before."""
-    return f"{_host_token()}.{os.getpid()}"
+    return f"{_host_token(config)}.{os.getpid()}"
 
 
-def entry_file(sdlc_dir, who, stream=ENTRIES):
+def entry_file(sdlc_dir, who, stream=ENTRIES, config=None):
     """F10: the filename carries the WRITING PROCESS, not just the actor. The per-author-file design
     assumed one writer per file, but the actor resolves to the authenticated `gh` login — and several
     parallel loops under a single shared account (all loops authenticate as the same user) all
@@ -831,7 +867,9 @@ def entry_file(sdlc_dir, who, stream=ENTRIES):
     `{safe_name}-{instance}.jsonl` — is what it always was; only the parent directory is fixed now.
     ENTRIES is untouched: it lands under `entries_dir(sdlc_dir, ENTRIES)` exactly as before."""
     base = local_events_dir(sdlc_dir) if stream == EVENTS else entries_dir(sdlc_dir, stream)
-    return base / f"{_safe_name(who)}-{_instance_token()}.jsonl"
+    if config is None:
+        config = _config_for(sdlc_dir)
+    return base / f"{_safe_name(who)}-{_instance_token(config)}.jsonl"
 
 
 def files_for(directory, who):
@@ -1190,7 +1228,7 @@ def prune_journal(sdlc_dir, keep_days=JOURNAL_RETENTION_DAYS, now=None):
     if _is_link(root):
         return []
     cutoff = (now if now is not None else time.time()) - keep_days * 86400
-    mine = f"-{_instance_token()}.jsonl"
+    mine = f"-{_instance_token(_config_for(sdlc_dir))}.jsonl"
     removed = []
     try:
         candidates = sorted(root.glob("*.jsonl"))
@@ -1419,7 +1457,7 @@ def append(sdlc_dir, config, kind, goal, run=None, now=None, stream=ENTRIES, **f
         field_whitelist = EVENT_FIELDS[kind]
 
     who = actor(config, run)
-    path = entry_file(sdlc_dir, who, stream)
+    path = entry_file(sdlc_dir, who, stream, config)
     path.parent.mkdir(parents=True, exist_ok=True)
     seq = _line_count(path) + 1
 
@@ -1431,7 +1469,7 @@ def append(sdlc_dir, config, kind, goal, run=None, now=None, stream=ENTRIES, **f
         # 3-part id is a no-op for all of them — confirmed by reading every "id" reference in the
         # plugin. #540 puts the host INSIDE that middle segment rather than adding a fourth one, so
         # both `_writer()` copies (which take the first two `:`-segments) keep working untouched.
-        "id": f"{who}:{_instance_token()}:{seq}",
+        "id": f"{who}:{_instance_token(config)}:{seq}",
         "ts": _stamp(now),
         "actor": who,
         "kind": kind,
@@ -1978,7 +2016,7 @@ def my_writer(config):
     "my own current process" apart from "a different process of mine" (F10/#337 already made every
     entry this process writes carry this identity; this is the read-side counterpart). Computed
     fresh every call, never cached — `os.getpid()` is the one thing riskier to cache than `actor`."""
-    return f"{actor(config)}:{_instance_token()}"
+    return f"{actor(config)}:{_instance_token(config)}"
 
 
 def writer_pid(writer):
@@ -2054,7 +2092,7 @@ def claim_belongs_to_me(holder_actor, holder_writer, me, my_writer, live_worker_
     # docstring above sets out for an unresolvable pid. A writer with no host is pre-#540 and falls
     # through to exactly the old behavior.
     holder_host = writer_host(holder_writer)
-    if holder_host is not None and holder_host != _host_token():
+    if holder_host is not None and holder_host != (writer_host(my_writer) or _host_token()):
         return False
     pid = writer_pid(holder_writer)
     if pid is None:

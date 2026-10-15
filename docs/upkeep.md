@@ -30,7 +30,10 @@ It does not do the following:
 ## The two ways a unit gets brought forward
 
 1. **At pick time.** When a goal that declares a unit is picked, the pick-time pass brings that unit's branch
-   (and the goal's own branch) up to date. This is the older mechanism. `work.rebase_upkeep` (on by default;
+   (and the goal's own branch) up to date. If another pass holds the unit's rebase lock, the pick does not wait: the
+   new goal is cut, the unit tip is re-checked right after the cut, and the still-empty goal branch is moved onto
+   the new tip if it changed. The pick line says so, and the goal's recorded cut tip makes its later rebase replay
+   only its own commits. This is the older mechanism. `work.rebase_upkeep` (on by default;
    `"off"` turns it off) governs it.
 2. **On a window.** With the scheduler, one bounded sweep brings every unit that is behind its base up to
    date, once per window. This is the subject of the next sections.
@@ -160,7 +163,7 @@ python3 skills/sigma-loop/scripts/feature_rebase.py ack .sdlc <unit> --all
 ```
 
 `ack --all` acknowledges only the commits the filed issue listed. The acknowledgement is keyed by patch id, so
-it survives the rewrite it unblocks, and it lives under `.sdlc/features/`, so it travels by pull request to
+it survives the rewrite it unblocks (a merge or empty commit, which has no patch id, is keyed by author, author date, message and parent count), and it lives under `.sdlc/features/`, so it travels by pull request to
 every teammate. Sigma only detects a violation; only host branch protection can prevent one, and ordinary
 protection on `feature/*` blocks upkeep's own force push, so grant upkeep's actor a bypass.
 

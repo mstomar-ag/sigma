@@ -776,92 +776,92 @@
       "writer": "skills/sigma-loop/scripts/ledger.py:1371"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/comment_watch.py:141"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/drift_watch.py:404"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/handoff.py:486"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/ledger.py:1568"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/ledger.py:1578"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/loop.py:1760"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/loop.py:5214"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/loop.py:5244"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/loop.py:5261"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/loop.py:5365"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/phase_report.py:2047"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/phase_report.py:2053"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/phase_report.py:2069"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/spend_approval.py:361"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/sync.py:1298"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/work.py:6965"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/work.py:985"
     },
     {
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-scope/scripts/assign.py:574"
     },
@@ -1406,92 +1406,92 @@
       "writer": "skills/sigma-loop/scripts/sync.py:1296"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/comment_watch.py:141"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/drift_watch.py:404"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/handoff.py:486"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/ledger.py:1568"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/ledger.py:1578"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/loop.py:1760"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/loop.py:5214"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/loop.py:5244"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/loop.py:5261"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/loop.py:5365"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/phase_report.py:2047"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/phase_report.py:2053"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/phase_report.py:2069"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/spend_approval.py:361"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/sync.py:1298"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/work.py:6965"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-loop/scripts/work.py:985"
     },
     {
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "source": "code",
       "writer": "skills/sigma-scope/scripts/assign.py:574"
     },
@@ -4235,7 +4235,7 @@
     {
       "decision": "capped",
       "growth_event": "writer invoked (skills/sigma-loop/scripts/comment_watch.py:141, skills/sigma-loop/scripts/drift_watch.py:404, skills/sigma-loop/scripts/handoff.py:486, skills/sigma-loop/scripts/ledger.py:1568, skills/sigma-loop/scripts/ledger.py:1578, skills/sigma-loop/scripts/loop.py:1760, skills/sigma-loop/scripts/loop.py:5214, skills/sigma-loop/scripts/loop.py:5244, skills/sigma-loop/scripts/loop.py:5261, skills/sigma-loop/scripts/loop.py:5365, skills/sigma-loop/scripts/phase_report.py:2047, skills/sigma-loop/scripts/phase_report.py:2053, skills/sigma-loop/scripts/phase_report.py:2069, skills/sigma-loop/scripts/spend_approval.py:361, skills/sigma-loop/scripts/sync.py:1298, skills/sigma-loop/scripts/work.py:6965, skills/sigma-loop/scripts/work.py:985, skills/sigma-scope/scripts/assign.py:574)",
-      "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
       "pruner_or_cap": "ledger.prune_journal: deletes journal files idle 30 days, from the first ledger.append of each process, at most once per 24h; age-based, not size-based; never the writing process's own file",
       "size_100x_bytes": 0,
       "size_10x_bytes": 0,
@@ -4577,7 +4577,7 @@
     {
       "decision": "intentionally unbounded (entries stream); the events half of <stream> is capped by ledger.prune_journal",
       "growth_event": "writer invoked (skills/sigma-loop/scripts/comment_watch.py:141, skills/sigma-loop/scripts/drift_watch.py:404, skills/sigma-loop/scripts/handoff.py:486, skills/sigma-loop/scripts/ledger.py:1568, skills/sigma-loop/scripts/ledger.py:1578, skills/sigma-loop/scripts/loop.py:1760, skills/sigma-loop/scripts/loop.py:5214, skills/sigma-loop/scripts/loop.py:5244, skills/sigma-loop/scripts/loop.py:5261, skills/sigma-loop/scripts/loop.py:5365, skills/sigma-loop/scripts/phase_report.py:2047, skills/sigma-loop/scripts/phase_report.py:2053, skills/sigma-loop/scripts/phase_report.py:2069, skills/sigma-loop/scripts/spend_approval.py:361, skills/sigma-loop/scripts/sync.py:1298, skills/sigma-loop/scripts/work.py:6965, skills/sigma-loop/scripts/work.py:985, skills/sigma-scope/scripts/assign.py:574)",
-      "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+      "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
       "pruner_or_cap": "none by decision: git-tracked on the ops branch, a sweep would stage deletions in a teammate's pull; ceiling and reclaim owner in the evidence doc",
       "size_100x_bytes": 0,
       "size_10x_bytes": 0,

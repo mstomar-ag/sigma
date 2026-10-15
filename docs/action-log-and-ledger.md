@@ -121,6 +121,23 @@ here can change the command's own output: stdout stays the bare entry id and the
 untouched, so a push that fails costs you a warning, never the write. Set
 `ledger.publish_on_write: false` to keep the push local and leave it to the watcher.
 
+### What the entry file name says about your machine
+
+Each machine writes its own file, `entries/<actor>-<host token>.<pid>.jsonl`, and the ops branch
+publishes it. The host token is a short hash of the host name, never the host name itself, on any
+repository. Two optional `ledger` settings change it, both off by default (the default file names
+are unchanged):
+
+- `host_alias`: a label of your choosing (letters and digits, at most 12) used in place of the hash.
+- `salt_host_token: true`: salts the hash with `discovery.github.repo`, so one machine has a different
+  token in each repository.
+
+Files written by older versions are still read and attributed by the `actor` field inside each line.
+`/sigma-doctor` reads the file names in the local copy of the ledger branch (at most 500) and warns
+when a public repository's published entries carry a host part that is not a hash, the alias or a
+pid; fix it with `host_alias` and remove those files from the ledger branch. It does not rewrite
+history.
+
 ### Blocked on someone else's area? Hand it off, don't park into silence
 
 Parking is right for a decision only a human can make. It is the wrong answer for a **dependency in

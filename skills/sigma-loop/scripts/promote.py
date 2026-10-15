@@ -710,7 +710,7 @@ _UPKEEP_BODY_LINE = "Filed by Sigma's rebase upkeep for unit"
 MIGRATE_FETCH_CAP = 10000
 
 Arm = collections.namedtuple("Arm", "reason qkind held", defaults=((),))   # #1518: held = open blockers
-Park = collections.namedtuple("Park", "reason qkind")
+Park = collections.namedtuple("Park", "reason qkind hardstop", defaults=(None,))
 
 
 def _label_names(issue):
@@ -764,6 +764,8 @@ def plan_for(issue, config, unresolved=(), hold=None):
     else:
         d = ft.decide(title, body, {}, config)
     if d.kind != "arm":
+        if getattr(d, "matched", None):             # #1498: a deny-list match is a hard stop
+            return Park(d.reason, _feature("hard_stop").first_hardstop_kind(config), d.matched)
         return Park(d.reason, "needs_decision")
     why = "human-confirmed filing" if pop == "human" else d.reason
     return Arm("armed (held by %s)" % ", ".join(held) if held else why, None, tuple(held))
@@ -774,7 +776,9 @@ def _migrate_comment(plan, pop):
         return ("%s\nMigrated off the retired confirmation queue: armed for the loop (population: %s; %s). "
                 "Pick-time guards still apply." % (MIGRATE_MARKER, pop, plan.reason))
     return ("%s\nMigrated off the retired confirmation queue: parked (population: %s; %s). Run /sigma-unpark "
-            "to release it.\n%s" % (MIGRATE_MARKER, pop, plan.reason, _feature("qkind").render_line(plan.qkind)))
+            "to release it.\n%s%s" % (MIGRATE_MARKER, pop, plan.reason, _feature("qkind").render_line(plan.qkind),
+                                     ("\n" + _feature("qkind").render_hardstop(plan.hardstop))
+                                     if plan.hardstop else ""))
 
 
 def _migrate_cap(config):
