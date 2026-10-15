@@ -2609,6 +2609,56 @@ def test_an_already_flattened_branch_can_be_acked_and_the_ack_survives_the_rebas
     assert again["outcome"] == m.REBASED, "the ack must survive the rewrite it allowed: %s" % again
 
 
+def _merge_base_into_unit(world):
+    """A hand-made "merge base into unit" commit: the feature branch merges the integration tip it
+    was cut from, so the merge has the OLD integration tip as its second parent (#1470)."""
+    _git(world.local, "checkout", "-q", FEATURE)
+    _git(world.local, "pull", "-q", "origin", FEATURE)
+    _git(world.local, "merge", "-q", "--no-ff", "-m", "merge base into unit", "origin/" + INTEGRATION)
+    _git(world.local, "push", "-q", "origin", FEATURE)
+    _git(world.local, "checkout", "-q", INTEGRATION)
+
+
+def test_an_ack_of_a_merge_commit_survives_the_replay_that_recreates_it(tmp_path):
+    """#1470: a merge has no patch-id, so its ack matched by sha only, and the rebase-merges replay re-creates it
+    under a new sha. The ack must also carry a rewrite-stable key (author, author date, raw message, parent count),
+    or the second pass after the base moves refuses with DIRECT_COMMITS again."""
+    m = _mod()
+    world = World(tmp_path).build()
+    world.move_integration()
+    _merge_base_into_unit(world)
+    world.move_integration(name="m2.txt", body="m2", subject="integration moves again")
+    _filer(m)
+    locked = _upkeep(m, world)
+    assert locked["outcome"] == m.DIRECT_COMMITS, locked
+    assert [d["subject"] for d in locked["direct"]] == ["merge base into unit"]
+    assert m.ack(str(world.sdlc), _cfg(), UNIT, [locked["direct"][0]["sha"]])["ok"] is True
+
+    first = _upkeep(m, world)
+    assert first["outcome"] == m.REBASED, first
+    _git(world.local, "fetch", "-q", "origin")
+    merges = _git(world.local, "log", "--merges", "--format=%H",
+                  "origin/%s..origin/%s" % (INTEGRATION, FEATURE)).split()
+    assert merges and merges[0] != locked["direct"][0]["sha"], "the replay must have re-created the merge"
+    world.move_integration(name="m3.txt", body="m3", subject="and again")
+    second = _upkeep(m, world)
+    assert second["outcome"] == m.REBASED, "the merge ack must survive the replay: %s" % second
+
+
+def test_a_commit_with_a_patch_id_is_not_acked_by_the_rewrite_key(tmp_path):
+    """The rewrite key is only for commits with no patch-id: acking a normal commit stores none."""
+    m = _mod()
+    world = World(tmp_path).build(feature_commits=(
+        ("f.txt", "f", "feat: land a goal (#11)"),
+        ("h.txt", "h", "quick fix, straight onto the branch")))
+    world.move_integration()
+    _filer(m)
+    first = _upkeep(m, world)
+    assert m.ack(str(world.sdlc), _cfg(), UNIT, [first["direct"][0]["sha"]])["ok"] is True
+    entries = json.loads(m.ack_path(str(world.sdlc), UNIT).read_text(encoding="utf-8"))["acked"]
+    assert entries and all(e["patch_id"] and not e.get("rewrite_key") for e in entries), entries
+
+
 def test_an_ack_covers_only_the_commits_it_names(tmp_path):
     """The check stays strict for everything else: a direct commit added AFTER the ack blocks."""
     m = _mod()

@@ -224,7 +224,7 @@ def record_comparison(sdlc_dir, record, would, config):
                                                    and bank_key(record.get("qkind"), would)):
             return                                      # M-13: public only ever carries enumerated keys
         _load("autonomy").record_watch(sdlc_dir, record.get("qkind"), record.get("area") or REPO_AREA,
-                                       would, actual, config)
+                                       would, actual, config, shown=bool(record.get("shown")))
     except Exception:                                   # noqa: BLE001
         pass
 
