@@ -206,7 +206,7 @@ def test_closed_gate_paths_unchanged_without_imports(tmp_path):
     row = AU.readout(sd, cfg)["kinds"][0]
     assert row == {"qkind": "quota", "area": "repo", "level": 0, "answers": 1, "comparisons": 0,
                    "agreement": None, "vetoes": 0, "paused": False, "capped": False,
-                   **{k: row[k] for k in row if k.startswith(("next_", "answers_n", "comparisons_n", "agreement_n"))}}
+                   **{k: row[k] for k in row if k.startswith(("next_", "answers_n", "comparisons_n", "agreement_n", "majority_share"))}}
     closed = _cfg(records=False)
     assert DS.list_by(sd, closed) == [] and RD.list_patterns(sd, closed) == []
     assert AU.readout(sd, _cfg(autonomy=False)) == {"enabled": False}

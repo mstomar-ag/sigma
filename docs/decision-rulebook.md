@@ -249,6 +249,24 @@ fails closed on a small held-out set, a tie, a missing option, a hard-stop kind,
 has a rule. It needs the rules, autonomy and records parts all open. On a public repository only answers that are bank options
 are stored, so drafts and comparisons work from those alone.
 
+`rule_draft.py list --why` also prints one `skipped <kind> / <area>: <reason>` line for each pair left out (hard-stop
+or unknown kind, level below 2, or the share of the most common answer). `rule_draft.py due` prints, for each approved
+rule due for re-asking, `rule <id>: K of N live answers accepted since <date>`.
+
+**The recommendation.** With the rules part open, `unpark.py brief` shows an approved rule as `recommendation`
+(`rule_id`, `option`, `gesture`, `due`) only for a declared, learnable kind whose rule option is among the options on
+offer, and a `pair` line (level, answers, comparisons, agreement; with autonomy open). The interview lists that option
+first with "(recommended)" in the label, and the answers payload carries `rule_id` as a top-level key (never inside
+`answers`). `resolve` then records `rule_id`, `shown` (the recommendation was displayed) and `accepted` (the answer
+equals the rule's option) on the decision record. Comparisons made while a recommendation was shown are reported apart
+from the others, and level 3 is judged on the ones that were not shown. At level 3 and above the applier acts on a rule
+only after `l3_min_answers` live comparisons whose predicted option is that rule's own, recorded since it was
+confirmed, agree at `l3_agreement`; a newly approved rule does not inherit the trust earned by an older prediction.
+The autonomy row also lists the top three `misses` (predicted instead of chosen; free text reads "a free-text answer")
+and says "cannot reach N%" when the most common answer's share is below what the next level needs. The doctor flags a
+rule whose option never matches a recorded answer and shows each rule's acceptance line. With all of these parts
+closed, brief and resolve output is unchanged.
+
 `approve` refuses, with one line, for an unknown id, an already approved rule, a non-owner, an unresolved login or a
 closed gate. For a login that is not an owner it prints the line that asks an owner to approve, and the rule stays proposed.
 

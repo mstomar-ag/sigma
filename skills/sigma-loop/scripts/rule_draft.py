@@ -137,6 +137,46 @@ def list_patterns(sdlc_dir, config):
         return []
 
 
+def skipped(sdlc_dir, config):
+    """#1496: `[{qkind, area, why}]` for each pair `list_patterns` leaves out, with the plain reason. Never raises."""
+    try:
+        if not _open(config):
+            return []
+        cfg, au = settings(config), _load("autonomy")
+        listed = {(r["qkind"], r["area"]) for r in list_patterns(sdlc_dir, config)}
+        pairs = sorted({(r.get("qkind"), r.get("area")) for r in _load("decision_store").list_by(sdlc_dir, config)
+                        if isinstance(r.get("qkind"), str) and isinstance(r.get("area"), str)})
+        out = []
+        for q, a in pairs:
+            if (q, a) in listed:
+                continue
+            if _blocked(q, config):
+                why = "unknown or hard-stop kind"
+            elif au.level(sdlc_dir, q, a, config) < MIN_LEVEL:
+                why = "level %d, below %d" % (au.level(sdlc_dir, q, a, config), MIN_LEVEL)
+            else:
+                opt, share = _majority(list(_human(sdlc_dir, q, a, config).values()))
+                why = ("tied or no usable answers" if opt is None
+                       else "%s is %d%% of answers, below %d%%" % (opt, round(share * 100),
+                                                                   round(cfg["min_agreement"] * 100)))
+            out.append({"qkind": q, "area": a, "why": why})
+        return out
+    except Exception:
+        return []
+
+
+def due_lines(sdlc_dir, config, now=None):
+    """#1496 F-19: for each approved rule due for re-asking, the plain acceptance line. Never raises."""
+    try:
+        import datetime
+        rb = _load("rulebook")
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        due = set(rb.due_for_reask(rb.load(sdlc_dir, config), now, config))
+        return [rb.acceptance_line(r) for r in rb.acceptance(sdlc_dir, config) if r["id"] in due]
+    except Exception:
+        return []
+
+
 def _refuse(reason):
     return {"status": "refused", "reason": reason}
 
@@ -210,7 +250,11 @@ def approve(sdlc_dir, rule_id, config):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="verb", required=True)
-    sub.add_parser("list", help="learned patterns at level 2 or more").add_argument("sdlc_dir")
+    ls = sub.add_parser("list", help="learned patterns at level 2 or more")
+    ls.add_argument("sdlc_dir")
+    ls.add_argument("--why", action="store_true", help="also say why each other pair was skipped")
+    sub.add_parser("due", help="approved rules due for re-asking, with how often they were accepted"
+                   ).add_argument("sdlc_dir")
     d = sub.add_parser("draft", help="propose a rule for one pair (never approves)")
     d.add_argument("sdlc_dir")
     d.add_argument("qkind")
@@ -237,6 +281,13 @@ def main(argv=None):
         return 0
     if args.verb == "list":
         print(json.dumps(list_patterns(args.sdlc_dir, config), indent=2))
+        if args.why:
+            for row in skipped(args.sdlc_dir, config):
+                print("skipped %s / %s: %s" % (row["qkind"], row["area"], row["why"]))
+        return 0
+    if args.verb == "due":
+        for line in due_lines(args.sdlc_dir, config):
+            print(line)
         return 0
     if args.verb == "approve":
         ok, line = approve(args.sdlc_dir, args.rule_id, config)
