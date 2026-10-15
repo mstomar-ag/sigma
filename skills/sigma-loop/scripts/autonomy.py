@@ -7,9 +7,9 @@ would have chosen next to what the person chose) give the agreement. Levels 0 to
 pre-fill; the higher levels are read by a later slice. Rules:
 
 - Thresholds come from `rulebook.autonomy.levels.*`; a wrong-typed value reads as its default.
-- Level 2 to 4 need as many watch comparisons as answers for that level, per machine; each machine
-  gets a level and the LOWER one wins, so disagreement never raises trust.
-- A veto drops one level (PROVISIONAL: once, not cumulatively); `veto_pause_consecutive` vetoes since
+- Level 2 to 4 need as many watch comparisons as answers for that level, pooled over all machines;
+  a machine whose own count reaches that need must also reach the level, so disagreement never raises trust.
+- A veto drops one level until `veto_recover_after` agreeing live comparisons follow it; `veto_pause_consecutive` vetoes since
   the last agreeing comparison, or `veto_pause_total` in all, pause the kind at level 0.
 - A hard-stop kind (`hard_stop.is_hardstop_kind`) or any record carrying a hardstop class is capped
   at level 2. The cap is fixed, not configurable.
@@ -93,6 +93,13 @@ def settings(config):
     return out
 
 
+def recover_after(config, cfg=None):
+    """Agreeing live comparisons that wear off a veto's one-level drop (F-14): `veto_pause`-style key
+    `rulebook.autonomy.veto_recover_after`, default `l3_min_answers / 6`, never below 5."""
+    cfg = cfg or settings(config)
+    return _pos_int(_sub(config).get("veto_recover_after"), max(5, cfg["l3_min_answers"] // 6))
+
+
 def _machine():
     try:
         return hashlib.sha256(os.uname().nodename.encode("utf-8")).hexdigest()[:8]
@@ -109,7 +116,8 @@ def _dir(sdlc_dir):
 
 
 def _area(area):
-    return area if isinstance(area, str) else ""
+    """A missing or blank area reads as `repo`, the same as `decision_record.REPO_AREA` (F-21)."""
+    return area if isinstance(area, str) and area else "repo"
 
 
 def _write_new(sdlc_dir, prefix, body, now):
@@ -188,6 +196,11 @@ def veto(sdlc_dir, rid, config=None, now=None, machine=None):
         return None
 
 
+def _keep_n(cfg):
+    """How many of a pair's newest comparisons the ladder reads and pruning keeps: the largest threshold."""
+    return max(cfg["l%d_min_answers" % n] for n in (1, 2, 3, 4))
+
+
 def _ladder(answers, comparisons, agreement, cfg):
     lvl = 0
     if answers >= cfg["l1_min_answers"]:
@@ -246,26 +259,40 @@ def _state(sdlc_dir, qkind, area, config):
     live = sum(1 for r in recs if r.get("how") == "human")
     imported = sum(1 for r in recs if r.get("how") == "imported")
     answers = live + imported
-    watch = [w for w in _facts(sdlc_dir, "watch-") if _pair(w, qkind, area)]
+    all_watch = [w for w in _facts(sdlc_dir, "watch-") if _pair(w, qkind, area)]
+    watch = sorted(all_watch, key=lambda w: str(w.get("time")))[-_keep_n(cfg):]  # F-12: newest N, any age
     vetoes = sorted((v for v in _facts(sdlc_dir, "veto-") if _pair(v, qkind, area)),
                     key=lambda v: str(v.get("time")))
     by_machine = {}
     for w in watch:
         by_machine.setdefault(str(w.get("machine")), []).append(w)
+    lagging = []
     if by_machine:
-        per = []
-        for items in by_machine.values():
-            per.append(_capped_ladder(answers, live, items, cfg))
-        lvl = min(per)
-        total_agree = sum(1 for w in watch if _agrees(w))
-        agreement = total_agree / len(watch)
+        lvl = _capped_ladder(answers, live, watch, cfg)         # F-08: all machines pooled
+        pooled = lvl
+        while lvl >= 2:                                           # only machines that reach the need can hold it down
+            need = cfg["l%d_min_answers" % lvl]
+            if all(_capped_ladder(answers, live, items, cfg) >= lvl
+                   for items in by_machine.values() if len(items) >= need):
+                break
+            lvl -= 1
+        if pooled >= 2:
+            need = cfg["l%d_min_answers" % pooled]
+            for tag, items in sorted(by_machine.items()):
+                if len(items) < need:
+                    lagging.append({"machine": tag, "comparisons": len(items),
+                                    "agreement": sum(1 for w in items if _agrees(w)) / len(items)})
+        agreement = sum(1 for w in watch if _agrees(w)) / len(watch)
     else:
         lvl, agreement = (1 if answers >= cfg["l1_min_answers"] else 0), None
-    last_ok = max((str(w.get("time")) for w in watch if _agrees(w)), default="")
+    last_ok = max((str(w.get("time")) for w in all_watch if _agrees(w)), default="")
     consecutive = sum(1 for v in vetoes if str(v.get("time")) > last_ok)
     paused = bool(vetoes) and (consecutive >= cfg["veto_pause_consecutive"] or len(vetoes) >= cfg["veto_pause_total"])
-    if vetoes:
-        lvl = max(0, lvl - 1)
+    if vetoes:                                                    # F-14: the drop wears off after enough agreeing answers
+        after = sum(1 for w in all_watch if _agrees(w) and w.get("how") != "imported"
+                    and str(w.get("time")) > str(vetoes[-1].get("time")))
+        if after < recover_after(config, cfg):
+            lvl = max(0, lvl - 1)
     if paused:
         lvl = 0
     capped = False
@@ -283,6 +310,8 @@ def _state(sdlc_dir, qkind, area, config):
     row = {"qkind": qkind, "area": _area(area), "level": lvl, "answers": answers, "comparisons": len(watch),
            "agreement": agreement, "vetoes": len(vetoes), "paused": paused, "capped": capped}
     row.update(_evidence(recs, watch, qkind))
+    if lagging:  # shown only when a machine has too few comparisons to count at the pooled level
+        row["lagging"] = lagging
     if unlearnable:  # shown only for the kind `unknown`; every other row is unchanged
         row["unlearnable"] = True
     if imported:  # shown only when something was imported; otherwise the row is unchanged
@@ -381,6 +410,9 @@ HARDSTOP_TEXT = "hard-stop kind, never learns beyond level 2, always asked"
 def describe(row):
     """One plain line for a row of `readout`; the doctor and the question list share it."""
     line = _describe(row)
+    for m in row.get("lagging") or []:
+        line += "; machine %s: %d comparisons, %d%% agreement" % (m["machine"], m["comparisons"],
+                                                                    round(m["agreement"] * 100))
     return line + (" (%d imported)" % row["imported"] if row.get("imported") else "")
 
 
@@ -451,8 +483,9 @@ def _parse_time(text):
 
 
 def prune_watch(sdlc_dir, now, config):
-    """Remove watch files whose embedded time is older than the retention; returns the count. Vetoes
-    stay. Links are skipped. Never raises."""
+    """Remove watch files older than the retention that are also beyond the newest `l4_min_answers`
+    of their pair (whichever keeps more, F-12); imported comparisons are never expired. Returns the
+    count. Vetoes stay. Links are skipped. Never raises."""
     try:
         if not enabled(config):
             return 0
@@ -460,10 +493,18 @@ def prune_watch(sdlc_dir, now, config):
         if os.path.islink(folder):
             return 0
         cutoff = _now(now) - datetime.timedelta(days=settings(config)["retention_days"])
+        facts = _facts(sdlc_dir, "watch-")
+        keep, pairs = set(), {}
+        for w in facts:
+            pairs.setdefault((w.get("qkind"), _area(w.get("area"))), []).append(w)
+        for (q, a), items in pairs.items():
+            n = _keep_n(_pair_settings(sdlc_dir, q, a, config)[0])
+            items.sort(key=lambda w: str(w.get("time")))
+            keep.update(w["_file"] for w in items[-n:])
         removed = 0
-        for w in _facts(sdlc_dir, "watch-"):
+        for w in facts:
             when = _parse_time(w.get("time"))
-            if when is not None and when < cutoff:
+            if when is not None and when < cutoff and w["_file"] not in keep and w.get("how") != "imported":
                 try:
                     os.unlink(os.path.join(folder, w["_file"]))
                     removed += 1
@@ -495,6 +536,30 @@ def _names(value):
     if isinstance(value, list) and value and all(isinstance(x, str) and x.strip() for x in value):
         return [x.strip().lower() for x in value]
     return []
+
+
+def owners(config):
+    """The lower-cased owner logins in force: `autonomy.owners`, or (key absent) `spend_approval.approvers`."""
+    try:
+        sub = _sub(config)
+        if "owners" in sub and sub["owners"] is not None:
+            return _names(sub["owners"])
+        sa = config.get("spend_approval") if isinstance(config, dict) else None
+        return _names(sa.get("approvers")) if isinstance(sa, dict) else []
+    except Exception:
+        return []
+
+
+def recent_comparisons(sdlc_dir, qkind, area, config, now=None):
+    """`(count, days)`: this pair's comparisons recorded within `retention_days` of `now`, and that window."""
+    days = settings(config)["retention_days"]
+    cutoff = _now(now) - datetime.timedelta(days=days)
+    n = 0
+    for w in _facts(sdlc_dir, "watch-"):
+        when = _parse_time(w.get("time"))
+        if _pair(w, qkind, area) and when is not None and when >= cutoff:
+            n += 1
+    return n, days
 
 
 def is_owner(login, config):

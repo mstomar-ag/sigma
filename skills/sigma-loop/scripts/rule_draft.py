@@ -216,12 +216,17 @@ def draft(sdlc_dir, qkind, area, config, now=None):
         return _refuse("unreadable: %s" % type(exc).__name__)
 
 
-def _invoker(config):
-    """The authenticated login of whoever runs this, or None. Reuses `cross_repo.identity`'s one lookup."""
+def _identity(config):
+    """`cross_repo.identity` for whoever runs this: `{"login", "confirmed", "detail", ...}`. Never raises."""
     try:
-        return _load("cross_repo").identity(config).get("login")
-    except Exception:
-        return None
+        return _load("cross_repo").identity(config)
+    except Exception as exc:  # noqa: BLE001
+        return {"login": None, "confirmed": False, "detail": type(exc).__name__}
+
+
+def _invoker(config):
+    """The authenticated login of whoever runs this, or None."""
+    return _identity(config).get("login")
 
 
 def approve(sdlc_dir, rule_id, config):
@@ -235,14 +240,18 @@ def approve(sdlc_dir, rule_id, config):
             return False, "no valid rule with id %s" % rule_id
         if rule.get("status") == "approved":
             return False, "rule %s is already approved" % rule_id
-        login = _invoker(config)
+        ident = _identity(config)
+        login = ident.get("login")
         if not login:
             return False, "cannot resolve who is approving; rule %s stays proposed" % rule_id
+        if ident.get("confirmed") is False:
+            return False, ("cannot confirm who is approving (gh reports %s: %s); rule %s stays proposed"
+                           % (login, ident.get("detail") or "identity unconfirmed", rule_id))
         if not _load("autonomy").is_owner(login, config):
             return False, rb.park_line(rule_id).replace("\n", " ")
         rb.approve(sdlc_dir, rule_id, login, config)
         said = meaning(rule.get("qkind"), rule.get("option"))
-        return True, rule_id + (": " + said if said else "")
+        return True, rule_id + (": " + said if said else "") + " (approved by %s)" % login
     except Exception as exc:  # noqa: BLE001 - fail closed
         return False, "unreadable: %s" % type(exc).__name__
 

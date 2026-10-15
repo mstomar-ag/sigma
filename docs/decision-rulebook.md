@@ -186,15 +186,24 @@ A level from 0 to 4 is derived per kind and area. It is never stored. The thresh
 Rules of the ladder:
 
 - **Answers** are human records plus imported records of that kind and area.
-- **Agreement** is how often the rulebook's pick matched the person's. It is measured **per machine**, over at
-  least as many comparisons as answers for that level, and **the lowest machine wins**.
+- **Agreement** is how often the rulebook's pick matched the person's. Comparisons of a pair are **pooled across
+  machines**. A machine whose own comparisons reach what the level needs must reach that level too, so the lowest
+  such machine wins and disagreement never raises trust; a machine with fewer comparisons than that does not cap the
+  pair, and the doctor names it (`machine <tag>: N comparisons, M% agreement`).
 - **Imported evidence** counts toward levels 1 and 2 and never above level 2. Above that only live answers and live
   comparisons count.
-- **A veto** (an owner's `no` after an applied answer) drops the kind one level, once. `veto_pause_consecutive`
-  (default 3) vetoes since the last agreeing comparison, or `veto_pause_total` (default 20) in all, pause the kind at level 0.
+- **A veto** (an owner's `no` after an applied answer) drops the kind one level, and the drop wears off once
+  `veto_recover_after` agreeing live comparisons (default `l3_min_answers` / 6, at least 5) came after the newest veto.
+  It is one level, not one per veto. `veto_pause_consecutive` (default 3) vetoes since the last agreeing comparison,
+  or `veto_pause_total` (default 20) in all, pause the kind at level 0, and recovery does not lift a pause.
 - **Hard-stop kinds** are capped at level 2, whatever the evidence.
 - Missing, unreadable or malformed files never raise a level.
-- Watch files older than `watch.retention_days` (default 30) are pruned by the time inside them; vetoes are kept.
+- The ladder reads the newest `l4_min_answers` comparisons of a pair whatever their age. Watch files are pruned by the
+  time inside them only when they are older than `watch.retention_days` (default 30) and also beyond that newest
+  count, so a level never falls because comparisons aged out. Imported comparisons are never expired in a batch;
+  vetoes are kept.
+- A record or comparison with no area belongs to the area `repo`; an issue with several `area:` labels uses the first
+  one in sorted order.
 - Public visibility writes no watch comparisons, because they would carry the free-text choice.
 
 State lives in `.sdlc/autonomy/` as one small file per fact (`watch-<id>.json`, `veto-<id>.json`, plus the applier's
@@ -514,7 +523,8 @@ flag, which closes the whole block.
 | `autonomy.levels.l2_agreement` ... `l4_agreement` | `0.90`, `0.95`, `0.99` | agreement per level (0 to 1) |
 | `autonomy.veto_pause_consecutive` | `3` | vetoes since the last match that pause a kind |
 | `autonomy.veto_pause_total` | `20` | vetoes in all that pause a kind |
-| `autonomy.watch.retention_days` | `30` | age at which watch records are pruned |
+| `autonomy.veto_recover_after` | `max(5, l3_min_answers / 6)` | agreeing live comparisons after a veto that lift its one-level drop |
+| `autonomy.watch.retention_days` | `30` | age after which watch records beyond the newest `l4_min_answers` per pair are pruned |
 | `autonomy.owners` | unset | logins who may approve; unset falls back to `spend_approval.approvers` |
 | `autonomy.applier.enabled` | `false` | open levels 3 and 4 |
 | `autonomy.applier.window_minutes` | `1440` | how long a person has to answer or veto |
@@ -606,7 +616,7 @@ Separate check rows count leftover legacy confirmation labels and name `promote.
 | the daily drift ceiling is reached | verdicts are `not_judged` (`ceiling_reached`) until the window rolls | raise the ceiling or wait |
 | an unreadable action in the hard-stop net | treated as blocked | read the log line it prints |
 | an approved rule edited by hand | it stops counting | re-propose and re-approve it |
-| machines disagree on agreement | the lowest machine's level wins | converge by answering more questions |
+| a machine with enough comparisons disagrees | the lowest such machine's level wins; a machine with fewer comparisons than the level needs does not count | converge by answering more questions |
 | `require_review: "approval"` on a host that cannot answer the approval query | the goal is parked rather than merged | use an approval the REST API can see |
 
 ## Rollout advice

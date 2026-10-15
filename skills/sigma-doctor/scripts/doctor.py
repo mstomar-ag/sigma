@@ -5301,6 +5301,12 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
             if ptr.is_open(cfg):
                 extra.append("ledger pointer on: %d ledger entry files, %d ids queued"
                              % (ptr.pointer_file_count(sdlc_dir), ptr.queued(sdlc_dir)))
+        if sdlc_dir is not None and rub.part_enabled("records"):
+            n, names = _load_loop_script("decision_store").commits_differing(sdlc_dir, cfg, behind=False)
+            if n:
+                extra.append("%d local commit%s touching %s %s not on the default branch; push or merge %s"
+                             % (n, "" if n == 1 else "s", ", ".join(names), "is" if n == 1 else "are",
+                                "it" if n == 1 else "them"))
         if sdlc_dir is not None:
             at = _load_loop_script("drift_judge").ceiling_paused_at(cfg, time.time(), sdlc_dir)
             if at is not None:
@@ -5343,9 +5349,28 @@ def _autonomy_state(cfg, sdlc_dir=None):
                                          _category_clause(r)) for r in out["kinds"]]
         head = "on: " + ("; ".join(rows) if rows else "no kinds yet") + "; %d watch records, %d vetoes" % (
             out["watch_records"], out["vetoes"])
-        return head + "".join("\n      " + l for l in ([mod.NO_RECORDS_LINE] if not rows else [mod.describe(r) for r in out["kinds"]]))
+        lines = [mod.NO_RECORDS_LINE] if not rows else [mod.describe(r) for r in out["kinds"]]
+        for r in out["kinds"]:   # #1500: a level the comparisons on hand cannot reach inside the retention window
+            need = r.get("comparisons_needed")
+            if r.get("next_level") and need and not r.get("capped") and r.get("answers", 0) >= (r.get("answers_needed") or 0):
+                recent, days = mod.recent_comparisons(sdlc_dir if sdlc_dir is not None else ".sdlc", r["qkind"], r["area"], cfg)
+                if r.get("comparisons", 0) < need and recent < need:
+                    lines.append("%s / %s: level %d unreachable: needs %d comparisons, %d recorded in the last %d days"
+                                 % (r["qkind"], r["area"] or "-", r["next_level"], need, recent, days))
+        return head + "".join("\n      " + l for l in lines)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
+
+
+def _no_owners_clause(cfg):
+    """#1500: the applier needs an owner to read a veto from; owners (or the approvers fallback) empty means none."""
+    try:
+        if not _load_loop_script("autonomy").owners(cfg):
+            return ("; WARNING: rulebook.autonomy.owners (and the spend_approval.approvers fallback) is empty, "
+                    "so no one can veto or approve a rule")
+    except Exception:
+        pass
+    return ""
 
 
 def _applier_state(cfg, sdlc_dir=None, now=None):
@@ -5360,8 +5385,9 @@ def _applier_state(cfg, sdlc_dir=None, now=None):
         beat = mod.read_heartbeat(sdlc_dir if sdlc_dir is not None else ".sdlc")
         if mod.tick_is_dead(beat, cfg, when):
             return ("on, WARNING: the applier tick looks dead (%s); parked questions stay parked until the "
-                    "watcher runs again" % ("never ran" if beat is None else "last tick " + beat.isoformat()))
-        return "on: last tick " + beat.isoformat()
+                    "watcher runs again" % ("never ran" if beat is None else "last tick " + beat.isoformat())
+                    + _no_owners_clause(cfg))
+        return "on: last tick " + beat.isoformat() + _no_owners_clause(cfg)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
 
