@@ -260,6 +260,15 @@ def _eligible(sdlc_dir, config, qkind_, area, option):
         return False
 
 
+def _arm_notice(source, issue, rule_id, at, config):
+    due = at + datetime.timedelta(minutes=settings(config)["window_minutes"])
+    try:
+        source.note(issue, "Rule %s will apply after %s unless you answer or reply no."
+                    % (rule_id, due.strftime("%Y-%m-%d %H:%M UTC")))
+    except Exception:
+        pass
+
+
 def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None, info=None):
     """Open the ask for a park that declared `qkind_`, when an approved rule matches its area.
     Returns the ask id (an existing pending ask for the same park is reused) or None. Never raises.
@@ -286,6 +295,10 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None, info=N
         for a in mine:                       # M-02: an applied, answered or vetoed ask covers its park
             if park and a.get("park") == park and a.get("state") not in ("pending", "superseded"):
                 return None
+            # a legacy ask (no `park`) or an unstamped park cannot be told apart: an applied or vetoed ask covers
+            # it, conservatively (no second apply)
+            if a.get("state") in ("applied", "vetoed") and (not a.get("park") or not park):
+                return None
         for a in mine:
             if a.get("state") != "pending":
                 continue
@@ -303,8 +316,11 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None, info=N
         if gesture not in GESTURES:                  # None: not a bank option; 'none': recommend only
             return None
         armed = now.isoformat() if _eligible(sdlc_dir, config, qkind_, area, m.option) else None
-        return open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now, gesture=gesture, park=park,
-                        armed_at=armed)
+        aid = open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now, gesture=gesture, park=park,
+                       armed_at=armed)
+        if aid and armed is not None and source is not None:    # M-03: one notice when an ask becomes armed
+            _arm_notice(source, issue, m.rule_id, _parse(armed), config)
+        return aid
     except Exception:
         return None
 
@@ -313,11 +329,30 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None, info=N
 SYNC_MAX_READS = 20
 
 
+_CURSOR = "sync-cursor.json"
+
+
+def _cursor_read(sdlc_dir):
+    try:
+        with open(os.path.join(_folder(sdlc_dir), _CURSOR), encoding="utf-8") as fh:
+            v = json.load(fh).get("after")
+        return v if isinstance(v, str) else ""
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def _cursor_write(sdlc_dir, key):
+    try:
+        _write_atomic(os.path.join(_folder(sdlc_dir), _CURSOR), {"after": key})
+    except OSError:
+        pass
+
+
 def sync(sdlc_dir, config, source, now=None, parked_fn=None):
     """Open an ask for every open parked issue that has none for its newest park, and close the asks that
     no longer apply (#1499). Returns the ids opened. Closed gate: `[]`, nothing read. Never raises. A failed
     list or read changes nothing; asks are only closed on a COMPLETE list. Reads at most `SYNC_MAX_READS`
-    issues per pass (those with a pending ask go last)."""
+    issues per pass, rotating from a persisted cursor so none starves."""
     opened = []
     try:
         if not enabled(config):
@@ -341,15 +376,20 @@ def sync(sdlc_dir, config, source, now=None, parked_fn=None):
                 if gone:
                     _supersede(sdlc_dir, a, now)
         asks = _asks(sdlc_dir)
-        pending = {_issue_key(a.get("issue")) for a in asks if a.get("state") == "pending"}
         reads = 0
-        # issues with no pending ask first (they may need one), then the rest: a re-park is seen by reading
-        for i in sorted((i for i in issues if isinstance(i, dict)),
-                        key=lambda i: (_issue_key(i.get("number")) in pending, str(i.get("number")))):
+        # fair rotation: a persisted cursor (the last issue read) makes each pass start after where the last
+        # stopped, so no park is starved by the read cap
+        cursor = _cursor_read(sdlc_dir)
+        ordered = sorted((i for i in issues if isinstance(i, dict)), key=lambda i: _issue_key(i.get("number")))
+        ordered = [i for i in ordered if _issue_key(i.get("number")) > cursor] + \
+                  [i for i in ordered if _issue_key(i.get("number")) <= cursor]
+        last = None
+        for i in ordered:
             n = i.get("number")
             if reads >= SYNC_MAX_READS:
                 break
             reads += 1
+            last = _issue_key(n)
             info = _park_info(source, n)
             if not info or not info.get("qkind"):
                 continue
@@ -357,6 +397,8 @@ def sync(sdlc_dir, config, source, now=None, parked_fn=None):
             mine = next((a for a in _asks(sdlc_dir) if a.get("id") == aid), None)
             if aid and mine and mine.get("opened") == now.isoformat():
                 opened.append(aid)
+        if last is not None:
+            _cursor_write(sdlc_dir, last)
     except Exception:
         return opened
     return opened
@@ -699,12 +741,7 @@ def apply(action, sdlc_dir, config, now, source=None, run=None, clock=None):
             at = max([t for t in (_parse(ask.get("opened")), _parse(action.get("rule_confirmed")), now) if t])
             ask.update(armed_at=at.isoformat())
             _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
-            due = at + datetime.timedelta(minutes=settings(config)["window_minutes"])
-            try:
-                source.note(issue, "Rule %s will apply after %s unless you answer or reply no."
-                            % (action["rule_id"], due.strftime("%Y-%m-%d %H:%M UTC")))
-            except Exception:
-                pass
+            _arm_notice(source, issue, action["rule_id"], at, config)
             return "done"
         # #1395: a person may have unparked it since the ask opened; the read failing keeps the ask pending.
         # A promote starts from a proposed issue, not a parked one, so only the other gestures check.

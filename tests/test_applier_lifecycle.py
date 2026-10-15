@@ -225,3 +225,40 @@ def test_closed_gate_leaves_every_path_byte_identical(tmp_path):
     assert AP.sync(sd, cfg, LSrc(), now=T0, parked_fn=_fetch([7])) == []
     assert AP.open_for_park(sd, cfg, 7, "dependency", source=LSrc(), now=T0) is None
     assert _snapshot(sd) == before
+
+
+def test_sync_rotates_so_later_parks_are_not_starved(tmp_path):
+    sd, cfg, _ = _dep_setup(tmp_path)
+    parks = {n: [("c%d" % n, "dependency")] for n in range(100, 150)}
+    for n in range(100, 125):
+        parks[n] = []                                        # 25 parks that yield no ask
+    src = LSrc(parks)
+    for i in range(3):
+        AP.sync(sd, cfg, src, now=T0 + i * MIN, parked_fn=_fetch(range(100, 150)))
+    assert {str(a["issue"]) for a in AP._asks(sd)} >= {"%d" % n for n in range(125, 150)}
+
+
+def test_an_ask_opened_already_armed_posts_one_notice(tmp_path):
+    sd, cfg, rid = _dep_setup(tmp_path)
+    src = LSrc({7: [("c1", "dependency")]})
+    assert len(AP.sync(sd, cfg, src, now=T0, parked_fn=_fetch([7]))) == 1
+    assert AP._asks(sd)[0]["armed_at"] is not None
+    AP.sync(sd, cfg, src, now=T0 + MIN, parked_fn=_fetch([7]))
+    AP.tick(sd, cfg, T0 + 2 * MIN, source=src)
+    assert sum(1 for _, n in src.notes if rid in n and "will apply" in n) == 1
+
+
+def test_a_legacy_or_unstamped_applied_ask_covers_the_park(tmp_path):
+    sd, cfg, _ = _dep_setup(tmp_path)
+    src = LSrc({7: [("c1", "dependency")]})
+    aid = AP.open_for_park(sd, cfg, 7, "dependency", source=src, now=T0)
+    ask = AP._asks(sd)[0]
+    ask.pop("park", None)
+    ask.update(state="applied", applied_at=T0.isoformat())
+    AP._write_atomic(AP._ask_path(sd, aid), ask)
+    assert AP.open_for_park(sd, cfg, 7, "dependency", source=src, now=T0 + DAY) is None
+    ask["park"] = "c1"
+    AP._write_atomic(AP._ask_path(sd, aid), ask)
+    nostamp = {"labels": [{"name": "area:docs"}], "qkind": "dependency", "park": None, "park_at": None}
+    assert AP.open_for_park(sd, cfg, 7, "dependency", now=T0 + DAY, info=nostamp) is None
+    assert len(AP._asks(sd)) == 1
