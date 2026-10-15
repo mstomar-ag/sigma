@@ -51,7 +51,8 @@ def test_space_joined_value_is_one_missing_folder(tmp_path, capsys):
     sd, prof = _world(tmp_path)
     rc, out, err = _run(capsys, "scan", sd, "--profile", prof, "--project-dir", X + " " + Y)
     line = _folders_line(err)
-    assert rc == 0 and (X + " " + Y) in line
+    assert rc == 0 and (X + " " + Y) not in line
+    assert (X + " " + Y) in "".join(ln for ln in (out + err).splitlines() if "skipped: project folder" in ln)
     assert "skipped: project folder" in out + err and "transcript: files_read=0" in out
 
 

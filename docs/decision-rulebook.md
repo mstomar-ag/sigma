@@ -347,7 +347,7 @@ python3 skills/sigma-loop/scripts/decision_import.py remove .sdlc --project-dir 
   `--project-dir A --project-dir B`. To build the list in a variable, use an array and expand it as a quoted list
   (`dirs=(--project-dir A --project-dir B)` then `"${dirs[@]}"`). A single unquoted variable holding several words is one
   argument in zsh (zsh does not split it), so it is read as one folder that does not exist and is skipped. Every scan,
-  `plan` and `apply` prints a `folders read:` line on stderr naming the folders it resolved.
+  `plan` and `apply` prints a `folders read:` line on stderr naming the folders it found and read (a folder skipped as not found is not listed).
 - **Profiles and missing folders.** Each `--project-dir` is searched under every `--profile` given.
   A folder found under none of them is skipped with a `skipped: project folder ... not found under ...` note, and the run continues with the other folders.
   One call with several `--profile` options is the intended way to cover several profiles.
