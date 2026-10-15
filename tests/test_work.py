@@ -7900,7 +7900,7 @@ def test_a_declared_unit_short_circuits_the_head_read(tmp_path):
     run = _runner([("api repos/", _issue(body="Feature: billing")), ("rev-parse", "release-2")])
     work.start(d, config, "1467", run=run)
     assert work._record(d, "1467")["base"] == "feature/billing"
-    assert not any("rev-parse" in c for c in run.calls)
+    assert not any("rev-parse" in c and "HEAD" in c and "--abbrev-ref" in c for c in run.calls)   # #1483: the cut tip's own read of HEAD is not a fallback
 
 
 def test_local_mode_never_reads_an_issue_at_all(tmp_path):
@@ -11806,3 +11806,31 @@ def test_pr_no_tests_without_a_reason_prints_usage_and_exits_2_before_any_push(t
         assert work.main(["work.py", "pr", str(tmp_path / ".sdlc"), "1346"] + tail) == 2
         err = capsys.readouterr().err
         assert "usage: work.py pr <sdlc_dir> <goal> [--no-tests <reason>]" in err
+
+
+def _busy_start(tmp_path, monkeypatch, busy):
+    """#1483: `start()` on a unit goal, with the pick-time pass reporting a held lock or not."""
+    d = _adopted(tmp_path)
+    cut_seen = []
+    monkeypatch.setattr(work, "_declared_unit", lambda *a, **k: ("u", "", True))
+    monkeypatch.setattr(work, "_declaration_moves_the_base", lambda *a, **k: True)
+
+    def _upkeep(*a, **k):
+        work._UPKEEP_BUSY = busy
+        return ""
+
+    monkeypatch.setattr(work, "_rebase_upkeep", _upkeep)
+    monkeypatch.setattr(work, "_recut_after_busy", lambda run, path, remote, base: " -- RECUT")
+    monkeypatch.setattr(work, "_cut_tip_fields", lambda *a, **k: cut_seen.append(a) or {})
+    out = work.start(d, ON, "0001-x.md", run=_runner([]))
+    return out, cut_seen
+
+
+def test_start_rechecks_the_cut_when_the_unit_lock_was_busy(tmp_path, monkeypatch):
+    out, _ = _busy_start(tmp_path, monkeypatch, True)
+    assert out.endswith(" -- RECUT"), out
+
+
+def test_start_without_a_busy_lock_makes_no_recheck(tmp_path, monkeypatch):
+    out, _ = _busy_start(tmp_path, monkeypatch, False)
+    assert "RECUT" not in out

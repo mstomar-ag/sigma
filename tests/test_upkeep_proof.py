@@ -168,18 +168,11 @@ def test_pick_time_unchanged(tmp_path):
     wrong, n = [], 0
     for adopted in (False, True):
         base = calls(tmp_path / ("base%d" % adopted), adopted, None)
-        assert len(base) == (17 if adopted else 4), len(base)
+        assert len(base) == (18 if adopted else 4), len(base)
         for block in ({"enabled": True}, {"enabled": "true"}, 1, template_block, {"enabled": True, "auto": {"floor": 50}}):
             n += 1
             got = calls(tmp_path / ("case%d" % n), adopted, block)
-            if adopted and support.script("feature_upkeep").enabled({"upkeep": block}):
-                # The gate is OPEN and the goal is cut from a unit branch: goal 922 records the tip it was cut from, with
-                # exactly ONE added read. Nothing else moves, and the closed gate above stays byte-identical.
-                import collections
-                extra = list((collections.Counter(got) - collections.Counter(base)).elements())
-                if len(got) != len(base) + 1 or len(extra) != 1 or not extra[0].startswith("git rev-parse origin/feature/"):
-                    wrong.append((adopted, repr(block)[:30]))
-                continue
+            # #1483: the cut-tip read is made for a unit goal whatever the gate says, so open and closed gates match.
             if got != base:
                 wrong.append((adopted, repr(block)[:30]))
     assert wrong == []
