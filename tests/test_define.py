@@ -83,9 +83,17 @@ class Runner:
             raise RuntimeError(boom)
         if argv[:2] == ["git", "ls-remote"]:
             wanted = argv[-1]
+            if wanted.startswith("refs/heads/") and wanted[len("refs/heads/"):] not in self.branches:
+                return "abc123\t" + wanted       # #1504: the base-existence probe -- every base exists
             return "abc123\trefs/heads/%s" % wanted if wanted in self.branches else ""
+        if argv[:2] == ["git", "fetch"]:
+            return ""
         if argv[:2] == ["git", "rev-parse"]:
+            if "--verify" in argv:
+                return "f" * 40               # #1504: the fetched `<remote>/<base>` commit
             return self.head
+        if argv[:3] == ["gh", "api", "user"]:
+            return "tester"
         if argv[:2] == ["git", "show-ref"]:
             if self.refs is not None and argv[-1] not in self.refs:
                 raise RuntimeError("git exited 1")
@@ -224,7 +232,8 @@ def test_the_observed_call_order_matches_the_declared_one(tmp_path):
     assert report["ok"], report
     assert [s["step"] for s in report["steps"]] == list(define._STEPS)
     # git (branch) strictly before gh (label); the registry directory is written by neither.
-    kinds = [a[0] for a in run.calls if a[:2] not in (["git", "status"], ["git", "add"], ["git", "commit"])]
+    kinds = [a[0] for a in run.calls if a[:2] not in (["git", "status"], ["git", "add"], ["git", "commit"])
+             and a[:3] != ["gh", "api", "user"] and a[:3] != ["git", "remote", "get-url"]]
     assert kinds.index("gh") > max(i for i, k in enumerate(kinds) if k == "git")   # #1312: the record commit is last
     assert feature_registry.registry_dir(sdlc).is_dir()
 
@@ -393,16 +402,19 @@ def test_the_base_precedence_is_the_loops_own(tmp_path):
     run = Runner(head="develop")
     define.open_unit(_sdlc(tmp_path / "a"), "u1", "feature", run=run, cwd=tmp_path,
                      base="release/2")
-    assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("release/2:")
+    assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("f" * 40 + ":")
+    assert ["git", "fetch", "origin", "release/2"] in run.calls
 
     run = Runner(head="develop")
     define.open_unit(_sdlc(tmp_path / "b"), "u2", "feature", run=run, cwd=tmp_path,
                      config={"work": {"base": "integration"}})
-    assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("integration:")
+    assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("f" * 40 + ":")
+    assert ["git", "fetch", "origin", "integration"] in run.calls
 
     run = Runner(head="develop")
     define.open_unit(_sdlc(tmp_path / "c"), "u3", "feature", run=run, cwd=tmp_path, config={})
-    assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("develop:")
+    assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("f" * 40 + ":")
+    assert ["git", "fetch", "origin", "develop"] in run.calls
 
 
 def test_a_detached_checkout_with_no_base_is_REFUSED_rather_than_guessed(tmp_path):
@@ -431,7 +443,7 @@ def test_an_explicit_base_makes_a_detached_checkout_fine(tmp_path):
                               base="main")
     assert report["ok"]
     assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1] == \
-        "main:refs/heads/feature/voice"
+        "f" * 40 + ":refs/heads/feature/voice"
 
 
 def test_an_empty_configured_base_falls_through_rather_than_pushing_an_empty_ref(tmp_path):
@@ -442,7 +454,7 @@ def test_an_empty_configured_base_falls_through_rather_than_pushing_an_empty_ref
     define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path,
                      config={"work": {"base": "   "}})
     pushed = [a for a in run.calls if a[:2] == ["git", "push"]][0][-1]
-    assert pushed == "develop:refs/heads/feature/voice"
+    assert pushed == "f" * 40 + ":refs/heads/feature/voice"
 
 
 # ------------------------------------------------------------------------------- the authorized exception
@@ -1295,26 +1307,24 @@ def _pushed(run):
     return [a for a in run.calls if a[:2] == ["git", "push"]][0][-1]
 
 
-def test_a_fresh_clone_pushes_the_remote_tracking_base(tmp_path):
-    """#1397: no local branch of the base's name, only the remote-tracking ref -- the unit branch
-    is cut from `<remote>/<base>` instead of failing with `src refspec ... does not match any`."""
+def test_a_fresh_clone_cuts_from_the_fetched_remote_base(tmp_path):
+    """#1397 / #1504: no local branch of the base's name is needed -- the unit branch is cut from the
+    fetched `<remote>/<base>` commit, and the report and the output name that commit."""
     run = Runner(refs={"refs/remotes/origin/main"})
     report = define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path,
                               base="main", remote="origin")
     assert report["ok"]
-    assert _pushed(run) == "origin/main:refs/heads/feature/voice"
+    assert _pushed(run) == "f" * 40 + ":refs/heads/feature/voice"
+    assert report["base_commit"] == "f" * 40
+    assert "origin/main@" + "f" * 12 in report["steps"][0]["detail"]
 
 
-def test_a_local_base_keeps_the_old_refspec(tmp_path):
-    """With the local branch present the pushed refspec is exactly what it was before #1397."""
+def test_a_local_base_is_no_longer_the_source(tmp_path):
+    """#1504: a local `main` that exists is NOT what the branch is cut from."""
     run = Runner(refs={"refs/heads/main", "refs/remotes/origin/main"})
     define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, base="main",
                      remote="origin")
-    assert _pushed(run) == "main:refs/heads/feature/voice"
+    assert not any(a[:2] == ["git", "show-ref"] for a in run.calls)
+    assert _pushed(run) == "f" * 40 + ":refs/heads/feature/voice"
 
 
-def test_no_base_ref_anywhere_leaves_git_to_report_it(tmp_path):
-    run = Runner(refs=set())
-    define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, base="main",
-                     remote="origin")
-    assert _pushed(run) == "main:refs/heads/feature/voice"
