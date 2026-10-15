@@ -37,14 +37,14 @@ ledger = _mod("ledger")
 timing_store = _mod("timing_store")
 
 EVENTS = [".sdlc/events", ".sdlc/events/", ".sdlc/events/.last-prune",
-          ".sdlc/events/<value>-<value>.<value>.jsonl"]
+          ".sdlc/events/<value>-<alias>.<value>.jsonl"]
 TIME = [".sdlc/state/time", ".sdlc/state/time/", ".sdlc/state/time/.last-prune",
         ".sdlc/state/time/<goal>", ".sdlc/state/time/<goal>/",
         ".sdlc/state/time/<goal>/<value>.jsonl", ".sdlc/state/time/_sessions/<text>/",
         ".sdlc/state/time/_sessions/<text>/<value>.jsonl",
         ".sdlc/state/time/_sessions/<text>/turns.jsonl"]
 UNBOUNDED = [".sdlc/ledger/", ".sdlc/ledger/<stream>", ".sdlc/ledger/<stream>/",
-             ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl"]
+             ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl"]
 DERIVED = [".sdlc/ledger/TEAM.md"]
 ISSUE_PATTERNS = set(EVENTS + TIME + UNBOUNDED + DERIVED)
 
