@@ -69,8 +69,10 @@ import json
 import os
 import pathlib
 import secrets
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 try:
@@ -87,6 +89,7 @@ def _load(name):
 
 
 feature_classify = _load("feature_classify")   # ABSTAIN / make_judgment -- see module docstring
+judge_isolation = _load("judge_isolation")     # #1472: refuse_ancestors, flag probe, child env
 
 
 def _note(message):
@@ -152,7 +155,7 @@ VALIDATE_SCHEMA = {
 }
 
 
-def _build_argv(prompt, json_schema, model, max_budget_usd):
+def _build_argv(prompt, json_schema, model, max_budget_usd, extra_argv=()):
     """The exact argv `ask_claude` hands to `subprocess.run` -- a small, pure, directly-testable
     function so the MUST-FIX regression test (the plan's own instruction: "inspects the actual
     argv list ... not just a design comment") has one obvious thing to assert against, independent
@@ -165,7 +168,7 @@ def _build_argv(prompt, json_schema, model, max_budget_usd):
         "--disallowedTools", DISALLOWED_TOOLS,
         "--json-schema", json.dumps(json_schema),
         "--max-budget-usd", str(max_budget_usd),
-    ]
+    ] + list(extra_argv)
 
 
 def _extract_cost_usd(envelope):
@@ -223,14 +226,14 @@ def _kill_group(proc, posix):
         pass
 
 
-def _run_group(argv, timeout=60):
+def _run_group(argv, timeout=60, cwd=None, env=None):
     """Run `argv` in a process group of its own; on overrun SIGKILL the WHOLE group (not only the direct
     child, #1310), reap it, and raise `subprocess.TimeoutExpired`. POSIX; elsewhere the direct child only.
     The read after the kill has its own bound (#1353): if a descendant outside the group still holds the pipe,
     give up on the output rather than block. Any other exit from the wait (an interrupt included) kills the
     group and re-raises."""
     posix = sys.platform != "win32"
-    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd, env=env,
                             **({"start_new_session": True} if posix else {}))
     try:
         out, _err = proc.communicate(timeout=timeout)
@@ -264,11 +267,17 @@ def ask_claude(prompt, json_schema, model="sonnet", timeout_s=60, max_budget_usd
     earlier plan-review round raised. `capture_output=True, text=True` mirrors `subprocess.run`'s
     own documented `Popen(...).communicate(timeout=...)` shape -- no pipe is left for a caller to
     drain or leak."""
-    argv = _build_argv(prompt, json_schema, model, max_budget_usd)
+    iso = judge_isolation                                              # #1472: keep the project out of the call
+    argv = _build_argv(prompt, json_schema, model, max_budget_usd, iso.isolation_argv())
+    scratch = tempfile.mkdtemp(prefix="sigma-judge-")
     try:
-        proc = _run_group(argv, timeout=timeout_s)
+        if iso.refuse_ancestors(scratch):
+            return None, 0.0
+        proc = _run_group(argv, timeout=timeout_s, cwd=scratch, env=iso.child_env())
     except Exception:                          # noqa: BLE001 - launch failure/timeout -> never raise
         return None, 0.0
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
     try:
         envelope = json.loads(proc.stdout)
     except (ValueError, TypeError):

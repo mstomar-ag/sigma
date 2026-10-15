@@ -1468,7 +1468,6 @@ _NO_UNIT_NAME = {
     ("feature_upkeep_launcher", "build_env"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
     ("feature_upkeep_launcher", "entry_limit"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
     ("feature_upkeep_launcher", "make_scratch"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
-    ("feature_upkeep_launcher", "refuse_ancestors"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name
     ("feature_propagate", "record_path"),     # keyed by GOAL, not by unit
     ("feature_rebase", "rebase_stopped"),     # takes a path that is already built
     # #278: keyed by a git BRANCH name (which may be a goal's `sdlc/<n>`), never a unit name; its

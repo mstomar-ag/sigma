@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Headless judge calls no longer read the caller's project (#1472).** The import classifier, drift judge and unit assigner/validator now run `claude -p` in a fresh empty temporary directory (refused under an instruction-file ancestor), without `CLAUDE_PROJECT_DIR`, and with `--setting-sources user`, `--strict-mcp-config` and `--no-session-persistence` when the installed CLI lists them; the privacy and rulebook docs state what each call sends.
+
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
 - **A person's free-text answer stays out of the applier ask file on a public repository (#1429).** The ask file kept the answer verbatim and the autonomy folder is published with the records; with `repo_visibility` public it now stores `recorded privately`, a private repository is unchanged.
