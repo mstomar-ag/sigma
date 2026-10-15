@@ -185,6 +185,7 @@ def judge(question, docs, config, spend_state, call=None, now=None, nonce_fn=Non
 
 def _judge(question, docs, config, spend_state, call, now, nonce_fn):
     _cfgmod = _sibling("rulebook_cfg")
+    cap_mod = _sibling("spend_cap")
     if not _cfgmod.load(config).part_enabled("drift") or call is None:
         return _nj("disabled")
     d = _drift(config)
@@ -219,6 +220,8 @@ def _judge(question, docs, config, spend_state, call, now, nonce_fn):
                 return _nj("spend_unreadable")
             if _spent(records, now) >= _ceiling(config):
                 return _nj("ceiling_reached")
+            if not cap_mod.check(spend_state, config, now)["ok"]:
+                return _nj("spend_cap_reached")   # shared weekly/monthly cap (#1502); unreadable ledger fails closed
             try:
                 ans = call(prompt, model, budget)
             except Exception:
@@ -228,6 +231,7 @@ def _judge(question, docs, config, spend_state, call, now, nonce_fn):
             usd = _num(ans.get("cost_usd"))
             valid = kind in ("consistent", "not_covered", "conflicts")
             _record(spend_state, records, now, usd if usd else budget)   # a cost of 0 means no envelope, not free
+            cap_mod.record(spend_state, config, "judge", usd if usd else budget, now)
             if not valid:                      # a timeout or killed call is not a verdict
                 return _nj("call_failed")
             if kind == "conflicts" and any(verify_quote(quote, t) for _, t in docs):

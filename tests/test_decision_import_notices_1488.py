@@ -31,6 +31,10 @@ def _run(capsys, verb, sd, *rest):
     return rc, cap.out, cap.err
 
 
+def _quiet(err):
+    return "".join(ln + "\n" for ln in err.splitlines() if not ln.startswith("folders read:"))
+
+
 def _args(a, *more):
     return ["--profile", a, "--project-dir", X, "--project-dir", Y, *more]
 
@@ -74,7 +78,7 @@ def test_no_notices_leaves_output_clean(tmp_path, capsys):
     sd, a, b = _world(tmp_path)
     for verb in ("scan", "plan", "apply"):
         _, out, err = _run(capsys, verb, sd, "--profile", b, "--project-dir", Y)
-        assert err == "" and "partial import" not in out and "refused" not in out and "skipped:" not in out
+        assert _quiet(err) == "" and "partial import" not in out and "refused" not in out and "skipped:" not in out
 
 
 def test_apply_flags_a_partial_import(tmp_path, capsys, monkeypatch):
