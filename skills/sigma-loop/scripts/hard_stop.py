@@ -211,6 +211,15 @@ def is_own(branch, registry, config):
     return any(isinstance(k, str) and _unit_key(k) == want for k in registry)
 
 
+def first_hardstop_kind(config):
+    """The kind a deny-list filing is declared under: the first configured hard-stop kind (default
+    `irreversible`). The same list `is_hardstop_kind` reads."""
+    kinds = _block(config).get("hardstop_kinds")
+    if not (isinstance(kinds, (list, tuple)) and kinds and all(isinstance(k, str) for k in kinds)):
+        kinds = DEFAULT_HARDSTOP_KINDS
+    return kinds[0]
+
+
 def is_hardstop_kind(qkind, record, config):
     """Shared by the autonomy ladder and the filer: true for a kind in `hard_stops.hardstop_kinds` (default
     irreversible) or any record carrying a `hardstop_class`. Not gated by `hard_stops.enabled`: the cap is fixed."""

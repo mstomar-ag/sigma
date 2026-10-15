@@ -304,7 +304,7 @@ def test_cli_scenario_fourteen_resolves_then_draft_and_show(tmp_path):
     gh.chmod(0o755)
     state = tmp_path / "state.json"
     park = {"body": "<!-- sigma-park -->\nhit a wall\nsigma-qkind: merge_conflict",
-            "created_at": "2026-10-01T00:00:00Z", "id": 11}
+            "created_at": "2026-10-01T00:00:00Z", "id": 11, "author_association": "OWNER"}
     state.write_text(json.dumps({"bodies": {}, "comments": {str(n): [park] for n in range(1, 15)}}))
     env = {**os.environ, "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", ""),
            "FAKE_GH_STATE": str(state), "FAKE_GH_TESTS": str(pathlib.Path(__file__).resolve().parent), "PYTHONDONTWRITEBYTECODE": "1"}
