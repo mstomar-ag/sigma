@@ -53,16 +53,16 @@ def _gh_cfg(**kw):
 
 def test_a_matching_rule_opens_one_ask_with_option_and_area(tmp_path):
     sd, cfg, _ = _setup(tmp_path)
-    aid = AP.open_for_park(sd, cfg, 7, "needs_decision", source=ReadSrc(), now=T0)
+    aid = AP.open_for_park(sd, cfg, 7, "merge_conflict", source=ReadSrc(), now=T0)
     asks = _asks(sd)
     assert aid and len(asks) == 1
     a = asks[0]
-    assert (a["id"], a["issue"], a["area"], a["options"], a["state"]) == (aid, 7, "docs", ["merge"], "pending")
+    assert (a["id"], a["issue"], a["area"], a["options"], a["state"]) == (aid, 7, "docs", ["rebase it"], "pending")
 
 
 def test_no_matching_rule_opens_nothing(tmp_path):
     sd, cfg, _ = _setup(tmp_path)
-    assert AP.open_for_park(sd, cfg, 7, "needs_decision", source=ReadSrc(("area:ci",)), now=T0) is None
+    assert AP.open_for_park(sd, cfg, 7, "merge_conflict", source=ReadSrc(("area:ci",)), now=T0) is None
     assert _asks(sd) == []
 
 
@@ -75,8 +75,8 @@ def test_hard_stop_and_unknown_kinds_open_nothing(tmp_path):
 
 def test_a_second_park_reuses_the_pending_ask(tmp_path):
     sd, cfg, _ = _setup(tmp_path)
-    first = AP.open_for_park(sd, cfg, 7, "needs_decision", source=ReadSrc(), now=T0)
-    again = AP.open_for_park(sd, cfg, 7, "needs_decision", source=ReadSrc(), now=T0 + MIN)
+    first = AP.open_for_park(sd, cfg, 7, "merge_conflict", source=ReadSrc(), now=T0)
+    again = AP.open_for_park(sd, cfg, 7, "merge_conflict", source=ReadSrc(), now=T0 + MIN)
     assert first and again == first and len(_asks(sd)) == 1
 
 
@@ -84,7 +84,7 @@ def test_a_closed_gate_opens_nothing_and_reads_nothing(tmp_path):
     sd, cfg, _ = _setup(tmp_path)
     cfg["rulebook"]["autonomy"]["applier"]["enabled"] = False
     src = ReadSrc()
-    assert AP.open_for_park(sd, cfg, 7, "needs_decision", source=src, now=T0) is None
+    assert AP.open_for_park(sd, cfg, 7, "merge_conflict", source=src, now=T0) is None
     assert src.reads == [] and _asks(sd) == []
     assert AP.close_for_issue(sd, cfg, 7, "text", now=T0) is None
     assert src.reads == []
@@ -96,14 +96,14 @@ def test_a_failing_source_read_falls_back_to_the_repo_area(tmp_path):
     class Boom(ReadSrc):
         def _read_issue(self, *a, **k):
             raise RuntimeError("rate limited")
-    assert AP.open_for_park(sd, cfg, 7, "needs_decision", source=Boom(), now=T0) is None
+    assert AP.open_for_park(sd, cfg, 7, "merge_conflict", source=Boom(), now=T0) is None
     assert _asks(sd) == []
 
 
 # ----------------------------------------------------------------------------------- close
 
 def _open_plain(sd, cfg, issue=5, gesture="unpark"):
-    return AP.open_ask(sd, issue, "needs_decision", "docs", ["merge"], cfg, T0, gesture=gesture)
+    return AP.open_ask(sd, issue, "merge_conflict", "docs", ["rebase it"], cfg, T0, gesture=gesture)
 
 
 def test_unpark_closes_the_ask_as_answered(tmp_path):
@@ -156,7 +156,7 @@ def test_an_unrelated_issue_ask_is_left_pending(tmp_path):
 
 # ----------------------------------------------------------------------------------- real path
 
-def _park_for_real(sd, cfg, src, goal="7", kind="needs_decision"):
+def _park_for_real(sd, cfg, src, goal="7", kind="merge_conflict"):
     lp = _loop()
     if True:
         # the backlog set up under tmp_path IS `sd`: the park and its asks share one state folder
@@ -212,7 +212,7 @@ def test_gate_closed_record_parked_is_byte_identical_and_reads_nothing(tmp_path)
     cfg["rulebook"]["autonomy"]["applier"]["enabled"] = False
     closed, bare = ReadSrc(), ReadSrc()
     _park_for_real(sd, cfg, closed)
-    _loop()._record(sd, bare, "7", "parked", "needs a call", qkind="needs_decision")
+    _loop()._record(sd, bare, "7", "parked", "needs a call", qkind="merge_conflict")
     assert closed.parked == bare.parked and closed.reads == [] and _asks(sd) == []
 
 
@@ -227,7 +227,7 @@ def test_a_raising_applier_never_blocks_the_park(tmp_path):
             raise RuntimeError("broken")
         return real(name)
     lp._load = boom
-    lp._record(sd, src, "7", "parked", "needs a call", qkind="needs_decision", config=cfg)
+    lp._record(sd, src, "7", "parked", "needs a call", qkind="merge_conflict", config=cfg)
     assert len(src.parked) == 1
 
 

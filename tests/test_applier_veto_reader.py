@@ -64,11 +64,11 @@ class BoardSrc(Src):
 def _applied_world(tmp_path, src=None):
     cfg, sd = _cfg(), str(tmp_path / ".sdlc")
     for _ in range(8):
-        DS.append(sd, {"how": "human", "qkind": "needs_decision", "area": "docs", "choice": "merge"}, cfg)
-        AU.record_watch(sd, "needs_decision", "docs", "merge", "merge", cfg, now=T0, machine="m1")
-    RB.propose(sd, {"qkind": "needs_decision", "area": "docs", "option": "merge", "reason": "low risk"}, cfg, now=T0)
+        DS.append(sd, {"how": "human", "qkind": "merge_conflict", "area": "docs", "choice": "rebase it"}, cfg)
+        AU.record_watch(sd, "merge_conflict", "docs", "rebase it", "rebase it", cfg, now=T0, machine="m1")
+    RB.propose(sd, {"qkind": "merge_conflict", "area": "docs", "option": "rebase it", "reason": "low risk"}, cfg, now=T0)
     RB.approve(sd, RB.load(sd, cfg)[-1]["id"], "boss", cfg, now=T0)
-    AP.open_ask(sd, 7, "needs_decision", "docs", ["merge", "wait"], cfg, T0)
+    AP.open_ask(sd, 7, "merge_conflict", "docs", ["rebase it", "start fresh"], cfg, T0)
     src = src or Src()
     assert [a["result"] for a in AP.tick(sd, cfg, T0 + 61 * MIN, source=src)] == ["done"]
     src.swaps.clear(), src.notes.clear()
@@ -91,10 +91,10 @@ def _tick(sd, cfg, src, comments, minutes=70):
 
 def test_owner_no_vetoes_and_reparks(tmp_path):
     sd, cfg, src = _applied_world(tmp_path)
-    before = AU.level(sd, "needs_decision", "docs", cfg)
+    before = AU.level(sd, "merge_conflict", "docs", cfg)
     acts = _tick(sd, cfg, src, [_comment("Boss", " No ", 65)])
     assert [(a["kind"], a["result"]) for a in acts] == [("veto", "done")]
-    assert AU.level(sd, "needs_decision", "docs", cfg) == before - 1
+    assert AU.level(sd, "merge_conflict", "docs", cfg) == before - 1
     assert src.swaps == [(7, ["sdlc:parked"], ["sdlc:goal", "sdlc:in-progress"])]
     assert len(src.notes) == 1 and "parked" in src.notes[0][1].lower()
     assert _tick(sd, cfg, src, [_comment("boss", "no", 65)], minutes=80) == []  # once only
@@ -133,7 +133,7 @@ def test_no_after_the_veto_period_changes_nothing(tmp_path):
 
 def test_ask_not_applied_is_not_vetoed(tmp_path):
     cfg, sd = _cfg(), str(tmp_path / ".sdlc")
-    AP.open_ask(sd, 7, "needs_decision", "docs", ["merge"], cfg, T0)
+    AP.open_ask(sd, 7, "merge_conflict", "docs", ["rebase it"], cfg, T0)
     AP.tick(sd, cfg, T0 + 5 * MIN, source=Src(), comments_fn=lambda i: [_comment("boss", "yes", 2)])
     assert _state(sd)["state"] == "pending" and _state(sd).get("vetoed_at") is None
 

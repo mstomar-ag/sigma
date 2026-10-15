@@ -46,9 +46,29 @@ def _text(v, limit=400):
     return " ".join(str(v).split())[:limit] if isinstance(v, (str, int, float)) else ""
 
 
-def _cand(source, when, question, options, choice, reason, issue, cid):
-    return {"source": source, "when": when, "question": question, "options": options,
-            "choice": choice, "reason": reason, "issue": issue, "id": cid, "superseded": False}
+def _cand(source, when, question, options, choice, reason, issue, cid, origin=None):
+    out = {"source": source, "when": when, "question": question, "options": options,
+           "choice": choice, "reason": reason, "issue": issue, "id": cid, "superseded": False}
+    if origin:
+        out["origin"] = origin
+    return out
+
+
+def _origin(where, name, line, cwd):
+    """A transcript candidate's origin. On a public repository profile, folder and cwd are short hashes."""
+    o = {"kind": "transcript", "profile": where["profile"], "folder": where["folder"], "file": name,
+         "line": line, "cwd": cwd}
+    if where.get("public"):
+        for k in ("profile", "folder", "cwd"):
+            o[k] = _fid(o[k])
+    return o
+
+
+def _in_repo(sdlc_dir):
+    """-> keep(cand, cwd): True when the transcript line's cwd is the repository root or inside it."""
+    base = pathlib.Path(sdlc_dir).absolute().parent
+    roots = {str(base), str(base.resolve())}
+    return lambda cand, cwd: bool(cwd) and any(cwd == r or cwd.startswith(r.rstrip("/") + "/") for r in roots)
 
 
 def _folder_name(sdlc_dir):
@@ -97,7 +117,7 @@ def _lines(fh):
             yield raw, len(raw)
 
 
-def _scan_file(path, name, stats, room, deadline=None, clock=time.monotonic):
+def _scan_file(path, name, stats, room, deadline=None, clock=time.monotonic, where=None, keep=None):
     """-> (candidates, stopped_at_line or None). Streams the file; a line is parsed only if it holds
     the question-tool name or an id still waiting for its answer, so every other line is dropped
     unread. Only AskUserQuestion tool_use blocks and the tool_result with the same id are looked at."""
@@ -131,10 +151,10 @@ def _scan_file(path, name, stats, room, deadline=None, clock=time.monotonic):
                         qs = (part.get("input") or {}).get("questions")
                         tid = part.get("id")
                         if isinstance(tid, str) and tid:
-                            pending[tid] = (n, when, qs if isinstance(qs, list) else [])
+                            pending[tid] = (n, when, qs if isinstance(qs, list) else [], _text(rec.get("cwd"), 400))
                     elif part.get("type") == "tool_result" and isinstance(part.get("tool_use_id"), str) \
                             and part.get("tool_use_id") in pending:
-                        at, asked_when, qs = pending.pop(part["tool_use_id"])
+                        at, asked_when, qs, cwd = pending.pop(part["tool_use_id"])
                         answers = _answers(part.get("content"))
                         for i, q in enumerate(qs):
                             if not isinstance(q, dict):
@@ -144,8 +164,12 @@ def _scan_file(path, name, stats, room, deadline=None, clock=time.monotonic):
                                 continue
                             opts = [_text(o.get("label"), 120) for o in (q.get("options") or [])
                                     if isinstance(o, dict)]
-                            out.append(_cand("transcript", when or asked_when, text, opts,
-                                             _text(answers[text]), "", None, _fid(name, at, i, text)))
+                            cand = _cand("transcript", when or asked_when, text, opts,
+                                         _text(answers[text]), "", None, _fid(name, at, i, text),
+                                         _origin(where, name, at, cwd) if where else None)
+                            if keep is not None and not keep(cand, cwd):
+                                continue
+                            out.append(cand)
                             if len(out) >= room:
                                 return out, None
             except Exception:
@@ -201,7 +225,8 @@ def _from_comment(c, issue, legacy, bs, qkind=None):
             if m:
                 f[m.group(1)] = _text(m.group(2))
         return [_cand("decision-span", when, f.get("kind", ""), [], f.get("choice", ""),
-                      f.get("reason", ""), issue, "%s#0" % cid)]
+                      f.get("reason", ""), issue, "%s#0" % cid,
+                      {"kind": "comment", "issue": issue, "comment_id": cid})]
     out, ask = [], ""
     for line in span.splitlines():
         line = line.strip()
@@ -209,7 +234,8 @@ def _from_comment(c, issue, legacy, bs, qkind=None):
             ask = _text(line[1:-1])
         elif line.startswith("- **") and "** — " in line:
             out.append(_cand("unpark-qa", when, ask or _text(line[4:line.index("**", 4)]), [],
-                             _canon(_text(line.split("** — ", 1)[1])), "", issue, "%s#%d" % (cid, len(out))))
+                             _canon(_text(line.split("** — ", 1)[1])), "", issue, "%s#%d" % (cid, len(out)),
+                             {"kind": "comment", "issue": issue, "comment_id": cid}))
             if qkind:
                 out[-1]["qkind"] = qkind
             ask = ""
@@ -228,13 +254,23 @@ def _mark_superseded(cands):
 
 
 def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, project_dirs=None,
-         clock=time.monotonic):
+         clock=time.monotonic, only_in_repo=None):
     """-> {"candidates", "stats", "refusals"}. Never raises on bad input; reads only."""
     cfgmod = _load("rulebook_cfg")
     limits = cfgmod.import_limits(config)
     stats = {s: {"files_read": 0, "candidates": 0, "skipped": 0, "superseded": 0,
                                  "bytes_read": 0, "partial": 0} for s in SOURCES}
     refusals, cands = [], []
+    filtering = limits["require_repo_cwd"] if only_in_repo is None else bool(only_in_repo)
+    dropped = [0]
+    inside = _in_repo(sdlc_dir)
+
+    def keep(cand, cwd):
+        if inside(cand, cwd):
+            return True
+        dropped[0] += 1
+        return False
+    public = _load("decision_store")._visibility(config) == "public"
     cap = limits["max_candidates"]
     full = False
     deadline = clock() + limits["time_budget_s"]
@@ -250,6 +286,8 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
             refusals.append("project folder reference %s unknown: cannot be resolved" % r)
     profs = _profiles(config, limits, profile_dirs)
     seen = set()
+    unread = [0]
+    found_names = []                                # #1523: only folders resolved under a profile
     for name in dict.fromkeys(names):
         found = False
         for prof in profs:
@@ -257,25 +295,37 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
             if not folder.is_dir():
                 continue
             found = True
+            if name not in found_names:
+                found_names.append(name)
             try:
                 files = sorted(folder.glob("*.jsonl"))
             except OSError:
                 files = []
             for f in files:
-                if full or timed_out or f in seen:
+                if f in seen:
+                    continue
+                if full or timed_out:
+                    unread[0] += 1
                     continue
                 seen.add(f)
                 if clock() > deadline:
                     timed_out = True
+                    unread[0] += 1
                     continue
                 try:
                     size = f.stat().st_size
                     if size > limits["max_file_bytes"]:
                         stats["transcript"]["skipped"] += 1
+                        unread[0] += 1
                         refusals.append("%s (%d bytes) skipped: over the size cap of %d bytes" % (
                             f.name, size, limits["max_file_bytes"]))
                         continue
-                    got, stopped = _scan_file(f, f.name, stats["transcript"], cap - len(cands), deadline, clock)
+                    got, stopped = _scan_file(
+                        f, f.name, stats["transcript"], cap - len(cands), deadline, clock,
+                        {"profile": os.path.basename(str(prof).rstrip("/")), "folder": name, "public": public},
+                        keep if filtering else None)
+                    for g in got:
+                        g["extra"] = name != names[0]
                     stats["transcript"]["files_read"] += 1
                 except Exception:
                     stats["transcript"]["skipped"] += 1
@@ -288,7 +338,8 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
                 cands += got
                 full = len(cands) >= cap
         if not found and name != names[0]:
-            refusals.append("project folder %s not found under the given profiles" % name)
+            refusals.append("project folder %s not found under %s; the other folders were read" % (
+                name, ", ".join(str(x) for x in profs) or "no profile"))
     comments_timed_out = False
     if not full and limits["comments"]:
         try:
@@ -324,7 +375,40 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
     for c in cands:
         stats[c["source"]]["candidates"] += 1
         stats[c["source"]]["superseded"] += 1 if c["superseded"] else 0
-    return {"candidates": cands, "stats": stats, "refusals": refusals}
+    res = {"candidates": cands, "stats": stats, "refusals": refusals,
+           "unread": unread[0] + stats["transcript"]["partial"],
+           "folders": found_names}
+    if filtering:
+        res["dropped"] = dropped[0]
+    return res
+
+
+_TRUNCATIONS = ("time budget reached", "candidate cap of", "over the size cap", "partially read")
+
+
+def _notice_lines(out):
+    """Scan notices as printed lines: a missing project folder is `skipped:`, the rest keep `refused:`."""
+    lines = []
+    for r in out.get("refusals", []):
+        skipped = r.startswith("project folder ") and " not found under " in r
+        lines.append(("skipped: " if skipped else "refused: ") + r)
+    return lines
+
+
+def _print_notices(out):
+    for line in _notice_lines(out):
+        print(line, file=sys.stderr)
+
+
+def _print_folders_read(out):
+    """#1503: name the project folders the scan found and read, on stderr (#1523: not-found ones are left out)."""
+    print("folders read: %s" % ", ".join(out.get("folders", [])), file=sys.stderr)
+
+
+def _print_partial(out):
+    if any(t in r for r in out.get("refusals", []) for t in _TRUNCATIONS):
+        print("partial import: %d files not read, raise rulebook.import.time_budget_s and run apply again" % (
+            out.get("unread", 0)))
 
 
 def candidates(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None):
@@ -445,6 +529,15 @@ def _declared_or(cand, kind, qkinds):
     return d if d in qkinds and d != UNKNOWN else kind
 
 
+def _cap_refused(sdlc_dir, config, info):
+    """True (and `info["cap_refused"]` set) when the shared weekly or monthly spend cap forbids another call."""
+    res = _load("spend_cap").check(sdlc_dir, config)
+    if res["ok"]:
+        return False
+    info["cap_refused"] = res
+    return True
+
+
 def classify_model(sdlc_dir, config, cands, call, skip=()):
     """-> (rows, info). Rows like `classify`. `call is None` sends nothing (plan): uncached rows are
     unknown and counted as would_send. An invalid answer is unknown and cached; an error or timeout is unknown, uncached and
@@ -471,6 +564,10 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
             info["stopped_after"] = info["sent"]
             rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
             continue
+        elif _cap_refused(sdlc_dir, config, info):
+            info["stopped_after"] = info["sent"]
+            rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
+            continue
         else:
             info["sent"] += 1
             try:
@@ -484,7 +581,9 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
             if ok:
                 info["max_real_cost"] = max(info["max_real_cost"], cost)
             # no envelope at all: the cap is not a hard limit, so charge the larger of it and the dearest real call
-            info["spent"] += cost if ok else max(lim["max_budget_usd_per_call"], info["max_real_cost"])
+            charged = cost if ok else max(lim["max_budget_usd_per_call"], info["max_real_cost"])
+            info["spent"] += charged
+            _load("spend_cap").record(sdlc_dir, config, "import", charged)   # shared rolling cap (#1502)
             if not isinstance(ans, dict) or ans.get("failed"):  # no answer: not cached, not stored, retried next run
                 info["timed_out"] += 1
                 if isinstance(ans, dict) and "budget" in str(ans.get("reason") or ""):
@@ -568,12 +667,31 @@ def _evidence(sdlc_dir, config, cands, call=None, info=None):
         if isinstance(rec.get("choice"), str) and fp not in allrows:
             allrows[fp] = {"qkind": rec.get("qkind"), "area": rec.get("area") or REPO_AREA,
                            "when": rec.get("original_time") or "", "fp": fp, "choice": rec["choice"],
-                           "shape": rec.get("shape")}
+                           "shape": rec.get("shape"),
+                           **({"origin": rec["origin"]} if isinstance(rec.get("origin"), dict) else {})}
     for r in allrows.values():
         r["when"] = r.get("when") or ""
         if "shape" not in r:
             r["shape"] = shape_of(r)
     return rows, new, replay(list(allrows.values())), allrows, watched
+
+
+def folder_counts(cands, new):
+    """-> [{"folder", "extra", "candidates", "new"}] in first-seen order; comment answers count as one group."""
+    out = {}
+    for group, key in ((cands, "candidates"), (new, "new")):
+        for c in group:
+            o = c.get("origin") or {}
+            name = o.get("folder") if o.get("kind") == "transcript" else "(issue comments)"
+            row = out.setdefault(name, {"folder": name, "extra": bool(c.get("extra")), "candidates": 0, "new": 0})
+            row[key] += 1
+    return list(out.values())
+
+
+def _print_folders(rows):
+    for r in rows:
+        print("folder %s%s: %d candidates, %d new records" % (
+            r["folder"], " (extra)" if r["extra"] else "", r["candidates"], r["new"]))
 
 
 def plan(sdlc_dir, config, cands):
@@ -597,7 +715,8 @@ def plan(sdlc_dir, config, cands):
         out.append({"qkind": q, "area": a, "write": p["write"], "unknown": p["write"] if q == UNKNOWN else 0,
                     "level": min(lvl, au.IMPORTED_LEVEL_CAP)})
     res = {"gate": _load("decision_store").enabled(config), "pairs": out,
-           "write": len(new), "unknown": sum(1 for r in new if r["qkind"] == UNKNOWN)}
+           "write": len(new), "unknown": sum(1 for r in new if r["qkind"] == UNKNOWN),
+           "folders": folder_counts(cands, new)}
     if info:
         res["model"] = info
     return res
@@ -619,9 +738,12 @@ def apply(sdlc_dir, config, cands, call=None):
         out["stopped_after"] = info["stopped_after"]
         out["timed_out"] = info["timed_out"]
         out["over_budget"] = info.get("over_budget", 0)
+        out["cap_refused"] = info.get("cap_refused")
         out["model"] = info
+    out["folders"] = folder_counts(cands, new)
     for r in new:
-        record = rec.build("import", r["issue"], r["qkind"], r["choice"], r["reason"], "imported", area=r["area"])
+        record = rec.build("import", r["issue"], r["qkind"], r["choice"], r["reason"], "imported", area=r["area"],
+                           origin=r.get("origin"))
         record.update(source=r["fp"], original_time=r["when"])
         if allrows[r["fp"]].get("shape"):
             record["shape"] = allrows[r["fp"]]["shape"]
@@ -635,11 +757,17 @@ def apply(sdlc_dir, config, cands, call=None):
         if fp in watched or not au.enabled(config):
             continue
         if au.record_watch(sdlc_dir, r["qkind"], r["area"], mine, _key(r), config,
-                           imported={"source": fp, "original_time": r["when"]}):
+                           imported=dict({"source": fp, "original_time": r["when"]},
+                                         **({"origin": r["origin"]} if isinstance(r.get("origin"), dict) else {}))):
             out["watch"] += 1
     if not au.enabled(config):
         out["note"] = "autonomy part closed: records written, no comparisons"
     return out
+
+
+def _print_dropped(out):
+    if "dropped" in out:
+        print("dropped %d answers whose cwd is outside this repository" % out["dropped"])
 
 
 def _clip(s, n=CLIP):
@@ -653,8 +781,63 @@ def _add_options(v):
     v.add_argument("--profile", action="append", default=[], metavar="DIR",
                    help="Claude Code profile directory (repeatable)")
     v.add_argument("--project-dir", action="append", default=[], metavar="DIR",
-                   help="extra project folder: a folder name or a path (repeatable); "
+                   help="extra project folder: a folder name or a path, one folder per flag "
+                        "(repeat the flag; one value holding several folders is read as one); "
                         "a dash-leading name works as: --project-dir -srv-demo-work-repo")
+    v.add_argument("--only-in-repo", action="store_true",
+                   help="keep only transcript answers whose cwd is inside this repository")
+
+
+def _origin_match(origin, folders, profile):
+    if not isinstance(origin, dict) or origin.get("kind") != "transcript":
+        return False
+    if origin.get("folder") not in folders:
+        return False
+    return profile is None or origin.get("profile") in profile
+
+
+def remove(sdlc_dir, config, project_dirs, profile=None, apply=False):
+    """Delete imported records and imported watch files whose origin folder (and profile, when given) matches.
+    Dry run unless `apply`. A record or watch file with no origin is never touched, only counted.
+    -> {"gate", "records", "watch", "legacy_records", "legacy_watch", "removed"}."""
+    store, au = _load("decision_store"), _load("autonomy")
+    out = {"gate": store.enabled(config), "records": 0, "watch": 0, "legacy_records": 0, "legacy_watch": 0}
+    if not out["gate"]:
+        return out
+    folders = set()
+    for ref in project_dirs:
+        name = _folder_ref(ref)
+        folders.update((name, _fid(name)))
+    prof = None
+    if profile:
+        base = os.path.basename(str(profile).rstrip("/"))
+        prof = {base, _fid(base)}
+    root = store._store(sdlc_dir, config)
+    doomed = []
+    if not os.path.islink(root):
+        for n in store._record_names(root):
+            r = store._read(os.path.join(root, n))
+            if not r or r.get("how") != "imported":
+                continue
+            if not isinstance(r.get("origin"), dict):
+                out["legacy_records"] += 1
+            elif _origin_match(r["origin"], folders, prof):
+                out["records"] += 1
+                doomed.append(os.path.join(root, n))
+    wdir = os.path.join(str(sdlc_dir), au._DIR)
+    for w in au._facts(sdlc_dir, "watch-"):
+        if w.get("how") != "imported":
+            continue
+        if not isinstance(w.get("origin"), dict):
+            out["legacy_watch"] += 1
+        elif _origin_match(w["origin"], folders, prof):
+            out["watch"] += 1
+            doomed.append(os.path.join(wdir, w["_file"]))
+    if apply:
+        for path in doomed:
+            if not os.path.islink(path):
+                os.unlink(path)
+    return out
 
 
 def list_issues(config, limits, run=None):
@@ -683,6 +866,12 @@ def main(argv=None, lister=None, comments_fn=None):
                        ("plan", "show what apply would write (writes nothing)"),
                        ("apply", "write the records and comparisons (idempotent)")):
         _add_options(sub.add_parser(verb, help=text))
+    rm = sub.add_parser("remove", help="delete the imported records and watch files of one project folder (dry run unless --apply)")
+    rm.add_argument("sdlc_dir")
+    rm.add_argument("--project-dir", action="append", required=True, default=[], metavar="DIR",
+                    help="project folder whose import to remove: a folder name or a path (repeatable)")
+    rm.add_argument("--profile", metavar="DIR", help="only imports read from this profile directory")
+    rm.add_argument("--apply", action="store_true", help="delete; without it only list what would go")
     argv = list(sys.argv[1:] if argv is None else argv)
     known = set(sub.choices["scan"]._option_string_actions)
     for i in range(len(argv) - 2, -1, -1):  # join a two-word dash-leading folder name
@@ -695,6 +884,19 @@ def main(argv=None, lister=None, comments_fn=None):
     except Exception as exc:  # noqa: BLE001
         print("decision_import: %s" % exc, file=sys.stderr)
         return 1
+    if args.verb == "remove":
+        res = remove(args.sdlc_dir, config, args.project_dir, args.profile, args.apply)
+        if not res["gate"]:
+            print("records part is closed (rulebook.records.enabled): nothing to remove")
+            return 1
+        print("%s %d records and %d comparisons%s" % (
+            "removed" if args.apply else "would remove", res["records"], res["watch"],
+            "" if args.apply else "; dry run, add --apply to delete"))
+        legacy = res["legacy_records"] + res["legacy_watch"]
+        if legacy:
+            print("%d legacy records have no origin; not removed" % res["legacy_records"]
+                  + (" (and %d legacy comparisons)" % res["legacy_watch"] if res["legacy_watch"] else ""))
+        return 0
     issues = None
     if _load("rulebook_cfg").import_limits(config)["comments"]:
         try:
@@ -704,7 +906,10 @@ def main(argv=None, lister=None, comments_fn=None):
             print("decision_import: issue lister failed, comment import skipped: %s" % (
                 " ".join(str(exc).split())[:160] or type(exc).__name__), file=sys.stderr)
     out = scan(args.sdlc_dir, config, args.profile or None, issues=issues, comments_fn=comments_fn,
-               project_dirs=args.project_dir or None)
+               project_dirs=args.project_dir or None, only_in_repo=True if args.only_in_repo else None)
+    _print_folders_read(out)
+    if args.verb in ("plan", "apply"):
+        _print_notices(out)
     if args.verb == "plan":
         pl = plan(args.sdlc_dir, config, out["candidates"])
         if not pl["gate"]:
@@ -713,6 +918,8 @@ def main(argv=None, lister=None, comments_fn=None):
             print("%s / %s: write %d, unknown %d, evidence alone reaches level %d" % (
                 r["qkind"], r["area"], r["write"], r["unknown"], r["level"]))
         print("would write %d records (%d unknown); plan writes nothing" % (pl["write"], pl["unknown"]))
+        _print_folders(pl["folders"])
+        _print_dropped(out)
         if "model" in pl:
             m = pl["model"]
             print("model classifier: would send %d candidates (%d cached) to %s, run ceiling $%.2f; plan sends nothing" % (
@@ -730,11 +937,17 @@ def main(argv=None, lister=None, comments_fn=None):
             return 1
         print("wrote %d records and %d comparisons%s" % (res["records"], res["watch"],
                                                           (" (%s)" % res["note"]) if res["note"] else ""))
+        _print_folders(res["folders"])
+        _print_dropped(out)
+        _print_partial(out)
         if res.get("over_budget"):
             m = res["model"]
             print("%d call(s) exceeded the per-call budget $%.2f (real cost about $%.2f each, answers discarded, run "
                   "stopped): raise rulebook.import.max_budget_usd_per_call" % (
                       res["over_budget"], m["per_call"], m["max_real_cost"]))
+        elif res.get("cap_refused"):
+            print(_load("spend_cap").refusal_line(res["cap_refused"]) +
+                  ": the rest stay unclassified, run apply again later")
         elif res.get("stopped_after") is not None:
             print("ceiling stopped the run after %d model calls: the rest stay unclassified, run apply again" % (
                 res["stopped_after"]))
@@ -747,8 +960,9 @@ def main(argv=None, lister=None, comments_fn=None):
         print("%s: files_read=%d candidates=%d skipped=%d superseded=%d partial=%d bytes_read=%d" % (
             name, st["files_read"], st["candidates"], st["skipped"], st["superseded"],
             st["partial"], st["bytes_read"]))
-    for r in out["refusals"]:
-        print("refused: " + r)
+    _print_dropped(out)
+    for line in _notice_lines(out):
+        print(line)
     for c in out["candidates"][:SAMPLE_LINES]:
         print("  - [%s] %s -> %s%s" % (c["source"], _clip(c["question"]), _clip(c["choice"]),
                                        " (superseded)" if c["superseded"] else ""))

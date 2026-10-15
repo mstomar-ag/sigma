@@ -30,6 +30,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import sys
 import uuid
 
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -197,11 +198,16 @@ def _ladder(answers, comparisons, agreement, cfg):
     return lvl if lvl >= 1 else 0
 
 
+def _agrees(w):
+    """A comparison agrees when both sides name the same learnable key; 'free' never agrees (M-06)."""
+    return w.get("would") == w.get("actual") and w.get("would") not in ("free", "unknown")
+
+
 def _capped_ladder(answers, live, items, cfg):
     """`_ladder` with imported evidence limited to IMPORTED_LEVEL_CAP: above it only live answers AND live
     comparisons (watch files not marked imported) count."""
     def rate(ws):
-        return (sum(1 for w in ws if w.get("would") == w.get("actual")) / len(ws)) if ws else 0.0
+        return (sum(1 for w in ws if _agrees(w)) / len(ws)) if ws else 0.0
     lvl = _ladder(answers, len(items), rate(items), cfg)
     if lvl > IMPORTED_LEVEL_CAP:
         own = [w for w in items if w.get("how") != "imported"]
@@ -228,7 +234,9 @@ def _pair_settings(sdlc_dir, qkind, area, config):
 def _state(sdlc_dir, qkind, area, config):
     cfg, cat, has_file = _pair_settings(sdlc_dir, qkind, area, config)
     store = _load("decision_store")
-    recs = [r for r in store.list_by(sdlc_dir, config, qkind=qkind) if _pair(r, qkind, area)]
+    dr = _load("decision_record")
+    recs = [r for r in store.list_by(sdlc_dir, config, qkind=qkind)
+            if _pair(r, qkind, area) and dr.is_park_answer(r)]      # F-10/M-01: promote/demote/ack/repeat out
     live = sum(1 for r in recs if r.get("how") == "human")
     imported = sum(1 for r in recs if r.get("how") == "imported")
     answers = live + imported
@@ -243,11 +251,11 @@ def _state(sdlc_dir, qkind, area, config):
         for items in by_machine.values():
             per.append(_capped_ladder(answers, live, items, cfg))
         lvl = min(per)
-        total_agree = sum(1 for w in watch if w.get("would") == w.get("actual"))
+        total_agree = sum(1 for w in watch if _agrees(w))
         agreement = total_agree / len(watch)
     else:
         lvl, agreement = (1 if answers >= cfg["l1_min_answers"] else 0), None
-    last_ok = max((str(w.get("time")) for w in watch if w.get("would") == w.get("actual")), default="")
+    last_ok = max((str(w.get("time")) for w in watch if _agrees(w)), default="")
     consecutive = sum(1 for v in vetoes if str(v.get("time")) > last_ok)
     paused = bool(vetoes) and (consecutive >= cfg["veto_pause_consecutive"] or len(vetoes) >= cfg["veto_pause_total"])
     if vetoes:
@@ -263,8 +271,13 @@ def _state(sdlc_dir, qkind, area, config):
         capped = True  # cannot tell: the safe reading
     if capped:
         lvl = min(lvl, HARDSTOP_CAP)
+    unlearnable = qkind == "unknown"                 # F-09: nobody classified these parks
+    if unlearnable:
+        lvl = min(lvl, 1)
     row = {"qkind": qkind, "area": _area(area), "level": lvl, "answers": answers, "comparisons": len(watch),
            "agreement": agreement, "vetoes": len(vetoes), "paused": paused, "capped": capped}
+    if unlearnable:  # shown only for the kind `unknown`; every other row is unchanged
+        row["unlearnable"] = True
     if imported:  # shown only when something was imported; otherwise the row is unchanged
         row["imported"] = imported
     if has_file:  # shown only when the opt-in file exists; otherwise the row is unchanged
@@ -325,6 +338,8 @@ def describe(row):
 
 def _describe(row):
     head = "%s / %s: " % (row["qkind"], row["area"] or "-")
+    if row.get("unlearnable"):
+        return head + "not learnable: declare a kind"
     if row["capped"]:
         return head + HARDSTOP_TEXT
     if row["paused"]:
@@ -439,3 +454,62 @@ def is_owner(login, config):
         return login.strip().lower() in names
     except Exception:
         return False
+
+
+def rekey(sdlc_dir, config, apply=False):
+    """One-time clean-up for comparisons written before the shared key (#1495): a watch file whose
+    `would` is a bank option of its kind while `actual` is a closing answer compared two vocabularies,
+    so it can only read as a miss. Dry run by default; `apply` removes those files (never vetoes, never a
+    link). Returns `{"pairs": {"kind / area": n}, "removed": n}`. Closed gate: nothing read."""
+    out = {"pairs": {}, "removed": 0}
+    if not enabled(config):
+        return out
+    u = _load("unpark")
+    closing = list(u.CLOSING_QUESTION["options"])
+    folder = _dir(sdlc_dir)
+    if os.path.islink(folder):
+        return out
+    for w in _facts(sdlc_dir, "watch-"):
+        kind = w.get("qkind")
+        if not (isinstance(kind, str) and u.route_slot(kind) and u.bank_option(kind, w.get("would"))
+                and w.get("actual") in closing):
+            continue
+        key = "%s / %s" % (kind, _area(w.get("area")) or "-")
+        if apply:
+            try:
+                os.unlink(os.path.join(folder, w["_file"]))
+            except OSError:
+                continue
+            out["removed"] += 1
+        out["pairs"][key] = out["pairs"].get(key, 0) + 1
+    return out
+
+
+USAGE = "usage: autonomy.py rekey <sdlc_dir> [--apply]   (dry run unless --apply)"
+
+
+def main(argv):
+    if argv[1:] in (["-h"], ["--help"]):
+        print(USAGE)
+        return 0
+    if len(argv) < 3 or argv[1] != "rekey" or any(a not in ("--apply",) for a in argv[3:]):
+        print(USAGE, file=sys.stderr)
+        return 2
+    try:
+        config = _load("state").load_config(argv[2])
+    except Exception as exc:  # noqa: BLE001
+        print("autonomy: %s" % exc, file=sys.stderr)
+        return 1
+    apply = "--apply" in argv[3:]
+    out = rekey(argv[2], config, apply=apply)
+    for pair, n in sorted(out["pairs"].items()):
+        print("%s: %d comparison%s %s" % (pair, n, "" if n == 1 else "s",
+                                        "removed" if apply else "would be removed"))
+    total = sum(out["pairs"].values())
+    print("%s %d in all" % ("removed" if apply else "dry run: would remove", total)
+          + ("" if apply or not total else " (re-run with --apply)"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
