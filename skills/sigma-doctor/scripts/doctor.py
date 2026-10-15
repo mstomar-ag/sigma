@@ -5366,6 +5366,14 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
             old = store.untracked_old(sdlc_dir, config=cfg)
             if old:
                 extra.append("%d decision records are untracked for over a day; commit them" % len(old))
+            if rub.part_enabled("rules"):
+                rbk = _load_loop_script("rulebook")
+                for ar in rbk.acceptance(sdlc_dir, cfg):
+                    if ar["never_matches"]:
+                        extra.append("rule %s: its option %r never matches a recorded answer"
+                                     % (ar["id"], ar["option"]))
+                    if ar["answers"]:
+                        extra.append(rbk.acceptance_line(ar))
             ptr = _load_loop_script("ledger_pointer")
             if ptr.is_open(cfg):
                 extra.append("ledger pointer on: %d ledger entry files, %d ids queued"
