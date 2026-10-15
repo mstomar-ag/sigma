@@ -167,6 +167,18 @@ def guard_issue_write(source, issue, op, via_guard=False, config=None):
         return Verdict(True, _hs().CANNOT_TELL, "error", "", "hard stop: cannot tell (guard error)")
 
 
+def is_sigma_issue(source, issue, config=None):
+    """#1468: True when `issue` is Sigma's own, or when hard stops are off. A read-only predicate: it never parks,
+    writes or logs, so a caller can skip a foreign issue before any write. Unreadable counts as not Sigma's."""
+    try:
+        cfg = config if config is not None else getattr(source, "_hs_config", None)
+        if not enabled(cfg) or issue is None or str(issue) in _FILING:
+            return True
+        return bool(_sigma_created(source, source._read_issue(issue, ["labels", "body"])))
+    except Exception:
+        return False
+
+
 def park_issue(source, issue, verdict):
     """The guard's own park write: exempt from guarding (parking is the remedy). Best effort; never raises."""
     _IN_GUARD.append(1)

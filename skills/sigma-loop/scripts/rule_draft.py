@@ -12,7 +12,7 @@ itself never approves, and this module never writes a file of its own.
   (stable under re-ordering). The majority option of one part drafts the rule; the other part is
   the exam, and the draft passes only when the held-out answers also agree with it at the
   threshold. Fail closed: a held-out set smaller than `min_held_out`, a tie, a missing option
-  (public records drop the free-text choice; on public visibility `list` and `draft` say so plainly and exit 1), a hard-stop kind, a level below 2, or a pair that
+  (public records keep only a bank option, so free text never drafts), a hard-stop kind, a level below 2, or a pair that
   already has a rule in the rulebook means NO draft.
 - Gated by both existing gates: `rulebook.rules.enabled` and `rulebook.autonomy.enabled`
   (and the records part for the data). Closed means inert: lists nothing, drafts nothing, writes nothing.
@@ -65,16 +65,17 @@ def _open(config):
         return False
 
 
-PUBLIC_REASON = ("cannot draft here: record visibility is public, which drops the recorded choice "
-                 "(free text), so no option can be read; draft from a repo on private visibility")
+MEANING = {"unpark": "this rule will UNPARK after the window",
+           "keep-parked": "this rule will KEEP PARKED",
+           "none": "this rule only recommends"}
 
 
-def _public(config):
-    """True when the gates are open and records are stored on public visibility. Never raises."""
+def meaning(qkind, option):
+    """The plain line for what a rule with `option` does (derived from the question bank), or None."""
     try:
-        return _open(config) and _load("decision_store")._visibility(config) == "public"
+        return MEANING.get(_load("applier").option_gesture(qkind, option))
     except Exception:
-        return False
+        return None
 
 
 def split(ids):
@@ -86,11 +87,14 @@ def split(ids):
 
 
 def _human(sdlc_dir, qkind, area, config):
+    dr = _load("decision_record")
     recs = _load("decision_store").list_by(sdlc_dir, config, qkind=qkind, area=area)
     # An imported record of kind unknown has no real kind behind it (#1239): it never feeds a draft.
-    return {r["id"]: r["choice"] for r in recs if isinstance(r, dict) and r.get("how") in ("human", "imported")
-            and not (r.get("how") == "imported" and r.get("qkind") == "unknown")
-            and isinstance(r.get("id"), str) and isinstance(r.get("choice"), str) and r["choice"]}
+    # The key is the one comparison key (#1495), so a draft reads exactly as a hand-written rule would;
+    # 'free' answers and promote/demote/ack gestures never feed one.
+    return {r["id"]: dr.key_of(r) for r in recs if isinstance(r, dict) and r.get("how") in ("human", "imported")
+            and not (r.get("how") == "imported" and r.get("qkind") == "unknown") and dr.is_park_answer(r)
+            and isinstance(r.get("id"), str) and dr.key_of(r) and dr.key_of(r) not in dr.UNLEARNABLE_KEYS}
 
 
 def _majority(choices):
@@ -105,7 +109,8 @@ def _majority(choices):
 
 def _blocked(qkind, config):
     try:
-        return qkind not in _load("qkind").QKINDS or _load("hard_stop").is_hardstop_kind(qkind, None, config)
+        return (qkind not in _load("qkind").QKINDS or qkind == "unknown"
+                or _load("hard_stop").is_hardstop_kind(qkind, None, config))
     except Exception:
         return True
 
@@ -141,8 +146,6 @@ def draft(sdlc_dir, qkind, area, config, now=None):
     try:
         if not _open(config):
             return _refuse("closed: rulebook, autonomy and records parts must all be enabled")
-        if _public(config):
-            return _refuse(PUBLIC_REASON)
         if not isinstance(qkind, str) or not isinstance(area, str) or _blocked(qkind, config):
             return _refuse("question kind is unknown or a hard-stop kind")
         if _load("autonomy").level(sdlc_dir, qkind, area, config) < MIN_LEVEL:
@@ -167,7 +170,8 @@ def draft(sdlc_dir, qkind, area, config, now=None):
         if path is None:
             return _refuse("the rulebook refused the proposal")
         return {"status": "drafted", "qkind": qkind, "area": area, "option": opt, "sources": linked,
-                "held_out": len(h_ids), "held_out_agreement": held, "path": path}
+                "held_out": len(h_ids), "held_out_agreement": held, "path": path,
+                "meaning": meaning(qkind, opt)}
     except Exception as exc:  # noqa: BLE001 - fail closed
         return _refuse("unreadable: %s" % type(exc).__name__)
 
@@ -197,7 +201,8 @@ def approve(sdlc_dir, rule_id, config):
         if not _load("autonomy").is_owner(login, config):
             return False, rb.park_line(rule_id).replace("\n", " ")
         rb.approve(sdlc_dir, rule_id, login, config)
-        return True, rule_id
+        said = meaning(rule.get("qkind"), rule.get("option"))
+        return True, rule_id + (": " + said if said else "")
     except Exception as exc:  # noqa: BLE001 - fail closed
         return False, "unreadable: %s" % type(exc).__name__
 
@@ -210,6 +215,9 @@ def main(argv=None):
     d.add_argument("sdlc_dir")
     d.add_argument("qkind")
     d.add_argument("area")
+    sh = sub.add_parser("show", help="print what one rule does: unpark, keep parked, or only recommends")
+    sh.add_argument("sdlc_dir")
+    sh.add_argument("rule_id")
     ap = sub.add_parser("approve", help="approve one proposed rule (owner only)")
     ap.add_argument("sdlc_dir")
     ap.add_argument("rule_id")
@@ -219,10 +227,15 @@ def main(argv=None):
     except Exception as exc:  # noqa: BLE001
         print("rule_draft: %s" % exc, file=sys.stderr)
         return 1
+    if args.verb == "show":
+        rule = next((r for r in _load("rulebook").load(args.sdlc_dir, config) if r.get("id") == args.rule_id), None)
+        if rule is None:
+            print("rule_draft: no valid rule with id %s" % args.rule_id, file=sys.stderr)
+            return 2
+        print("%s: %s / %s -> %s (%s); %s" % (rule["id"], rule["qkind"], rule["area"], rule["option"],
+                                              rule["status"], meaning(rule["qkind"], rule["option"])))
+        return 0
     if args.verb == "list":
-        if _public(config):
-            print("rule_draft: " + PUBLIC_REASON, file=sys.stderr)
-            return 1
         print(json.dumps(list_patterns(args.sdlc_dir, config), indent=2))
         return 0
     if args.verb == "approve":
