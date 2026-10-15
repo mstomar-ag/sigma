@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- An unstamped legacy answers block is no longer counted for a newer stamped park, and a quota wait-it-out ask is applied only after its recorded reset time (unknown counts as not yet) (#1522).
+
 - A needs_decision closing answer is now normalised through the bank (case, spacing, a trailing recommended marker) into the stored `answer`; other text is `free` and never learnable (#1521).
 
 - **The applier now asks for parks that already exist, never asks twice for one park, and counts its window from when a rule became eligible (#1499).** `applier.py` runs a bounded sync (20 reads per tick) before each tick, an ask in any state covers its park, a new park or an unpark supersedes or closes the old ask (superseded asks are pruned after two days), an ask opened below level 3 is armed with one notice comment and a fresh window, the applied record carries its gesture and answer, and `applier.py <dir> --dry-run` prints the plan and writes nothing. Closed, nothing changes.
