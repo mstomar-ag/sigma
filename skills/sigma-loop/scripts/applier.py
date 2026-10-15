@@ -443,6 +443,9 @@ def _evidence_behind(sdlc_dir, config):
             "applier acts" % (n, "" if n == 1 else "s", ", ".join(names)))
 
 
+DUE_REASON = "rule due for re-confirmation"
+
+
 def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comments_fn=None,
          monotonic_fn=time.monotonic):
     """Plan, and unless `apply_actions` is false apply, one pass. Returns the actions (dicts with a
@@ -468,6 +471,8 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
         cap = settings(config)["max_auto_applied_per_day"]
         used = _applied_in_last_day(asks, now)
         rules = _load("rulebook").load(sdlc_dir, config)
+        due_ids = set(_load("rulebook").due_for_reask(rules, now, config))
+        skipped = []
         hs = _load("hard_stop")
         stored = _spot_read(sdlc_dir)
         counts = dict(stored)
@@ -491,6 +496,11 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 continue
             m = _load("rulebook").match(qkind, area, ask.get("options"), rules)
             if m is None:
+                continue
+            if m.rule_id in due_ids:    # F-04: an old rule only recommends until an owner reconfirms it
+                skipped.append({"kind": "skipped", "ask": ask["id"], "issue": ask.get("issue"), "qkind": qkind,
+                                "area": area, "rule_id": m.rule_id, "result": "skipped",
+                                "skip_reason": DUE_REASON})
                 continue
             rule = next((r for r in rules if r.get("id") == m.rule_id), None)
             level = _level(sdlc_dir, qkind, area, config)
@@ -529,6 +539,7 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
         else:
             for a in actions:
                 a["result"] = "would"
+        actions.extend(skipped)     # F-04: reported, never applied; the ask stays pending
         _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT), {"time": now.isoformat()})
         _prune(sdlc_dir, asks, now, config)
     except Exception as exc:  # a tick never raises

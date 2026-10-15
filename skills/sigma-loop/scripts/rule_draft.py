@@ -65,6 +65,8 @@ def _open(config):
         return False
 
 
+SHAPE_NOTE = "level reached on normalised shape; no single option can be drafted"
+
 MEANING = {"unpark": "this rule will UNPARK after the window",
            "keep-parked": "this rule will KEEP PARKED",
            "none": "this rule only recommends"}
@@ -131,10 +133,21 @@ def list_patterns(sdlc_dir, config):
             lvl = au.level(sdlc_dir, q, a, config)
             opt, share = _majority(list(_human(sdlc_dir, q, a, config).values()))
             if lvl >= MIN_LEVEL and opt is not None and share >= cfg["min_agreement"]:
-                rows.append({"qkind": q, "area": a, "option": opt, "agreement": share, "level": lvl})
+                row = {"qkind": q, "area": a, "option": opt, "agreement": share, "level": lvl}
+                if _shape_only(q, opt):
+                    row["note"] = SHAPE_NOTE        # F-18: only listed rows with a draftable option stay silent
+                rows.append(row)
         return rows
     except Exception:
         return []
+
+
+def _shape_only(qkind, option):
+    """True when the agreed key is not a bank option of the kind (a normalised shape), so no rule can name it."""
+    try:
+        return _load("unpark").bank_option(qkind, option) != option
+    except Exception:
+        return False
 
 
 def _refuse(reason):
@@ -163,6 +176,8 @@ def draft(sdlc_dir, qkind, area, config, now=None):
         held = sum(1 for i in h_ids if answers[i] == opt) / len(h_ids)
         if held < cfg["min_agreement"]:
             return _refuse("exam failed: held-out agreement %.2f below %.2f" % (held, cfg["min_agreement"]))
+        if _shape_only(qkind, opt):
+            return _refuse(SHAPE_NOTE)
         linked = (d_ids + h_ids)[:MAX_LINKED]
         reason = "learned from %d recorded decisions (%d held-out, agreement %.2f): %s%s" % (
             len(answers), len(h_ids), held, ", ".join(linked), " ..." if len(answers) > len(linked) else "")
@@ -216,6 +231,70 @@ def approve(sdlc_dir, rule_id, config):
         return False, "unreadable: %s" % type(exc).__name__
 
 
+def _owner_login(config):
+    """-> (login, None) for a confirmed owner, else (None, refusal line). Never raises."""
+    ident = _identity(config)
+    login = ident.get("login")
+    if not login:
+        return None, "cannot resolve who is acting"
+    if ident.get("confirmed") is False:
+        return None, "cannot confirm who is acting (gh reports %s: %s)" % (login, ident.get("detail") or "identity unconfirmed")
+    if not _load("autonomy").is_owner(login, config):
+        return None, "only an owner may do this"
+    return login, None
+
+
+def due(sdlc_dir, config, now=None):
+    """`[(rule_id, age_days or None)]` for approved rules past `rulebook.reask_days` (F-04). [] when closed."""
+    try:
+        import datetime
+        rb = _load("rulebook")
+        return rb.due_ages(rb.load(sdlc_dir, config), now or datetime.datetime.now(datetime.timezone.utc), config)
+    except Exception:
+        return []
+
+
+def reconfirm(sdlc_dir, rule_id, config):
+    """Re-stamp one approved rule's confirmation and seal as the invoking owner. -> (ok, line). Never raises."""
+    try:
+        rb = _load("rulebook")
+        if not rb.enabled(config):
+            return False, "closed: rulebook rules are not enabled; nothing written"
+        rule = next((r for r in rb.load(sdlc_dir, config) if r.get("id") == rule_id), None)
+        if rule is None:
+            return False, "no valid rule with id %s" % rule_id
+        if rule.get("status") != "approved":
+            return False, "rule %s is not approved; use approve" % rule_id
+        login, why = _owner_login(config)
+        if why:
+            return False, "%s; rule %s unchanged" % (why, rule_id)
+        rb.approve(sdlc_dir, rule_id, login, config)
+        return True, "%s reconfirmed (by %s)" % (rule_id, login)
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        return False, "unreadable: %s" % type(exc).__name__
+
+
+def retire(sdlc_dir, rule_id, config, reject=False):
+    """Remove one rule as the invoking owner, so drafting is allowed again for its pair (M-11).
+    `reject` refuses an approved rule (only a proposal is rejected). -> (ok, line). Never raises."""
+    try:
+        rb = _load("rulebook")
+        if not rb.enabled(config):
+            return False, "closed: rulebook rules are not enabled; nothing written"
+        login, why = _owner_login(config)
+        if why:
+            return False, "%s; rule %s unchanged" % (why, rule_id)
+        try:
+            rb.retire(sdlc_dir, rule_id, login, config, only_proposed=reject)
+        except KeyError:
+            return False, "no rule with id %s" % rule_id
+        except ValueError:
+            return False, "rule %s is approved; use retire" % rule_id
+        return True, "%s %s (by %s)" % (rule_id, "rejected" if reject else "retired", login)
+    except Exception as exc:  # noqa: BLE001 - fail closed
+        return False, "unreadable: %s" % type(exc).__name__
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="verb", required=True)
@@ -230,6 +309,14 @@ def main(argv=None):
     ap = sub.add_parser("approve", help="approve one proposed rule (owner only)")
     ap.add_argument("sdlc_dir")
     ap.add_argument("rule_id")
+    du = sub.add_parser("due", help="approved rules older than reask_days, with their age")
+    du.add_argument("sdlc_dir")
+    for name, hp in (("reconfirm", "re-stamp one approved rule (owner only)"),
+                     ("retire", "remove one rule (owner only)"),
+                     ("reject", "remove one proposed rule (owner only)")):
+        sp = sub.add_parser(name, help=hp)
+        sp.add_argument("sdlc_dir")
+        sp.add_argument("rule_id")
     args = p.parse_args(argv)
     try:
         config = _load("state").load_config(args.sdlc_dir)
@@ -247,6 +334,15 @@ def main(argv=None):
     if args.verb == "list":
         print(json.dumps(list_patterns(args.sdlc_dir, config), indent=2))
         return 0
+    if args.verb == "due":
+        for rid, age in due(args.sdlc_dir, config):
+            print("%s: %s" % (rid, "confirmation unreadable" if age is None else "%d days since confirmed" % age))
+        return 0
+    if args.verb in ("reconfirm", "retire", "reject"):
+        ok, line = (reconfirm(args.sdlc_dir, args.rule_id, config) if args.verb == "reconfirm"
+                    else retire(args.sdlc_dir, args.rule_id, config, reject=args.verb == "reject"))
+        print(line, file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 2
     if args.verb == "approve":
         ok, line = approve(args.sdlc_dir, args.rule_id, config)
         print(line, file=sys.stdout if ok else sys.stderr)

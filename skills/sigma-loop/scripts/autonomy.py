@@ -238,10 +238,29 @@ def _pair_settings(sdlc_dir, qkind, area, config):
         has_file = cats.exists(sdlc_dir)
         cat = cats.resolve(sdlc_dir, qkind, area) if has_file else None
         if cat:
-            cfg.update(cat["levels"])
+            merged = dict(cfg, **cat["levels"])
+            if cats.order_ok(merged):       # F-13: a category that breaks the level order is not applied
+                cfg = merged
+            else:
+                cat = None
     except Exception:
         cat = None
     return cfg, cat, has_file
+
+
+def category_notes(sdlc_dir, config):
+    """Doctor notes for categories left out: broke the order on their own, or on top of the global levels."""
+    notes = ["category %s dropped: %s" % n for n in _load("categories").dropped(sdlc_dir)]
+    try:
+        cats = _load("categories")
+        base = settings(config)
+        for c in cats.load(sdlc_dir):
+            if not cats.order_ok(dict(base, **c["levels"])):
+                notes.append("category %s dropped: its thresholds on top of the global levels break the level order"
+                             % c["id"])
+    except Exception:
+        pass
+    return notes
 
 
 def _state(sdlc_dir, qkind, area, config):
