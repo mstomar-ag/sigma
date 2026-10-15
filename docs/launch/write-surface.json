@@ -633,6 +633,14 @@
       "risk": "low"
     },
     {
+      "path": "skills/sigma-loop/scripts/decision_import.py",
+      "function": "remove",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "person-run remove verb with --apply (dry run otherwise); records part enabled; unlinks only imported decision records and imported watch files whose origin names the given project folder (and profile when given), never a file without an origin and never a symbolic link",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/decision_store.py",
       "function": "_lock",
       "rule": "fs-write",

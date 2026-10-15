@@ -60,7 +60,8 @@ def area_of(labels):
     return REPO_AREA
 
 
-def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None, answer=None):
+def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None, answer=None,
+          origin=None):
     """A plain record dict. An unusable kind reads `unknown`; an empty choice gets a placeholder."""
     rec = {"gesture": gesture,
            "qkind": qkind_ if qkind_ in qkind.QKINDS else "unknown",
@@ -74,6 +75,8 @@ def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None, a
         rec["area"] = str(area)
     if answer:
         rec["answer"] = str(answer)
+    if isinstance(origin, dict):
+        rec["origin"] = dict(origin)
     return rec
 
 

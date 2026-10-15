@@ -319,6 +319,10 @@ shadow-only and has two parts that must both be configured before anything is ca
 - It runs once per issue and park, when a question is parked with a declared, non-hard-stop kind.
 - It reads the files listed in `rulebook.drift.documents` (repository-relative; an absolute path, an escape or an
   unreadable file is reported as unreachable), clipped to `max_total_chars` (default 40000) together.
+- The clip runs in the order the documents are listed. Once the budget is used up, a later document is not sent: the
+  record names it in `documents_clipped_out`, and a document cut short is listed in `documents_truncated` as
+  `{name, chars_sent, chars_total}`. `documents_read` holds only documents with at least one character sent, and the
+  doctor warns when the documents together exceed `max_total_chars`.
 - Verdicts: `conflicts` (counts only with a quote the code finds verbatim in a document, and the document is named),
   `consistent`, `not_covered`, or `not_judged` with a typed reason (`disabled`, `no_model`, `no_ceiling`,
   `ceiling_reached`, `call_failed`, `lock_unusable`, `spend_unreadable`, `no_documents_configured`, `documents_unreachable`).
@@ -339,12 +343,22 @@ which means no call. When the rolling 24-hour spend reaches the ceiling, the doc
 python3 skills/sigma-loop/scripts/decision_import.py scan  .sdlc [--profile DIR ...] [--project-dir DIR ...]
 python3 skills/sigma-loop/scripts/decision_import.py plan  .sdlc [same options]
 python3 skills/sigma-loop/scripts/decision_import.py apply .sdlc [same options]
+python3 skills/sigma-loop/scripts/decision_import.py remove .sdlc --project-dir DIR [--profile DIR] [--apply]
 ```
 
 - `scan` reports candidates and writes nothing. `plan` shows per kind and area what `apply` would write, how many are
   unknown, and the level the evidence alone would reach (capped at 2). `apply` writes records marked `how: imported`
   (with a source fingerprint and the original time) plus replayed watch comparisons. It is idempotent and writes
   nothing while the records part is closed.
+- **Scope and origin.** Every `--project-dir` (and `rulebook.import.project_dirs`) is imported in full into this
+  repository, with no relevance check. Each imported record and watch comparison carries an `origin`: for a transcript
+  `{kind, profile, folder, file, line, cwd}`, for a comment `{kind, issue, comment_id}`; on a public repository the
+  profile, folder and cwd are short hashes. `plan` and `apply` print one line per folder (candidates, new records);
+  folders other than this repository's own are marked `(extra)`. `--only-in-repo` (or `rulebook.import.require_repo_cwd`
+  `true`, default `false`) keeps only answers whose transcript `cwd` is inside this repository and prints how many were dropped.
+- **Removing one folder's import.** `remove .sdlc --project-dir DIR` lists the imported records and watch files whose
+  origin names that folder (add `--profile` to narrow); `--apply` deletes them. Records written before origins existed
+  have none: they are counted ("N legacy records have no origin; not removed") and never deleted.
 - **Sources.** Transcript files of an `AskUserQuestion` call paired with its answer (no other tool result is read), and,
   when `rulebook.import.comments` is `true`, `sigma:unpark-qa` answers and decision-record lines in issue comments of
   goal-labelled and parked-labelled issues (at most `max_issues`, default 50). Each answer takes the kind of the nearest
@@ -490,6 +504,7 @@ flag, which closes the whole block.
 | `import.max_budget_usd_per_call` | `0.50` | classifier per call |
 | `import.max_budget_usd_per_run` | `1.0` | classifier per run |
 | `import.timeout_s` | `60` | classifier per call |
+| `import.require_repo_cwd` | `false` | same as `--only-in-repo` |
 
 Related keys outside the block: `ai_filed.triage.enabled` (gate holds), `ai_filed.migration.*` (the label migration),
 `ledger.watch.interval_seconds` (the interval the dead-tick check is measured in), `action_log.enabled` (the record-done
