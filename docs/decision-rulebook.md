@@ -306,6 +306,10 @@ shadow-only and has two parts that must both be configured before anything is ca
 - It runs once per issue and park, when a question is parked with a declared, non-hard-stop kind.
 - It reads the files listed in `rulebook.drift.documents` (repository-relative; an absolute path, an escape or an
   unreadable file is reported as unreachable), clipped to `max_total_chars` (default 40000) together.
+- The clip runs in the order the documents are listed. Once the budget is used up, a later document is not sent: the
+  record names it in `documents_clipped_out`, and a document cut short is listed in `documents_truncated` as
+  `{name, chars_sent, chars_total}`. `documents_read` holds only documents with at least one character sent, and the
+  doctor warns when the documents together exceed `max_total_chars`.
 - Verdicts: `conflicts` (counts only with a quote the code finds verbatim in a document, and the document is named),
   `consistent`, `not_covered`, or `not_judged` with a typed reason (`disabled`, `no_model`, `no_ceiling`,
   `ceiling_reached`, `call_failed`, `lock_unusable`, `spend_unreadable`, `no_documents_configured`, `documents_unreachable`).
