@@ -1609,6 +1609,37 @@ def _list(run, gh_cfg, fields, labels, state="open", cap=200, sort="created", re
         return None
 
 
+def _mis_kinded_hardstop_parks(cfg, gh_cfg, run, cap=20):
+    """#1498: open parked issues whose title or body matches the filing deny-list (a hard stop) but whose
+    declared kind is not a hard-stop kind. -> a list of issue numbers (empty = none), or None when the
+    read could not be made. READ-ONLY; cost: one list read plus one issue read per deny-list match, at
+    most `cap` of them."""
+    try:
+        sources = _load_loop_script("sources")
+        ft = _load_loop_script("file_triage")
+        hs = _load_loop_script("hard_stop")
+        qk = _load_loop_script("qkind")
+        src = sources.GitHubSource(cfg, run=_raising_gh(run))    # sources' runner takes no binary
+        label = src.parked_label
+        rows = _list(run, gh_cfg, ["number", "title", "body"], [label], cap=100)
+        if rows is None:
+            return None
+        found = []
+        for it in rows:
+            d = ft.decide(it.get("title") or "", it.get("body") or "", {}, {})
+            if d.kind != "park" or not d.matched:
+                continue
+            data = src._read_issue(it["number"], ["number", "comments", "state"])
+            kind = qk.resolve(data.get("comments") or [], goal=it["number"])
+            if not hs.is_hardstop_kind(kind, None, cfg) and not qk.resolve_hardstop(data.get("comments") or []):
+                found.append(it["number"])
+            if len(found) >= cap:
+                break
+        return found
+    except Exception:
+        return None
+
+
 def _dependency_marker_scan(gh_cfg, bchk_cfg, run):
     """An issue with a comment matching `backlog_check._BLOCK_RE` ("blocked by #N" / "depends on #N"
     / ...) but NO matching marker in its own body is likely a human-authored dependency, left via the
@@ -2965,6 +2996,14 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
             out.append(_chk(
                 "every open unit's landing PR is CI-verifiable (not conflicted with zero checks)",
                 landing is None, landing))
+
+            # #1498: a park the filing deny-list would stop, declared as an ordinary kind. Warn only; no write.
+            mk = _mis_kinded_hardstop_parks(cfg, gh_disc, run)
+            if mk:
+                out.append(_chk("deny-list parks are declared a hard-stop kind", False,
+                                "parked issue(s) match the filing deny-list but are not declared a hard-stop kind: #"
+                                + ", #".join(str(n) for n in mk[:10])
+                                + " -- run `unpark.py declare .sdlc <issue> irreversible`."))
 
             # #389: NOT gated on backlog_check.enabled (nor on the `project` block above) -- a repo with
             # backlog_check OFF has zero auto-skip happening at all, so this is arguably more useful

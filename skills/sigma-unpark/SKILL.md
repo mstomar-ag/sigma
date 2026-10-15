@@ -31,8 +31,8 @@ through this path is never re-litigated by the automatic sweep.
 
 ## The flow
 
-1. **List** — `python3 "${CLAUDE_SKILL_DIR}/../sigma-loop/scripts/unpark.py" list .sdlc [--assignee X]`
-   Parked and blocked issues, oldest first. Scope defaults to `discovery.github.assignee`, which
+1. **List** — `python3 "${CLAUDE_SKILL_DIR}/../sigma-loop/scripts/unpark.py" list .sdlc [--assignee X] [--undeclared]`
+   Parked and blocked issues, oldest first. `--undeclared`: kindless parks; `declare .sdlc <issue> <kind>` sets one. Scope defaults to `discovery.github.assignee`, which
    ships empty; the output says which scope it used, so an empty list is never mistaken for "nothing
    is parked for me".
 

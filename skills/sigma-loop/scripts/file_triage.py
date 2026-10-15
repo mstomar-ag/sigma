@@ -25,7 +25,9 @@ import re
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
-Decision = collections.namedtuple("Decision", "kind priority reason")
+#: `matched` (#1498): the deny-list class that parked the filing (`hard-stop word`, `spend phrase`, `secret`,
+#: `hard-stop class`, `permission marker`), else None. Callers declare a hard-stop kind from it.
+Decision = collections.namedtuple("Decision", "kind priority reason matched", defaults=(None,))
 
 DEFAULT_BUCKETS = {"urgent": "P2", "routine": "P3", "unclear": "P4"}
 DEFAULT_HUMAN_PRIORITY = "P1"
@@ -40,8 +42,8 @@ _URGENT = re.compile(r"\b(unsafe|vulnerab\w*|exploit\w*|data corrupt\w*|deadlock
 _ROUTINE = re.compile(r"\b(tech.?debt|cleanup|edge case|polish|follow.?up|cosmetic|nice.to.have)\b", re.IGNORECASE)
 
 
-def _park(reason):
-    return Decision("park", None, reason)
+def _park(reason, matched=None):
+    return Decision("park", None, reason, matched)
 
 
 def _block(config):
@@ -92,10 +94,10 @@ def _load(name):
 
 
 def _deny(title, body, blk):
-    """-> reason string when the deny-list matches, else None. Raises on a broken helper (caller parks)."""
+    """-> (reason, class) when the deny-list matches, else None. Raises on a broken helper (caller parks)."""
     status = _load("spend_approval").parse_marker(body)[0]
     if status != "none":
-        return "first body line carries a recorded-permission marker"
+        return "first body line carries a recorded-permission marker", "permission marker"
     text = "%s\n%s" % (title, body)
     words = blk.get("triage", {}).get("deny_words") if isinstance(blk.get("triage"), dict) else None
     if not (isinstance(words, (list, tuple)) and all(isinstance(w, str) for w in words)):
@@ -103,23 +105,23 @@ def _deny(title, body, blk):
     low = text.lower()
     for w in words:
         if w and w.lower() in low:
-            return "hard-stop word: " + w
+            return "hard-stop word: " + w, "hard-stop word"
     tri = blk.get("triage") if isinstance(blk.get("triage"), dict) else {}
     phrases = tri.get("spend_phrases")
     if not (isinstance(phrases, (list, tuple)) and all(isinstance(w, str) for w in phrases)):
         phrases = DEFAULT_SPEND_PHRASES
     for ph in phrases:
         if ph.strip() and re.search(r"\b" + r"\s+".join(map(re.escape, ph.split())) + r"\b", text, re.IGNORECASE):
-            return "spend phrase: " + ph
+            return "spend phrase: " + ph, "spend phrase"
     if _SECRET.search(text):
-        return "secret-shaped text"
+        return "secret-shaped text", "secret"
     res = _load("hard_stop").classify(text, {}, {"hard_stops": {"enabled": True}})
     # A shell parse failure on free prose (an odd apostrophe) is not a stop: the text is not a command.
     # Every other cannot-tell (detector error, not text) and every matched class still parks.
     if res.cls == "cannot-tell" and res.pattern_id == "parse-error":
         return None
     if res.cls is not None:
-        return "hard-stop class: " + str(res.cls)
+        return "hard-stop class: " + str(res.cls), "hard-stop class"
     return None
 
 
@@ -155,7 +157,7 @@ def _decide(title, body, flags, config):
         return _park(v["reason"])
     why = _deny(title, body, blk)
     if why:
-        return _park(why)
+        return _park(why[0], why[1])
     flags = flags if isinstance(flags, dict) else {}
     if flags.get("human_confirmed") is True:
         pri = flags.get("priority")
