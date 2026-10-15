@@ -428,6 +428,9 @@ and the board field write is skipped when the GraphQL budget is low; the label w
    `Blocked by #N`. It also removes the blocking mark from a closed blocker or one that blocks nothing.
    Cycles are handled: every member of a blocking cycle that transitively blocks something more urgent is
    raised, whichever member the walk enters through, and the cycle is reported once.
+   Whole-body scans here use only the explicit phrases (blocked by, depends on, depends upon), so prose such as
+   "after #N" makes no edge. A blocker that is merged, closed or a pull request is never written to, and the dry
+   pass writes nothing. At most 10 outside blockers are read per pass; the rest are reported on stderr, not dropped.
 
 **Picker order.** With `discovery.order` at `"priority"` and `discovery.blocking_priority_override` on (the
 default), the picker orders by priority tier first, then a goal that also carries `sdlc:blocking` ahead of

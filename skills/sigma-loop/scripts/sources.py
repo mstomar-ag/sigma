@@ -4800,7 +4800,7 @@ class GitHubSource:
             backlog_check = _get_backlog_check()
             for ref, it in by_ref.items():
                 haystack = (it.get("title") or "") + "\n" + (it.get("body") or "")
-                for m in backlog_check._BLOCK_RE.finditer(haystack):
+                for m in backlog_check.blocker_scan._EXPLICIT_BLOCK_RE.finditer(haystack):   # #1475: whole body, explicit phrases only
                     if not smart and backlog_check.blocker_scan.is_cross_repo(haystack, m):
                         cross_repo.append("#%s blocked by another repository's #%s" % (ref, m.group(2)))
                         continue
@@ -4831,11 +4831,11 @@ class GitHubSource:
             newly_closed = []
             for ref in outside[:self._BLOCKER_READ_CAP]:
                 try:
-                    data = self._read_issue(ref, ["number", "state", "labels"])
+                    data = self._read_issue(ref, ["number", "state", "labels", "isPullRequest"])
                     names = [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (data.get("labels") or [])]
-                    if str(data.get("state") or "open").lower() == "closed":
+                    if self._blocker_not_open(data):
                         newly_closed.append(ref)
-                    if str(data.get("state") or "open").lower() == "closed" or self.proposed_label in names:
+                    if self._blocker_not_open(data) or self.proposed_label in names:
                         directly_blocks.pop(ref, None)
                         continue
                     ext[ref] = {"number": int(ref), "labels": data.get("labels") or []}
@@ -5082,11 +5082,11 @@ class GitHubSource:
                 return "skipped: self edge"
             items = {}
             for ref in (blocker, dependent):
-                data = self._read_issue(ref, ["number", "state", "labels"])
+                data = self._read_issue(ref, ["number", "state", "labels", "isPullRequest"])
                 items[str(ref)] = data
             b = items[str(blocker)]
             names = [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (b.get("labels") or [])]
-            if str(b.get("state") or "open").lower() == "closed" or self.proposed_label in names:
+            if self._blocker_not_open(b) or self.proposed_label in names:
                 return "skipped: blocker closed or awaiting confirmation"
             ranks = {str(r): discovery.priority_rank(self._priority_name(d.get("labels")), self.priority_aliases)
                      for r, d in items.items()}
@@ -5146,12 +5146,12 @@ class GitHubSource:
                              key=lambda r: (-int(r), r) if str(r).isdigit() else (0, r))
             for ref in outside[:self._BLOCKER_READ_CAP]:
                 try:
-                    data = self._read_issue(ref, ["number", "state", "labels"])
+                    data = self._read_issue(ref, ["number", "state", "labels", "isPullRequest"])
                 except Exception as exc:
                     cross_repo.append("#%s could not be read (%s)" % (ref, exc))
                     continue
                 names = self._label_names(data.get("labels"))
-                if str(data.get("state") or "open").lower() == "closed":
+                if self._blocker_not_open(data):
                     newly_closed.append(ref)
                     continue
                 if self.proposed_label in names:
@@ -5161,7 +5161,11 @@ class GitHubSource:
             for ref, it in corpus.items():
                 if ref in blocker_refs and self.proposed_label in self._label_names(it.get("labels")):
                     proposed[ref] = it
-            self._remember_closed_refs(known_closed, newly_closed)
+            for ref in outside[self._BLOCKER_READ_CAP:]:      # #1475: beyond the cap is reported, never silent
+                out["unread"] = out.get("unread", 0) + 1
+                cross_repo.append("#%s not read (more than %d outside blockers this pass)" % (ref, self._BLOCKER_READ_CAP))
+            if apply:                                         # #1475: the dry pass writes nothing
+                self._remember_closed_refs(known_closed, newly_closed)
             edges = [(b, d) for b, d in edges if b in ext or (b in corpus and b not in proposed)]
             item_of = lambda r: corpus[r] if r in corpus else ext[r]            # noqa: E731
             ranks = {r: discovery.priority_rank(self._priority_name(item_of(r).get("labels")), self.priority_aliases)
@@ -5239,6 +5243,11 @@ class GitHubSource:
             pass
 
     @staticmethod
+    def _blocker_not_open(data):
+        """#1475: a blocker that is MERGED, CLOSED or a pull request is never written to (resolved)."""
+        return str(data.get("state") or "open").upper() != "OPEN" or bool(data.get("isPullRequest"))
+
+    @staticmethod
     def _label_names(labels):
         return [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (labels or [])]
 
@@ -5260,7 +5269,7 @@ class GitHubSource:
         backlog_check = _get_backlog_check()
         for ref, it in corpus.items():
             haystack = (it.get("title") or "") + "\n" + (it.get("body") or "")
-            for m in backlog_check._BLOCK_RE.finditer(haystack):
+            for m in backlog_check.blocker_scan._EXPLICIT_BLOCK_RE.finditer(haystack):   # #1475: explicit phrases only
                 if backlog_check.blocker_scan.is_cross_repo(haystack, m):
                     cross_repo.append("#%s blocked by another repository's #%s" % (ref, m.group(2)))
                     continue
@@ -5330,9 +5339,9 @@ class GitHubSource:
         if self.blocker_promotion_mode == "off":
             return "skipped: off"
         try:
-            b = self._read_issue(blocker, ["number", "state", "labels"])
+            b = self._read_issue(blocker, ["number", "state", "labels", "isPullRequest"])
             names = [(l.get("name") if isinstance(l, dict) else str(l or "")) for l in (b.get("labels") or [])]
-            if str(b.get("state") or "open").lower() == "closed" or self.proposed_label not in names:
+            if self._blocker_not_open(b) or self.proposed_label not in names:
                 return "unchanged"
             self._swap_labels(blocker, remove=[self.proposed_label])
         except Exception as exc:
