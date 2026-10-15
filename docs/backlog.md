@@ -153,6 +153,8 @@ each named blocker is classified and acted on:
 | parked | left alone — a park is human-owned; `/sigma-unpark` is the route |
 | a plain third-party issue | surfaced, never adopted — it was never Sigma's to work |
 
+With hard stops on, a hand-typed blocker on a third-party issue is reported on stderr ("not raised: not a Sigma issue"), not raised.
+
 Promoting Sigma's own follow-up does not bypass triage: the deny-list still applies, and an issue
 that real, already-approved work is stalled behind is by definition not speculative. The label pair
 is decisive: `sdlc:followup` means Sigma filed it, the legacy `sdlc:needs-confirmation` means **no
