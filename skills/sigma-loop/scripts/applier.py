@@ -601,7 +601,8 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
     behind = _evidence_behind(sdlc_dir, config)     # M-10: another machine's evidence is not here yet
     if behind:
         with contextlib.suppress(Exception):
-            _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT), {"time": now.isoformat()})
+            if not dry_run:     # #1499: a dry run writes nothing, on any branch
+                _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT), {"time": now.isoformat()})
         return [{"kind": "behind", "result": "skipped", "reason": behind}]
     started = monotonic_fn()    # #1390: each ask is stamped when its own gesture lands, not at tick start
     clock = lambda: now + datetime.timedelta(seconds=monotonic_fn() - started)  # noqa: E731
@@ -634,6 +635,10 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
             qkind, area = ask.get("qkind"), ask.get("area") or "repo"
             if not isinstance(qkind, str) or hs.is_hardstop_kind(qkind, None, config):
                 continue
+            if (apply_actions and not dry_run and ask.get("armed_at") is not None
+                    and _level(sdlc_dir, qkind, area, config) < 3):
+                ask["armed_at"] = None      # #1499: dropped below 3; a later re-arm gets a fresh window and notice
+                _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
             if "armed_at" in ask and ask.get("armed_at") is None:       # #1499 M-03: arm, never apply, this tick
                 am = _load("rulebook").match(qkind, area, ask.get("options"), rules)
                 if am is not None and _level(sdlc_dir, qkind, area, config) >= 3:

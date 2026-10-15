@@ -262,3 +262,33 @@ def test_a_legacy_or_unstamped_applied_ask_covers_the_park(tmp_path):
     nostamp = {"labels": [{"name": "area:docs"}], "qkind": "dependency", "park": None, "park_at": None}
     assert AP.open_for_park(sd, cfg, 7, "dependency", now=T0 + DAY, info=nostamp) is None
     assert len(AP._asks(sd)) == 1
+
+
+def test_dry_run_writes_no_heartbeat_when_evidence_is_behind(tmp_path, monkeypatch):
+    sd, cfg, _ = _setup(tmp_path)
+    monkeypatch.setattr(AP, "_evidence_behind", lambda *a: "evidence behind the default branch")
+    before = _snapshot(sd)
+    acts = AP.tick(sd, cfg, T0, source=Src(), apply_actions=False, dry_run=True)
+    assert acts[0]["kind"] == "behind" and _snapshot(sd) == before
+    AP.tick(sd, cfg, T0, source=Src())          # the real tick still beats
+    assert AP.read_heartbeat(sd) is not None
+
+
+def test_an_ask_whose_level_drops_below_3_loses_armed_at_and_rearms_with_one_new_notice(tmp_path):
+    sd, cfg, rid = _dep_setup(tmp_path)
+    level = {"v": 2}
+    AP.level_fn = lambda *a: level["v"]
+    try:
+        src = LSrc({7: [("c1", "dependency")]})
+        AP.sync(sd, cfg, src, now=T0, parked_fn=_fetch([7]))
+        level["v"] = 3
+        assert [a["kind"] for a in AP.tick(sd, cfg, T0 + MIN, source=src)] == ["arm"]
+        assert AP._asks(sd)[0]["armed_at"] is not None
+        level["v"] = 2
+        assert AP.tick(sd, cfg, T0 + 5 * MIN, source=src) == []
+        assert AP._asks(sd)[0]["armed_at"] is None
+        level["v"] = 3
+        assert [a["kind"] for a in AP.tick(sd, cfg, T0 + 200 * MIN, source=src)] == ["arm"]
+        assert sum(1 for _, n in src.notes if rid in n and "will apply" in n) == 2
+    finally:
+        AP.level_fn = None
