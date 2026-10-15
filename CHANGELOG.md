@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Upkeep's mechanical level resolves two append-only shapes (#1515).** A dated `## YYYY-MM` log and a bullet-list file that both sides only added to are unioned (per section in date order; base order then the unit's new items); an edit or removal on either side still parks.
 - `promote.py migrate-confirmation` now arms an item whose only hold is an open blocker (`sdlc:goal` plus the `sdlc:blocked` overlay, reason `armed (held by #N)`) instead of parking it; the pick-time dependency hold and auto-unpark take it from there (#1518).
 
 - **The confirmation migration no longer arms upper-tier items (#1517).** `promote.py migrate-confirmation` removes the retired label from an item labelled epic, story, dossier or spec and reports `upper tier: label removed, not armed` (no goal label, no park); `promote.py apply` refuses such an item with one line.

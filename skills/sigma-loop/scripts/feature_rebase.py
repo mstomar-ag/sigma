@@ -1581,7 +1581,7 @@ def _level1(run, cwd, path, base_ref, report, level1):
     report["why"] = "level 1 refused (%s): %s" % (out["refusal"].get("code"), out["refusal"].get("detail"))
     if out.get("restorable"):
         try:
-            run(str(path), ["git", "checkout", "--merge", "--", prove.CHANGELOG])
+            run(str(path), ["git", "checkout", "--merge", "--", out.get("file") or prove.CHANGELOG])
         except Exception:                 # noqa: BLE001 - an unrestorable stop is described as what it is
             pass
         try:
