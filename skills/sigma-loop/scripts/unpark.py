@@ -245,6 +245,8 @@ def route_answer(kind, answers):
     """The normalised route answer for `kind`: a bank option, or 'free'; None when the kind has no
     route question or none was answered."""
     slot = route_slot(kind)
+    if slot is None and kind in QUESTIONS and kind != "unknown":
+        slot = CLOSING_QUESTION                 # #1521: no route question, so the closing answer is the key
     raw = (answers or {}).get(slot["id"]) if slot else None
     if raw is None or not str(raw).strip():
         return None
