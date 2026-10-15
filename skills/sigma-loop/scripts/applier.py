@@ -313,6 +313,18 @@ def silent_allowed(qkind, config, rule=None):
         return False
 
 
+def _rule_has_own_support(sdlc_dir, qkind, area, rule, config):
+    """Level 3 and above apply a rule only when `l3_min_answers` live comparisons that chose the
+    rule's own option, recorded since it was confirmed, agree at `l3_agreement`."""
+    try:
+        au = _load("autonomy")
+        cfg = au._pair_settings(sdlc_dir, qkind, area, config)[0]
+        n, rate = au.rule_support(sdlc_dir, qkind, area, rule.get("option"), rule.get("confirmed"), config)
+        return n >= cfg["l3_min_answers"] and rate >= cfg["l3_agreement"]
+    except Exception:
+        return False
+
+
 def _interval(config):
     try:
         v = config["ledger"]["watch"]["interval_seconds"]
@@ -504,6 +516,8 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 continue
             rule = next((r for r in rules if r.get("id") == m.rule_id), None)
             level = _level(sdlc_dir, qkind, area, config)
+            if not _rule_has_own_support(sdlc_dir, qkind, area, rule, config):
+                continue    # #1496 M-04: a rule needs its own live comparisons, not its pair's older ones
             silent = False
             key = None
             if level >= 4 and silent_allowed(qkind, config, rule):

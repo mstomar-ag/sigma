@@ -157,7 +157,8 @@ def _pair(rec, qkind, area):
     return rec.get("qkind") == qkind and _area(rec.get("area")) == _area(area)
 
 
-def record_watch(sdlc_dir, qkind, area, would, actual, config=None, now=None, machine=None, imported=None):
+def record_watch(sdlc_dir, qkind, area, would, actual, config=None, now=None, machine=None, imported=None,
+                 shown=False):
     """Write what the rule would have chosen next to what was chosen; returns the file id, or None
     when the part is closed or the inputs are unusable. Never raises."""
     try:
@@ -168,6 +169,8 @@ def record_watch(sdlc_dir, qkind, area, would, actual, config=None, now=None, ma
         when = _now(now)
         body = {"qkind": qkind, "area": _area(area), "would": would, "actual": actual,
                 "machine": machine or _machine(), "time": when.isoformat()}
+        if shown:   # #1496: the person was shown this recommendation, so the match is not independent
+            body["shown"] = True
         if isinstance(imported, dict):  # a replayed comparison from decision_import: marked, with its source
             body.update(imported, how="imported")
         fid = _write_new(sdlc_dir, "watch-", body, when)
@@ -222,6 +225,9 @@ def _capped_ladder(answers, live, items, cfg):
     def rate(ws):
         return (sum(1 for w in ws if _agrees(w)) / len(ws)) if ws else 0.0
     lvl = _ladder(answers, len(items), rate(items), cfg)
+    if lvl >= 3 and any(w.get("shown") for w in items):     # #1496 M-09: level 3 judges unprompted answers
+        blind = [w for w in items if not w.get("shown")]
+        lvl = min(lvl, max(2, _ladder(answers, len(blind), rate(blind), cfg)))
     if lvl > IMPORTED_LEVEL_CAP:
         own = [w for w in items if w.get("how") != "imported"]
         lvl = max(IMPORTED_LEVEL_CAP, min(lvl, _ladder(live, len(own), rate(own), cfg)))
@@ -322,6 +328,7 @@ def _state(sdlc_dir, qkind, area, config):
         lvl = min(lvl, 1)
     row = {"qkind": qkind, "area": _area(area), "level": lvl, "answers": answers, "comparisons": len(watch),
            "agreement": agreement, "vetoes": len(vetoes), "paused": paused, "capped": capped}
+    row.update(_evidence(recs, watch, qkind))
     if lagging:  # shown only when a machine has too few comparisons to count at the pooled level
         row["lagging"] = lagging
     if unlearnable:  # shown only for the kind `unknown`; every other row is unchanged
@@ -332,6 +339,47 @@ def _state(sdlc_dir, qkind, area, config):
         row["category"] = cat["id"] if cat else None
         row["thresholds"] = {k: cfg[k] for k in DEFAULTS}
     return row
+
+
+def _evidence(recs, watch, qkind):
+    """#1496: the extra row keys, each present only when it has something to say, so a pair without
+    them reads exactly as before: `misses` (top 3 would/actual disagreements), `majority_share` (the
+    most common learnable answer's share) and, once any comparison was shown, agreement per group."""
+    dr = _load("decision_record")
+    out, bank = {}, _load("unpark")
+    miss = {}
+    for w in watch:
+        if not _agrees(w):
+            act = w.get("actual")
+            act = act if bank.bank_option(qkind, act) else "a free-text answer"
+            miss[(str(w.get("would")), act)] = miss.get((str(w.get("would")), act), 0) + 1
+    if miss:
+        top = sorted(miss.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+        out["misses"] = [{"would": k[0], "actual": k[1], "count": n} for k, n in top]
+    keys = [dr.key_of(r) for r in recs]
+    keys = [k for k in keys if k and k not in dr.UNLEARNABLE_KEYS]
+    if keys:
+        out["majority_share"] = max(keys.count(k) for k in set(keys)) / len(keys)
+    if any(w.get("shown") for w in watch):
+        for name, group in (("agreement_shown", [w for w in watch if w.get("shown")]),
+                            ("agreement_not_shown", [w for w in watch if not w.get("shown")])):
+            out[name] = (sum(1 for w in group if _agrees(w)) / len(group)) if group else None
+    return out
+
+
+def rule_support(sdlc_dir, qkind, area, option, since, config):
+    """#1496 M-04: `(count, agreement)` of the live comparisons for the pair whose `would` is `option`,
+    recorded at or after `since` (an ISO time; unreadable means none count). Imported ones never count."""
+    start = _parse_time(since)
+    if start is None:
+        return 0, 0.0
+    mine = []
+    for w in _facts(sdlc_dir, "watch-"):
+        t = _parse_time(w.get("time"))
+        if (_pair(w, qkind, area) and w.get("would") == option and w.get("how") != "imported"
+                and t is not None and t >= start):
+            mine.append(w)
+    return len(mine), (sum(1 for w in mine if _agrees(w)) / len(mine) if mine else 0.0)
 
 
 def level(sdlc_dir, qkind, area, config):
@@ -403,9 +451,20 @@ def _describe(row):
     if row["next_level"] is None:
         return head + "level %d, nothing further to learn" % row["level"]
     agree = "none yet" if row["agreement"] is None else "%d%%" % round(row["agreement"] * 100)
-    return head + ("level %d, level %d needs %d answers (have %d), %d comparisons (have %d), %d%% agreement (have %s)"
+    line = head + ("level %d, level %d needs %d answers (have %d), %d comparisons (have %d), %d%% agreement (have %s)"
                    % (row["level"], row["next_level"], row["answers_needed"], row["answers"],
                       row["comparisons_needed"], row["comparisons"], round(row["agreement_needed"] * 100), agree))
+    if row.get("misses"):
+        line += "; most misses: " + ", ".join("%s instead of %s x%d" % (m["actual"], m["would"], m["count"])
+                                              for m in row["misses"])
+    share, need = row.get("majority_share"), row["agreement_needed"]
+    if share is not None and need is not None and share < need:
+        line += "; cannot reach %d%%: the most common answer is %d%%" % (round(need * 100), round(share * 100))
+    if "agreement_shown" in row:
+        fmt = lambda v: "none yet" if v is None else "%d%%" % round(v * 100)  # noqa: E731
+        line += "; agreement when shown %s, not shown %s" % (fmt(row["agreement_shown"]),
+                                                              fmt(row["agreement_not_shown"]))
+    return line
 
 
 def learning_line(sdlc_dir, qkind, config):
