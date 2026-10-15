@@ -60,7 +60,8 @@ def area_of(labels):
     return REPO_AREA
 
 
-def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None, hardstop_class=None):
+def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None, origin=None,
+          hardstop_class=None):
     """A plain record dict. An unusable kind reads `unknown`; an empty choice gets a placeholder."""
     rec = {"gesture": gesture,
            "qkind": qkind_ if qkind_ in qkind.QKINDS else "unknown",
@@ -74,6 +75,8 @@ def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None, h
         rec["area"] = str(area)
     if hardstop_class:                                  # #1498: a deny-list park is a hard stop for the applier
         rec["hardstop_class"] = str(hardstop_class)
+    if isinstance(origin, dict):
+        rec["origin"] = dict(origin)
     return rec
 
 
