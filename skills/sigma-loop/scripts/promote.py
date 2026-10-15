@@ -695,7 +695,7 @@ _FOLLOWUP_LABEL = "sdlc:followup"
 #: Override with `ai_filed.migration.max_issues`.
 MIGRATE_FETCH_CAP = 10000
 
-Arm = collections.namedtuple("Arm", "reason qkind")
+Arm = collections.namedtuple("Arm", "reason qkind held", defaults=((),))   # #1518: held = open blockers
 Park = collections.namedtuple("Park", "reason qkind")
 
 
@@ -729,8 +729,8 @@ def plan_for(issue, config, unresolved=(), hold=None):
         return Park("ownership hold: a non-owner filing; the unit owner decides through the registry", "owner_hold")
     if pop == "scope_hold":
         return Park("scope-expansion hold: the unit owner decides through the registry", "scope_hold")
-    if unresolved:
-        return Park("open blocker(s) not confirmed closed: " + ", ".join(unresolved), "dependency")
+    # #1518: an OPEN blocker is not a hold -- the pick-time dependency hold and auto-unpark handle it. Armed below.
+    held = [u.split(" ")[0] for u in unresolved if u.endswith("(OPEN)")]
     if hold:
         return Park("gate hold: " + str(hold), "needs_decision")
     ft = _feature("file_triage")
@@ -741,7 +741,8 @@ def plan_for(issue, config, unresolved=(), hold=None):
         d = ft.decide(title, body, {}, config)
     if d.kind != "arm":
         return Park(d.reason, "needs_decision")
-    return Arm("human-confirmed filing" if pop == "human" else d.reason, None)
+    why = "human-confirmed filing" if pop == "human" else d.reason
+    return Arm("armed (held by %s)" % ", ".join(held) if held else why, None, tuple(held))
 
 
 def _migrate_comment(plan, pop):
@@ -835,10 +836,15 @@ def _migrate_one(source, config, sdlc_dir, item, apply, rep_item, writes=None):
     arm = isinstance(plan, Arm)
     rep_item.update(population=pop, action="arm" if arm else "park", reason=plan.reason,
                     destination="armed" if arm else "parked")
+    unread = [u for u in unresolved if u.endswith("(UNREADABLE)")]
+    if unread:                                          # #1518: reported, never parked on
+        rep_item.setdefault("notes", []).append("blocker(s) unreadable, not held on: " + ", ".join(unread))
     add, remove = ([source.goal_label], [source.proposed_label]) if arm else \
                   ([source.parked_label], [source.proposed_label])
     if not arm and source.goal_label in names:
         remove.append(source.goal_label)                # a half-promoted pair is repaired by the park
+    if arm and plan.held and getattr(source, "goal_blocked_label", None):
+        add.append(source.goal_blocked_label)           # #1518: label-model "Blocked" row; auto-unpark clears it
     add = [l for l in add if l not in names]
     detail = "%s (%s; %s)" % ("arm" if arm else "park", pop, plan.reason)
     if not apply:
