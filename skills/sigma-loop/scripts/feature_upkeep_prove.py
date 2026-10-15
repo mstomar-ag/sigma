@@ -106,7 +106,7 @@ def _union_appended(run, path, name):
     if text is None:
         return False
     try:
-        (pathlib.Path(path) / name).write_text(text, encoding="utf-8")
+        _sibling("state").atomic_write_text(str(pathlib.Path(path) / name), text)
         run(str(path), ["git", "add", "--", name])
     except Exception:                        # noqa: BLE001
         return False
