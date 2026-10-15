@@ -35,10 +35,10 @@ def test_unpark_record_has_area_and_declared_kind_and_a_rule_matches(tmp_path):
     cfg["rulebook"]["autonomy"] = {"owners": ["boss"]}
     park = tu._park("x\nsigma-qkind: dependency")
     run = tu._runner(views={"5": tu._view(labels=("sdlc:parked", "area:docs"), comments=[park])})
-    u.resolve(str(tmp_path), cfg, 5, {"decision": "go"}, "unpark", run=run)
+    u.resolve(str(tmp_path), cfg, 5, {"decision": "wait for it"}, "unpark", run=run)
     rec = _recs(tmp_path, cfg)[0]
     assert rec["area"] == "docs" and rec["qkind"] == "dependency"
-    rb.propose(str(tmp_path), {"qkind": rec["qkind"], "area": "docs", "option": "go", "reason": "r"},
+    rb.propose(str(tmp_path), {"qkind": rec["qkind"], "area": "docs", "option": "wait for it", "reason": "r"},
                cfg, now=NOW)
     rid = rb.load(str(tmp_path), cfg)[0]["id"]
     rb.approve(str(tmp_path), rid, "boss", cfg, now=NOW)
@@ -50,7 +50,7 @@ def test_unpark_without_area_label_is_repo_wide(tmp_path):
     u = _mod("unpark")
     cfg = _on(tu._config())
     run = tu._runner(views={"5": tu._view(comments=[tu._park("x")])})
-    u.resolve(str(tmp_path), cfg, 5, {"decision": "go"}, "unpark", run=run)
+    u.resolve(str(tmp_path), cfg, 5, {"decision": "start it again"}, "unpark", run=run)
     assert _recs(tmp_path, cfg)[0]["area"] == "repo"
 
 
@@ -95,8 +95,8 @@ def test_gate_closed_is_byte_identical_and_writes_nothing(tmp_path):
     for cfg in (tu._config(), closed):
         run = tu._runner(views={"5": tu._view(labels=("sdlc:parked", "area:docs"),
                                               comments=[tu._park("x")])})
-        u.resolve(str(tmp_path), cfg, 5, {"decision": "go"}, "unpark", run=run)
-        assert _bodies(run, 5) == [u.render_block({"decision": "go"})]
+        u.resolve(str(tmp_path), cfg, 5, {"decision": "start it again"}, "unpark", run=run)
+        assert _bodies(run, 5) == [u.render_block({"decision": "start it again"})]
         run = tp._runner(views={"5": tp._view("sdlc:needs-confirmation", "area:docs")})
         p.promote(str(tmp_path), dict(cfg, **tp._config()), ["5"], run=run)
         assert _bodies(run, 5) == [p.PROMOTE_COMMENT.format(goal="sdlc:goal")]

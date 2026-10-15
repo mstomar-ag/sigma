@@ -33,7 +33,7 @@ def _cfg(enabled=True, **extra):
 
 
 def _draft(**kw):
-    d = {"qkind": "needs_decision", "area": "docs", "option": "merge", "reason": "docs are low risk"}
+    d = {"qkind": "needs_decision", "area": "docs", "option": "start it again", "reason": "docs are low risk"}
     d.update(kw)
     return d
 
@@ -60,7 +60,7 @@ def test_unapproved_rule_never_acts(tmp_path):
     assert R.match("needs_decision", "docs", None, R.load(sd, cfg)) is None
     R.approve(sd, rid, "boss", cfg, now=NOW)
     m = R.match("needs_decision", "docs", None, R.load(sd, cfg))
-    assert (m.rule_id, m.option, m.mode) == (rid, "merge", "recommend")
+    assert (m.rule_id, m.option, m.mode) == (rid, "start it again", "recommend")
 
 
 def test_hand_edited_approved_rule_without_seal_never_acts(tmp_path):
@@ -69,17 +69,17 @@ def test_hand_edited_approved_rule_without_seal_never_acts(tmp_path):
     data["rules"][0]["status"] = "approved"
     _file(tmp_path).write_text(json.dumps(data))
     assert R.match("needs_decision", "docs", None, R.load(sd, cfg)) is None
-    data["rules"][0]["option"] = "reject"
+    data["rules"][0]["option"] = "leave it parked"
     R.approve(sd, rid, "boss", cfg, now=NOW)
     data = json.loads(_file(tmp_path).read_text())
-    data["rules"][0]["option"] = "reject"  # edit after approval breaks the seal
+    data["rules"][0]["option"] = "leave it parked"  # edit after approval breaks the seal
     _file(tmp_path).write_text(json.dumps(data))
     assert R.match("needs_decision", "docs", None, R.load(sd, cfg)) is None
 
 
 def test_two_matches_ask(tmp_path):
     sd, cfg, a = _proposed(tmp_path)
-    R.propose(sd, _draft(option="reject"), cfg, now=NOW)
+    R.propose(sd, _draft(option="leave it parked"), cfg, now=NOW)
     ids = [r["id"] for r in R.load(sd, cfg)]
     for rid in ids:
         R.approve(sd, rid, "boss", cfg, now=NOW)
@@ -157,7 +157,7 @@ def test_import_goes_through_the_same_gate(tmp_path):
 
 
 def test_hardstop_kind_and_other_areas_never_match(tmp_path):
-    sd, cfg, rid = _proposed(tmp_path, qkind="irreversible")
+    sd, cfg, rid = _proposed(tmp_path, qkind="irreversible", option="go ahead")
     R.approve(sd, rid, "boss", cfg, now=NOW)
     assert R.match("irreversible", "docs", None, R.load(sd, cfg)) is None
     sd2 = _sdlc(tmp_path / "b") if (tmp_path / "b").mkdir() is None else None
@@ -166,14 +166,14 @@ def test_hardstop_kind_and_other_areas_never_match(tmp_path):
     R.approve(sd2, r2, "boss", cfg, now=NOW)
     assert R.match("needs_decision", "api", None, R.load(sd2, cfg)) is None
     assert R.match("needs_decision", "docs", ["other"], R.load(sd2, cfg)) is None
-    assert R.match("needs_decision", "docs", ["merge", "x"], R.load(sd2, cfg)).option == "merge"
+    assert R.match("needs_decision", "docs", ["start it again", "x"], R.load(sd2, cfg)).option == "start it again"
 
 
 def test_prefill_recommends(tmp_path):
     sd, cfg, rid = _proposed(tmp_path)
     assert R.prefill(sd, "needs_decision", "docs", None, cfg) is None
     R.approve(sd, rid, "boss", cfg, now=NOW)
-    assert R.prefill(sd, "needs_decision", "docs", None, cfg) == {"recommend": "merge", "rule": rid, "mode": "recommend"}
+    assert R.prefill(sd, "needs_decision", "docs", None, cfg) == {"recommend": "start it again", "rule": rid, "mode": "recommend"}
 
 
 def test_path_escape_is_refused(tmp_path):
@@ -234,5 +234,5 @@ def test_match_refuses_unsealed_or_invalid_rules_from_a_direct_caller(tmp_path):
     R.approve(sd, rid, "boss", cfg, now=NOW)
     good = R._read_raw(_file(tmp_path))[0]
     assert R.match("needs_decision", "docs", None, [good]).rule_id == rid
-    assert R.match("needs_decision", "docs", None, [dict(good, option="reject")], ) is None  # seal broken
+    assert R.match("needs_decision", "docs", None, [dict(good, option="leave it parked")], ) is None  # seal broken
     assert R.match("needs_decision", "docs", None, [dict(good, login="someone")]) is None  # schema-invalid

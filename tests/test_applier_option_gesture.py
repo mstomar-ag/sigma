@@ -8,11 +8,11 @@ AP, AU, DS, RB = T.AP, T.AU, T.DS, T.RB
 T0, MIN = T.T0, T.MIN
 
 
-def _setup(tmp_path, option):
+def _setup(tmp_path, option, qkind="needs_decision"):
     cfg = T._cfg()
     sd = T._sd(tmp_path)
-    T._train(sd, cfg, area="repo", level=3)
-    T._rule(sd, cfg, area="repo", option=option)
+    T._train(sd, cfg, qkind=qkind, area="repo", level=3)
+    T._rule(sd, cfg, qkind=qkind, area="repo", option=option)
     return sd, cfg
 
 
@@ -41,21 +41,28 @@ def test_keep_parked_option_leaves_labels_and_records_once(tmp_path):
 
 
 def test_unpark_option_still_swaps(tmp_path):
-    sd, cfg = _setup(tmp_path, "merge")
-    AP.open_for_park(sd, cfg, 7, "needs_decision", source=T.Src(), now=T0)
+    sd, cfg = _setup(tmp_path, "rebase it", qkind="merge_conflict")
+    AP.open_for_park(sd, cfg, 7, "merge_conflict", source=T.Src(), now=T0)
     src = T.Src()
     acts = AP.tick(sd, cfg, T0 + 61 * MIN, source=src)
     assert [(a["kind"], a["result"]) for a in acts] == [("unpark", "done")]
     assert len(src.swaps) == 1
 
 
-def test_helper_reads_options():
+def test_helper_reads_options_from_the_bank():
     f = AP.option_gesture
-    for t in ("leave it parked", "keep parked", "stay parked", "Remain parked", "hold it parked",
-              "don't unpark", "no unpark"):
-        assert f(t) == "keep-parked", t
-    for t in ("unpark", "merge", "unpark it", "", None, "park the sibling"):
-        assert f(t) == "unpark", t
+    assert f("needs_decision", "leave it parked") == "keep-parked"
+    assert f("handoff", "look into it first") == "keep-parked"
+    assert f("merge_conflict", "rebase it") == "unpark"
+    assert f("quota", "wait it out") == "unpark"
+    assert f("merge_conflict", "start fresh") == "none"
+    assert f("merge_conflict", "merge") in (None, "none")
+    assert f("needs_decision", "") in (None, "none")
+
+
+def test_unlisted_option_or_kind_opens_no_ask(tmp_path):
+    sd, cfg = _setup(tmp_path, "rebase it", qkind="merge_conflict")
+    assert AP.open_for_park(sd, cfg, 7, "scope_hold", source=T.Src(), now=T0) is None
 
 
 def test_promote_ask_unchanged(tmp_path):
