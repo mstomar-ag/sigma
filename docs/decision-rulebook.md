@@ -314,6 +314,10 @@ The tick writes `applier-heartbeat.json`; the doctor reads a tick as dead when i
 `stale_after_intervals` (default 3) watch intervals. A dead tick is harmless: the goal stays parked. Applied asks with no
 pending veto are deleted after `prune_after_days` (default 30); answered and vetoed asks after two days.
 
+A `keep-parked` on a dependency park (route answer "wait for it") no longer posts the opt-out marker, even with the gates closed. This is intended; the owner is to ratify it.
+
+A quota ask matched to the "wait it out" rule is applied only after the reset time the ask records (`reset_at`). A reset time that is missing or unreadable counts as not yet reached, so the ask stays with the person. Other kinds are not affected.
+
 ## Hard stops and the record-done net
 
 `rulebook.hard_stops` classifies one concrete action text into a class, or says it cannot tell. An unreadable action is

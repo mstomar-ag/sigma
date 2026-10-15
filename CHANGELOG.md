@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- An unstamped legacy answers block is no longer counted for a newer stamped park, and a quota wait-it-out ask is applied only after its recorded reset time (unknown counts as not yet) (#1522).
+
 - A needs_decision closing answer is now normalised through the bank (case, spacing, a trailing recommended marker) into the stored `answer`; other text is `free` and never learnable (#1521).
 
 - `promote.py migrate-confirmation` now arms an item whose only hold is an open blocker (`sdlc:goal` plus the `sdlc:blocked` overlay, reason `armed (held by #N)`) instead of parking it; the pick-time dependency hold and auto-unpark take it from there (#1518).
