@@ -330,12 +330,31 @@ which means no call. When the rolling 24-hour spend reaches the ceiling, the doc
 python3 skills/sigma-loop/scripts/decision_import.py scan  .sdlc [--profile DIR ...] [--project-dir DIR ...]
 python3 skills/sigma-loop/scripts/decision_import.py plan  .sdlc [same options]
 python3 skills/sigma-loop/scripts/decision_import.py apply .sdlc [same options]
+python3 skills/sigma-loop/scripts/decision_import.py remove .sdlc --project-dir DIR [--profile DIR] [--apply]
 ```
 
 - `scan` reports candidates and writes nothing. `plan` shows per kind and area what `apply` would write, how many are
   unknown, and the level the evidence alone would reach (capped at 2). `apply` writes records marked `how: imported`
   (with a source fingerprint and the original time) plus replayed watch comparisons. It is idempotent and writes
   nothing while the records part is closed.
+- **Scope and origin.** Every `--project-dir` (and `rulebook.import.project_dirs`) is imported in full into this
+  repository, with no relevance check. Each imported record and watch comparison carries an `origin`: for a transcript
+  `{kind, profile, folder, file, line, cwd}`, for a comment `{kind, issue, comment_id}`; on a public repository the
+  profile, folder and cwd are short hashes. `plan` and `apply` print one line per folder (candidates, new records);
+  folders other than this repository's own are marked `(extra)`. `--only-in-repo` (or `rulebook.import.require_repo_cwd`
+  `true`, default `false`) keeps only answers whose transcript `cwd` is inside this repository and prints how many were dropped.
+- **Several folders, bash and zsh.** Give one folder per flag and repeat the flag:
+  `--project-dir A --project-dir B`. To build the list in a variable, use an array and expand it as a quoted list
+  (`dirs=(--project-dir A --project-dir B)` then `"${dirs[@]}"`). A single unquoted variable holding several words is one
+  argument in zsh (zsh does not split it), so it is read as one folder that does not exist and is skipped. Every scan,
+  `plan` and `apply` prints a `folders read:` line on stderr naming the folders it resolved.
+- **Profiles and missing folders.** Each `--project-dir` is searched under every `--profile` given.
+  A folder found under none of them is skipped with a `skipped: project folder ... not found under ...` note, and the run continues with the other folders.
+  One call with several `--profile` options is the intended way to cover several profiles.
+  `plan` and `apply` print these notices on stderr; when a time budget, size cap or candidate cap cut the import short, `apply` also prints `partial import: N files not read, raise rulebook.import.time_budget_s and run apply again`.
+- **Removing one folder's import.** `remove .sdlc --project-dir DIR` lists the imported records and watch files whose
+  origin names that folder (add `--profile` to narrow); `--apply` deletes them. Records written before origins existed
+  have none: they are counted ("N legacy records have no origin; not removed") and never deleted.
 - **Sources.** Transcript files of an `AskUserQuestion` call paired with its answer (no other tool result is read), and,
   when `rulebook.import.comments` is `true`, `sigma:unpark-qa` answers and decision-record lines in issue comments of
   goal-labelled and parked-labelled issues (at most `max_issues`, default 50). Each answer takes the kind of the nearest
@@ -481,6 +500,7 @@ flag, which closes the whole block.
 | `import.max_budget_usd_per_call` | `0.50` | classifier per call |
 | `import.max_budget_usd_per_run` | `1.0` | classifier per run |
 | `import.timeout_s` | `60` | classifier per call |
+| `import.require_repo_cwd` | `false` | same as `--only-in-repo` |
 
 Related keys outside the block: `ai_filed.triage.enabled` (gate holds), `ai_filed.migration.*` (the label migration),
 `ledger.watch.interval_seconds` (the interval the dead-tick check is measured in), `action_log.enabled` (the record-done

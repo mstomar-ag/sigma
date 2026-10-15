@@ -55,7 +55,7 @@ def test_path_form_derives_the_folder_name(tmp_path, capsys):
 def test_missing_folder_is_reported_not_raised(tmp_path, capsys):
     sd, prof = _world(tmp_path)
     rc, out = _run(capsys, "scan", sd, "--profile", prof, "--project-dir", "-srv-demo-work-nowhere")
-    assert rc == 0 and "refused: project folder -srv-demo-work-nowhere not found" in out
+    assert rc == 0 and "skipped: project folder -srv-demo-work-nowhere not found" in out
 
 
 def test_a_real_option_after_the_flag_is_not_swallowed(tmp_path):
