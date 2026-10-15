@@ -22,6 +22,7 @@ All notable changes to Sigma are recorded here, newest first.
 - A needs_decision closing answer is now normalised through the bank (case, spacing, a trailing recommended marker) into the stored `answer`; other text is `free` and never learnable (#1521).
 
 - **The applier now asks for parks that already exist, never asks twice for one park, and counts its window from when a rule became eligible (#1499).** `applier.py` runs a bounded sync (20 reads per tick) before each tick, an ask in any state covers its park, a new park or an unpark supersedes or closes the old ask (superseded asks are pruned after two days), an ask opened below level 3 is armed with one notice comment and a fresh window, the applied record carries its gesture and answer, and `applier.py <dir> --dry-run` prints the plan and writes nothing. Closed, nothing changes.
+- A merge parked for a missing approval now says the PR is not approved and how to approve it, instead of blaming GraphQL; the failed-read (budget) park keeps its wording (#1506).
 
 - `promote.py migrate-confirmation` now arms an item whose only hold is an open blocker (`sdlc:goal` plus the `sdlc:blocked` overlay, reason `armed (held by #N)`) instead of parking it; the pick-time dependency hold and auto-unpark take it from there (#1518).
 
