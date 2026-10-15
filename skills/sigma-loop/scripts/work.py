@@ -3687,6 +3687,7 @@ def commit(sdlc_dir, config, goal, run=None, message=""):
     if not rec:
         return "not started — run `work.py start` first (nothing committed)"
     path = rec["worktree"]
+    _copy_acceptance_into_worktree(sdlc_dir, rec, goal, run)    # #1474
     run(path, ["git", "add", "-A"])
     staged = run(path, ["git", "diff", "--cached", "--name-only"])
     if not staged:
@@ -3884,6 +3885,78 @@ def _research_missing_from_branch(sdlc_dir, rec, goal, run):
     return _phase_doc_missing_from_branch(sdlc_dir, rec, goal, run, "research", "research dossier")
 
 
+def _acceptance_missing_from_branch(sdlc_dir, rec, goal, run):
+    """The refusal line when this goal's acceptance record is on disk but not on its branch (#1474)."""
+    return _phase_doc_missing_from_branch(sdlc_dir, rec, goal, run, "acceptance", "acceptance record")
+
+
+def _copy_acceptance_into_worktree(sdlc_dir, rec, goal, run):
+    """#1474: byte-copy the root `.sdlc/acceptance/<stem>.md` into the worktree so `git add -A` sees it.
+
+    Create-only: a worktree copy that already exists is never touched. Skipped when the repo's own
+    ignore rules cover the path (the #1504 boundary `_phase_doc_missing_from_branch` draws), and a
+    failure to read those rules fails open, as there. Never raises: commit must not strand on this."""
+    try:
+        doc = _load("review_context").phase_doc_file(sdlc_dir, goal, "acceptance")
+        if not doc:
+            return False
+        rel = doc.resolve().relative_to(project_root(sdlc_dir)).as_posix()
+        target = pathlib.Path(rec["worktree"], rel)
+        if target.exists():
+            return False
+        try:
+            run(rec["worktree"], ["git", "check-ignore", "-v", "--non-matching", "--", rel])
+            return False                # exit 0: a pattern covers it -> this repo does not commit these
+        except Exception as exc:        # noqa: BLE001 - told apart by git's own words
+            if _NO_IGNORE_MATCH not in str(exc):
+                return False
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(doc.read_bytes())
+        return True
+    except Exception:                   # noqa: BLE001 - best-effort: commit must not strand on a copy
+        return False
+
+
+def _clean_landed_root_records(sdlc_dir, rec, goal, run):
+    """#1474: after a CONFIRMED merge, drop root-checkout plan/research/acceptance copies that landed.
+
+    A copy is unlinked (file only, never a directory) only when it is untracked AND its blob id equals
+    the blob at `<remote>/<base>:<path>`, i.e. exactly what landed on the branch the PR merged into.
+    A copy that differs, or is on no such branch, is left alone and reported. Returns report lines;
+    never raises, because cleanup must not fail a merge that already happened."""
+    lines = []
+    try:
+        root = project_root(sdlc_dir)
+        rc = _load("review_context")
+        found = [(sub, rc.phase_doc_file(sdlc_dir, goal, sub)) for sub in ("plans", "research", "acceptance")]
+        found = [(sub, f) for sub, f in found if f]
+        if not found:
+            return lines
+        remote, base = rec["remote"], rec["base"]
+        try:
+            run(root, ["git", "fetch", "-q", remote, base])
+        except Exception:               # noqa: BLE001 - a stale remote ref only makes us keep more files
+            pass
+        for sub, doc in found:
+            rel = doc.resolve().relative_to(root).as_posix()
+            if run(root, ["git", "ls-files", "--", rel]):
+                continue                # tracked: not ours to remove
+            try:
+                landed = run(root, ["git", "rev-parse", f"{remote}/{base}:{rel}"])
+            except Exception:           # noqa: BLE001 - not on the landed branch
+                landed = ""
+            if not landed:
+                lines.append(f"kept {rel}: not on {remote}/{base} (commit it or it is lost)")
+            elif run(root, ["git", "hash-object", "--", str(doc)]) != landed:
+                lines.append(f"kept {rel}: differs from the copy that landed on {remote}/{base}")
+            else:
+                doc.unlink()
+                lines.append(f"removed landed duplicate {rel}")
+    except Exception as exc:            # noqa: BLE001
+        lines.append(f"root record cleanup skipped: {exc}")
+    return lines
+
+
 def _default_branch(path, run):
     """The default branch of the repo this PR is opened against, or "" when it cannot be read.
 
@@ -4054,6 +4127,9 @@ def pr(sdlc_dir, config, goal, run=None, no_tests=None):
     missing_research = _research_missing_from_branch(sdlc_dir, rec, goal, run)
     if missing_research:
         return missing_research
+    missing_acceptance = _acceptance_missing_from_branch(sdlc_dir, rec, goal, run)     # #1474
+    if missing_acceptance:
+        return missing_acceptance
 
     test_first_refusal = _test_first_refusal(sdlc_dir, config, rec, goal, run, no_tests)
     if test_first_refusal:
@@ -7382,6 +7458,8 @@ def finish(sdlc_dir, config, goal, run=None, force=False, merged=False):
                     print("merge receipt publication pending: %s" % exc, file=sys.stderr)
             if not _merge_delivery_complete(sdlc_dir, goal):
                 return "PARK: confirmed merge observation delivery is pending; retry finish to repair it"
+    root_report = _clean_landed_root_records(sdlc_dir, rec, goal, run) if merged_before_cleanup else []
+    note = ("; " + "; ".join(root_report)) if root_report else ""
     remove_argv = ["git", "worktree", "remove", rec["worktree"]] + (["--force"] if force else [])
     try:
         run(project_root(sdlc_dir), remove_argv)
@@ -7429,15 +7507,15 @@ def finish(sdlc_dir, config, goal, run=None, force=False, merged=False):
         try:
             run(project_root(sdlc_dir), ["git", "branch", "-D", branch])
         except Exception:                   # noqa: BLE001 - best-effort; the worktree is already gone
-            return f"removed {rec['worktree']}"
+            return f"removed {rec['worktree']}{note}"
         # Report exactly what was confirmed, not what was attempted (code-review finding: the
         # local delete succeeding must never be read as "the branch is fully gone" when the
         # remote half -- usually already done by `merge()`'s own eager call, but not always --
         # came back unconfirmed).
         if remote_deleted:
-            return f"removed {rec['worktree']}, deleted branch {branch}"
-        return f"removed {rec['worktree']}, deleted local branch {branch} (remote delete unconfirmed)"
-    return f"removed {rec['worktree']}"
+            return f"removed {rec['worktree']}, deleted branch {branch}{note}"
+        return f"removed {rec['worktree']}, deleted local branch {branch} (remote delete unconfirmed){note}"
+    return f"removed {rec['worktree']}{note}"
 
 
 def prune_terminal_review_copies(sdlc_dir, goal):
