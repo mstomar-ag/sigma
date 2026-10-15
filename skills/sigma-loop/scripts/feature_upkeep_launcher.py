@@ -93,7 +93,7 @@ PLACEHOLDER_MODEL = "UNSET-PLACEHOLDER-MODEL-ID"
 CATALOG = {"haiku": PLACEHOLDER_MODEL, "sonnet": PLACEHOLDER_MODEL, "opus": PLACEHOLDER_MODEL, "fable": PLACEHOLDER_MODEL}
 _MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 
-INSTRUCTION_FILES = ("CLAUDE.md", "CLAUDE.local.md", ".mcp.json", ".claude")
+INSTRUCTION_FILES = _sibling("judge_isolation").INSTRUCTION_FILES   # #1472: one list, shared with the judge path
 HOME_SURFACE = (".claude", ".claude.json")
 BASE_ENV = ("PATH", "LANG", "LC_ALL", "TERM")
 DEFAULT_PATH = "/usr/bin:/bin"
@@ -138,12 +138,8 @@ def build_prompt(prompt, blocks, nonce):
 
 
 def refuse_ancestors(cwd):
-    """COPIED from the bench launcher (the shipped skill cannot depend on evals/); a test pins the file lists equal."""
-    for parent in pathlib.Path(os.path.realpath(cwd)).parents:
-        for name in INSTRUCTION_FILES:
-            if (parent / name).exists():
-                return "%s exists in a parent of the working directory (%s); the model may read it" % (name, parent)
-    return None
+    """Moved to the shared `judge_isolation` module (#1472); behaviour identical."""
+    return _sibling("judge_isolation").refuse_ancestors(cwd)
 
 
 def check_flags(flags):

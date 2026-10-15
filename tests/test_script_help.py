@@ -82,6 +82,7 @@ LIBRARY_ONLY = {
     "feature_upkeep_landing",
     "feature_upkeep_pass",
     "feature_upkeep_launcher",
+    "judge_isolation",
     "feature_upkeep_review",
     "feature_upkeep_level2",
     "hard_stop",
