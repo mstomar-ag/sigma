@@ -25,6 +25,7 @@ SCALE: one file per open or recent ask, read by one listing per tick; applied or
 than a day are pruned by embedded time. The apply loop is serial and bounded by the daily cap.
 No model call, no network except the two gestures through the injected source.
 """
+import contextlib
 import datetime
 import importlib.util
 import json
@@ -428,12 +429,31 @@ def _loud_text(m, qkind, config):
             "the window. Reply no to veto." % (m.rule_id, qkind, m.option))
 
 
+def _evidence_behind(sdlc_dir, config):
+    """A notice naming the evidence folders that are behind the default branch, or "" (current, or it
+    cannot be told). The tick acts on levels and vetoes read from these; stale copies could apply a rule
+    another machine has since vetoed, so it waits until they are pulled."""
+    try:
+        n, names = _load("decision_store").commits_differing(sdlc_dir, config, behind=True)
+    except Exception:
+        return ""
+    if not n:
+        return ""
+    return ("evidence behind the default branch: %d commit%s touching %s not here yet; pull before the "
+            "applier acts" % (n, "" if n == 1 else "s", ", ".join(names)))
+
+
 def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comments_fn=None,
          monotonic_fn=time.monotonic):
     """Plan, and unless `apply_actions` is false apply, one pass. Returns the actions (dicts with a
     `result` of would, done, failed or skipped). Closed gate: `[]`, nothing read, nothing written."""
     if not enabled(config):
         return []
+    behind = _evidence_behind(sdlc_dir, config)     # M-10: another machine's evidence is not here yet
+    if behind:
+        with contextlib.suppress(Exception):
+            _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT), {"time": now.isoformat()})
+        return [{"kind": "behind", "result": "skipped", "reason": behind}]
     started = monotonic_fn()    # #1390: each ask is stamped when its own gesture lands, not at tick start
     clock = lambda: now + datetime.timedelta(seconds=monotonic_fn() - started)  # noqa: E731
     actions = []
@@ -462,7 +482,7 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 continue
             if ask.get("state") != "pending" or ask.get("answer") is not None:
                 continue  # a person's answer wins; nothing else is pending
-            qkind, area = ask.get("qkind"), ask.get("area", "")
+            qkind, area = ask.get("qkind"), ask.get("area") or "repo"
             if not isinstance(qkind, str) or hs.is_hardstop_kind(qkind, None, config):
                 continue
             if window_open(ask, config, now) or used >= cap:

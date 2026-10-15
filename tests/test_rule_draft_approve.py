@@ -28,7 +28,7 @@ def _setup(tmp_path, monkeypatch, login="boss", cfg=None, propose=True):
     sd, cfg = str(tmp_path / ".sdlc"), cfg or _cfg()
     (tmp_path / ".sdlc").mkdir()
     (tmp_path / ".sdlc" / "config.json").write_text(json.dumps(cfg))
-    monkeypatch.setattr(RD, "_invoker", lambda config: login)
+    monkeypatch.setattr(RD, "_identity", lambda config: {"login": login, "confirmed": True} if login else {"login": None})
     path = None
     if propose:
         path = RB.propose(sd, {"qkind": "needs_decision", "area": "docs", "option": "start it again", "reason": "r"},
