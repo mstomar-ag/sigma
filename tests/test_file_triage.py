@@ -186,3 +186,20 @@ def test_triage_off_unchanged_for_spend_text():
     m = _mod()
     d = m.decide("x", "a paid run", {}, _cfg(triage={"enabled": False}))
     assert d.kind == "queue"
+
+
+def test_money_amount_for_compute_parks_as_spend():
+    m = _mod()
+    for text in ("We will spend $40 on GPU time for the benchmark.", "Budget forty dollars of cloud credits.",
+                 "rent an instance, 40 dollars", "use 1,200 USD of compute for this"):
+        d = m.decide("cleanup", text, {}, _cfg())
+        assert d.kind == "park" and "spend phrase" in d.reason, (text, d)
+    off = _cfg(triage={"enabled": True, "spend_phrases": []})
+    assert m.decide("cleanup", "spend $40 on GPU time", {}, off).kind == "arm"
+
+
+def test_money_amount_near_misses_still_arm():
+    m = _mod()
+    for text in ("The price is $40 in the invoice template.", "Fix the GPU docs. Costs 5 pages.",
+                 "see log:\n```\ncost $40 gpu run\n```\ntidy the docs", "a run of 40 tests, no dollars"):
+        assert m.decide("cleanup", text, {}, _cfg()).kind == "arm", text

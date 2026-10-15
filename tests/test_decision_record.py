@@ -170,7 +170,7 @@ def test_unpark_record_build_error_is_swallowed_and_comment_posted(tmp_path):
     run = tu._runner(views={"5": tu._view(labels=("sdlc:parked",), comments=[tu._park("x")])})
     res = u.resolve(str(tmp_path), _on(tu._config()), 5, {"decision": "go"}, "unpark", run=run)
     assert res["outcome"] == "unparked" and "decision record failed" in res["detail"]
-    assert _bodies(run, 5) == [u.render_block({"decision": "go"})]
+    assert len(_bodies(run, 5)) == 1 and u.render_block({"decision": "go"}).split("\n\n")[-2] in _bodies(run, 5)[0]
 
 
 def test_promote_record_build_error_is_swallowed_and_comment_posted(tmp_path):

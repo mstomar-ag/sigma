@@ -96,6 +96,19 @@ def _now(now):
     return now or datetime.datetime.now(datetime.timezone.utc)
 
 
+_BANK = []
+
+
+def _bank():
+    """The question bank (unpark), loaded once; None only if it cannot be loaded."""
+    if not _BANK:
+        try:
+            _BANK.append(_load("unpark"))
+        except Exception:                               # noqa: BLE001 - never let a bank problem crash a load
+            return None
+    return _BANK[0]
+
+
 def _seal(rule):
     body = json.dumps({k: rule.get(k) for k in _SEALED}, sort_keys=True)
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
@@ -118,6 +131,12 @@ def validate(rule):
         return False, "unknown question kind %r" % rule["qkind"]
     if rule["status"] not in STATUSES:
         return False, "status must be proposed or approved"
+    if rule["qkind"] == "unknown":
+        return False, "question kind unknown is not learnable: declare a kind"
+    bank = _bank()
+    if bank is not None and bank.bank_option(rule["qkind"], rule["option"]) != rule["option"]:
+        return False, "option %r is not an option of kind %s (use one of: %s)" % (
+            rule["option"], rule["qkind"], ", ".join(bank.valid_options(rule["qkind"])) or "none")
     return True, None
 
 

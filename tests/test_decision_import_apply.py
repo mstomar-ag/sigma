@@ -187,14 +187,14 @@ def test_autonomy_closed_writes_records_only(tmp_path):
 def test_rule_draft_counts_imported_evidence_and_stays_proposed(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg(rulebook=True)
     cfg["rulebook"]["autonomy"]["owners"] = ["boss"]
-    DI.apply(sd, cfg, [_c(i) for i in range(40)])
+    DI.apply(sd, cfg, [_c(i, choice="leave it parked") for i in range(40)])
     rows = RD.list_patterns(sd, cfg)
-    assert [(r["qkind"], r["area"], r["option"]) for r in rows] == [("needs_decision", "repo", "merge")]
+    assert [(r["qkind"], r["area"], r["option"]) for r in rows] == [("needs_decision", "repo", "leave it parked")]
     out = RD.draft(sd, "needs_decision", "repo", cfg)
     assert out["status"] == "drafted"
     assert [r["status"] for r in RB.load(sd, cfg)] == ["proposed"]
     sd2 = str(tmp_path / "few" / ".sdlc")
-    DI.apply(sd2, cfg, [_c(i) for i in range(4)])
+    DI.apply(sd2, cfg, [_c(i, choice="leave it parked") for i in range(4)])
     assert RD.draft(sd2, "needs_decision", "repo", cfg)["status"] == "refused"
     assert RB.load(sd2, cfg) == []
 
