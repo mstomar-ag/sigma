@@ -3593,6 +3593,14 @@
       "risk": "high"
     },
     {
+      "path": "skills/sigma-loop/scripts/autonomy.py",
+      "function": "rekey",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "operator-run verb, dry run unless --apply; rulebook.autonomy.enabled is exactly true; removes only watch files in the autonomy folder whose would is a bank option and whose actual is a closing answer; vetoes and links are never touched",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/rulebook.py",
       "function": "_write",
       "rule": "fs-remove",

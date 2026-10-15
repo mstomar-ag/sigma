@@ -48,8 +48,8 @@ DEFAULT_INTERVAL_SECONDS = 900
 GESTURES = ("unpark", "promote", "keep-parked")
 
 
-def option_gesture(option):
-    """The gesture a rule's option text means: `keep-parked` when it reads as leaving the issue
+def _text_gesture(option):
+    """Legacy text reading (kept for callers with no bank). The gesture a rule's option text means: `keep-parked` when it reads as leaving the issue
     parked (a leading no/don't, or keep/leave/stay/remain/hold with 'park'), else `unpark`
     (unknown text keeps the old meaning)."""
     t = option.lower().replace("'", "").strip() if isinstance(option, str) else ""
@@ -61,6 +61,16 @@ def option_gesture(option):
     if "park" in t and "unpark" not in t and any(w in words for w in ("keep", "leave", "stay", "remain", "hold")):
         return "keep-parked"
     return "unpark"
+def option_gesture(kind, option):
+    """What the question bank says an option of `kind` means: `unpark`, `keep-parked`, or `none` (the
+    rule only recommends and is never applied). None for text the bank does not list. Derived from the
+    bank, never stored in a rule, so a rule's seal does not depend on it (#1495)."""
+    try:
+        return _load("unpark").option_gestures(kind).get(option)
+    except Exception:
+        return None
+
+
 #: Set (process-wide, so a separately loaded copy of this module sees it) while `apply` runs its own
 #: gesture, so that gesture does not close the ask it is applying.
 _APPLYING_ENV = "SIGMA_APPLIER_APPLYING"
@@ -226,6 +236,8 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None):
             return None
         if _load("hard_stop").is_hardstop_kind(qkind_, None, config):
             return None
+        if qkind_ in ("unknown", "scope_hold", "owner_hold"):    # F-09 not learnable; F-02(5) gate holds
+            return None
         now = now or datetime.datetime.now(datetime.timezone.utc)
         for a in _asks(sdlc_dir):
             if a.get("state") == "pending" and _issue_key(a.get("issue")) == _issue_key(issue):
@@ -241,8 +253,10 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None):
         m = rb.match(qkind_, area, None, rb.load(sdlc_dir, config), config)
         if m is None:
             return None
-        return open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now,
-                        gesture=option_gesture(m.option))
+        gesture = option_gesture(qkind_, m.option)
+        if gesture not in GESTURES:                  # None: not a bank option; 'none': recommend only
+            return None
+        return open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now, gesture=gesture)
     except Exception:
         return None
 
@@ -581,6 +595,15 @@ def apply(action, sdlc_dir, config, now, source=None, run=None, clock=None):
             if not all(r.get("outcome") == "promoted" for r in res.get("results", [])) or not res.get("results"):
                 return "failed"
         elif action["kind"] != "keep-parked":      # #1301: keep-parked touches no label and no card
+            if ask.get("qkind") in ("scope_hold", "owner_hold"):
+                return "skipped"                    # F-02(5): a gate hold needs the registry edit, never an unpark here
+            if ask.get("qkind") == "dependency":    # F-02(4): skip while a named blocker is still open
+                try:
+                    bf = _load("unpark").brief(sdlc_dir, config, issue, source=source, run=run)
+                except Exception:
+                    return "failed"
+                if any(b.get("open") for b in (bf.get("blockers") or [])):
+                    return "skipped"
             triage = _load("triage")
             add = [source.goal_label]
             remove = [source.parked_label, source.goal_blocked_label, source.in_progress_label]

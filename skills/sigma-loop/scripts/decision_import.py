@@ -287,6 +287,7 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
     profs = _profiles(config, limits, profile_dirs)
     seen = set()
     unread = [0]
+    found_names = []                                # #1523: only folders resolved under a profile
     for name in dict.fromkeys(names):
         found = False
         for prof in profs:
@@ -294,6 +295,8 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
             if not folder.is_dir():
                 continue
             found = True
+            if name not in found_names:
+                found_names.append(name)
             try:
                 files = sorted(folder.glob("*.jsonl"))
             except OSError:
@@ -374,7 +377,7 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
         stats[c["source"]]["superseded"] += 1 if c["superseded"] else 0
     res = {"candidates": cands, "stats": stats, "refusals": refusals,
            "unread": unread[0] + stats["transcript"]["partial"],
-           "folders": list(dict.fromkeys(names))}
+           "folders": found_names}
     if filtering:
         res["dropped"] = dropped[0]
     return res
@@ -398,7 +401,7 @@ def _print_notices(out):
 
 
 def _print_folders_read(out):
-    """#1503: name the project folders the scan resolved, on stderr."""
+    """#1503: name the project folders the scan found and read, on stderr (#1523: not-found ones are left out)."""
     print("folders read: %s" % ", ".join(out.get("folders", [])), file=sys.stderr)
 
 

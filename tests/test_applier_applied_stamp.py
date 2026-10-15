@@ -59,12 +59,12 @@ class Clock:
 def _world(tmp_path, issues):
     cfg, sd = _cfg(), str(tmp_path / ".sdlc")
     for _ in range(8):
-        DS.append(sd, {"how": "human", "qkind": "needs_decision", "area": "docs", "choice": "merge"}, cfg)
-        AU.record_watch(sd, "needs_decision", "docs", "merge", "merge", cfg, now=T0, machine="m1")
-    RB.propose(sd, {"qkind": "needs_decision", "area": "docs", "option": "merge", "reason": "low risk"}, cfg, now=T0)
+        DS.append(sd, {"how": "human", "qkind": "merge_conflict", "area": "docs", "choice": "rebase it"}, cfg)
+        AU.record_watch(sd, "merge_conflict", "docs", "rebase it", "rebase it", cfg, now=T0, machine="m1")
+    RB.propose(sd, {"qkind": "merge_conflict", "area": "docs", "option": "rebase it", "reason": "low risk"}, cfg, now=T0)
     RB.approve(sd, RB.load(sd, cfg)[-1]["id"], "boss", cfg, now=T0)
     for i in issues:
-        AP.open_ask(sd, i, "needs_decision", "docs", ["merge", "wait"], cfg, T0)
+        AP.open_ask(sd, i, "merge_conflict", "docs", ["rebase it", "start fresh"], cfg, T0)
     return sd, cfg
 
 
