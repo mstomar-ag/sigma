@@ -170,6 +170,8 @@ def _prompt(question, docs, nonce):
              "for conflicts give an exact quote from a document.",
              "QUESTION:\n" + str(question)]
     for name, text in docs:
+        if not text:
+            continue
         parts.append("<<DOC %s %s>>\n%s\n<<END %s>>" % (nonce, name, text, nonce))
     return "\n\n".join(parts)
 

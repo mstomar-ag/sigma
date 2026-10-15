@@ -118,8 +118,8 @@ draft a file with that section and repeat with `--draft <file>`; the command pos
 GitHub criteria as an issue comment before writing the record. Optionally supply
 `--verify-command '<command>'` (local frontmatter is inherited). Never put secrets in it.
 A refusal stops P1 until the source/draft is repaired. Keep the resulting
-`.sdlc/acceptance/<goal-stem>.md` unchanged; copy it into the goal worktree and commit it
-with plan/research. This step applies to every phase executor.
+`.sdlc/acceptance/<goal-stem>.md` unchanged; `work.py commit` copies it in; `pr` refuses a
+branch lacking it. This step applies to every phase executor.
 
 **The maker must not be the checker (`config.review.independent`, default on).**
 Every review gate — plan-review, the pre-PR code review, the post-PR review at step 6 — is asked to

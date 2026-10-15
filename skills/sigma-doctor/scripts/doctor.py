@@ -1319,6 +1319,59 @@ def _preflight_fix(check):
     return head + (f" ({tail})" if tail else "")
 
 
+_REGISTRY_COMMIT_CMD = 'git add .sdlc/features && git commit -m "registry: record unit membership"'   # branching-model s15
+_STALE_RECORD_DIRS = ("acceptance", "plans", "research")
+
+
+def _stale_record_rows(base, run, now=None):
+    """#1474: one row on untracked `.sdlc/{acceptance,plans,research}/*.md` older than a day, split into a
+    landed duplicate (byte-identical to the default branch's blob: safe to remove) and a file on no branch
+    (commit it or it is lost). Detection only. An unanswered git call is no finding."""
+    repo = str(base.parent)
+    ok = lambda v: isinstance(v, str) and getattr(v, "raw", None) is None      # noqa: E731
+    out = run(["git", "-C", repo, "ls-files", "--others", "--exclude-standard", "--"]
+              + [str(base / d) for d in _STALE_RECORD_DIRS])
+    if not ok(out):
+        return []
+    cutoff = (now if now is not None else time.time()) - 86400
+    default = run(["git", "-C", repo, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"])
+    default = default.strip() if ok(default) and "/" in default else "origin/main"
+    landed, lost, differs = [], [], []
+    for rel in (x.strip() for x in out.splitlines() if x.strip()):
+        f = pathlib.Path(repo) / rel if not pathlib.Path(rel).is_absolute() else pathlib.Path(rel)
+        try:
+            if f.stat().st_mtime > cutoff:
+                continue
+        except OSError:
+            continue
+        name = f.parent.name + "/" + f.name
+        blob = run(["git", "-C", repo, "rev-parse", "--verify", "-q", default + ":" + _repo_rel(repo, f)])
+        mine = run(["git", "-C", repo, "hash-object", "--", str(f)])
+        if ok(blob) and blob.strip() and blob.strip() == str(mine).strip():
+            landed.append(name)
+        elif ok(blob) and blob.strip():
+            differs.append(name)
+        else:
+            seen = run(["git", "-C", repo, "log", "--all", "-1", "--format=%H", "--", _repo_rel(repo, f)])
+            if ok(seen) and not seen.strip():
+                lost.append(name)
+    parts = []
+    if landed:
+        parts.append("landed duplicate (safe to remove): " + ", ".join(landed[:5]))
+    if differs:
+        parts.append("differs from the landed copy (diff it, then remove): " + ", ".join(differs[:5]))
+    if lost:
+        parts.append("on no branch (commit it or it is lost): " + ", ".join(lost[:5]))
+    return [_chk("old untracked acceptance/plans/research records", not parts, "; ".join(parts))]
+
+
+def _repo_rel(repo, f):
+    try:
+        return pathlib.Path(f).resolve().relative_to(pathlib.Path(repo).resolve()).as_posix()
+    except ValueError:
+        return str(f)
+
+
 def _unit_record_rows(base, run, cheap_only):
     """#1312: one row on unit records git cannot show other machines -- a record file that is
     untracked, or a remote `feature/*` branch with no record. Absent without `.sdlc/features/`;
@@ -1331,6 +1384,10 @@ def _unit_record_rows(base, run, cheap_only):
     out = run(["git", "-C", repo, "ls-files", "--others", "--exclude-standard", "--", str(features / "units")])
     if isinstance(out, str) and getattr(out, "raw", None) is None:
         found += ["untracked record " + pathlib.PurePath(x).name for x in out.splitlines() if x.strip()]
+    mod = run(["git", "-C", repo, "status", "--porcelain", "--", str(features)])      # #1474
+    if isinstance(mod, str) and getattr(mod, "raw", None) is None:
+        found += ["modified record " + pathlib.PurePath(x[3:].strip()).name
+                  for x in mod.splitlines() if x.strip() and not x.startswith("??")]
     if not cheap_only:
         heads = run(["git", "-C", repo, "ls-remote", "--heads", "origin", "feature/*"])
         if isinstance(heads, str) and getattr(heads, "raw", None) is None:
@@ -1347,7 +1404,8 @@ def _unit_record_rows(base, run, cheap_only):
                         if unit.lower() not in known:
                             found.append("remote branch " + ref[len("refs/heads/"):] + " has no record")
     return [_chk("unit records visible to other machines", not found,
-                 "; ".join(found[:5]) + " -- commit the record (git add <file> && git commit) or open the unit")]
+                 "; ".join(found[:5]) + " -- commit the record (git add <file> && git commit) or open the unit;"
+                 " a modified one: " + _REGISTRY_COMMIT_CMD)]
 
 
 def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
@@ -2838,6 +2896,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     out.extend(_resolver_rows(base, cfg, which, cheap_only))
     _progress("unit records")
     out.extend(_unit_record_rows(base, run, cheap_only))
+    out.extend(_stale_record_rows(base, run))      # #1474
     if disc.get("source") == "github":
         gh_disc = _block(disc, "github")
         if _block(gh_disc, "project").get("enabled"):
@@ -5239,6 +5298,12 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
             if at is not None:
                 extra.append("drift judge paused: daily ceiling reached at "
                              + time.strftime("%H:%M", time.localtime(at)))
+            ds = _load_loop_script("drift_shadow")
+            if _load_loop_script("rulebook_cfg").load(cfg).part_enabled("drift"):
+                _d, _b, _n, cut, out = ds.read_documents_detail(pathlib.Path(sdlc_dir).resolve().parent, cfg)
+                if cut or out:
+                    extra.append("drift documents exceed max_total_chars: %d cut short, %d left out"
+                                 % (len(cut), len(out)))
         return state + "".join("; " + e for e in extra)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
