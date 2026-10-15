@@ -551,6 +551,8 @@ All scripts are in `skills/sigma-loop/scripts/` unless noted.
 | import | `decision_import.py scan`, `plan`, `apply` | see [Importing](#importing-past-decisions) |
 | publish records | `decision_store.py publish <sdlc_dir>` | the local commit that `records.publish` does for you |
 | run the applier once | `applier.py [sdlc_dir]` | the watcher runs it each tick |
+| plan the applier without writing | `applier.py [sdlc_dir] --dry-run` | prints each action with rule, level and window |
+| open asks for existing parks | `applier.py sync [sdlc_dir]` | also runs before each tick |
 | read levels | `skills/sigma-doctor/scripts/doctor.py features [sdlc_dir]` | the `rulebook`, `autonomy levels` and `applier tick` rows |
 
 Library modules (no command line): `rulebook.py` (rule file, seal, match), `rulebook_cfg.py` (the total config reader),
