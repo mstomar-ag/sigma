@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- A config that sets `discovery.blocker_promotion.mode` to `"smart"` now gets a one-time skip line from the reconcile tick and a not-OK "blocker priority rule inactive" doctor row naming the one-word fix to `"always"`; what smart, always and off do is unchanged (#1489).
+
 - `promote.py migrate-confirmation` now arms an item whose only hold is an open blocker (`sdlc:goal` plus the `sdlc:blocked` overlay, reason `armed (held by #N)`) instead of parking it; the pick-time dependency hold and auto-unpark take it from there (#1518).
 
 - **The confirmation migration no longer arms upper-tier items (#1517).** `promote.py migrate-confirmation` removes the retired label from an item labelled epic, story, dossier or spec and reports `upper tier: label removed, not armed` (no goal label, no park); `promote.py apply` refuses such an item with one line.
