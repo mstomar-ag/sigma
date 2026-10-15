@@ -15,7 +15,7 @@ def _doctor():
 def test_on_row_describes_within_tier_order():
     text = _doctor()._blocking_priority_override_feature_state({"discovery": {"source": "github"}})
     assert text.startswith("ON (default)")
-    assert "within its own priority tier" in text
+    assert "within its own tier" in text
     assert "raised to the tier of what it blocks" in text
     assert "regardless of priority tier" not in text
 

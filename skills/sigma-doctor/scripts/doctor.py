@@ -3877,8 +3877,8 @@ def _blocking_priority_override_feature_state(cfg):
     disc = _block(cfg, "discovery")
     if disc.get("source") != "github":
         return "n/a — backlog source is not github"
-    return ("ON (default) — an sdlc:goal issue also carrying sdlc:blocking goes first within its own "
-            "priority tier; a blocker is raised to the tier of what it blocks") \
+    return ("ON (default) — a blocking goal goes first within its own tier; a blocker is "
+            "raised to the tier of what it blocks") \
         if disc.get("blocking_priority_override") is not False \
         else "off — set discovery.blocking_priority_override to true to re-enable"
 
