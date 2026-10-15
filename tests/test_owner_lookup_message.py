@@ -39,7 +39,7 @@ PROJ = ["project", "view", "3", "--owner", "acme"]
 def test_bare_owner_lookup_failure_names_the_graphql_rate_limit():
     e = _err("unknown owner type", PROJ)
     msg = str(e)
-    assert "unknown owner type" in msg           # doctor's board-gone match still holds
+    assert "unknown owner type" in msg           # the text is kept; the doctor no longer reads it as board-gone (#1485)
     assert "GraphQL rate limit" in msg and "gh api rate_limit" in msg and "retry" in msg
     assert getattr(e, "hint", None) == msg
 

@@ -453,10 +453,14 @@ def _board_dup_risk(gh_cfg, run):
             ".sdlc (read-only preview; add --yes to create).")
 
 
-#: What gh prints when GitHub ANSWERED and the board (or its owner) is not there. Measured:
+#: What gh prints when GitHub ANSWERED and the board is not there. Measured:
 #: `gh project view 99999 --owner <org>` -> "GraphQL: Could not resolve to a ProjectV2 with the
-#: number 99999."; an owner login that does not exist -> "unknown owner type".
-_BOARD_GONE = ("could not resolve to a", "unknown owner type")
+#: number 99999." A bare "unknown owner type" is NOT in this list (#1485): gh prints it too when its
+#: GraphQL owner lookup is refused (usually the rate limit), so it is confirmed over REST first.
+_BOARD_GONE = ("could not resolve to a",)
+_OWNER_REFUSED = ("unknown owner type",)
+#: the same markers cross_repo/promote use for "GitHub is rate limiting this account"
+_RATE_LIMIT_MARKERS = ("rate limit", "secondary rate", "abuse detection", "too many requests")
 
 
 def _pinned_board_unreachable(gh_cfg, run):
@@ -466,7 +470,8 @@ def _pinned_board_unreachable(gh_cfg, run):
 
 
 def _pinned_board_state(gh_cfg, run):
-    """(state, fix): "ok", "gone" (with the fix), "unverifiable", or "unpinned".
+    """(state, fix): "ok", "gone" (with the fix), "refused" (GitHub refused the read, owner exists),
+    "unverifiable", or "unpinned".
 
     #235: `project.number` is pinned but GitHub says that board does not exist under its owner --
     deleted, transferred, or a wrong `project.owner`. The loop then turns board mirroring OFF on
@@ -501,13 +506,41 @@ def _pinned_board_state(gh_cfg, run):
         return ("ok" if isinstance(got, dict) and got.get("number") == want
                 else "unverifiable"), None
     said = _failure_text(raw).lower()
+    if any(tell in said for tell in _RATE_LIMIT_MARKERS):
+        return "unverifiable", None  # #1485: a rate-limited read says nothing about the board
+    if any(tell in said for tell in _OWNER_REFUSED) and not any(t in said for t in _BOARD_GONE):
+        # #1485: gh prints this when its GraphQL owner lookup is refused. Ask REST (a different pool).
+        def _rest(argv, cwd=None, timeout=None):
+            res = run(list(argv))
+            return (0, str(res)) if res else (1, _failure_text(res))
+        try:
+            pf = _load_init_script("preflight")
+            found = pf.check_owner_type(owner, None, _rest, pf.network_timeout())
+        except Exception:                    # noqa: BLE001 - a lookup that cannot run is no verdict
+            found = None
+        if found is not None:
+            return "refused", ("GitHub refused the board read (usually the GraphQL rate limit); "
+                               "wait for the reset and re-run /sigma-doctor")
+        if not _owner_missing(owner, run):
+            return "unverifiable", None
+        return "gone", _board_gone_fix(want, owner)
     if not any(tell in said for tell in _BOARD_GONE):
         return "unverifiable", None  # the read failed -- says nothing about the board
-    return "gone", (f"the pinned board #{want} does not exist under {owner} (GitHub: could not "
-                    "resolve it -- deleted, moved, or a wrong project.owner) - the loop mirrors "
-                    "nothing while it is unreachable. Fix discovery.github.project.number/owner, "
-                    "or create and pin a new one: python3 "
-                    "<sigma>/skills/sigma-init/scripts/board_setup.py create .sdlc.")
+    return "gone", _board_gone_fix(want, owner)
+
+
+def _board_gone_fix(want, owner):
+    return (f"the pinned board #{want} does not exist under {owner} (GitHub: could not "
+            "resolve it -- deleted, moved, or a wrong project.owner) - the loop mirrors "
+            "nothing while it is unreachable. Fix discovery.github.project.number/owner, "
+            "or create and pin a new one: python3 "
+            "<sigma>/skills/sigma-init/scripts/board_setup.py create .sdlc.")
+
+
+def _owner_missing(owner, run):
+    """#1485: True only when REST itself says the owner is not there (a 404)."""
+    res = run(["gh", "api", f"users/{owner}", "--jq", ".type"])
+    return (not res) and "404" in _failure_text(res)
 
 
 def _self_merge_risk(gh_cfg, wk, run):
@@ -2914,6 +2947,9 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                 if state in ("ok", "gone"):
                     out.append(_chk("pinned board #%s reachable"
                                     % _block(gh_disc, "project").get("number"), state == "ok", gone))
+                elif state == "refused":     # #1485: cannot verify, never a "gone" and never a create advice
+                    out.append(_chk("pinned board #%s reachable (cannot verify)"
+                                    % _block(gh_disc, "project").get("number"), False, gone))
                 # #280: read-only, same gate. A column with no matching Status option makes that
                 # card move a no-op; a case/spacing-only difference already matches.
                 unmatched = (_board_columns_unmatched(gh_disc, run, board_fields)

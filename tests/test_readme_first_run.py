@@ -367,6 +367,7 @@ def preflight_fixes():
             (("git", "remote"), (0, "origin\n")),
             (("git", "ls-remote"), (0, "abc\trefs/heads/main\n")),
             (("gh", "auth", "status"), (auth_rc, auth)),
+            (("gh", "api", "user", "--jq"), (1, "HTTP 401") if auth_rc else (0, "alice\n")),
             (("gh", "api"), (0, owner + "\n")),
         ]
 
