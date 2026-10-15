@@ -1215,9 +1215,15 @@ def _blocker_rank_row(cfg, sdlc_dir, now=None):
     source is not github or the rule is explicitly off."""
     try:
         disc = (cfg or {}).get("discovery") or {}
-        block = disc.get("blocker_promotion")
-        if disc.get("source") != "github" or (isinstance(block, dict) and block.get("mode") == "off"):
+        if disc.get("source") != "github":
             return None
+        mode = _load_loop_script("sources")._blocker_promotion(cfg)
+        if mode == "off":
+            return None
+        if mode == "smart":
+            return _chk('blocker priority rule inactive: discovery.blocker_promotion.mode is "smart" (board '
+                        "pass only; the reconcile repair and block-time raise are skipped)", False,
+                        'set it to "always" (or remove the key) to turn the rule on')
         tick = _load_loop_script("reconcile_tick")
         loop = tick.loop
         st = tick.read_repair_state(sdlc_dir)
