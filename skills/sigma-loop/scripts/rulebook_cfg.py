@@ -71,7 +71,8 @@ IMPORT_DEFAULTS = {"max_file_bytes": 500000000, "max_candidates": 500, "max_issu
                    "time_budget_s": 60, "comments": False, "profile_dirs": [], "project_dirs": [],
                    "classifier": "table", "model": "haiku",
                    "max_budget_usd_per_call": 0.50, "max_budget_usd_per_run": 1.0,  # budgets PROVISIONAL; the CLI checks the cap after a turn
-                   "timeout_s": 60}  # per model-classifier call, seconds (#1310); longer is allowed
+                   "timeout_s": 60,  # per model-classifier call, seconds (#1310); longer is allowed
+                   "require_repo_cwd": False}  # keep only transcript answers whose cwd is inside the repository (#1477)
 
 
 def import_limits(config):
@@ -87,6 +88,8 @@ def import_limits(config):
                 out[key] = v
         if sub.get("comments") is True:
             out["comments"] = True
+        if sub.get("require_repo_cwd") is True:
+            out["require_repo_cwd"] = True
         if sub.get("classifier") == "model":
             out["classifier"] = "model"
         if isinstance(sub.get("model"), str) and sub["model"].strip():

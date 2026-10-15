@@ -5334,6 +5334,12 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
             if at is not None:
                 extra.append("drift judge paused: daily ceiling reached at "
                              + time.strftime("%H:%M", time.localtime(at)))
+            ds = _load_loop_script("drift_shadow")
+            if _load_loop_script("rulebook_cfg").load(cfg).part_enabled("drift"):
+                _d, _b, _n, cut, out = ds.read_documents_detail(pathlib.Path(sdlc_dir).resolve().parent, cfg)
+                if cut or out:
+                    extra.append("drift documents exceed max_total_chars: %d cut short, %d left out"
+                                 % (len(cut), len(out)))
         return state + "".join("; " + e for e in extra)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
