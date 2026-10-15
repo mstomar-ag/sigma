@@ -61,13 +61,13 @@ def test_hard_stops_off_foreign_blocker_raised_as_before(capsys):
     assert "not a Sigma issue" not in capsys.readouterr().err
 
 
-def test_note_returns_false_on_guard_refusal_and_true_otherwise():
+def test_note_returns_false_on_guard_refusal_and_none_otherwise():
     run = base._runner(_issues())
     assert _src(run, True).note(7, "x") is False
     run2 = base._runner(_issues([GOAL]))
-    assert _src(run2, True).note(7, "x") is True
+    assert _src(run2, True).note(7, "x") is None
     run3 = base._runner(_issues())
-    assert _src(run3, False).note(7, "x") is True
+    assert _src(run3, False).note(7, "x") is None
 
 
 def test_is_sigma_issue_never_parks_and_is_closed_when_off():
