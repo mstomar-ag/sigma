@@ -97,20 +97,22 @@ def build_options_mutation(field_id, options, ready_name=READY):
 
 
 def card_statuses(owner, number, field_name, run):
-    """{issue number -> Status name or None} for every item, paged. The before/after snapshot the
-    post-condition check compares."""
+    """{project item id -> (kind, Status name or None)} for EVERY card -- issues, pull requests and
+    drafts -- paged. Keyed by item id, not issue number, so same-numbered issues from different
+    repositories of one board stay separate. The before/after snapshot the post-condition compares."""
     out, after = {}, None
     while True:
         page = 'items(first: 100%s)' % (', after: "%s"' % after if after else "")
-        inner = ('projectV2(number: %d) { %s { nodes { content { ... on Issue { number } } '
+        inner = ('projectV2(number: %d) { %s { nodes { id content { __typename ... on Issue { number } '
+                 '... on PullRequest { number } ... on DraftIssue { title } } '
                  'fieldValueByName(name: "%s") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } '
                  'pageInfo { hasNextPage endCursor } } }' % (int(number), page, field_name))
         q, key = _query(owner, inner)
         items = _unwrap(run(["gh", "api", "graphql", "-f", "query=" + q]), key).get("items") or {}
         for node in items.get("nodes") or []:
-            n = (node.get("content") or {}).get("number")
-            if n is not None:
-                out[int(n)] = (node.get("fieldValueByName") or {}).get("name")
+            if node.get("id"):
+                kind = (node.get("content") or {}).get("__typename") or "Unknown"
+                out[node["id"]] = (kind, (node.get("fieldValueByName") or {}).get("name"))
         info = items.get("pageInfo") or {}
         if not info.get("hasNextPage"):
             return out
@@ -218,7 +220,7 @@ def main(argv, run=None):
         print("\ndry run — nothing was written. Re-run with --apply to make the change.")
         return 0
 
-    before = card_statuses(owner, number, field_name, run)
+    before = {} if have_lane else card_statuses(owner, number, field_name, run)
     if not have_lane:
         try:
             run(["gh", "api", "graphql", "-f", build_options_mutation(field["id"], options, ready)])
@@ -229,14 +231,17 @@ def main(argv, run=None):
         project_id, field = read_status_field(owner, number, field_name, run)
     ready_id = next((o.get("id") for o in (field.get("options") or []) if o.get("name") == ready), None)
 
-    # Post-condition. Rehearsal step [3] showed exactly how this goes wrong, so it is checked rather
-    # than trusted: a card that HAD a Status and now has none was damaged by the write.
-    after = card_statuses(owner, number, field_name, run)
-    lost = sorted(n for n, s in before.items() if s and not after.get(n))
-    if lost:
-        print("FAILED: %d card(s) lost their Status: %s" % (len(lost), ", ".join(str(n) for n in lost)))
-        print("Restore them by hand on the board. Do NOT re-run this until that is understood.")
-        return 1
+    # Post-condition (equality). Rehearsal step [3] showed how this goes wrong, so it is checked
+    # rather than trusted: ANY card -- issue, pull request or draft -- whose Status differs after
+    # the option write was damaged by it. With the lane already present there is no write to check.
+    if not have_lane:
+        after = card_statuses(owner, number, field_name, run)
+        changed = sorted(i for i, v in before.items() if after.get(i, (None, None))[1] != v[1])
+        if changed:
+            print("FAILED: %d card(s) changed Status during the option write: %s"
+                  % (len(changed), ", ".join(changed)))
+            print("Restore them by hand on the board. Do NOT re-run this until that is understood.")
+            return 1
 
     moved, failed = (0, [])
     if cards:
@@ -246,9 +251,32 @@ def main(argv, run=None):
             return 1
         moved, failed = seed_ready(project_id, field["id"], ready_id, cards, run)
 
-    print("\n%s; %d card(s) kept their Status; %d moved into %r."
-          % (("added the %r lane" % ready) if not have_lane else ("%r lane already present" % ready),
-             len(before), moved, ready))
+    print()
+    if have_lane:
+        print("%r lane already present: no option write; Status untouched." % ready)
+        print("seed: %d moved %s -> %r." % (moved, backlog, ready))
+    else:
+        kinds = [v[0] for v in before.values()]
+        total = len(before)
+        nostat = sum(1 for v in before.values() if not v[1])
+        print("added the %r lane." % ready)
+        print("board: %d card(s) (%d issues, %d pull requests, %d drafts)."
+              % (total, kinds.count("Issue"), kinds.count("PullRequest"), kinds.count("DraftIssue")))
+        print("option write: %d unchanged (%d had no Status), 0 changed." % (total, nostat))
+        print("seed: %d moved %s -> %r (a subset of the %d unchanged)." % (moved, backlog, ready, total))
+        if moved:
+            final = card_statuses(owner, number, field_name, run)
+            seeded = {c.get("id") for c in cards}
+            odd = sorted(i for i, v in before.items()
+                         if final.get(i, (None, None))[1] != v[1]
+                         and not (i in seeded and final[i][1] == ready))
+            if odd:
+                print("FAILED: %d card(s) changed beyond the seed: %s" % (len(odd), ", ".join(odd)))
+                return 1
+        else:
+            final = after
+        nready = sum(1 for v in final.values() if v[1] == ready)
+        print("now: %d %s, %d elsewhere." % (nready, ready, len(final) - nready))
     if failed:
         # Partial seeds leave a usable board (the moved cards are pickable) but an incomplete one,
         # and the command is idempotent, so the honest instruction is "run it again".
