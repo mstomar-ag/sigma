@@ -190,3 +190,9 @@ def test_ceiling_paused_at_names_the_crossing_record(tmp_path):
     assert m.ceiling_paused_at(_cfg(spend_ceiling_usd_per_day=None), now, tmp_path) is None
     assert m.ceiling_paused_at(_cfg(enabled=False), now, tmp_path) is None
     assert m.ceiling_paused_at(_cfg(), now, tmp_path / "none") is None
+
+
+def test_invalid_verdict_with_known_cost_charges_that_cost(tmp_path):
+    v = _mod().judge("q", DOCS, _cfg(), tmp_path, call=Fake({"kind": None}, cost=0.17))
+    assert v.reason == "call_failed"
+    assert [r["usd"] for r in _spend(tmp_path)] == [0.17]

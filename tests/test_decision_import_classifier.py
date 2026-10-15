@@ -249,3 +249,72 @@ def test_class_cache_is_capped_and_keeps_the_newest(tmp_path):
     saved = json.loads((pathlib.Path(sd) / CACHE).read_text())["classes"]
     assert len(saved) == DI.MAX_CACHE
     assert "fp%d" % (n - 1) in saved and "fp0" not in saved
+
+
+# --- #1471: the CLI checks the budget after a turn, so a cut-off call bills more than the cap ---
+
+CUT = {"kind": None, "area": None, "failed": True, "reason": "error_max_budget_usd"}
+
+
+def test_cut_off_call_is_charged_its_real_cost_and_stops_the_run(tmp_path):
+    cfg = _cfg(max_budget_usd_per_call=0.05, max_budget_usd_per_run=0.30)
+    fake = Fake(CUT, cost=0.15)
+    rows, info = DI.classify_model(_sd(tmp_path), cfg, [_c(1), _c(2), _c(3)], fake)
+    assert len(fake.calls) == 1 and info["spent"] == 0.15
+    assert info["over_budget"] == 1 and info["timed_out"] == 1
+    assert not (pathlib.Path(_sd(tmp_path)) / CACHE).exists()
+
+
+def test_no_envelope_charges_the_larger_of_cap_and_dearest_real_call(tmp_path):
+    seq = [dict(GOOD, cost_usd=0.20), None]
+    calls = iter(seq)
+    rows, info = DI.classify_model(_sd(tmp_path), _cfg(max_budget_usd_per_call=0.05), [_c(1), _c(2)],
+                                   lambda p, m, b: next(calls))
+    assert abs(info["spent"] - 0.40) < 1e-9
+
+
+def test_default_cap_is_half_a_dollar_in_code_and_template():
+    assert CFG.import_limits({})["max_budget_usd_per_call"] == 0.50
+    tmpl = (ROOT / "skills" / "sigma-init" / "templates" / "config.json.tmpl").read_text()
+    assert '"classifier": "table", "model": "haiku", "max_budget_usd_per_call": 0.50' in tmpl
+
+
+def _pin_fj(monkeypatch):
+    FJ = _mod("feature_judge")   # DI._load builds a fresh module per call, so pin one to patch
+    monkeypatch.setattr(DI, "_load", lambda n, _l=DI._load: FJ if n == "feature_judge" else _l(n))
+    return FJ
+
+
+def test_default_call_keeps_the_cost_of_a_cut_off_envelope(monkeypatch):
+    FJ = _pin_fj(monkeypatch)
+
+    def fake(*a, reason_out=None, **k):
+        reason_out.append("error_max_budget_usd")
+        return None, 0.15
+    monkeypatch.setattr(FJ, "ask_claude", fake)
+    ans = DI.default_call("p", "haiku", 0.05)
+    assert ans["failed"] is True and ans["cost_usd"] == 0.15 and "budget" in ans["reason"]
+    monkeypatch.setattr(FJ, "ask_claude", lambda *a, **k: (None, 0.0))
+    assert DI.default_call("p", "haiku", 0.05) is None
+
+
+def test_apply_cli_names_the_setting_on_a_budget_cut_off(tmp_path, capsys, monkeypatch):
+    """The gesture the docs give: `decision_import.py apply <sdlc>` with the model classifier, a stubbed CLI call."""
+    sdlc = tmp_path / "repo" / ".sdlc"
+    sdlc.mkdir(parents=True)
+    (sdlc / "config.json").write_text(json.dumps(_cfg(max_budget_usd_per_call=0.05,
+                                                      max_budget_usd_per_run=0.30)))
+    calls = []
+    FJ = _pin_fj(monkeypatch)
+
+    def fake(*a, reason_out=None, **k):
+        calls.append(1)
+        reason_out.append("error_max_budget_usd")
+        return None, 0.15
+    monkeypatch.setattr(FJ, "ask_claude", fake)
+    monkeypatch.setattr(DI, "scan", lambda *a, **k: {"candidates": [_c(1), _c(2), _c(3)]})
+    rc = DI.main(["apply", str(sdlc), "--profile", str(tmp_path / "none")])
+    out = capsys.readouterr().out
+    assert rc == 0 and len(calls) == 1, out
+    assert "exceeded the per-call budget $0.05" in out and "$0.15" in out
+    assert "rulebook.import.max_budget_usd_per_call" in out

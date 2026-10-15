@@ -381,9 +381,12 @@ def _eligible(cands):
 def default_call(prompt, model, max_budget_usd, timeout_s=60):
     """The drift judge's invocation path (`feature_judge.ask_claude`); no key is read here. No answer at all (a timeout,
     a failure) is None, so the row is skipped and retried next run (#1310), not stored as unknown."""
+    why = []
     payload, cost = _load("feature_judge").ask_claude(prompt, _SCHEMA, model=model, timeout_s=timeout_s,
-                                                      max_budget_usd=max_budget_usd)
+                                                      max_budget_usd=max_budget_usd, reason_out=why)
     if not isinstance(payload, dict):
+        if why:   # an envelope came back: its real cost was billed, and the reason says why there is no answer
+            return {"kind": None, "area": None, "cost_usd": cost, "failed": True, "reason": why[0]}
         return None
     return {"kind": payload.get("kind"), "area": payload.get("area"), "cost_usd": cost}
 
@@ -448,7 +451,8 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
     areas = _areas(sdlc_dir)
     cache = _cache_read(sdlc_dir)
     info = {"model": lim["model"], "run_ceiling": lim["max_budget_usd_per_run"], "cached": 0, "sent": 0,
-            "would_send": 0, "spent": 0.0, "stopped_after": None, "timed_out": 0}
+            "would_send": 0, "spent": 0.0, "stopped_after": None, "timed_out": 0,
+            "over_budget": 0, "max_real_cost": 0.0, "per_call": lim["max_budget_usd_per_call"]}
     rows, fresh = [], False
     for c in (x for x in _eligible(cands) if _fp(x) not in skip):
         fp = _fp(c)
@@ -459,7 +463,7 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
         kind, area = UNKNOWN, REPO_AREA
         if call is None:
             info["would_send"] += 1
-        elif info["stopped_after"] is not None or info["sent"] >= lim["max_candidates"] \
+        elif info["stopped_after"] is not None or info["over_budget"] or info["sent"] >= lim["max_candidates"] \
                 or info["spent"] >= lim["max_budget_usd_per_run"]:
             info["stopped_after"] = info["sent"]
             rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
@@ -472,9 +476,14 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
                 ans = None
             cost = ans.get("cost_usd") if isinstance(ans, dict) else None
             ok = isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0
-            info["spent"] += cost if ok else lim["max_budget_usd_per_call"]
-            if not isinstance(ans, dict):  # no answer at all: not cached, not stored, retried next run
+            if ok:
+                info["max_real_cost"] = max(info["max_real_cost"], cost)
+            # no envelope at all: the cap is not a hard limit, so charge the larger of it and the dearest real call
+            info["spent"] += cost if ok else max(lim["max_budget_usd_per_call"], info["max_real_cost"])
+            if not isinstance(ans, dict) or ans.get("failed"):  # no answer: not cached, not stored, retried next run
                 info["timed_out"] += 1
+                if isinstance(ans, dict) and "budget" in str(ans.get("reason") or ""):
+                    info["over_budget"] += 1   # every later call would be cut off too: stop after this one
                 rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
                 continue
             if ans.get("kind") in qkinds and ans.get("area") in areas:
@@ -604,6 +613,7 @@ def apply(sdlc_dir, config, cands, call=None):
     if info:
         out["stopped_after"] = info["stopped_after"]
         out["timed_out"] = info["timed_out"]
+        out["over_budget"] = info.get("over_budget", 0)
         out["model"] = info
     for r in new:
         record = rec.build("import", r["issue"], r["qkind"], r["choice"], r["reason"], "imported", area=r["area"])
@@ -710,7 +720,12 @@ def main(argv=None, lister=None, comments_fn=None):
             return 1
         print("wrote %d records and %d comparisons%s" % (res["records"], res["watch"],
                                                           (" (%s)" % res["note"]) if res["note"] else ""))
-        if res.get("stopped_after") is not None:
+        if res.get("over_budget"):
+            m = res["model"]
+            print("%d call(s) exceeded the per-call budget $%.2f (real cost about $%.2f each, answers discarded, run "
+                  "stopped): raise rulebook.import.max_budget_usd_per_call" % (
+                      res["over_budget"], m["per_call"], m["max_real_cost"]))
+        elif res.get("stopped_after") is not None:
             print("ceiling stopped the run after %d model calls: the rest stay unclassified, run apply again" % (
                 res["stopped_after"]))
         if res.get("timed_out"):
