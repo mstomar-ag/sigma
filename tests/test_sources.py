@@ -1645,7 +1645,7 @@ def test_note_body_saying_http_502_is_not_retried(monkeypatch):
 def test_note_foreign_issue_returns_before_any_call(monkeypatch):
     gh, calls = _note_world(monkeypatch, lambda n: (_ for _ in ()).throw(AssertionError("no call")))
     monkeypatch.setattr(gh.note.__globals__["hsg"], "blocks_issue_write", lambda *a, **k: True)
-    assert gh.note("5", "x") is None and calls == []
+    assert gh.note("5", "x") is False and calls == []
 
 
 def test_github_append_to_body_appends_without_overwriting():
