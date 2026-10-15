@@ -313,7 +313,7 @@ def ceiling_warning(sdlc_dir, config):
     n = len(_record_names(_store(sdlc_dir, config)))
     cap = settings(config)["max_files_warn"]
     if n > cap:
-        return "%d decision records exceed the configured ceiling of %d; run the archive verb" % (n, cap)
+        return "%d decision records exceed the configured ceiling of %d; fold old ones with the archive library function (no command runs it)" % (n, cap)
     return None
 
 

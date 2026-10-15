@@ -669,7 +669,7 @@
       "function": "archive",
       "rule": "fs-remove",
       "count": 2,
-      "gate": "person-run archive verb; records part enabled; removes only record files older than records.archive_after_days after they are written into a yearly archive file under the lock",
+      "gate": "person-run archive library function (no command runs it); records part enabled; removes only record files older than records.archive_after_days after they are written into a yearly archive file under the lock",
       "risk": "high"
     },
     {
