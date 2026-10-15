@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Rulebook levels pool machines, survive retention and recover from vetoes (#1500).** A pair's comparisons count together across machines (a machine with too few comparisons no longer caps it, a disagreeing one with enough still does), the ladder reads the newest `l4_min_answers` comparisons whatever their age and pruning keeps them, a veto's one-level drop wears off after `veto_recover_after` agreeing answers, and a missing area reads `repo`.
 - **The import `folders read:` line lists only folders actually found (#1523).** A project folder skipped as not found under any profile no longer appears in the line; it stays in the `skipped:` note.
 - **An optional shared weekly and monthly spend cap covers every paid model call (#1502).** `rulebook.spend.weekly_usd` and `rulebook.spend.monthly_usd` (both unset by default, which changes nothing) cap the real cost of the import classifier and the drift judge together over a rolling 7 and 30 days; a call that would run past a cap is refused with one line, counted in `.sdlc/state/spend-cap.jsonl`, and shown by the doctor with the reset time.
 - **Import docs show a project-folder form that works in bash and zsh, and a scan prints the folders it read (#1503).** The rulebook import section and the `--project-dir` help say one folder per flag (or a quoted array), and `scan`, `plan` and `apply` print a `folders read:` line on stderr.
