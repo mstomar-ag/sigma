@@ -179,3 +179,19 @@ def test_valid_ref_is_never_looser_than_git_check_ref_format(tmp_path):
         elif git_ok:
             stricter.append(name)
     assert vr("main") and vr("feature/x") and not vr("")        # the table is not vacuous
+
+
+def test_the_unit_pass_rewrite_carries_an_acked_commit_forward(wired):
+    """#1470: the unit pass's rewrite returns `acks` for the replayed copy of an acked commit (matched by patch-id)."""
+    import json
+    root, bare = wired
+    rb = mod()._sibling("feature_rebase")
+    tip = remote_tip(bare, "feature/u")
+    path = rb.ack_path(str(root / ".sdlc"), "u")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"unit": "u", "acked": [{"sha": tip, "patch_id": rb.patch_id(rb._run, str(root), tip),
+                                                        "subject": "u.txt"}]}), encoding="utf-8")
+    rewrite, _ = mod().unit_callables(root, "origin", "feature/u", str(root / ".sdlc"), "u")
+    out = rewrite(mod().engine_runner("off"), (tip, remote_tip(bare, "main")))
+    assert out["ok"] is True and len(out["acks"]) == 1, out
+    assert out["acks"][0]["sha"] != tip and out["acks"][0]["patch_id"]

@@ -245,6 +245,8 @@ def route_answer(kind, answers):
     """The normalised route answer for `kind`: a bank option, or 'free'; None when the kind has no
     route question or none was answered."""
     slot = route_slot(kind)
+    if slot is None and kind in QUESTIONS and kind != "unknown":
+        slot = CLOSING_QUESTION                 # #1521: no route question, so the closing answer is the key
     raw = (answers or {}).get(slot["id"]) if slot else None
     if raw is None or not str(raw).strip():
         return None
@@ -349,7 +351,8 @@ def brief(sdlc_dir, config, number, source=None, run=None):
 
     answered = _recorded_answers(body)
     current, block = park_stamp(data.get("comments")), _block_stamp(body)
-    if current and block and block != current:          # M-01: that block answered an earlier park
+    if current and block != current and (block or decision_record.enabled(config)):
+        # M-01: that block answered an earlier park; #1522: with records open an unstamped (legacy) one did too
         answered = {}
     questions = _questions_for(reason_class, reason, open_refs, answered)
     learning = _load("autonomy").learning_line(sdlc_dir, reason_class, config)
