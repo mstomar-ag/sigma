@@ -283,3 +283,33 @@ def due_for_reask(rules, now, config):
             if t is None or now - t > limit:
                 out.append(r.get("id"))
     return out
+
+
+def acceptance(sdlc_dir, config):
+    """#1496 F-19: one row per approved rule: `{id, option, confirmed, answers, accepted, never_matches}`,
+    counting live human answers recorded since the rule was confirmed that name the rule (`rule_id`).
+    `never_matches` is true when the pair has recorded answers and none equals the rule's option.
+    [] when closed. Never raises."""
+    try:
+        if not enabled(config):
+            return []
+        dr, store = _load("decision_record"), _load("decision_store")
+        recs = [r for r in store.list_by(sdlc_dir, config) if r.get("how") == "human" and dr.is_park_answer(r)]
+        rows = []
+        for rule in load(sdlc_dir, config):
+            if rule.get("status") != "approved":
+                continue
+            since = _parse(rule.get("confirmed"))
+            pair = [r for r in recs if r.get("qkind") == rule["qkind"] and (r.get("area") or dr.REPO_AREA) == rule["area"]]
+            mine = [r for r in pair if r.get("rule_id") == rule["id"] and (_parse(r.get("time")) or since) >= since]
+            rows.append({"id": rule["id"], "option": rule["option"], "confirmed": rule.get("confirmed"),
+                         "answers": len(mine), "accepted": sum(1 for r in mine if r.get("accepted")),
+                         "never_matches": bool(pair) and all(dr.key_of(r) != rule["option"] for r in pair)})
+        return rows
+    except Exception:
+        return []
+
+
+def acceptance_line(row):
+    return "rule %s: %d of %d live answers accepted since %s" % (
+        row["id"], row["accepted"], row["answers"], (row.get("confirmed") or "")[:10])

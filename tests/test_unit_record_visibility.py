@@ -48,6 +48,14 @@ def _runner(tmp_path):
     """git goes to the real binary; the push/label legs are faked (no remote exists here)."""
     def run(cwd, argv):
         argv = [str(a) for a in argv]
+        if argv[:2] == ["git", "fetch"]:
+            return ""
+        if argv[:3] == ["git", "rev-parse", "--verify"]:
+            return "a" * 40                       # #1504: the fetched `<remote>/<base>` commit
+        if argv[:3] == ["gh", "api", "user"]:
+            return "tester"
+        if argv[:2] == ["git", "ls-remote"] and argv[-1].startswith("refs/heads/main"):
+            return "abc\t" + argv[-1]
         if argv[0] == "git" and argv[1] not in ("push", "ls-remote"):
             return _git(cwd, *argv[1:]).strip()
         if argv[:2] == ["git", "ls-remote"]:
@@ -121,7 +129,7 @@ def test_an_unreadable_branch_fails_closed_and_prints_the_command(tmp_path, caps
     base = _runner(tmp_path)
 
     def run(cwd, argv):
-        if [str(a) for a in argv][:2] == ["git", "rev-parse"]:
+        if [str(a) for a in argv][:3] == ["git", "rev-parse", "--abbrev-ref"]:
             raise RuntimeError("no head")
         return base(cwd, argv)
     head = _git(tmp_path, "rev-parse", "HEAD")

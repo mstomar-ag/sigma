@@ -249,6 +249,7 @@ class _Ctx(object):
         self.base = safe("--base", base)
         self.branch = branch_for(name)
         self.label = label_for(name)
+        self.base_commit = None
 
     def _configured(self, key):
         work = self.config.get("work")
@@ -286,24 +287,28 @@ def _step_branch(ctx):
     if ctx.run(ctx.cwd, ["git", "ls-remote", "--heads", ctx.remote, ctx.branch]).strip():
         return EXISTS, ctx.branch
     base = ctx.resolved_base()
-    source = _push_source(ctx, base)
-    ctx.run(ctx.cwd, ["git", "push", ctx.remote, "%s:refs/heads/%s" % (source, ctx.branch)])
-    return CREATED, "%s -> %s" % (source, ctx.branch)
+    source, sha = _cut_from_remote_base(ctx, base)
+    ctx.base_commit = sha
+    ctx.run(ctx.cwd, ["git", "push", ctx.remote, "%s:refs/heads/%s" % (sha, ctx.branch)])
+    return CREATED, "%s@%s -> %s" % (source, sha[:12], ctx.branch)
 
 
-def _push_source(ctx, base):
-    """The ref to push as the unit branch: the local `base` when it exists, else `<remote>/<base>`
-    (#1397: a fresh clone has no local branch of the default name, and `git push` then fails with
-    `src refspec ... does not match any`). When neither is found the bare base is returned so git
-    reports the same error it always did."""
-    for ref, source in (("refs/heads/" + base, base),
-                        ("refs/remotes/%s/%s" % (ctx.remote, base), "%s/%s" % (ctx.remote, base))):
-        try:
-            ctx.run(ctx.cwd, ["git", "show-ref", "--verify", "--quiet", ref])
-            return source
-        except RuntimeError:
-            continue
-    return base
+def _cut_from_remote_base(ctx, base):
+    """#1504: the commit the unit branch is cut from is the REMOTE's `<remote>/<base>` after a fetch,
+    the rule `work.py start` uses -- never the local `<base>`, which a checkout that works in
+    worktrees never fast-forwards. -> `(<remote>/<base>, <full sha>)`.
+
+    A base the remote does not have is a REFUSAL with one line (a human names another base); an
+    unreachable remote raises and is reported as a failed step."""
+    if not ctx.run(ctx.cwd, ["git", "ls-remote", "--heads", ctx.remote, "refs/heads/" + base]).strip():
+        raise _Refused("base %s/%s does not exist on the remote -- name an existing --base"
+                       % (ctx.remote, base))
+    ctx.run(ctx.cwd, ["git", "fetch", ctx.remote, base])
+    ref = "%s/%s" % (ctx.remote, base)
+    sha = ctx.run(ctx.cwd, ["git", "rev-parse", "--verify", "refs/remotes/" + ref]).strip()
+    if not sha:
+        raise _Refused("base %s could not be resolved after fetching it" % ref)
+    return ref, sha
 
 
 def _repo_labels(ctx):
@@ -405,6 +410,19 @@ def _step_registry(ctx):
     return CREATED, str(path)
 
 
+def _active_login(ctx):
+    """The active GitHub login, read through the same runner every other leg uses, or None. A failed
+    lookup leaves the owner empty and says so in one stderr line; it never breaks the gesture."""
+    try:
+        login = str(ctx.run(ctx.cwd, ["gh", "api", "user", "--jq", ".login"]) or "").strip()
+        if login:
+            return login
+        raise RuntimeError("empty reply")
+    except Exception as exc:                        # noqa: BLE001 - the owner is a record, not a gate
+        _note("sigma: define: owner not recorded (%s)\n" % _flat(exc))
+        return None
+
+
 def _commit_record(ctx):
     """#1312: make the unit visible to other machines. A unit with no record gets one written (the
     same `write_unit` shape the sync uses: no person or login field), then that one path is committed
@@ -416,7 +434,17 @@ def _commit_record(ctx):
         features_dir = feature_registry.registry_dir(ctx.sdlc_dir)
         path = feature_registry.unit_path(features_dir, ctx.name)
         if not path.is_file():
-            report = feature_sync.amend(ctx.sdlc_dir, ctx.name, lambda entry: entry.update(title=ctx.name))
+            owner = _active_login(ctx)
+            slug = feature_sync.repo_slug(ctx.config, ctx.run, ctx.cwd, ctx.remote)
+
+            def _fill(entry):
+                entry.update(title=ctx.name)
+                if owner:
+                    entry["owner"] = owner
+                if slug:                                     # #1504: one repository entry at open time
+                    entry["repos"][slug] = {"branch": ctx.branch, "owner": owner,
+                                            "authorized": False, "goals": []}
+            report = feature_sync.amend(ctx.sdlc_dir, ctx.name, _fill)
             if report.get("refused") or not path.is_file():
                 raise RuntimeError(report.get("refused") or "the record was not written")
         if not ctx.run(ctx.cwd, ["git", "status", "--porcelain", "--", str(path)]).strip():
@@ -475,6 +503,7 @@ def open_unit(sdlc_dir, name, kind, *, config=None, run=None, cwd=None, remote=N
             return report
         report["steps"].append({"step": step, "outcome": outcome, "detail": detail})
     report["ok"] = True
+    report["base_commit"] = ctx.base_commit
     _commit_record(ctx)
     return report
 
