@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Import docs show a project-folder form that works in bash and zsh, and a scan prints the folders it read (#1503).** The rulebook import section and the `--project-dir` help say one folder per flag (or a quoted array), and `scan`, `plan` and `apply` print a `folders read:` line on stderr.
 - **Import calls a missing project folder "skipped", and plan and apply print scan notices (#1488).** A `--project-dir` found under none of the given profiles now reads `skipped: ... the other folders were read` instead of `refused`; `plan` and `apply` print the scan notices on stderr, and `apply` adds a `partial import: N files not read` line when a time budget, size cap or candidate cap cut the import short.
 - **The drift judge records which documents it did not see (#1481).** A document past the `max_total_chars` budget is no longer passed on empty and listed as read: it is named in `documents_clipped_out`, a cut-short one in `documents_truncated`, the prompt carries no empty block, and the doctor warns when the documents exceed the budget.
 - **Headless judge calls no longer read the caller's project (#1472).** The import classifier, drift judge and unit assigner/validator now run `claude -p` in a fresh empty temporary directory (refused under an instruction-file ancestor), without `CLAUDE_PROJECT_DIR`, and with `--setting-sources user`, `--strict-mcp-config` and `--no-session-persistence` when the installed CLI lists them; the privacy and rulebook docs state what each call sends.

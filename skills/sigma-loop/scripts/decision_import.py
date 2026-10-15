@@ -373,7 +373,8 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
         stats[c["source"]]["candidates"] += 1
         stats[c["source"]]["superseded"] += 1 if c["superseded"] else 0
     res = {"candidates": cands, "stats": stats, "refusals": refusals,
-           "unread": unread[0] + stats["transcript"]["partial"]}
+           "unread": unread[0] + stats["transcript"]["partial"],
+           "folders": list(dict.fromkeys(names))}
     if filtering:
         res["dropped"] = dropped[0]
     return res
@@ -394,6 +395,11 @@ def _notice_lines(out):
 def _print_notices(out):
     for line in _notice_lines(out):
         print(line, file=sys.stderr)
+
+
+def _print_folders_read(out):
+    """#1503: name the project folders the scan resolved, on stderr."""
+    print("folders read: %s" % ", ".join(out.get("folders", [])), file=sys.stderr)
 
 
 def _print_partial(out):
@@ -756,7 +762,8 @@ def _add_options(v):
     v.add_argument("--profile", action="append", default=[], metavar="DIR",
                    help="Claude Code profile directory (repeatable)")
     v.add_argument("--project-dir", action="append", default=[], metavar="DIR",
-                   help="extra project folder: a folder name or a path (repeatable); "
+                   help="extra project folder: a folder name or a path, one folder per flag "
+                        "(repeat the flag; one value holding several folders is read as one); "
                         "a dash-leading name works as: --project-dir -srv-demo-work-repo")
     v.add_argument("--only-in-repo", action="store_true",
                    help="keep only transcript answers whose cwd is inside this repository")
@@ -881,6 +888,7 @@ def main(argv=None, lister=None, comments_fn=None):
                 " ".join(str(exc).split())[:160] or type(exc).__name__), file=sys.stderr)
     out = scan(args.sdlc_dir, config, args.profile or None, issues=issues, comments_fn=comments_fn,
                project_dirs=args.project_dir or None, only_in_repo=True if args.only_in_repo else None)
+    _print_folders_read(out)
     if args.verb in ("plan", "apply"):
         _print_notices(out)
     if args.verb == "plan":
