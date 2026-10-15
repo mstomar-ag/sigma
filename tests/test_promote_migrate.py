@@ -155,7 +155,7 @@ def test_second_run_with_a_stale_list_is_a_noop(tmp_path):
     assert len(src.writes) == before
 
 
-def test_open_blocker_issue_is_parked_not_armed(tmp_path):
+def test_open_blocker_issue_is_armed_not_parked(tmp_path):
     src = FakeSource()
     src.add(50, "sdlc:goal")                        # open blocker
     src.add(51, PROPOSED, "priority:P1", body="Blocked by: #50")
@@ -163,8 +163,9 @@ def test_open_blocker_issue_is_parked_not_armed(tmp_path):
     src.add(53, state="closed")
     rep = _run(src, apply=True, tmp=tmp_path)
     out = {i["number"]: i for i in rep["items"]}
-    assert out["51"]["outcome"] == "parked" and PARKED in src.store[51]["labels"]
-    assert GOAL not in src.store[51]["labels"] and "dependency" in dict(src.comments)[51]
+    # #1518: an open blocker arms (the pick-time hold waits on it); it is no longer a park
+    assert out["51"]["outcome"] == "armed" and GOAL in src.store[51]["labels"]
+    assert PARKED not in src.store[51]["labels"] and "held by #50" in dict(src.comments)[51]
     assert out["52"]["outcome"] == "armed" and GOAL in src.store[52]["labels"]
 
 
