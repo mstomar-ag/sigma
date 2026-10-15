@@ -21,7 +21,7 @@
     "evidence": "tests/test_b6_461.py (events nodes) and tests/test_ledger_prune.py; measurements, ownership and recovery in docs/launch/retention-event-time-ledger.md"
   },
   {
-    "pattern": ".sdlc/events/<value>-<value>.<value>.jsonl",
+    "pattern": ".sdlc/events/<value>-<alias>.<value>.jsonl",
     "issue": "#461",
     "decision": "capped",
     "pruner_or_cap": "ledger.prune_journal: deletes journal files idle 30 days, from the first ledger.append of each process, at most once per 24h; age-based, not size-based; never the writing process's own file",
@@ -49,7 +49,7 @@
     "evidence": "tests/test_b6_461.py (unbounded node, red when a sweep reaches ledger/entries or the legacy ledger/events); decision, ceiling and who can reclaim in docs/launch/retention-event-time-ledger.md"
   },
   {
-    "pattern": ".sdlc/ledger/<stream>/<value>-<value>.<value>.jsonl",
+    "pattern": ".sdlc/ledger/<stream>/<value>-<alias>.<value>.jsonl",
     "issue": "#461",
     "decision": "intentionally unbounded (entries stream); the events half of <stream> is capped by ledger.prune_journal",
     "pruner_or_cap": "none by decision: git-tracked on the ops branch, a sweep would stage deletions in a teammate's pull; ceiling and reclaim owner in the evidence doc",

@@ -1642,6 +1642,37 @@ def _list(run, gh_cfg, fields, labels, state="open", cap=200, sort="created", re
         return None
 
 
+def _mis_kinded_hardstop_parks(cfg, gh_cfg, run, cap=20):
+    """#1498: open parked issues whose title or body matches the filing deny-list (a hard stop) but whose
+    declared kind is not a hard-stop kind. -> a list of issue numbers (empty = none), or None when the
+    read could not be made. READ-ONLY; cost: one list read plus one issue read per deny-list match, at
+    most `cap` of them."""
+    try:
+        sources = _load_loop_script("sources")
+        ft = _load_loop_script("file_triage")
+        hs = _load_loop_script("hard_stop")
+        qk = _load_loop_script("qkind")
+        src = sources.GitHubSource(cfg, run=_raising_gh(run))    # sources' runner takes no binary
+        label = src.parked_label
+        rows = _list(run, gh_cfg, ["number", "title", "body"], [label], cap=100)
+        if rows is None:
+            return None
+        found = []
+        for it in rows:
+            d = ft.decide(it.get("title") or "", it.get("body") or "", {}, {})
+            if d.kind != "park" or not d.matched:
+                continue
+            data = src._read_issue(it["number"], ["number", "comments", "state"])
+            kind = qk.resolve(data.get("comments") or [], goal=it["number"])
+            if not hs.is_hardstop_kind(kind, None, cfg) and not qk.resolve_hardstop(data.get("comments") or []):
+                found.append(it["number"])
+            if len(found) >= cap:
+                break
+        return found
+    except Exception:
+        return None
+
+
 def _dependency_marker_scan(gh_cfg, bchk_cfg, run):
     """An issue with a comment matching `backlog_check._BLOCK_RE` ("blocked by #N" / "depends on #N"
     / ...) but NO matching marker in its own body is likely a human-authored dependency, left via the
@@ -3002,6 +3033,14 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                 "every open unit's landing PR is CI-verifiable (not conflicted with zero checks)",
                 landing is None, landing))
 
+            # #1498: a park the filing deny-list would stop, declared as an ordinary kind. Warn only; no write.
+            mk = _mis_kinded_hardstop_parks(cfg, gh_disc, run)
+            if mk:
+                out.append(_chk("deny-list parks are declared a hard-stop kind", False,
+                                "parked issue(s) match the filing deny-list but are not declared a hard-stop kind: #"
+                                + ", #".join(str(n) for n in mk[:10])
+                                + " -- run `unpark.py declare .sdlc <issue> irreversible`."))
+
             # #389: NOT gated on backlog_check.enabled (nor on the `project` block above) -- a repo with
             # backlog_check OFF has zero auto-skip happening at all, so this is arguably more useful
             # there (a nudge toward turning it on); a repo with it ON benefits from catching the exact
@@ -3279,6 +3318,20 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                         "run /sigma-ledger — one command joins the existing ops branch, seeds your file + TEAM.md, and pushes"
                         if joins else
                         "run /sigma-ledger — one command creates the ops branch, seeds your file + TEAM.md, and pushes"))
+
+    # #1514: a published entry file named for the raw machine name tells a public repository's readers
+    # who works there. Local read of the already-fetched ledger worktree, bounded; one REST read of
+    # visibility only when a raw name was actually found.
+    if _block(cfg, "ledger").get("enabled") is True:
+        raw = _raw_host_entry_files(base, cfg)
+        if raw:
+            real = _real_repo_public(cfg, run, base) if run is not None else None
+            if real is None:
+                real = _load_loop_script("rulebook_cfg").visibility(cfg) == "public"
+            out.append(_chk("ledger entries carry no raw host name", not real,
+                            "%d published ledger entry file(s) on a public repository carry a raw host name "
+                            "(e.g. %s); set ledger.host_alias in .sdlc/config.json, then remove those files "
+                            "from the ledger branch" % (len(raw), raw[0])))
 
     # #2698: the same shape one channel over. Knowledge-graph analysis notes share an ops branch
     # only once `.sdlc/knowledge/analysis` is a worktree; until then `loop.py record` says so on
@@ -5242,6 +5295,33 @@ def _model_max_tier(cfg):
 
 
 _STALE_RULEBOOK_KEY = "`decision_rubric` was renamed `rulebook`; it is not read"
+
+
+LEDGER_RAW_HOST_SCAN_MAX = 500
+
+
+def _raw_host_entry_files(base, cfg):
+    """#1514: names of ledger entry files whose host part is neither an 8-hex hash, the configured
+    `ledger.host_alias`, nor a bare pid (the oldest shape). Reads file NAMES under the local ledger
+    worktree only, at most LEDGER_RAW_HOST_SCAN_MAX of them; never raises."""
+    try:
+        alias = _block(cfg, "ledger").get("host_alias")
+        alias = "".join(c for c in alias.lower() if c.isascii() and c.isalnum())[:12] if isinstance(alias, str) else ""
+        found = []
+        for i, p in enumerate(sorted((pathlib.Path(base) / "ledger" / "entries").glob("*.jsonl"))):
+            if i >= LEDGER_RAW_HOST_SCAN_MAX:
+                break
+            stem = p.name[:-len(".jsonl")]
+            _actor, dash, instance = stem.rpartition("-")
+            host, dot, pid = instance.rpartition(".")
+            if not (dash and dot and host and pid.isdigit()):
+                continue
+            if re.fullmatch(r"[0-9a-f]{8}", host) or (alias and host == alias):
+                continue
+            found.append(p.name)
+        return found
+    except Exception:
+        return []
 
 
 def _real_repo_slug(cfg, run, sdlc_dir):

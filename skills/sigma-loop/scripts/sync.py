@@ -1119,7 +1119,7 @@ def _settle_ledger(git, sdlc_dir, path, backup, stamp, who):
     file makes every later `git rebase` refuse), and no file stays where `unpublished()` counts it,
     `read_all()` reads it, and TEAM.md renders it. IDEMPOTENT: it recomputes everything from the
     worktree, so `_resume_reroot` can run it again after a failure part-way through."""
-    host, notes = ledger._host_token(), []
+    host, notes = ledger._host_token(ledger._config_for(sdlc_dir)), []
     loose = [p for p in git(path, ["ls-files", "--others", "-z", "--", ledger.ENTRIES]).split("\0")
              if p.endswith(".jsonl")]
     changed = [p for p in git(path, ["diff", "--name-only", "-z", "--", ledger.ENTRIES]).split("\0")
@@ -1220,7 +1220,7 @@ def _reroot(git, sdlc_dir, ch, who=None):
     git(path, ["update-ref", backup, old_tip])
     for stale in _pending(sdlc_dir, ch.name):
         stale.unlink()                          # superseded: HEAD never left the old branch
-    host = ledger._host_token()
+    host = ledger._host_token(ledger._config_for(sdlc_dir))
     checkout, appended = [], 0
     for rel in [p for p in git(path, ["ls-tree", "-r", "-z", "--name-only", tracking]).split("\0") if p]:
         mine = (rel.endswith(".md") if ch.name == KNOWLEDGE
