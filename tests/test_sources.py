@@ -1558,7 +1558,7 @@ def _raises_gh_api_error(gh, text="x"):
 
 def test_note_first_attempt_is_the_rest_post(monkeypatch):
     gh, calls = _note_world(monkeypatch, lambda n: json.dumps({"id": 1}))
-    assert gh.note("5", "goal-review: REJECTED") is True
+    assert gh.note("5", "goal-review: REJECTED") is None
     assert len(_posts(calls)) == 1 and _posts(calls)[0][1] == "repos/o/r/issues/5/comments"
     assert "body=goal-review: REJECTED" in _posts(calls)[0]
     assert _graphql_comments(calls) == []
@@ -1593,7 +1593,7 @@ def test_note_primary_rate_limit_makes_exactly_one_fallback(monkeypatch):
     def limited(n):
         raise _hinted("gh api failed", "gh: API rate limit exceeded (HTTP 429)")
     gh, calls = _note_world(monkeypatch, limited, fallback=lambda n: "")
-    assert gh.note("5", "x") is True
+    assert gh.note("5", "x") is None
     assert len(_posts(calls)) == 1 and len(_graphql_comments(calls)) == 1
     # the policy fallback itself failing 5xx is raised: no second POST, no second fallback
     def bad(n):
@@ -1626,7 +1626,7 @@ def test_note_5xx_retries_rest_only_up_to_the_cap_then_raises(monkeypatch):
             raise _hinted("gh api failed", "gh: Server Error (HTTP 502)")
         return json.dumps({"id": 2})
     gh, calls = _note_world(monkeypatch, flaky)
-    assert gh.note("5", "x") is True
+    assert gh.note("5", "x") is None
     assert len(_posts(calls)) == 2 and _graphql_comments(calls) == []
 
 
