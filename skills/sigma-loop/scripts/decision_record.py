@@ -52,12 +52,13 @@ REPO_AREA = "repo"
 
 
 def area_of(labels):
-    """The first `area:<x>` label's `<x>`, else `repo`. Labels may be names or `{"name": ...}`."""
+    """The first `area:<x>` label's `<x>` in sorted order, else `repo`. Labels may be names or `{"name": ...}`."""
+    found = []
     for label in (labels or []):
         name = label.get("name") if isinstance(label, dict) else label
         if isinstance(name, str) and name.startswith("area:") and name[5:].strip():
-            return name[5:].strip()
-    return REPO_AREA
+            found.append(name[5:].strip())
+    return sorted(found)[0] if found else REPO_AREA
 
 
 def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None, answer=None,
