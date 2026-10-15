@@ -84,6 +84,9 @@ def test_applier_leaves_due_rule_pending_then_applies_after_reconfirm(tmp_path, 
     assert ask["state"] == "pending" and ask.get("answer") is None
     # an owner reconfirms (stamped at the tick's clock), the next tick may apply
     RB.approve(sd, rid, "boss", cfg, now=late)
+    # #1496: a rule applies on comparisons recorded since its confirmation, so reconfirming starts that count anew
+    for _ in range(8):
+        AU.record_watch(sd, "merge_conflict", "docs", "rebase it", "rebase it", cfg, now=late, machine="m1")
     acts = AP.tick(sd, cfg, late + 61 * MIN, source=src)
     assert [(a["kind"], a["result"]) for a in acts] == [("unpark", "done")]
 

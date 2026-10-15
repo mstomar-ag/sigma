@@ -341,7 +341,7 @@ def main(argv=None):
     ls = sub.add_parser("list", help="learned patterns at level 2 or more")
     ls.add_argument("sdlc_dir")
     ls.add_argument("--why", action="store_true", help="also say why each other pair was skipped")
-    sub.add_parser("due", help="approved rules due for re-asking, with how often they were accepted"
+    sub.add_parser("due", help="approved rules due for re-asking, with age and how often they were accepted"
                    ).add_argument("sdlc_dir")
     d = sub.add_parser("draft", help="propose a rule for one pair (never approves)")
     d.add_argument("sdlc_dir")
@@ -353,8 +353,6 @@ def main(argv=None):
     ap = sub.add_parser("approve", help="approve one proposed rule (owner only)")
     ap.add_argument("sdlc_dir")
     ap.add_argument("rule_id")
-    du = sub.add_parser("due", help="approved rules older than reask_days, with their age")
-    du.add_argument("sdlc_dir")
     for name, hp in (("reconfirm", "re-stamp one approved rule (owner only)"),
                      ("retire", "remove one rule (owner only)"),
                      ("reject", "remove one proposed rule (owner only)")):
@@ -382,12 +380,11 @@ def main(argv=None):
                 print("skipped %s / %s: %s" % (row["qkind"], row["area"], row["why"]))
         return 0
     if args.verb == "due":
-        for line in due_lines(args.sdlc_dir, config):
-            print(line)
-        return 0
-    if args.verb == "due":
+        lines = {ln.split(":", 1)[0]: ln for ln in due_lines(args.sdlc_dir, config)}
         for rid, age in due(args.sdlc_dir, config):
-            print("%s: %s" % (rid, "confirmation unreadable" if age is None else "%d days since confirmed" % age))
+            note = "confirmation unreadable" if age is None else "%d days since confirmed" % age
+            base = lines.get("rule %s" % rid)
+            print("%s (%s)" % (base, note) if base else "%s: %s" % (rid, note))
         return 0
     if args.verb in ("reconfirm", "retire", "reject"):
         ok, line = (reconfirm(args.sdlc_dir, args.rule_id, config) if args.verb == "reconfirm"
