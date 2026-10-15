@@ -204,3 +204,64 @@ def test_timeout_shaped_call_stores_nothing_and_judges_again(tmp_path):
     assert ds.get(sdlc, 7, "Upload logs?") is None
     again = _run(sdlc, cfg, Fake(kind="consistent"))
     assert again["verdict"] == "consistent"
+
+
+def test_first_document_exceeds_limit_second_is_clipped_out(tmp_path):
+    (tmp_path / "second.md").write_text("SECOND-DOC-BODY", encoding="utf-8")
+    sdlc, cfg = _setup(tmp_path, docs=("vision.md", "second.md"), max_total_chars=10)
+    f = Fake()
+    r = _run(sdlc, cfg, f)
+    assert r["documents_read"] == ["vision.md"] and r["documents_clipped_out"] == ["second.md"]
+    assert r["documents_truncated"] == [{"name": "vision.md", "chars_sent": 10, "chars_total": len(TEXT)}]
+    assert "second.md" not in f.calls[0] and f.calls[0].count("<<DOC") == 1
+
+
+def test_all_documents_fit_record_unchanged(tmp_path):
+    (tmp_path / "second.md").write_text("SECOND", encoding="utf-8")
+    sdlc, cfg = _setup(tmp_path, docs=("vision.md", "second.md"))
+    f = Fake()
+    r = _run(sdlc, cfg, f)
+    assert r["documents_read"] == ["vision.md", "second.md"]
+    assert r["documents_truncated"] == [] and r["documents_clipped_out"] == []
+    assert TEXT in f.calls[0] and "SECOND" in f.calls[0]
+
+
+def test_prompt_never_emits_empty_doc_block():
+    dj = _mod("drift_judge")
+    p = dj._prompt("q?", [("a.md", "text"), ("b.md", "")], "N")
+    assert "a.md" in p and "b.md" not in p
+
+
+def test_park_path_records_clipped_documents(tmp_path):
+    (tmp_path / "second.md").write_text("SECOND-DOC-BODY", encoding="utf-8")
+    sdlc, cfg = _setup(tmp_path, docs=("vision.md", "second.md"), max_total_chars=10)
+    f = Fake()
+    real = _loop()._load
+    loop = _loop()
+    loop._load = lambda n: ds if n == "drift_shadow" else real(n)
+    orig = ds.default_call
+    ds.default_call = f
+    try:
+        src = type("S", (), {"park": lambda self, g, t: None})()
+        loop._record(str(sdlc), src, "7", "parked", "why", qkind="needs_decision", config=cfg)
+    finally:
+        ds.default_call = orig
+    rec = ds.get(sdlc, "7", "why")
+    assert rec["documents_read"] == ["vision.md"] and rec["documents_clipped_out"] == ["second.md"]
+    assert "second.md" not in f.calls[0]
+
+
+def test_doctor_warns_when_documents_exceed_budget(tmp_path):
+    d = _mod_path("skills/sigma-doctor/scripts/doctor.py")
+    sdlc, cfg = _setup(tmp_path, max_total_chars=10)
+    assert "drift documents exceed max_total_chars" in d._rulebook_state(cfg, sdlc)
+    (tmp_path / "b").mkdir()
+    sdlc2, cfg2 = _setup(tmp_path / "b")
+    assert "drift documents exceed" not in d._rulebook_state(cfg2, sdlc2)
+
+
+def _mod_path(rel):
+    spec = importlib.util.spec_from_file_location("doctor_x", ROOT / rel)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m

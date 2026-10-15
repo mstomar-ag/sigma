@@ -583,6 +583,35 @@ def patch_id(run, cwd, sha):
     return (out.split() or [""])[0]
 
 
+def rewrite_key(run, cwd, sha):
+    """The rewrite-stable key of a commit that has NO patch-id (a merge, an empty commit), else "" (#1470).
+
+    A hash of author name/email, author date, the raw message and the parent count: `rebase --rebase-merges` and
+    `pick` keep all of these and change only the committer, so the re-created commit carries the same key under a new
+    sha. For a merge the patch-id of `git show --remerge-diff` is folded in too, so an evil merge is told apart from a
+    clean one; a git without that option simply leaves it out of BOTH sides of the comparison."""
+    import hashlib
+    if patch_id(run, cwd, sha):
+        return ""
+    try:
+        head = run(cwd, ["git", "show", "-s", "--date=raw", "--format=%an%x00%ae%x00%ad%x00%P%x00%B", sha])
+        name, mail, date, parents, body = str(head or "").split("\x00", 4)
+    except Exception:                     # noqa: BLE001 - no key is "not acked", never a crash
+        return ""
+    remerge = ""
+    if len(parents.split()) > 1:
+        try:
+            import subprocess
+            diff = run(cwd, ["git", "show", "--remerge-diff", "--format=", sha])
+            remerge = subprocess.run(["git", "patch-id", "--stable"], input=str(diff or ""), cwd=cwd,
+                                     capture_output=True, text=True, check=True).stdout.split()[0:1]
+            remerge = remerge[0] if remerge else ""
+        except Exception:                 # noqa: BLE001
+            remerge = ""
+    material = "\x00".join([name, mail, date, str(len(parents.split())), body, remerge])
+    return hashlib.sha256(material.encode("utf-8", "replace")).hexdigest()
+
+
 def _read_acks(text):
     try:
         data = json.loads(text)
@@ -606,18 +635,13 @@ def _runtime_acks(sdlc_dir, unit):
         return []
 
 
-def _acked(sdlc_dir, run, cwd, unit, integration_ref, config=None):
-    """Every ack for `unit` -> `(patch_ids, shas)`: the local file UNION the copy on the remote
-    integration branch. Never raises; anything unreadable contributes nothing, so a broken store
-    fails towards REFUSING, which costs a pass and never data.
-
-    #1017/#1086: both runtime files (`state/upkeep/acks.json` and the per-unit `state/rebase-acks/` one; written only under the upkeep opt-in) are read only while that gate is open when a `config`
-    is given, so a file left behind after the gate was closed again is ignored. `config=None` keeps the old reading."""
+def _acked_entries(sdlc_dir, run, cwd, unit, integration_ref, config=None):
+    """Every ack entry for `unit` (local file, runtime files, remote copy). Never raises; see `_acked`."""
     entries = []
     try:
         path = ack_path(sdlc_dir, unit)
     except ValueError:
-        return set(), set()
+        return entries
     try:
         entries += _read_acks(path.read_text(encoding="utf-8"))
     except OSError:
@@ -637,6 +661,23 @@ def _acked(sdlc_dir, run, cwd, unit, integration_ref, config=None):
             entries += _read_acks(run(cwd, ["git", "show", "%s:%s" % (integration_ref, rel)]))
         except Exception:                 # noqa: BLE001 - not on the integration branch yet
             pass
+    return entries
+
+
+def _acked_keys(sdlc_dir, run, cwd, unit, integration_ref, config=None):
+    """The `rewrite_key`s of the acks for `unit` -> set (#1470); the third answer beside `_acked`'s two."""
+    return {str(e.get("rewrite_key")) for e in
+            _acked_entries(sdlc_dir, run, cwd, unit, integration_ref, config) if e.get("rewrite_key")}
+
+
+def _acked(sdlc_dir, run, cwd, unit, integration_ref, config=None):
+    """Every ack for `unit` -> `(patch_ids, shas)`: the local file UNION the copy on the remote
+    integration branch. Never raises; anything unreadable contributes nothing, so a broken store
+    fails towards REFUSING, which costs a pass and never data.
+
+    #1017/#1086: both runtime files (`state/upkeep/acks.json` and the per-unit `state/rebase-acks/` one; written only under the upkeep opt-in) are read only while that gate is open when a `config`
+    is given, so a file left behind after the gate was closed again is ignored. `config=None` keeps the old reading."""
+    entries = _acked_entries(sdlc_dir, run, cwd, unit, integration_ref, config)
     return ({str(e.get("patch_id")) for e in entries if e.get("patch_id")},
             {str(e.get("sha")) for e in entries if e.get("sha")})
 
@@ -646,12 +687,14 @@ def _unacked(sdlc_dir, run, cwd, unit, integration_ref, found, config=None):
     if not found:
         return found, []
     pids, shas = _acked(sdlc_dir, run, cwd, unit, integration_ref, config)
-    if not pids and not shas:
+    keys = _acked_keys(sdlc_dir, run, cwd, unit, integration_ref, config)
+    if not pids and not shas and not keys:
         return found, []
     still, acked = [], []
     for d in found:
-        pid = patch_id(run, cwd, d["sha"]) if pids else ""
-        (acked if (d["sha"] in shas or (pid and pid in pids)) else still).append(d)
+        pid = patch_id(run, cwd, d["sha"]) if (pids or keys) else ""
+        key = rewrite_key(run, cwd, d["sha"]) if (keys and not pid) else ""
+        (acked if (d["sha"] in shas or (pid and pid in pids) or (key and key in keys)) else still).append(d)
     return still, acked
 
 
@@ -713,8 +756,10 @@ def ack(sdlc_dir, config, unit, shas, all_=False, run=None, cwd=None, remote=Non
     have = {e.get("sha") for e in entries}
     for d in chosen:
         if d["sha"] not in have:
-            entries.append({"sha": d["sha"], "patch_id": patch_id(run, cwd, d["sha"]),
-                            "subject": d["subject"]})
+            entry = {"sha": d["sha"], "patch_id": patch_id(run, cwd, d["sha"]), "subject": d["subject"]}
+            if not entry["patch_id"]:     # #1470: a merge / empty commit is matched by its rewrite-stable key
+                entry["rewrite_key"] = rewrite_key(run, cwd, d["sha"])
+            entries.append(entry)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"unit": unit, "branch": branch, "acked": entries},
@@ -2114,7 +2159,8 @@ def _direct_body(unit, branch, base, found):
         "  (`--all` in place of the shas acks every commit listed above.) It writes "
         "`.sdlc/features/rebase-acks/%s.json`; land that file on `%s` through a pull request so "
         "every teammate's loop honours it. The ack is keyed by patch-id, so it survives the "
-        "rebase it unblocks.\n\n"
+        "rebase it unblocks; a merge or empty commit has no patch-id and is keyed by author, author date, "
+        "message and parent count instead.\n\n"
         "Until then `%s` stays behind `%s`.\n\n"
         "Filed by Sigma's rebase upkeep for unit `%s`.\n"
         % (branch, len(found), listed, branch, unit, unit, base, branch, base, unit))
@@ -2720,12 +2766,46 @@ def _acks_well_formed(text):
     return isinstance(data, dict) and isinstance(data.get("acked"), list)
 
 
-def _write_runtime_acks(sdlc_dir, run, cwd, unit, report):
-    """After a resolved push only: for each (original, replayed) pair whose original was acked, ack the replayed sha and
-    its patch-id in the RUNTIME file. The tracked store is not touched and the stamp is not read."""
+def _clean_pairs(run, cwd, base_ref, report):
+    """(original, replay) pairs for the acked commits of a CLEAN rewrite (#1470): each acked original is matched to the
+    unclaimed commit on the new first-parent line with the same subject and the same patch-id (or, with none, the same
+    rewrite key). Unmatched originals are left out -- a missed carry costs one re-ack, never a wrong ack."""
+    after = report.get("after")
+    acked = [d for d in (report.get("acked") or []) if isinstance(d, dict) and d.get("sha")]
+    if not (after and acked):
+        return []
+    return pair_acked(run, cwd, acked, landed_commits(run, cwd, base_ref, after))
+
+
+def pair_acked(run, cwd, acked, replayed):
+    """[(old_sha, new_sha)]: each acked `{"sha","subject"}` matched to the first unclaimed `(sha, subject)` of `replayed`
+    with the same subject and the same (patch-id, rewrite key). Shared by the rebase pass and the unit pass (#1470)."""
+    pairs, used = [], set()
+    for old in acked:
+        want = (patch_id(run, cwd, old["sha"]), rewrite_key(run, cwd, old["sha"]))
+        for sha, subject in replayed:
+            if sha in used or subject != old.get("subject"):
+                continue
+            if (patch_id(run, cwd, sha), rewrite_key(run, cwd, sha)) == want:
+                used.add(sha)
+                pairs.append((old["sha"], sha))
+                break
+    return pairs
+
+
+def _write_runtime_acks(sdlc_dir, run, cwd, unit, report, pairs=None):
+    """After a push that LANDED: for each (original, replayed) pair whose original was acked, ack the replayed sha, its
+    patch-id and (#1470) its rewrite key in the RUNTIME file. `pairs` defaults to the resolved replay's; a clean rewrite
+    passes its own. The tracked store is not touched and the stamp is not read."""
     acked = {str(d.get("sha")) for d in (report.get("acked") or []) if isinstance(d, dict)}
-    fresh = [{"sha": new, "patch_id": patch_id(run, cwd, new), "subject": "resolved replay of " + old[:12]}
-             for old, new in report["resolved"]["pairs"] if old in acked]
+    fresh = []
+    for old, new in (report["resolved"]["pairs"] if pairs is None else pairs):
+        if old in acked:
+            entry = {"sha": new, "patch_id": patch_id(run, cwd, new),
+                     "subject": "replay of " + old[:12]}
+            if not entry["patch_id"]:
+                entry["rewrite_key"] = rewrite_key(run, cwd, new)
+            fresh.append(entry)
     path = runtime_ack_path(sdlc_dir, unit)
     try:
         text = path.read_text(encoding="utf-8")
@@ -2878,6 +2958,11 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
     _clear_blocked(sdlc_dir, unit)
     if report.get("resolved"):
         _after_resolved_push(sdlc_dir, config, run, cwd, remote, base_ref, report)
+    elif report.get("acked"):             # #1470: a clean rewrite carries the acks forward too (defence in depth)
+        try:
+            _write_runtime_acks(sdlc_dir, run, cwd, unit, report, _clean_pairs(run, cwd, base_ref, report))
+        except Exception as exc:          # noqa: BLE001 - the push cannot be undone; the rewrite key still matches
+            _note("sigma: rebase upkeep: the acks of the replayed commits were not recorded (%s).\n" % _flat(exc))
     _settle_parks(sdlc_dir, config, run, cwd, remote, report)
 
     entry = registry.read(registry.registry_dir(sdlc_dir)).get(unit) or {}

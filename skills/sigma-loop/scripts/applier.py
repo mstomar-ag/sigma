@@ -25,6 +25,7 @@ SCALE: one file per open or recent ask, read by one listing per tick; applied or
 than a day are pruned by embedded time. The apply loop is serial and bounded by the daily cap.
 No model call, no network except the two gestures through the injected source.
 """
+import contextlib
 import datetime
 import importlib.util
 import json
@@ -48,8 +49,8 @@ DEFAULT_INTERVAL_SECONDS = 900
 GESTURES = ("unpark", "promote", "keep-parked")
 
 
-def option_gesture(option):
-    """The gesture a rule's option text means: `keep-parked` when it reads as leaving the issue
+def _text_gesture(option):
+    """Legacy text reading (kept for callers with no bank). The gesture a rule's option text means: `keep-parked` when it reads as leaving the issue
     parked (a leading no/don't, or keep/leave/stay/remain/hold with 'park'), else `unpark`
     (unknown text keeps the old meaning)."""
     t = option.lower().replace("'", "").strip() if isinstance(option, str) else ""
@@ -61,6 +62,16 @@ def option_gesture(option):
     if "park" in t and "unpark" not in t and any(w in words for w in ("keep", "leave", "stay", "remain", "hold")):
         return "keep-parked"
     return "unpark"
+def option_gesture(kind, option):
+    """What the question bank says an option of `kind` means: `unpark`, `keep-parked`, or `none` (the
+    rule only recommends and is never applied). None for text the bank does not list. Derived from the
+    bank, never stored in a rule, so a rule's seal does not depend on it (#1495)."""
+    try:
+        return _load("unpark").option_gestures(kind).get(option)
+    except Exception:
+        return None
+
+
 #: Set (process-wide, so a separately loaded copy of this module sees it) while `apply` runs its own
 #: gesture, so that gesture does not close the ask it is applying.
 _APPLYING_ENV = "SIGMA_APPLIER_APPLYING"
@@ -226,6 +237,8 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None):
             return None
         if _load("hard_stop").is_hardstop_kind(qkind_, None, config):
             return None
+        if qkind_ in ("unknown", "scope_hold", "owner_hold"):    # F-09 not learnable; F-02(5) gate holds
+            return None
         now = now or datetime.datetime.now(datetime.timezone.utc)
         for a in _asks(sdlc_dir):
             if a.get("state") == "pending" and _issue_key(a.get("issue")) == _issue_key(issue):
@@ -241,8 +254,10 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None):
         m = rb.match(qkind_, area, None, rb.load(sdlc_dir, config), config)
         if m is None:
             return None
-        return open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now,
-                        gesture=option_gesture(m.option))
+        gesture = option_gesture(qkind_, m.option)
+        if gesture not in GESTURES:                  # None: not a bank option; 'none': recommend only
+            return None
+        return open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now, gesture=gesture)
     except Exception:
         return None
 
@@ -294,6 +309,18 @@ def silent_allowed(qkind, config, rule=None):
         if _load("hard_stop").is_hardstop_kind(qkind, None, config):
             return False
         return _rule_is_approved(rule)
+    except Exception:
+        return False
+
+
+def _rule_has_own_support(sdlc_dir, qkind, area, rule, config):
+    """Level 3 and above apply a rule only when `l3_min_answers` live comparisons that chose the
+    rule's own option, recorded since it was confirmed, agree at `l3_agreement`."""
+    try:
+        au = _load("autonomy")
+        cfg = au._pair_settings(sdlc_dir, qkind, area, config)[0]
+        n, rate = au.rule_support(sdlc_dir, qkind, area, rule.get("option"), rule.get("confirmed"), config)
+        return n >= cfg["l3_min_answers"] and rate >= cfg["l3_agreement"]
     except Exception:
         return False
 
@@ -414,12 +441,31 @@ def _loud_text(m, qkind, config):
             "the window. Reply no to veto." % (m.rule_id, qkind, m.option))
 
 
+def _evidence_behind(sdlc_dir, config):
+    """A notice naming the evidence folders that are behind the default branch, or "" (current, or it
+    cannot be told). The tick acts on levels and vetoes read from these; stale copies could apply a rule
+    another machine has since vetoed, so it waits until they are pulled."""
+    try:
+        n, names = _load("decision_store").commits_differing(sdlc_dir, config, behind=True)
+    except Exception:
+        return ""
+    if not n:
+        return ""
+    return ("evidence behind the default branch: %d commit%s touching %s not here yet; pull before the "
+            "applier acts" % (n, "" if n == 1 else "s", ", ".join(names)))
+
+
 def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comments_fn=None,
          monotonic_fn=time.monotonic):
     """Plan, and unless `apply_actions` is false apply, one pass. Returns the actions (dicts with a
     `result` of would, done, failed or skipped). Closed gate: `[]`, nothing read, nothing written."""
     if not enabled(config):
         return []
+    behind = _evidence_behind(sdlc_dir, config)     # M-10: another machine's evidence is not here yet
+    if behind:
+        with contextlib.suppress(Exception):
+            _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT), {"time": now.isoformat()})
+        return [{"kind": "behind", "result": "skipped", "reason": behind}]
     started = monotonic_fn()    # #1390: each ask is stamped when its own gesture lands, not at tick start
     clock = lambda: now + datetime.timedelta(seconds=monotonic_fn() - started)  # noqa: E731
     actions = []
@@ -448,7 +494,7 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 continue
             if ask.get("state") != "pending" or ask.get("answer") is not None:
                 continue  # a person's answer wins; nothing else is pending
-            qkind, area = ask.get("qkind"), ask.get("area", "")
+            qkind, area = ask.get("qkind"), ask.get("area") or "repo"
             if not isinstance(qkind, str) or hs.is_hardstop_kind(qkind, None, config):
                 continue
             if window_open(ask, config, now) or used >= cap:
@@ -460,6 +506,8 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 continue
             rule = next((r for r in rules if r.get("id") == m.rule_id), None)
             level = _level(sdlc_dir, qkind, area, config)
+            if not _rule_has_own_support(sdlc_dir, qkind, area, rule, config):
+                continue    # #1496 M-04: a rule needs its own live comparisons, not its pair's older ones
             silent = False
             key = None
             if level >= 4 and silent_allowed(qkind, config, rule):
@@ -581,6 +629,15 @@ def apply(action, sdlc_dir, config, now, source=None, run=None, clock=None):
             if not all(r.get("outcome") == "promoted" for r in res.get("results", [])) or not res.get("results"):
                 return "failed"
         elif action["kind"] != "keep-parked":      # #1301: keep-parked touches no label and no card
+            if ask.get("qkind") in ("scope_hold", "owner_hold"):
+                return "skipped"                    # F-02(5): a gate hold needs the registry edit, never an unpark here
+            if ask.get("qkind") == "dependency":    # F-02(4): skip while a named blocker is still open
+                try:
+                    bf = _load("unpark").brief(sdlc_dir, config, issue, source=source, run=run)
+                except Exception:
+                    return "failed"
+                if any(b.get("open") for b in (bf.get("blockers") or [])):
+                    return "skipped"
             triage = _load("triage")
             add = [source.goal_label]
             remove = [source.parked_label, source.goal_blocked_label, source.in_progress_label]

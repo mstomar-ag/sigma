@@ -155,7 +155,7 @@ def test_second_run_with_a_stale_list_is_a_noop(tmp_path):
     assert len(src.writes) == before
 
 
-def test_open_blocker_issue_is_parked_not_armed(tmp_path):
+def test_open_blocker_issue_is_armed_not_parked(tmp_path):
     src = FakeSource()
     src.add(50, "sdlc:goal")                        # open blocker
     src.add(51, PROPOSED, "priority:P1", body="Blocked by: #50")
@@ -163,8 +163,9 @@ def test_open_blocker_issue_is_parked_not_armed(tmp_path):
     src.add(53, state="closed")
     rep = _run(src, apply=True, tmp=tmp_path)
     out = {i["number"]: i for i in rep["items"]}
-    assert out["51"]["outcome"] == "parked" and PARKED in src.store[51]["labels"]
-    assert GOAL not in src.store[51]["labels"] and "dependency" in dict(src.comments)[51]
+    # #1518: an open blocker arms (the pick-time hold waits on it); it is no longer a park
+    assert out["51"]["outcome"] == "armed" and GOAL in src.store[51]["labels"]
+    assert PARKED not in src.store[51]["labels"] and "held by #50" in dict(src.comments)[51]
     assert out["52"]["outcome"] == "armed" and GOAL in src.store[52]["labels"]
 
 
@@ -278,3 +279,64 @@ def test_limit_counts_only_open_issues(tmp_path):
     rep = promote.migrate(src, CFG, sdlc_dir=str(tmp_path), limit=2)
     opens = [i for i in rep["items"] if i["outcome"] != "closed"]
     assert len(opens) == 2 and [i["number"] for i in opens] == ["3", "4"]
+
+
+# #1473: upkeep findings are a report for a person; the migration parks them and never arms one.
+
+UPKEEP_MARKER = "<!-- sigma:upkeep-finding -->"
+CONFLICT = "`sdlc/9` could not be replayed onto `feature/x`.\n\nFiled by Sigma's rebase upkeep for unit `x`.\n"
+DIRECT = ("Direct commits on feature/x block rebase upkeep", "`feature/x` carries 2 commit(s) that no pull request "
+          "accounts for, so it was **not rebased**.\n\nFiled by Sigma's rebase upkeep for unit `x`.\n")
+
+
+def test_upkeep_marker_matches_handoff():
+    assert promote._UPKEEP_MARKER == _mod("handoff").UPKEEP_FINDING_MARKER == UPKEEP_MARKER
+
+
+def test_classify_upkeep_finding_by_marker_by_legacy_body_line_and_before_followup():
+    c = promote.classify_population
+    assert c({"labels": ["sdlc:followup"], "body": "x\n" + UPKEEP_MARKER, "comments": []}) == "upkeep_finding"
+    assert c({"labels": ["sdlc:followup"], "body": CONFLICT, "comments": []}) == "upkeep_finding"
+    assert c({"labels": ["sdlc:followup"], "body": "plain", "comments": []}) == "followup"
+    assert c({"labels": ["sdlc:followup"], "body": UPKEEP_MARKER, "comments": [promote._OWNER_MARKER]}) == "ownership_hold"
+
+
+def test_plan_for_parks_an_upkeep_finding_with_the_right_kind_and_never_arms():
+    conflict = {"title": "Rebase conflict: sdlc/9 onto feature/x", "body": CONFLICT + UPKEEP_MARKER,
+                "labels": ["sdlc:followup"], "comments": []}
+    p = promote.plan_for(conflict, CFG)
+    assert isinstance(p, promote.Park) and p.qkind == "merge_conflict"
+    direct = {"title": DIRECT[0], "body": DIRECT[1] + UPKEEP_MARKER, "labels": ["sdlc:followup"], "comments": []}
+    p = promote.plan_for(direct, CFG)
+    assert isinstance(p, promote.Park) and p.qkind == "needs_decision"
+
+
+def test_migrate_dry_run_and_apply_park_an_upkeep_finding_without_sdlc_goal():
+    src = FakeSource()
+    src.add(7, PROPOSED, "sdlc:followup", "priority:P1", title="Rebase conflict: sdlc/9 onto feature/x",
+            body=CONFLICT + UPKEEP_MARKER)
+    row = _run(src)["items"][0]
+    assert (row["population"], row["action"], row["outcome"]) == ("upkeep_finding", "park", "would-park")
+    assert src.writes == []
+    _run(src, apply=True)
+    assert GOAL not in src.store[7]["labels"] and PARKED in src.store[7]["labels"]
+    assert "merge_conflict" in src.comments[0][1]
+
+
+def test_cli_migrate_confirmation_parks_an_upkeep_finding_on_a_temp_repo(tmp_path, capsys):
+    """The real `promote.py migrate-confirmation --apply` entry point on a temp git repo with a fake source."""
+    import subprocess
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    sdlc = tmp_path / ".sdlc"
+    sdlc.mkdir()
+    (sdlc / "config.json").write_text("{}")
+    src = FakeSource()
+    src.add(7, PROPOSED, "sdlc:followup", "priority:P1", title="Rebase conflict: sdlc/9 onto feature/x",
+            body=CONFLICT + UPKEEP_MARKER)
+    src.add(8, PROPOSED, "sdlc:followup", "priority:P2", title="tidy the docs", body="cleanup of old text")
+    rc = promote.main(["promote.py", "migrate-confirmation", str(sdlc), "--apply"], source=src)
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert PARKED in src.store[7]["labels"] and GOAL not in src.store[7]["labels"]
+    assert "upkeep_finding" in out and "parked" in out
+    assert GOAL in src.store[8]["labels"]

@@ -59,21 +59,21 @@ def _sd(tmp_path):
     return str(tmp_path / ".sdlc")
 
 
-def _train(sd, cfg, qkind="needs_decision", area="docs", level=3):
+def _train(sd, cfg, qkind="merge_conflict", area="docs", level=3):
     n = 16 if level >= 4 else 8
     for _ in range(n):
-        DS.append(sd, {"how": "human", "qkind": qkind, "area": area, "choice": "merge"}, cfg)
-        AU.record_watch(sd, qkind, area, "merge", "merge", cfg, now=T0, machine="m1")
+        DS.append(sd, {"how": "human", "qkind": qkind, "area": area, "choice": "rebase it"}, cfg)
+        AU.record_watch(sd, qkind, area, "rebase it", "rebase it", cfg, now=T0, machine="m1")
 
 
-def _rule(sd, cfg, qkind="needs_decision", area="docs", option="merge"):
+def _rule(sd, cfg, qkind="merge_conflict", area="docs", option="rebase it"):
     RB.propose(sd, {"qkind": qkind, "area": area, "option": option, "reason": "low risk"}, cfg, now=T0)
     rid = RB.load(sd, cfg)[-1]["id"]
     RB.approve(sd, rid, "boss", cfg, now=T0)
     return rid
 
 
-def _setup(tmp_path, applier=None, level=3, qkind="needs_decision"):
+def _setup(tmp_path, applier=None, level=3, qkind="merge_conflict"):
     cfg = _cfg(applier)
     sd = _sd(tmp_path)
     _train(sd, cfg, qkind=qkind, level=level)
@@ -81,8 +81,8 @@ def _setup(tmp_path, applier=None, level=3, qkind="needs_decision"):
     return sd, cfg, rid
 
 
-def _ask(sd, cfg, issue=7, qkind="needs_decision", opened=T0):
-    return AP.open_ask(sd, issue, qkind, "docs", ["merge", "wait"], cfg, opened)
+def _ask(sd, cfg, issue=7, qkind="merge_conflict", opened=T0):
+    return AP.open_ask(sd, issue, qkind, "docs", ["rebase it", "start fresh"], cfg, opened)
 
 
 def test_window_not_elapsed_does_not_apply(tmp_path):
@@ -148,33 +148,33 @@ def test_no_after_window_is_a_veto(tmp_path):
     aid = _ask(sd, cfg)
     src = Src()
     AP.tick(sd, cfg, T0 + 61 * MIN, source=src)
-    before = AU.level(sd, "needs_decision", "docs", cfg)
+    before = AU.level(sd, "merge_conflict", "docs", cfg)
     assert before == 3
     assert AP.answer(sd, aid, "no", cfg, T0 + 70 * MIN) == "veto-pending"
     acts = AP.tick(sd, cfg, T0 + 71 * MIN, source=src)
     assert [(a["kind"], a["result"]) for a in acts] == [("veto", "done")]
-    assert AU.level(sd, "needs_decision", "docs", cfg) == before - 1
+    assert AU.level(sd, "merge_conflict", "docs", cfg) == before - 1
     assert AP.tick(sd, cfg, T0 + 72 * MIN, source=src) == []  # logged once
 
 
 def test_level_four_needs_allow_silent(tmp_path):
     sd, cfg, _ = _setup(tmp_path, level=4)
-    assert AU.level(sd, "needs_decision", "docs", cfg) == 4
+    assert AU.level(sd, "merge_conflict", "docs", cfg) == 4
     _ask(sd, cfg)
     src = Src()
     AP.tick(sd, cfg, T0 + 61 * MIN, source=src)
     assert len(src.notes) == 1  # no allow_silent key: never silent
     # the same level with the kind allowed is silent (the rule is an approved sealed rule)
-    sd2, cfg2, _ = _setup(tmp_path / "b", {"allow_silent": ["needs_decision"]}, level=4)
+    sd2, cfg2, _ = _setup(tmp_path / "b", {"allow_silent": ["merge_conflict"]}, level=4)
     _ask(sd2, cfg2)
     src2 = Src()
     acts = AP.tick(sd2, cfg2, T0 + 61 * MIN, source=src2)
     assert acts[0]["silent"] is True and src2.notes == [] and len(src2.swaps) == 1
-    assert AP.silent_allowed("needs_decision", cfg2, {"status": "proposed"}) is False
+    assert AP.silent_allowed("merge_conflict", cfg2, {"status": "proposed"}) is False
 
 
 def test_spot_check_still_tells(tmp_path):
-    sd, cfg, _ = _setup(tmp_path, {"allow_silent": ["needs_decision"], "spot_check_one_in": 1}, level=4)
+    sd, cfg, _ = _setup(tmp_path, {"allow_silent": ["merge_conflict"], "spot_check_one_in": 1}, level=4)
     _ask(sd, cfg)
     src = Src()
     AP.tick(sd, cfg, T0 + 61 * MIN, source=src)
@@ -185,7 +185,7 @@ def test_hard_stop_kind_never_reaches_the_tick(tmp_path):
     # the rulebook's own matcher only knows the default hard-stop kind, so a CONFIGURED hard-stop kind
     # (and a forced top level) must be stopped by the tick itself
     sd, cfg, _ = _setup(tmp_path)
-    cfg["rulebook"]["hard_stops"] = {"hardstop_kinds": ["needs_decision"]}
+    cfg["rulebook"]["hard_stops"] = {"hardstop_kinds": ["merge_conflict"]}
     _ask(sd, cfg)
     AP.level_fn = lambda *a: 4
     try:

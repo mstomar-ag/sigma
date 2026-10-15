@@ -153,6 +153,8 @@ each named blocker is classified and acted on:
 | parked | left alone — a park is human-owned; `/sigma-unpark` is the route |
 | a plain third-party issue | surfaced, never adopted — it was never Sigma's to work |
 
+With hard stops on, a hand-typed blocker on a third-party issue is reported on stderr ("not raised: not a Sigma issue"), not raised.
+
 Promoting Sigma's own follow-up does not bypass triage: the deny-list still applies, and an issue
 that real, already-approved work is stalled behind is by definition not speculative. The label pair
 is decisive: `sdlc:followup` means Sigma filed it, the legacy `sdlc:needs-confirmation` means **no
@@ -397,7 +399,10 @@ strict filing order still gets it.
 **A blocker is never ranked below what it blocks.** Whenever one issue blocks another, the blocker's
 priority is at least the priority of what it blocks: a lower-priority blocker is raised to match when
 the blocked and blocking marks are assigned, and again whenever the reconcile tick finds the graph
-changed. Nothing is ever lowered. It is on by default, with no config key to set.
+changed. Nothing is ever lowered. It is on by default, with no config key to set. Edges are read only
+from `Blocked by:` / `depends on` / `depends upon` markers (text inside an unpark Q&A block is ignored)
+and ledger hand-offs. Prose such as "after #N lands" or "needs #N" never writes; it is reported on
+stderr as ignored, and writing `Blocked by: #N` makes it count.
 
 Worked cases:
 
@@ -425,9 +430,12 @@ and the board field write is skipped when the GraphQL budget is low; the label w
    confirmation label from the open blocker.
 3. The board pass re-evaluates every open `sdlc:goal` issue on each board touch.
 4. The reconcile tick repairs what the first three missed, for example a blocker typed by hand as
-   `Blocked by #N`. It also removes the blocking mark from a closed blocker or one that blocks nothing.
+   `Blocked by: #N`. It also removes the blocking mark from a closed blocker or one that blocks nothing.
    Cycles are handled: every member of a blocking cycle that transitively blocks something more urgent is
    raised, whichever member the walk enters through, and the cycle is reported once.
+   Whole-body scans here use only the explicit phrases (blocked by, depends on, depends upon), so prose such as
+   "after #N" makes no edge. A blocker that is merged, closed or a pull request is never written to, and the dry
+   pass writes nothing. At most 10 outside blockers are read per pass; the rest are reported on stderr, not dropped.
 
 **Picker order.** With `discovery.order` at `"priority"` and `discovery.blocking_priority_override` on (the
 default), the picker orders by priority tier first, then a goal that also carries `sdlc:blocking` ahead of

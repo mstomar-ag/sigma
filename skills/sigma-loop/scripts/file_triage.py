@@ -33,6 +33,14 @@ DEFAULT_DENY_WORDS = ("irreversible", "force push", "production data", "drop tab
                       "private key", "credentials")
 DEFAULT_SPEND_PHRASES = ("paid run", "rent a GPU", "new vendor", "paid API", "cloud GPU benchmark")
 _PRIO = re.compile(r"P[0-4]")
+_FENCE = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
+_NUMWORD = (r"(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty"
+            r"|ninety|hundred|thousand)")
+_AMOUNT = (r"(?:(?:\$|US\$|USD\s?)\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\b|\b\d[\d,]*(?:\.\d+)?\s*(?:dollars?|USD|bucks)\b"
+           r"|\b" + _NUMWORD + r"(?:[- ]" + _NUMWORD + r")*\s+(?:dollars?|bucks)\b)")
+_COMPUTE = r"\b(?:GPUs?|instances?|clusters?|credits|compute|pods?|cloud|runs?|nodes?)\b"
+_AMOUNT_FOR_COMPUTE = re.compile(_AMOUNT + r"[^.\n]{0,60}" + _COMPUTE + "|" + _COMPUTE + r"[^.\n]{0,60}" + _AMOUNT,
+                                 re.IGNORECASE)
 _SECRET = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:token|secret|password|api[_-]?key)\s*[:=]\s*\S{8,}",
                      re.IGNORECASE)
 _URGENT = re.compile(r"\b(unsafe|vulnerab\w*|exploit\w*|data corrupt\w*|deadlock\w*|every run|silently wrong)\b",
@@ -111,6 +119,8 @@ def _deny(title, body, blk):
     for ph in phrases:
         if ph.strip() and re.search(r"\b" + r"\s+".join(map(re.escape, ph.split())) + r"\b", text, re.IGNORECASE):
             return "spend phrase: " + ph
+    if phrases and _AMOUNT_FOR_COMPUTE.search(_FENCE.sub(" ", text)):
+        return "spend phrase: money amount for compute"
     if _SECRET.search(text):
         return "secret-shaped text"
     res = _load("hard_stop").classify(text, {}, {"hard_stops": {"enabled": True}})

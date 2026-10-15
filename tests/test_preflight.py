@@ -144,7 +144,8 @@ def test_git_repo_without_a_commit():
 
 
 def test_gh_auth_line_mentions_pushing_still_works():
-    answers = [(("gh", "auth", "status"), (1, "You are not logged into any GitHub hosts."))] + healthy()
+    answers = [(("gh", "auth", "status"), (1, "You are not logged into any GitHub hosts.")),
+               (("gh", "api", "user"), (1, "HTTP 401"))] + healthy()
     c = by_id(pf.preflight("/r", WORK_ON, runner=fake(answers), which=has({"git", "gh"})))
     assert "pushing works without" in c["gh-auth"]["meanwhile"]
 
@@ -229,7 +230,8 @@ def test_ls_remote_failure_is_cannot_verify():
 
 
 def test_gh_logged_out():
-    answers = [(("gh", "auth", "status"), (1, "You are not logged into any GitHub hosts."))] + healthy()
+    answers = [(("gh", "auth", "status"), (1, "You are not logged into any GitHub hosts.")),
+               (("gh", "api", "user"), (1, "HTTP 401"))] + healthy()
     c = by_id(pf.preflight("/r", WORK_ON, runner=fake(answers), which=has({"git", "gh"})))
     assert c["gh-auth"]["ok"] is False
     assert c["gh-auth"]["commands"][0].startswith("gh auth login")

@@ -66,7 +66,7 @@ def _matrix():
         10: ([P, "priority:P1", PROGRESS], HUMAN, "armed"),                        # in progress
         11: ([P, "priority:P1", PARKED], HUMAN, "parked"),                         # already parked, kept parked
         12: ([P, "priority:P1", BLOCKED], HUMAN, "armed"),                         # blocked overlay, no blocker
-        13: ([P, "priority:P1"], dict(HUMAN, body="Blocked by: #90"), "parked"),   # open blocker
+        13: ([P, "priority:P1"], dict(HUMAN, body="Blocked by: #90"), "armed"),    # open blocker: armed (#1518)
         14: ([P, "priority:P1"], dict(HUMAN, body="Blocked by: #91"), "armed"),    # closed blocker
         15: ([P, "priority:P1", GOAL], HUMAN, "armed"),                            # half-promoted pair
         16: ([P, "priority:P1"], dict(HUMAN, assignee="dana"), "armed"),           # assigned

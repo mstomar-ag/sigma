@@ -47,16 +47,18 @@ def _limit(config):
     return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else MAX_TOTAL_CHARS
 
 
-def read_documents(root, config):
-    """-> (docs, unreachable, configured). `docs` is [(name, text)] clipped to a total size;
-    `unreachable` lists configured names that are absolute, escape the root, or cannot be read."""
+def read_documents_detail(root, config):
+    """-> (docs, unreachable, configured, truncated, clipped_out). Documents are clipped to the total
+    size in configured order: once the budget is used up a later readable document is not passed on
+    (its name goes to `clipped_out`), and a document cut short is listed in `truncated` as
+    {name, chars_sent, chars_total}. `docs` holds only documents with at least one character sent."""
     names = _block(config).get("documents")
     names = [n for n in names if isinstance(n, str) and n.strip()] if isinstance(names, list) else []
-    docs, bad, left = [], [], _limit(config)
+    docs, bad, left, truncated, clipped = [], [], _limit(config), [], []
     try:
         base = pathlib.Path(root).resolve()
     except Exception:
-        return [], names, names
+        return [], names, names, [], []
     for n in names:
         try:
             p = pathlib.Path(n)
@@ -67,8 +69,22 @@ def read_documents(root, config):
         except Exception:
             bad.append(n)
             continue
-        docs.append((n, text[:max(left, 0)]))
+        if not text:
+            continue
+        if left <= 0:
+            clipped.append(n)
+            continue
+        docs.append((n, text[:left]))
+        if len(text) > left:
+            truncated.append({"name": n, "chars_sent": left, "chars_total": len(text)})
         left -= len(text)
+    return docs, bad, names, truncated, clipped
+
+
+def read_documents(root, config):
+    """-> (docs, unreachable, configured). `docs` is [(name, text)] clipped to a total size;
+    `unreachable` lists configured names that are absolute, escape the root, or cannot be read."""
+    docs, bad, names, _t, _c = read_documents_detail(root, config)
     return docs, bad, names
 
 
@@ -124,9 +140,10 @@ def shadow_for_park(sdlc_dir, config, issue, qkind_, question, call=None, now=No
             return None
         now = time.time() if now is None else now
         root = pathlib.Path(sdlc_dir).resolve().parent
-        docs, bad, configured = read_documents(root, config)
+        docs, bad, configured, truncated, clipped = read_documents_detail(root, config)
         rec = {"key": park_key(issue, question), "issue": str(issue), "qkind": qkind_, "ts": now,
                "documents_read": [n for n, _ in docs], "documents_unreachable": bad,
+               "documents_truncated": truncated, "documents_clipped_out": clipped,
                "verdict": "not_judged", "quote": None, "document": None, "reason": None}
         if not configured:
             rec["reason"] = "no_documents_configured"

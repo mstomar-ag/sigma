@@ -7,9 +7,9 @@ would have chosen next to what the person chose) give the agreement. Levels 0 to
 pre-fill; the higher levels are read by a later slice. Rules:
 
 - Thresholds come from `rulebook.autonomy.levels.*`; a wrong-typed value reads as its default.
-- Level 2 to 4 need as many watch comparisons as answers for that level, per machine; each machine
-  gets a level and the LOWER one wins, so disagreement never raises trust.
-- A veto drops one level (PROVISIONAL: once, not cumulatively); `veto_pause_consecutive` vetoes since
+- Level 2 to 4 need as many watch comparisons as answers for that level, pooled over all machines;
+  a machine whose own count reaches that need must also reach the level, so disagreement never raises trust.
+- A veto drops one level until `veto_recover_after` agreeing live comparisons follow it; `veto_pause_consecutive` vetoes since
   the last agreeing comparison, or `veto_pause_total` in all, pause the kind at level 0.
 - A hard-stop kind (`hard_stop.is_hardstop_kind`) or any record carrying a hardstop class is capped
   at level 2. The cap is fixed, not configurable.
@@ -30,6 +30,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import sys
 import uuid
 
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -92,6 +93,13 @@ def settings(config):
     return out
 
 
+def recover_after(config, cfg=None):
+    """Agreeing live comparisons that wear off a veto's one-level drop (F-14): `veto_pause`-style key
+    `rulebook.autonomy.veto_recover_after`, default `l3_min_answers / 6`, never below 5."""
+    cfg = cfg or settings(config)
+    return _pos_int(_sub(config).get("veto_recover_after"), max(5, cfg["l3_min_answers"] // 6))
+
+
 def _machine():
     try:
         return hashlib.sha256(os.uname().nodename.encode("utf-8")).hexdigest()[:8]
@@ -108,7 +116,8 @@ def _dir(sdlc_dir):
 
 
 def _area(area):
-    return area if isinstance(area, str) else ""
+    """A missing or blank area reads as `repo`, the same as `decision_record.REPO_AREA` (F-21)."""
+    return area if isinstance(area, str) and area else "repo"
 
 
 def _write_new(sdlc_dir, prefix, body, now):
@@ -148,7 +157,8 @@ def _pair(rec, qkind, area):
     return rec.get("qkind") == qkind and _area(rec.get("area")) == _area(area)
 
 
-def record_watch(sdlc_dir, qkind, area, would, actual, config=None, now=None, machine=None, imported=None):
+def record_watch(sdlc_dir, qkind, area, would, actual, config=None, now=None, machine=None, imported=None,
+                 shown=False):
     """Write what the rule would have chosen next to what was chosen; returns the file id, or None
     when the part is closed or the inputs are unusable. Never raises."""
     try:
@@ -159,6 +169,8 @@ def record_watch(sdlc_dir, qkind, area, would, actual, config=None, now=None, ma
         when = _now(now)
         body = {"qkind": qkind, "area": _area(area), "would": would, "actual": actual,
                 "machine": machine or _machine(), "time": when.isoformat()}
+        if shown:   # #1496: the person was shown this recommendation, so the match is not independent
+            body["shown"] = True
         if isinstance(imported, dict):  # a replayed comparison from decision_import: marked, with its source
             body.update(imported, how="imported")
         fid = _write_new(sdlc_dir, "watch-", body, when)
@@ -184,6 +196,11 @@ def veto(sdlc_dir, rid, config=None, now=None, machine=None):
         return None
 
 
+def _keep_n(cfg):
+    """How many of a pair's newest comparisons the ladder reads and pruning keeps: the largest threshold."""
+    return max(cfg["l%d_min_answers" % n] for n in (1, 2, 3, 4))
+
+
 def _ladder(answers, comparisons, agreement, cfg):
     lvl = 0
     if answers >= cfg["l1_min_answers"]:
@@ -197,12 +214,20 @@ def _ladder(answers, comparisons, agreement, cfg):
     return lvl if lvl >= 1 else 0
 
 
+def _agrees(w):
+    """A comparison agrees when both sides name the same learnable key; 'free' never agrees (M-06)."""
+    return w.get("would") == w.get("actual") and w.get("would") not in ("free", "unknown")
+
+
 def _capped_ladder(answers, live, items, cfg):
     """`_ladder` with imported evidence limited to IMPORTED_LEVEL_CAP: above it only live answers AND live
     comparisons (watch files not marked imported) count."""
     def rate(ws):
-        return (sum(1 for w in ws if w.get("would") == w.get("actual")) / len(ws)) if ws else 0.0
+        return (sum(1 for w in ws if _agrees(w)) / len(ws)) if ws else 0.0
     lvl = _ladder(answers, len(items), rate(items), cfg)
+    if lvl >= 3 and any(w.get("shown") for w in items):     # #1496 M-09: level 3 judges unprompted answers
+        blind = [w for w in items if not w.get("shown")]
+        lvl = min(lvl, max(2, _ladder(answers, len(blind), rate(blind), cfg)))
     if lvl > IMPORTED_LEVEL_CAP:
         own = [w for w in items if w.get("how") != "imported"]
         lvl = max(IMPORTED_LEVEL_CAP, min(lvl, _ladder(live, len(own), rate(own), cfg)))
@@ -228,30 +253,46 @@ def _pair_settings(sdlc_dir, qkind, area, config):
 def _state(sdlc_dir, qkind, area, config):
     cfg, cat, has_file = _pair_settings(sdlc_dir, qkind, area, config)
     store = _load("decision_store")
-    recs = [r for r in store.list_by(sdlc_dir, config, qkind=qkind) if _pair(r, qkind, area)]
+    dr = _load("decision_record")
+    recs = [r for r in store.list_by(sdlc_dir, config, qkind=qkind)
+            if _pair(r, qkind, area) and dr.is_park_answer(r)]      # F-10/M-01: promote/demote/ack/repeat out
     live = sum(1 for r in recs if r.get("how") == "human")
     imported = sum(1 for r in recs if r.get("how") == "imported")
     answers = live + imported
-    watch = [w for w in _facts(sdlc_dir, "watch-") if _pair(w, qkind, area)]
+    all_watch = [w for w in _facts(sdlc_dir, "watch-") if _pair(w, qkind, area)]
+    watch = sorted(all_watch, key=lambda w: str(w.get("time")))[-_keep_n(cfg):]  # F-12: newest N, any age
     vetoes = sorted((v for v in _facts(sdlc_dir, "veto-") if _pair(v, qkind, area)),
                     key=lambda v: str(v.get("time")))
     by_machine = {}
     for w in watch:
         by_machine.setdefault(str(w.get("machine")), []).append(w)
+    lagging = []
     if by_machine:
-        per = []
-        for items in by_machine.values():
-            per.append(_capped_ladder(answers, live, items, cfg))
-        lvl = min(per)
-        total_agree = sum(1 for w in watch if w.get("would") == w.get("actual"))
-        agreement = total_agree / len(watch)
+        lvl = _capped_ladder(answers, live, watch, cfg)         # F-08: all machines pooled
+        pooled = lvl
+        while lvl >= 2:                                           # only machines that reach the need can hold it down
+            need = cfg["l%d_min_answers" % lvl]
+            if all(_capped_ladder(answers, live, items, cfg) >= lvl
+                   for items in by_machine.values() if len(items) >= need):
+                break
+            lvl -= 1
+        if pooled >= 2:
+            need = cfg["l%d_min_answers" % pooled]
+            for tag, items in sorted(by_machine.items()):
+                if len(items) < need:
+                    lagging.append({"machine": tag, "comparisons": len(items),
+                                    "agreement": sum(1 for w in items if _agrees(w)) / len(items)})
+        agreement = sum(1 for w in watch if _agrees(w)) / len(watch)
     else:
         lvl, agreement = (1 if answers >= cfg["l1_min_answers"] else 0), None
-    last_ok = max((str(w.get("time")) for w in watch if w.get("would") == w.get("actual")), default="")
+    last_ok = max((str(w.get("time")) for w in all_watch if _agrees(w)), default="")
     consecutive = sum(1 for v in vetoes if str(v.get("time")) > last_ok)
     paused = bool(vetoes) and (consecutive >= cfg["veto_pause_consecutive"] or len(vetoes) >= cfg["veto_pause_total"])
-    if vetoes:
-        lvl = max(0, lvl - 1)
+    if vetoes:                                                    # F-14: the drop wears off after enough agreeing answers
+        after = sum(1 for w in all_watch if _agrees(w) and w.get("how") != "imported"
+                    and str(w.get("time")) > str(vetoes[-1].get("time")))
+        if after < recover_after(config, cfg):
+            lvl = max(0, lvl - 1)
     if paused:
         lvl = 0
     capped = False
@@ -263,14 +304,63 @@ def _state(sdlc_dir, qkind, area, config):
         capped = True  # cannot tell: the safe reading
     if capped:
         lvl = min(lvl, HARDSTOP_CAP)
+    unlearnable = qkind == "unknown"                 # F-09: nobody classified these parks
+    if unlearnable:
+        lvl = min(lvl, 1)
     row = {"qkind": qkind, "area": _area(area), "level": lvl, "answers": answers, "comparisons": len(watch),
            "agreement": agreement, "vetoes": len(vetoes), "paused": paused, "capped": capped}
+    row.update(_evidence(recs, watch, qkind))
+    if lagging:  # shown only when a machine has too few comparisons to count at the pooled level
+        row["lagging"] = lagging
+    if unlearnable:  # shown only for the kind `unknown`; every other row is unchanged
+        row["unlearnable"] = True
     if imported:  # shown only when something was imported; otherwise the row is unchanged
         row["imported"] = imported
     if has_file:  # shown only when the opt-in file exists; otherwise the row is unchanged
         row["category"] = cat["id"] if cat else None
         row["thresholds"] = {k: cfg[k] for k in DEFAULTS}
     return row
+
+
+def _evidence(recs, watch, qkind):
+    """#1496: the extra row keys, each present only when it has something to say, so a pair without
+    them reads exactly as before: `misses` (top 3 would/actual disagreements), `majority_share` (the
+    most common learnable answer's share) and, once any comparison was shown, agreement per group."""
+    dr = _load("decision_record")
+    out, bank = {}, _load("unpark")
+    miss = {}
+    for w in watch:
+        if not _agrees(w):
+            act = w.get("actual")
+            act = act if bank.bank_option(qkind, act) else "a free-text answer"
+            miss[(str(w.get("would")), act)] = miss.get((str(w.get("would")), act), 0) + 1
+    if miss:
+        top = sorted(miss.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+        out["misses"] = [{"would": k[0], "actual": k[1], "count": n} for k, n in top]
+    keys = [dr.key_of(r) for r in recs]
+    keys = [k for k in keys if k and k not in dr.UNLEARNABLE_KEYS]
+    if keys:
+        out["majority_share"] = max(keys.count(k) for k in set(keys)) / len(keys)
+    if any(w.get("shown") for w in watch):
+        for name, group in (("agreement_shown", [w for w in watch if w.get("shown")]),
+                            ("agreement_not_shown", [w for w in watch if not w.get("shown")])):
+            out[name] = (sum(1 for w in group if _agrees(w)) / len(group)) if group else None
+    return out
+
+
+def rule_support(sdlc_dir, qkind, area, option, since, config):
+    """#1496 M-04: `(count, agreement)` of the live comparisons for the pair whose `would` is `option`,
+    recorded at or after `since` (an ISO time; unreadable means none count). Imported ones never count."""
+    start = _parse_time(since)
+    if start is None:
+        return 0, 0.0
+    mine = []
+    for w in _facts(sdlc_dir, "watch-"):
+        t = _parse_time(w.get("time"))
+        if (_pair(w, qkind, area) and w.get("would") == option and w.get("how") != "imported"
+                and t is not None and t >= start):
+            mine.append(w)
+    return len(mine), (sum(1 for w in mine if _agrees(w)) / len(mine) if mine else 0.0)
 
 
 def level(sdlc_dir, qkind, area, config):
@@ -320,11 +410,16 @@ HARDSTOP_TEXT = "hard-stop kind, never learns beyond level 2, always asked"
 def describe(row):
     """One plain line for a row of `readout`; the doctor and the question list share it."""
     line = _describe(row)
+    for m in row.get("lagging") or []:
+        line += "; machine %s: %d comparisons, %d%% agreement" % (m["machine"], m["comparisons"],
+                                                                    round(m["agreement"] * 100))
     return line + (" (%d imported)" % row["imported"] if row.get("imported") else "")
 
 
 def _describe(row):
     head = "%s / %s: " % (row["qkind"], row["area"] or "-")
+    if row.get("unlearnable"):
+        return head + "not learnable: declare a kind"
     if row["capped"]:
         return head + HARDSTOP_TEXT
     if row["paused"]:
@@ -337,9 +432,20 @@ def _describe(row):
     if row["next_level"] is None:
         return head + "level %d, nothing further to learn" % row["level"]
     agree = "none yet" if row["agreement"] is None else "%d%%" % round(row["agreement"] * 100)
-    return head + ("level %d, level %d needs %d answers (have %d), %d comparisons (have %d), %d%% agreement (have %s)"
+    line = head + ("level %d, level %d needs %d answers (have %d), %d comparisons (have %d), %d%% agreement (have %s)"
                    % (row["level"], row["next_level"], row["answers_needed"], row["answers"],
                       row["comparisons_needed"], row["comparisons"], round(row["agreement_needed"] * 100), agree))
+    if row.get("misses"):
+        line += "; most misses: " + ", ".join("%s instead of %s x%d" % (m["actual"], m["would"], m["count"])
+                                              for m in row["misses"])
+    share, need = row.get("majority_share"), row["agreement_needed"]
+    if share is not None and need is not None and share < need:
+        line += "; cannot reach %d%%: the most common answer is %d%%" % (round(need * 100), round(share * 100))
+    if "agreement_shown" in row:
+        fmt = lambda v: "none yet" if v is None else "%d%%" % round(v * 100)  # noqa: E731
+        line += "; agreement when shown %s, not shown %s" % (fmt(row["agreement_shown"]),
+                                                              fmt(row["agreement_not_shown"]))
+    return line
 
 
 def learning_line(sdlc_dir, qkind, config):
@@ -377,8 +483,9 @@ def _parse_time(text):
 
 
 def prune_watch(sdlc_dir, now, config):
-    """Remove watch files whose embedded time is older than the retention; returns the count. Vetoes
-    stay. Links are skipped. Never raises."""
+    """Remove watch files older than the retention that are also beyond the newest `l4_min_answers`
+    of their pair (whichever keeps more, F-12); imported comparisons are never expired. Returns the
+    count. Vetoes stay. Links are skipped. Never raises."""
     try:
         if not enabled(config):
             return 0
@@ -386,10 +493,18 @@ def prune_watch(sdlc_dir, now, config):
         if os.path.islink(folder):
             return 0
         cutoff = _now(now) - datetime.timedelta(days=settings(config)["retention_days"])
+        facts = _facts(sdlc_dir, "watch-")
+        keep, pairs = set(), {}
+        for w in facts:
+            pairs.setdefault((w.get("qkind"), _area(w.get("area"))), []).append(w)
+        for (q, a), items in pairs.items():
+            n = _keep_n(_pair_settings(sdlc_dir, q, a, config)[0])
+            items.sort(key=lambda w: str(w.get("time")))
+            keep.update(w["_file"] for w in items[-n:])
         removed = 0
-        for w in _facts(sdlc_dir, "watch-"):
+        for w in facts:
             when = _parse_time(w.get("time"))
-            if when is not None and when < cutoff:
+            if when is not None and when < cutoff and w["_file"] not in keep and w.get("how") != "imported":
                 try:
                     os.unlink(os.path.join(folder, w["_file"]))
                     removed += 1
@@ -423,6 +538,30 @@ def _names(value):
     return []
 
 
+def owners(config):
+    """The lower-cased owner logins in force: `autonomy.owners`, or (key absent) `spend_approval.approvers`."""
+    try:
+        sub = _sub(config)
+        if "owners" in sub and sub["owners"] is not None:
+            return _names(sub["owners"])
+        sa = config.get("spend_approval") if isinstance(config, dict) else None
+        return _names(sa.get("approvers")) if isinstance(sa, dict) else []
+    except Exception:
+        return []
+
+
+def recent_comparisons(sdlc_dir, qkind, area, config, now=None):
+    """`(count, days)`: this pair's comparisons recorded within `retention_days` of `now`, and that window."""
+    days = settings(config)["retention_days"]
+    cutoff = _now(now) - datetime.timedelta(days=days)
+    n = 0
+    for w in _facts(sdlc_dir, "watch-"):
+        when = _parse_time(w.get("time"))
+        if _pair(w, qkind, area) and when is not None and when >= cutoff:
+            n += 1
+    return n, days
+
+
 def is_owner(login, config):
     """True when `login` is in `autonomy.owners` (case-insensitive). Owners unset (key absent) falls back
     to `spend_approval.approvers`; an empty or malformed list, or both empty, refuses. This is the only
@@ -439,3 +578,62 @@ def is_owner(login, config):
         return login.strip().lower() in names
     except Exception:
         return False
+
+
+def rekey(sdlc_dir, config, apply=False):
+    """One-time clean-up for comparisons written before the shared key (#1495): a watch file whose
+    `would` is a bank option of its kind while `actual` is a closing answer compared two vocabularies,
+    so it can only read as a miss. Dry run by default; `apply` removes those files (never vetoes, never a
+    link). Returns `{"pairs": {"kind / area": n}, "removed": n}`. Closed gate: nothing read."""
+    out = {"pairs": {}, "removed": 0}
+    if not enabled(config):
+        return out
+    u = _load("unpark")
+    closing = list(u.CLOSING_QUESTION["options"])
+    folder = _dir(sdlc_dir)
+    if os.path.islink(folder):
+        return out
+    for w in _facts(sdlc_dir, "watch-"):
+        kind = w.get("qkind")
+        if not (isinstance(kind, str) and u.route_slot(kind) and u.bank_option(kind, w.get("would"))
+                and w.get("actual") in closing):
+            continue
+        key = "%s / %s" % (kind, _area(w.get("area")) or "-")
+        if apply:
+            try:
+                os.unlink(os.path.join(folder, w["_file"]))
+            except OSError:
+                continue
+            out["removed"] += 1
+        out["pairs"][key] = out["pairs"].get(key, 0) + 1
+    return out
+
+
+USAGE = "usage: autonomy.py rekey <sdlc_dir> [--apply]   (dry run unless --apply)"
+
+
+def main(argv):
+    if argv[1:] in (["-h"], ["--help"]):
+        print(USAGE)
+        return 0
+    if len(argv) < 3 or argv[1] != "rekey" or any(a not in ("--apply",) for a in argv[3:]):
+        print(USAGE, file=sys.stderr)
+        return 2
+    try:
+        config = _load("state").load_config(argv[2])
+    except Exception as exc:  # noqa: BLE001
+        print("autonomy: %s" % exc, file=sys.stderr)
+        return 1
+    apply = "--apply" in argv[3:]
+    out = rekey(argv[2], config, apply=apply)
+    for pair, n in sorted(out["pairs"].items()):
+        print("%s: %d comparison%s %s" % (pair, n, "" if n == 1 else "s",
+                                        "removed" if apply else "would be removed"))
+    total = sum(out["pairs"].values())
+    print("%s %d in all" % ("removed" if apply else "dry run: would remove", total)
+          + ("" if apply or not total else " (re-run with --apply)"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

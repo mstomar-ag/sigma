@@ -44,7 +44,9 @@ through this path is never re-litigated by the automatic sweep.
    asking. Never ask something this payload already answers.
 
 4. **Ask, one question at a time.** Use `AskUserQuestion` where the host has it, with the `options`
-   the brief supplies. One question per turn — a wall of questions gets one answer.
+   the brief supplies. One question per turn — a wall of questions gets one answer. If the brief
+   has `recommendation`, list that option first with "(recommended)" in the label only (never in the
+   answer), and put `recommendation.rule_id` in the payload as a top-level `rule_id`.
 
 5. **Close the loop.** The last question is always: *start it again now, or leave it parked with
    these notes?* Do not infer it from the earlier answers; ask it. Its id is **`resume`** — keep it

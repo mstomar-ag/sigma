@@ -187,14 +187,14 @@ def test_autonomy_closed_writes_records_only(tmp_path):
 def test_rule_draft_counts_imported_evidence_and_stays_proposed(tmp_path):
     sd, cfg = _sd(tmp_path), _cfg(rulebook=True)
     cfg["rulebook"]["autonomy"]["owners"] = ["boss"]
-    DI.apply(sd, cfg, [_c(i) for i in range(40)])
+    DI.apply(sd, cfg, [_c(i, choice="leave it parked") for i in range(40)])
     rows = RD.list_patterns(sd, cfg)
-    assert [(r["qkind"], r["area"], r["option"]) for r in rows] == [("needs_decision", "repo", "merge")]
+    assert [(r["qkind"], r["area"], r["option"]) for r in rows] == [("needs_decision", "repo", "leave it parked")]
     out = RD.draft(sd, "needs_decision", "repo", cfg)
     assert out["status"] == "drafted"
     assert [r["status"] for r in RB.load(sd, cfg)] == ["proposed"]
     sd2 = str(tmp_path / "few" / ".sdlc")
-    DI.apply(sd2, cfg, [_c(i) for i in range(4)])
+    DI.apply(sd2, cfg, [_c(i, choice="leave it parked") for i in range(4)])
     assert RD.draft(sd2, "needs_decision", "repo", cfg)["status"] == "refused"
     assert RB.load(sd2, cfg) == []
 
@@ -206,7 +206,7 @@ def test_closed_gate_paths_unchanged_without_imports(tmp_path):
     row = AU.readout(sd, cfg)["kinds"][0]
     assert row == {"qkind": "quota", "area": "repo", "level": 0, "answers": 1, "comparisons": 0,
                    "agreement": None, "vetoes": 0, "paused": False, "capped": False,
-                   **{k: row[k] for k in row if k.startswith(("next_", "answers_n", "comparisons_n", "agreement_n"))}}
+                   **{k: row[k] for k in row if k.startswith(("next_", "answers_n", "comparisons_n", "agreement_n", "majority_share"))}}
     closed = _cfg(records=False)
     assert DS.list_by(sd, closed) == [] and RD.list_patterns(sd, closed) == []
     assert AU.readout(sd, _cfg(autonomy=False)) == {"enabled": False}
