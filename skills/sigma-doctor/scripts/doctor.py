@@ -5298,6 +5298,11 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
             if at is not None:
                 extra.append("drift judge paused: daily ceiling reached at "
                              + time.strftime("%H:%M", time.localtime(at)))
+            for sr in _load_loop_script("spend_cap").status(sdlc_dir, cfg, time.time()):
+                over = sr["spent"] >= sr["cap"] and sr["reset_at"]
+                extra.append("spend cap %s: $%.2f of $%.2f%s" % (
+                    sr["window"], sr["spent"], sr["cap"],
+                    ", resets " + time.strftime("%a %H:%M", time.localtime(sr["reset_at"])) if over else ""))
             ds = _load_loop_script("drift_shadow")
             if _load_loop_script("rulebook_cfg").load(cfg).part_enabled("drift"):
                 _d, _b, _n, cut, out = ds.read_documents_detail(pathlib.Path(sdlc_dir).resolve().parent, cfg)

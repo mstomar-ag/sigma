@@ -386,8 +386,23 @@ The per-call figure is passed to the CLI as `--max-budget-usd`, which the CLI ch
 bill more than it, and the answer is then discarded. A failed call is charged its real cost, and the first budget
 cut-off stops the import run with a message naming `rulebook.import.max_budget_usd_per_call`; a failed call whose cost is not reported is charged the larger of the per-call figure and the dearest real call so far, and `plan` warns when the figure is below 0.15, the lowest fixed per-call cost measured from a repository root (default 0.50).
 
-The import ceiling applies to **one run** only. There is no daily or cross-run cap, so repeated runs add up. All dollar
+The import ceiling applies to **one run** only. Without the shared cap below, repeated runs add up. All dollar
 defaults are provisional.
+
+### Shared weekly and monthly cap
+
+`rulebook.spend.weekly_usd` and `rulebook.spend.monthly_usd` are optional and unset by default; while both are unset
+nothing changes and no ledger file is created. A positive number sets a rolling cap (7 and 30 days) on the real cost of
+every paid model call, the import classifier and the drift judge counted together. Before each call the spend inside the
+window is read; once it has reached the cap the call is not made. The import prints one line,
+`spend cap reached (weekly $X of $Y, resets Day HH:MM): no model call made`, and the judge returns `not_judged`
+(`spend_cap_reached`). The doctor shows the cap, the spend and, once reached, the time the window frees up.
+
+The record of calls is `.sdlc/state/spend-cap.jsonl`, one line per call, appended in one write. A torn or garbage line is
+skipped; the file is pruned of records older than 30 days once it passes 64 KB. If a cap is set and the file cannot be
+read, the call is refused rather than made blind. The check is made before a call and cannot know that call's cost, so one
+call can end a window slightly over its cap; two callers racing can both pass the check. Neither the over-run nor the race
+has been measured. Setting a cap does not count calls made before it was set.
 
 ## Migrating the old confirmation label
 
@@ -478,6 +493,8 @@ flag, which closes the whole block.
 | `import.profile_dirs`, `import.project_dirs` | `[]` | same as `--profile`, `--project-dir` |
 | `import.classifier` | `"table"` | `"table"` or `"model"` |
 | `import.model` | `"haiku"` | model for the classifier |
+| `spend.weekly_usd` | `null` | rolling 7-day cap shared by classifier and judge; unset means none |
+| `spend.monthly_usd` | `null` | rolling 30-day cap shared by classifier and judge; unset means none |
 | `import.max_budget_usd_per_call` | `0.50` | classifier per call |
 | `import.max_budget_usd_per_run` | `1.0` | classifier per run |
 | `import.timeout_s` | `60` | classifier per call |

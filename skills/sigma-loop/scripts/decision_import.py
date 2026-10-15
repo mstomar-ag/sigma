@@ -445,6 +445,15 @@ def _declared_or(cand, kind, qkinds):
     return d if d in qkinds and d != UNKNOWN else kind
 
 
+def _cap_refused(sdlc_dir, config, info):
+    """True (and `info["cap_refused"]` set) when the shared weekly or monthly spend cap forbids another call."""
+    res = _load("spend_cap").check(sdlc_dir, config)
+    if res["ok"]:
+        return False
+    info["cap_refused"] = res
+    return True
+
+
 def classify_model(sdlc_dir, config, cands, call, skip=()):
     """-> (rows, info). Rows like `classify`. `call is None` sends nothing (plan): uncached rows are
     unknown and counted as would_send. An invalid answer is unknown and cached; an error or timeout is unknown, uncached and
@@ -471,6 +480,10 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
             info["stopped_after"] = info["sent"]
             rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
             continue
+        elif _cap_refused(sdlc_dir, config, info):
+            info["stopped_after"] = info["sent"]
+            rows.append(dict(c, qkind=kind, area=area, fp=fp, skipped=True))
+            continue
         else:
             info["sent"] += 1
             try:
@@ -484,7 +497,9 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
             if ok:
                 info["max_real_cost"] = max(info["max_real_cost"], cost)
             # no envelope at all: the cap is not a hard limit, so charge the larger of it and the dearest real call
-            info["spent"] += cost if ok else max(lim["max_budget_usd_per_call"], info["max_real_cost"])
+            charged = cost if ok else max(lim["max_budget_usd_per_call"], info["max_real_cost"])
+            info["spent"] += charged
+            _load("spend_cap").record(sdlc_dir, config, "import", charged)   # shared rolling cap (#1502)
             if not isinstance(ans, dict) or ans.get("failed"):  # no answer: not cached, not stored, retried next run
                 info["timed_out"] += 1
                 if isinstance(ans, dict) and "budget" in str(ans.get("reason") or ""):
@@ -619,6 +634,7 @@ def apply(sdlc_dir, config, cands, call=None):
         out["stopped_after"] = info["stopped_after"]
         out["timed_out"] = info["timed_out"]
         out["over_budget"] = info.get("over_budget", 0)
+        out["cap_refused"] = info.get("cap_refused")
         out["model"] = info
     for r in new:
         record = rec.build("import", r["issue"], r["qkind"], r["choice"], r["reason"], "imported", area=r["area"])
@@ -735,6 +751,9 @@ def main(argv=None, lister=None, comments_fn=None):
             print("%d call(s) exceeded the per-call budget $%.2f (real cost about $%.2f each, answers discarded, run "
                   "stopped): raise rulebook.import.max_budget_usd_per_call" % (
                       res["over_budget"], m["per_call"], m["max_real_cost"]))
+        elif res.get("cap_refused"):
+            print(_load("spend_cap").refusal_line(res["cap_refused"]) +
+                  ": the rest stay unclassified, run apply again later")
         elif res.get("stopped_after") is not None:
             print("ceiling stopped the run after %d model calls: the rest stay unclassified, run apply again" % (
                 res["stopped_after"]))
