@@ -378,6 +378,9 @@ def _eligible(cands):
     return [c for c in cands if not c["superseded"] and c["choice"]]
 
 
+PER_CALL_FLOOR = 0.15   # lowest fixed per-call cost measured from a repository root
+
+
 def default_call(prompt, model, max_budget_usd, timeout_s=60):
     """The drift judge's invocation path (`feature_judge.ask_claude`); no key is read here. No answer at all (a timeout,
     a failure) is None, so the row is skipped and retried next run (#1310), not stored as unknown."""
@@ -476,6 +479,8 @@ def classify_model(sdlc_dir, config, cands, call, skip=()):
                 ans = None
             cost = ans.get("cost_usd") if isinstance(ans, dict) else None
             ok = isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0
+            if ok and cost == 0 and isinstance(ans, dict) and ans.get("failed"):
+                ok = False   # a failed envelope that parsed with no cost field reads 0.0: unknown, not free
             if ok:
                 info["max_real_cost"] = max(info["max_real_cost"], cost)
             # no envelope at all: the cap is not a hard limit, so charge the larger of it and the dearest real call
@@ -712,6 +717,11 @@ def main(argv=None, lister=None, comments_fn=None):
             m = pl["model"]
             print("model classifier: would send %d candidates (%d cached) to %s, run ceiling $%.2f; plan sends nothing" % (
                 m["would_send"], m["cached"], m["model"], m["run_ceiling"]))
+            if m["per_call"] < PER_CALL_FLOOR:
+                print("warning: rulebook.import.max_budget_usd_per_call is $%.2f, below $%.2f, the lowest fixed cost of one "
+                      "call measured in the field (about $0.04 to $0.13 from an empty directory, $0.15 to $0.20 from a "
+                      "repository root): calls are likely to be cut off; the default is $0.50" % (
+                          m["per_call"], PER_CALL_FLOOR))
         return 0
     if args.verb == "apply":
         res = apply(args.sdlc_dir, config, out["candidates"])

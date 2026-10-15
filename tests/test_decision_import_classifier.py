@@ -273,6 +273,30 @@ def test_no_envelope_charges_the_larger_of_cap_and_dearest_real_call(tmp_path):
     assert abs(info["spent"] - 0.40) < 1e-9
 
 
+def test_cut_off_envelope_with_zero_cost_is_unknown_and_charged_the_larger(tmp_path):
+    """A failed call whose envelope parsed but carried no cost field reads 0.0: unknown, not free."""
+    seq = iter([dict(GOOD, cost_usd=0.20), dict(CUT, cost_usd=0.0)])
+    rows, info = DI.classify_model(_sd(tmp_path), _cfg(max_budget_usd_per_call=0.05, max_budget_usd_per_run=5.0),
+                                   [_c(1), _c(2)], lambda p, m, b: next(seq))
+    assert abs(info["spent"] - 0.40) < 1e-9, info
+    assert info["max_real_cost"] == 0.20
+
+
+def test_plan_cli_warns_below_the_measured_fixed_cost_and_not_at_the_default(tmp_path, capsys, monkeypatch):
+    sdlc = tmp_path / "repo" / ".sdlc"
+    sdlc.mkdir(parents=True)
+    monkeypatch.setattr(DI, "scan", lambda *a, **k: {"candidates": [_c(1)]})
+
+    def run(**extra):
+        (sdlc / "config.json").write_text(json.dumps(_cfg(**extra)))
+        assert DI.main(["plan", str(sdlc), "--profile", str(tmp_path / "none")]) == 0
+        return capsys.readouterr().out
+    low = run(max_budget_usd_per_call=0.05)
+    assert "warning" in low and "rulebook.import.max_budget_usd_per_call" in low and "0.50" in low
+    assert "warning" not in run()
+    assert "warning" not in run(max_budget_usd_per_call=0.15)
+
+
 def test_default_cap_is_half_a_dollar_in_code_and_template():
     assert CFG.import_limits({})["max_budget_usd_per_call"] == 0.50
     tmpl = (ROOT / "skills" / "sigma-init" / "templates" / "config.json.tmpl").read_text()

@@ -378,7 +378,7 @@ board moves the gestures already made. See [privacy.md](privacy.md).
 
 The per-call figure is passed to the CLI as `--max-budget-usd`, which the CLI checks only after a model turn: one call can
 bill more than it, and the answer is then discarded. A failed call is charged its real cost, and the first budget
-cut-off stops the import run with a message naming `rulebook.import.max_budget_usd_per_call`.
+cut-off stops the import run with a message naming `rulebook.import.max_budget_usd_per_call`; a failed call whose cost is not reported is charged the larger of the per-call figure and the dearest real call so far, and `plan` warns when the figure is below 0.15, the lowest fixed per-call cost measured from a repository root (default 0.50).
 
 The import ceiling applies to **one run** only. There is no daily or cross-run cap, so repeated runs add up. All dollar
 defaults are provisional.
