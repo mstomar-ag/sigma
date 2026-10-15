@@ -3598,6 +3598,26 @@ def _reason_class_matched(detail):
     return "unknown", None
 
 
+def _needle_kind(detail):
+    """The kind of the `_REASON_CLASS_RULES` needle that fired in `detail`, else None. For Sigma's OWN
+    fixed park wording only; never for a CLI-typed park (#1498: a needle is a substring, and agent prose
+    such as "add a rate limit ..." would be declared quota)."""
+    return _reason_class_matched(detail)[0] if _reason_class_matched(detail)[1] else None
+
+
+def _suggest_kind(detail):
+    """A SUGGESTION for a park with no declared kind: the needle kind, else the first matching
+    `decision_import.KIND_WORDS` row, else `unknown`. Never a declaration."""
+    found = _needle_kind(detail)
+    if found:
+        return found
+    text = (detail or "").lower()
+    for kind, words in _load("decision_import").KIND_WORDS:
+        if any(w in text for w in words):
+            return kind
+    return "unknown"
+
+
 def _reason_class(detail):
     """Classify a park `detail` string into one of `ledger.REASON_CLASSES`, by ordered substring
     match — pure, no I/O. Two of the eleven documented classes are honestly NOT guaranteed
@@ -4154,7 +4174,8 @@ def _reconcile_one(sdlc_dir, config, source, goal, run, now, results):
         if outcome != "done":
             work.note_close_failure(sdlc_dir, goal)
     elif landing[0] == work.CLOSED_PR:
-        outcome = _record(sdlc_dir, source, goal, "parked", f"PR #{pr} was closed without merging")
+        outcome = _record(sdlc_dir, source, goal, "parked", f"PR #{pr} was closed without merging",
+                          qkind="needs_decision")
     else:
         return
     results.append((goal, outcome, pr))
@@ -4519,7 +4540,10 @@ def precheck(sdlc_dir, goal, config, source, run=None, now=None):
             # would drop membership and hand a machine-resolvable wait to a human -- the exact
             # confusion between "waiting to be picked" and "waiting for a person" this release
             # exists to remove. `transition="blocked"` keeps membership and the auto-resume.
-            _record(sdlc_dir, source, goal, "parked", reason, transition=transition)
+            blocked_by = any(f.get("kind") == "blocked-by" and f.get("confident")
+                             for f in ((pack or {}).get("findings") or []))
+            _record(sdlc_dir, source, goal, "parked", reason, transition=transition,
+                    qkind="dependency" if blocked_by or transition == "blocked" else "needs_decision")
             return ("BLOCKED " if transition == "blocked" else "PARKED ") + reason
         if decision["note"]:
             try:
@@ -4695,7 +4719,7 @@ def decompose_check(sdlc_dir, goal, config, source):
             # feature exists to catch, on top of it now ALSO being parked on GitHub). So a park
             # decision, once made, is reported as PARKED no matter what happens next.
             try:
-                _record(sdlc_dir, source, goal, "parked", detail)
+                _record(sdlc_dir, source, goal, "parked", detail, qkind="needs_decision")
             except Exception as e:
                 print(f"loop.py decompose-check: park record failed after park — "
                       f"treating as PARKED anyway: {e}", file=sys.stderr)
@@ -4901,7 +4925,7 @@ def design_check(sdlc_dir, goal, config, source):
             # Mirrors decompose_check's own R9/#522 nested `_park`: once a park decision is made it
             # is reported as PARKED no matter what a later bookkeeping failure does.
             try:
-                _record(sdlc_dir, source, goal, "parked", detail)
+                _record(sdlc_dir, source, goal, "parked", detail, qkind="needs_decision")
             except Exception as e:
                 print(f"loop.py design-check: park record failed after park — "
                       f"treating as PARKED anyway: {e}", file=sys.stderr)
@@ -4998,7 +5022,7 @@ def _park_design(sdlc_dir, source, goal, detail):
     inline — this one branch runs BEFORE that closure is defined (it fires before any network read),
     so it cannot simply call it."""
     try:
-        _record(sdlc_dir, source, goal, "parked", detail)
+        _record(sdlc_dir, source, goal, "parked", detail, qkind="needs_decision")
     except Exception as e:
         print(f"loop.py design-check: park record failed after park — "
               f"treating as PARKED anyway: {e}", file=sys.stderr)
@@ -5614,7 +5638,8 @@ def run_loop(sdlc_dir, run_goal):
             # differ from the `result` just passed in. Trust that return value for this run's
             # counters rather than re-deriving "did complete() fail?" a second, independent way —
             # exactly the duplication issue #1201 calls out avoiding.
-            outcome = _record(sdlc_dir, source, goal, result, detail)
+            outcome = _record(sdlc_dir, source, goal, result, detail,
+                              qkind=_needle_kind(detail) if result == "parked" else None)
         except Exception as exc:
             # F4: this is now the BACKSTOP for whatever `_record`'s own internal downgrade could not
             # absorb — e.g. `source.park()` itself also raising right after the downgrade, or any
@@ -5624,7 +5649,8 @@ def run_loop(sdlc_dir, run_goal):
             # still be open and re-pickable next run, so the local record must not claim otherwise.
             try:
                 outcome = _record(sdlc_dir, source, goal, "parked",
-                                   f"source error recording '{result}' ({exc})")
+                                   f"source error recording '{result}' ({exc})",
+                                   qkind=_needle_kind(f"source error recording '{result}' ({exc})"))
             except Exception:
                 # POST-REVIEW FIX: even the park-record failed — this goal cannot be reliably
                 # recorded at all. Without this, `source.next_pending` would re-serve it forever
@@ -6675,6 +6701,9 @@ def _dispatch(argv):
                       f"for {argv[3]} -- run `work.py pr` first, or record done/parked/failed",
                       file=sys.stderr)
                 return 2
+        if qkind is None and argv[4] == "parked":      # #1498: never guessed here, only suggested
+            print("no --qkind: this park cannot be learned from; suggested kind: %s" % _suggest_kind(reason),
+                  file=sys.stderr)
         park_failed = []
         if merged_pr:
             _record(argv[2], sources.get_source(argv[2], config), argv[3], argv[4],

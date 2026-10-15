@@ -1156,6 +1156,21 @@ def test_features_blocking_priority_override_is_ON_by_default():
         assert rows["blocking-priority picker override (#1352)"].startswith("ON (default)")
 
 
+def test_features_blocking_priority_override_row_says_within_tier_not_across_tiers():
+    """#1509: the row describes the within-tier order; off leaves the row text unchanged."""
+    d = _doc()
+    with tempfile.TemporaryDirectory() as t:
+        on = _sdlc(t, {"discovery": {"source": "github"}})
+        row = {n: s for n, s, _ in d.features(on)}["blocking-priority picker override (#1352)"]
+        assert "within its own tier" in row
+        assert "raised to the tier" in row
+        assert "regardless of priority tier" not in row
+    with tempfile.TemporaryDirectory() as t:
+        off = _sdlc(t, {"discovery": {"source": "github", "blocking_priority_override": False}})
+        row = {n: s for n, s, _ in d.features(off)}["blocking-priority picker override (#1352)"]
+        assert row == "off — set discovery.blocking_priority_override to true to re-enable"
+
+
 def test_features_blocking_priority_override_reports_on():
     d = _doc()
     with tempfile.TemporaryDirectory() as t:

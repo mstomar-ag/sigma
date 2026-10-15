@@ -13,6 +13,8 @@ def _setup(tmp_path, option, qkind="needs_decision"):
     sd = T._sd(tmp_path)
     T._train(sd, cfg, qkind=qkind, area="repo", level=3)
     T._rule(sd, cfg, qkind=qkind, area="repo", option=option)
+    for _ in range(8):      # #1496 M-04: the rule needs live comparisons that predicted its own option
+        AU.record_watch(sd, qkind, "repo", option, option, cfg, now=T0, machine="m1")
     return sd, cfg
 
 

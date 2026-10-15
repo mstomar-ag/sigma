@@ -62,7 +62,7 @@ def area_of(labels):
 
 
 def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None, answer=None,
-          origin=None):
+          origin=None, hardstop_class=None):
     """A plain record dict. An unusable kind reads `unknown`; an empty choice gets a placeholder."""
     rec = {"gesture": gesture,
            "qkind": qkind_ if qkind_ in qkind.QKINDS else "unknown",
@@ -74,6 +74,8 @@ def build(gesture, goal, qkind_, choice, reason, how, rule_id=None, area=None, a
         rec["rule_id"] = str(rule_id)
     if area:
         rec["area"] = str(area)
+    if hardstop_class:                                  # #1498: a deny-list park is a hard stop for the applier
+        rec["hardstop_class"] = str(hardstop_class)
     if answer:
         rec["answer"] = str(answer)
     if isinstance(origin, dict):
@@ -224,7 +226,7 @@ def record_comparison(sdlc_dir, record, would, config):
                                                    and bank_key(record.get("qkind"), would)):
             return                                      # M-13: public only ever carries enumerated keys
         _load("autonomy").record_watch(sdlc_dir, record.get("qkind"), record.get("area") or REPO_AREA,
-                                       would, actual, config)
+                                       would, actual, config, shown=bool(record.get("shown")))
     except Exception:                                   # noqa: BLE001
         pass
 

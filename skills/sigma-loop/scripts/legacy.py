@@ -74,7 +74,7 @@ MARKERS = frozenset({
     "sigma:approve", "sigma:block", "sigma:unblock", "sigma:keep-parked",
     "sigma:dismissed-finding", "sigma:decompose-filed", "sigma:decompose-of=",
     "sigma:decomposed-from=", "sigma:design-filed", "sigma:design-of=",
-    "sigma-qkind:", "sigma-depth:", "<!-- sigma:migrate-confirmation -->",
+    "sigma-qkind:", "sigma-hardstop:", "sigma-depth:", "<!-- sigma:migrate-confirmation -->",
     "<!-- sigma:upkeep-finding -->",
 })
 

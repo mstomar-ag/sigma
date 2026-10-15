@@ -486,6 +486,8 @@ def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text
         return None
     plan = {"kind": decision.kind, "priority": decision.priority, "reason": decision.reason,
             "qkind": "needs_decision", "text": text, "depth": None}
+    if decision.matched:                           # #1498: a deny-list match is a hard stop, never a plain question
+        plan["qkind"], plan["hardstop"] = _load("hard_stop").first_hardstop_kind(config), decision.matched
     text, quoted = spend_approval.scrub_marker(text)
     plan["text"] = text
     if plan["kind"] == "arm" and actionable and re.fullmatch(r"P[0-4]", str(priority)) \
@@ -518,6 +520,8 @@ def _triage_finish(sdlc_dir, config, source, plan, issue, key_goal, report):
     a `park` event is appended), then count the filing. Never raises."""
     if plan["kind"] == "park":
         text = "Parked at filing: %s\n%s" % (plan["reason"], qkind.render_line(plan["qkind"]))
+        if plan.get("hardstop"):
+            text += "\n" + qkind.render_hardstop(plan["hardstop"])
         try:
             with sources.hsg.filing_park(issue):               # #1136: Sigma's own park keeps its text
                 source.park(str(issue), text)

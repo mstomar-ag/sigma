@@ -34,12 +34,13 @@ RE-DERIVED from text that is always present on the issue: `loop._reason_class` o
 comment (prefix-stripped), and `decision_tier.classify` -- the UNGATED, pure classifier, never
 `resolve`. The ledger, when a repo has it on, is optional enrichment and nothing more.
 
-    python3 unpark.py list <sdlc_dir> [--assignee X] [--json]
+    python3 unpark.py list <sdlc_dir> [--assignee X] [--undeclared] [--json]
+    python3 unpark.py declare <sdlc_dir> <issue> <kind>
     python3 unpark.py brief <sdlc_dir> <issue> [--json]
     python3 unpark.py resolve <sdlc_dir> <issue> --answers <file.json>
                               --decision keep-parked|unpark [--dry-run]
 """
-import json, pathlib, re, sys, importlib.util
+import datetime, json, pathlib, re, sys, importlib.util
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -245,6 +246,8 @@ def route_answer(kind, answers):
     """The normalised route answer for `kind`: a bank option, or 'free'; None when the kind has no
     route question or none was answered."""
     slot = route_slot(kind)
+    if slot is None and kind in QUESTIONS and kind != "unknown":
+        slot = CLOSING_QUESTION                 # #1521: no route question, so the closing answer is the key
     raw = (answers or {}).get(slot["id"]) if slot else None
     if raw is None or not str(raw).strip():
         return None
@@ -282,7 +285,20 @@ def _fetch_issue(source, number):
     return data
 
 
-def list_parked(sdlc_dir, config, source=None, run=None, assignee=None):
+def _suggested(source, number, title):
+    """(declared?, suggested kind) for one parked issue: one REST read. The suggestion is the needle
+    guess, then the keyword table, and is never a declaration."""
+    data = _fetch_issue(source, number)
+    comments = data.get("comments") or []
+    if qkind.resolve(comments, goal=number):
+        return True, None
+    reason, _ = _park_reason([sources.defuse_body(c.get("body") or "", c.get("authorAssociation"),
+                                                  (c.get("author") or {}).get("login"), number)
+                              for c in comments])
+    return False, loop._suggest_kind(qkind.strip_line(reason) or title)
+
+
+def list_parked(sdlc_dir, config, source=None, run=None, assignee=None, undeclared=False):
     """Open issues carrying `parked_label` or `goal_blocked_label`, OLDEST FIRST (by issue number,
     the only age signal available without a second query per issue).
 
@@ -303,10 +319,18 @@ def list_parked(sdlc_dir, config, source=None, run=None, assignee=None):
     rows = []
     for it in sorted(issues, key=lambda i: int(i.get("number") or 0)):
         names = _names(it)
-        rows.append({"number": str(it.get("number")), "title": it.get("title") or "",
+        suggested = None
+        if undeclared:                                  # one read per parked issue: linear, never cached
+            try:
+                declared, suggested = _suggested(source, it.get("number"), it.get("title") or "")
+            except Exception:                           # noqa: BLE001 - an unreadable park is not "declared"
+                declared, suggested = False, "unknown"
+            if declared:
+                continue
+        rows.append({**({"suggested": suggested} if undeclared else {}), **{"number": str(it.get("number")), "title": it.get("title") or "",
                      "state": (source.goal_blocked_label if source.goal_blocked_label in names
                                else source.parked_label),
-                     "labels": sorted(names)})
+                     "labels": sorted(names)}})
     return {"issues": rows, "complete": complete, "assignee": assignee,
             "degraded": [] if complete else
                         ["one of the two label queries failed — this list may be incomplete"]}
@@ -334,8 +358,8 @@ def brief(sdlc_dir, config, number, source=None, run=None):
     # #1392 / PR-1: BOTH re-derived from text that is always on the issue. `loop._reason_class` and
     # `decision_tier.classify` are pure functions; the ledger fields are unreachable on a stock
     # config (ledger.enabled ships false) and `decision_tier.resolve` is gated off besides.
-    declared = qkind.parse_line(reason) if reason else None      # #994: a declared kind wins
-    if declared:
+    declared = qkind.resolve(data.get("comments") or [], goal=number)   # #1498: one resolver, trusted lines
+    if reason:
         reason = qkind.strip_line(reason)
     reason_class = declared or (loop._reason_class(reason) if reason else "unknown")
     tier, tier_signal = decision_tier.classify(reason) if reason else (None, None)
@@ -349,16 +373,49 @@ def brief(sdlc_dir, config, number, source=None, run=None):
 
     answered = _recorded_answers(body)
     current, block = park_stamp(data.get("comments")), _block_stamp(body)
-    if current and block and block != current:          # M-01: that block answered an earlier park
+    if current and block != current and (block or decision_record.enabled(config)):
+        # M-01: that block answered an earlier park; #1522: with records open an unstamped (legacy) one did too
         answered = {}
     questions = _questions_for(reason_class, reason, open_refs, answered)
+    if not declared and "kind" not in answered:         # #1498: ask for the kind first, suggestion on top
+        guess = loop._suggest_kind(reason)
+        questions.insert(0, {"id": "kind", "ask": "Which kind of question is this?",
+                             "options": [guess] + [k for k in qkind.QKINDS if k != guess]})
     learning = _load("autonomy").learning_line(sdlc_dir, reason_class, config)
+    extra = _recommendation(sdlc_dir, config, declared, data.get("labels"))
     return {"number": str(number), "title": data.get("title") or "",
             "state": data.get("state"), "labels": sorted(names),
             "park_reason": reason, "park_reason_is_sigmas": from_sigma,
-            "reason_class": reason_class, "decision_tier": tier, "tier_signal": tier_signal,
+            "reason_class": reason_class, "kind_declared": bool(declared), "decision_tier": tier, "tier_signal": tier_signal,
             "blockers": blockers, "prior_answers": answered,
-            "questions": questions, "degraded": [], **({"learning": learning} if learning else {})}
+            "questions": questions, "degraded": [], **({"learning": learning} if learning else {}), **extra}
+
+
+def _recommendation(sdlc_dir, config, kind, labels):
+    """#1496: `{"recommendation": ..., "pair": ...}` for a declared, learnable kind with the rules part
+    open and one approved rule whose option is on offer; `{}` otherwise (closed gates add nothing)."""
+    try:
+        rb = _load("rulebook")
+        if not kind or kind == "unknown" or not rb.enabled(config) or not route_slot(kind):
+            return {}
+        area = decision_record.area_of(labels)
+        pre = rb.prefill(sdlc_dir, kind, area, valid_options(kind), config)
+        if not pre:
+            return {}
+        due = pre["rule"] in rb.due_for_reask(rb.load(sdlc_dir, config),
+                                              datetime.datetime.now(datetime.timezone.utc), config)
+        out = {"recommendation": {"rule_id": pre["rule"], "option": pre["recommend"],
+                                  "gesture": option_gestures(kind).get(pre["recommend"], "none"), "due": due}}
+        au = _load("autonomy")
+        if au.enabled(config):
+            row = au._state(sdlc_dir, kind, area, config)
+            row.update(au._need(row, config))
+            out["pair"] = {k: row.get(k) for k in ("level", "answers", "comparisons", "agreement",
+                                                     "next_level", "answers_needed", "comparisons_needed",
+                                                     "agreement_needed")}
+        return out
+    except Exception:                                   # noqa: BLE001 - a recommendation never breaks a brief
+        return {}
 
 
 def _questions_for(reason_class, reason, open_refs, answered):
@@ -511,8 +568,11 @@ def _replace_block(body, block):
 
 
 def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, apply=True,
-            questions_asked=()):
+            questions_asked=(), kind=None, rule_id=None):
     """Record the answers, then either keep the park or undo it.
+
+    `kind` (#1498): a kind to declare; its machine line rides inside the decision comment and the
+    record is filed under it.
 
     `decision`:
       `keep-parked` -- record, and post `auto_unpark.KEEP_PARKED_MARKER` so the automatic sweep
@@ -596,7 +656,7 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         err = _comment_decision(sdlc_dir, config, source, n, block + ("" if waits else "\n\n"
                                 + auto_unpark.keep_parked_comment(_one_line(
                                     PRIVATE_VALUE if _keys_only(config) else _substantive_reason(answers)))),
-                                "keep-parked", answers, data)
+                                "keep-parked", answers, data, kind, rule_id)
         _append_block(source, n, data.get("body") or "", block)
         return {"number": n, "decision": decision, "outcome": "kept-parked",
                 "detail": "answers recorded; the automatic sweep will leave it alone" + err}
@@ -616,20 +676,17 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
     if not source._set_board_status(n, source.col["ready"]) and source.board_active:
         detail += ("; the label landed but the board card did not move to %r — move it by hand if "
                    "this repo picks from the board" % source.col["ready"])
-    detail += _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data)
+    detail += _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data, kind, rule_id)
     _append_block(source, n, data.get("body") or "", block)
     return {"number": n, "decision": decision, "outcome": "unparked", "detail": detail}
 
 
 def _declared_kind(data):
-    """The kind a park comment declared (the last one wins), else `unknown`."""
-    found = None
-    for c in (data.get("comments") or []):
-        found = qkind.parse_line(c.get("body") or "") or found
-    return found or "unknown"
+    """The kind a trusted park or declaration comment declared (the newest wins), else `unknown`."""
+    return qkind.resolve(data.get("comments") or [], goal=data.get("number")) or "unknown"
 
 
-def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, data):
+def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, data, kind=None, rule_id=None):
     """Post `text`. With the records part open it is posted WITH the decision record's id and the
     record is stored; closed, this is exactly `_comment` (byte-identical). Returns "" or a
     "; <error>" suffix for the caller's detail."""
@@ -638,18 +695,27 @@ def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, 
             (answers or {}).get(CLOSING_QUESTION["id"]) or gesture), refuse=gesture == "keep-parked")
     except Exception:                                   # noqa: BLE001 - never block the gesture
         pass
+    if kind:
+        text = text + "\n" + qkind.render_line(kind)    # #1498: the declaration rides in the decision
     tried = []                                          # the comment was attempted (never post twice)
     warn = ""
     try:
         if decision_record.enabled(config):
             choice = (answers or {}).get(CLOSING_QUESTION["id"]) or gesture
-            kind = _declared_kind(data)
+            kind = kind or _declared_kind(data)
             rec = decision_record.build(gesture, number, kind, choice,
                                         _substantive_reason(answers), decision_record.how_for(gesture),
-                                        area=decision_record.area_of(data.get("labels")))
+                                        area=decision_record.area_of(data.get("labels")),
+                                        hardstop_class=qkind.resolve_hardstop(data.get("comments") or [],
+                                                                              goal=number))
             ans = route_answer(kind, answers)
+            if rule_id:                                 # #1496: the person was shown this rule's recommendation
+                rec["rule_id"], rec["shown"] = str(rule_id), True
             if ans and not (ans == "free" and decision_record.visibility(config) == "public"):
                 rec["answer"] = ans                     # F-01: the key rules and comparisons share
+            if rule_id:
+                shown = next((r for r in _load("rulebook").load(sdlc_dir, config) if r.get("id") == rule_id), None)
+                rec["accepted"] = bool(shown) and decision_record.key_of(rec) == shown.get("option")
             park = park_stamp(data.get("comments"))
             if park:
                 rec["park"] = park
@@ -669,6 +735,28 @@ def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, 
         return "; decision record failed: %s" % exc
     _comment(source, number, text)
     return ""
+
+
+def declare(sdlc_dir, config, number, kind, source=None, run=None):
+    """Declare the kind of an existing park (#1498): one comment, `Question kind set: <kind>` plus the
+    machine line. Changes no label, writes no ledger event. -> (ok, detail)."""
+    if kind not in qkind.QKINDS:
+        return False, "unknown kind %r (expected one of %s)" % (kind, ", ".join(qkind.QKINDS))
+    source = source or sources.GitHubSource(config, run=run)
+    if not _github(source):
+        return False, "unparking needs github discovery mode"
+    try:
+        data = _fetch_issue(source, number)
+    except Exception as exc:                            # noqa: BLE001 - a usable refusal
+        return False, "could not read #%s: %s" % (number, sources._fx(exc))
+    names = _names(data)
+    if source.parked_label not in names and source.goal_blocked_label not in names:
+        return False, "#%s is not parked — nothing was declared" % number
+    try:
+        source._issue_comment(number, qkind.DECLARATION_PREFIX + kind + "\n" + qkind.render_line(kind))
+    except Exception as exc:                            # noqa: BLE001
+        return False, "the declaration comment did not post: %s" % sources._fx(exc)
+    return True, "declared %s on #%s" % (kind, number)
 
 
 def _comment(source, number, text):
@@ -700,7 +788,8 @@ def render_list(result):
     lines = ["parked work: %s" % ("scoped to @%s" % scope if scope
                                   else "every parked issue (discovery.github.assignee is not set)")]
     for r in result["issues"]:
-        lines.append("  #%s [%s] %s" % (r["number"], r["state"], r["title"]))
+        lines.append("  #%s [%s] %s%s" % (r["number"], r["state"], r["title"],
+                                         "  (suggested: %s)" % r["suggested"] if r.get("suggested") else ""))
     if not result["issues"]:
         lines.append("  none")
     for note in result.get("degraded") or []:
@@ -722,6 +811,19 @@ def render_brief(b):
         lines.append("  already answered: %s" % ", ".join(sorted(b["prior_answers"])))
     if b.get("learning"):
         lines.append("  %s" % b["learning"])
+    rec, pair = b.get("recommendation"), b.get("pair")
+    if rec:
+        lines.append("  approved rule %s recommends: %s (will %s)%s" % (
+            rec["rule_id"], rec["option"], {"unpark": "unpark", "keep-parked": "keep parked"}.get(
+                rec["gesture"], "only recommend"), "; due to be re-asked" if rec.get("due") else ""))
+    if pair:
+        have = "none yet" if pair["agreement"] is None else "%d%%" % round(pair["agreement"] * 100)
+        lines.append("  pair: level %s, %s answers, %s comparisons, agreement %s%s" % (
+            pair["level"], pair["answers"], pair["comparisons"], have,
+            "; level %s needs %s answers, %s comparisons at %d%%" % (
+                pair["next_level"], pair["answers_needed"], pair["comparisons_needed"],
+                round(pair["agreement_needed"] * 100)) if pair.get("next_level") and pair.get("agreement_needed") is not None
+            else ""))
     lines.append("  questions:")
     for q in b["questions"]:
         opts = ("  [%s]" % " / ".join(q["options"])) if q.get("options") else ""
@@ -729,10 +831,11 @@ def render_brief(b):
     return "\n".join(lines)
 
 
-_USAGE = ("usage: unpark.py list <sdlc_dir> [--assignee X] [--json]\n"
+_USAGE = ("usage: unpark.py list <sdlc_dir> [--assignee X] [--undeclared] [--json]\n"
+          "       unpark.py declare <sdlc_dir> <issue> <kind>\n"
           "       unpark.py brief <sdlc_dir> <issue> [--json]\n"
           "       unpark.py resolve <sdlc_dir> <issue> --answers <file.json> "
-          "--decision keep-parked|unpark [--dry-run]")
+          "--decision keep-parked|unpark [--qkind K] [--dry-run]")
 
 
 def _value(tail, name):
@@ -761,9 +864,22 @@ def _main(argv, run=None):
         if blocked is not None:
             return blocked
         result = list_parked(sdlc_dir, triage.config_strict(sdlc_dir), run=run,
-                             assignee=_value(tail, "--assignee"))
+                             assignee=_value(tail, "--assignee"),
+                             undeclared="--undeclared" in tail)
         print(json.dumps(result, indent=2) if "--json" in tail else render_list(result))
         return 0 if result["complete"] else 1
+    if len(argv) >= 5 and argv[1] == "declare":
+        sdlc_dir, number, kind = argv[2], argv[3], argv[4]
+        if kind not in qkind.QKINDS:
+            print("unpark.py declare: unknown kind %r (expected one of %s)" % (kind, ", ".join(qkind.QKINDS)),
+                  file=sys.stderr)
+            return 2
+        blocked = triage.needs_github(triage.config_strict(sdlc_dir), "unparking", 1, run, None)
+        if blocked is not None:
+            return blocked
+        ok, detail = declare(sdlc_dir, triage.config_strict(sdlc_dir), number, kind, run=run)
+        print(detail, file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 1
     if len(argv) >= 4 and argv[1] == "brief":
         sdlc_dir, number, tail = argv[2], argv[3], argv[4:]
         blocked = triage.needs_github(triage.config_strict(sdlc_dir), "unparking", 1, run, None)
@@ -799,9 +915,15 @@ def _main(argv, run=None):
         blocked = triage.needs_github(triage.config_strict(sdlc_dir), "unparking", 1, run, None)
         if blocked is not None:
             return blocked
+        kind = _value(tail, "--qkind")
+        if kind is not None and kind not in qkind.QKINDS:
+            print("unpark.py resolve: unknown --qkind %r (expected one of %s)" % (kind, ", ".join(qkind.QKINDS)),
+                  file=sys.stderr)
+            return 2
         result = resolve(sdlc_dir, triage.config_strict(sdlc_dir), number, answers, decision, run=run,
-                         apply="--dry-run" not in tail,
-                         questions_asked=(payload.get("questions") or []))
+                         apply="--dry-run" not in tail, kind=kind,
+                         questions_asked=(payload.get("questions") or []),
+                         rule_id=payload.get("rule_id") if isinstance(payload.get("rule_id"), str) else None)
         print("[%s] #%s: %s" % (result["outcome"], result["number"], result["detail"]))
         return 1 if result["outcome"] == "failed" else 0
     print(_USAGE, file=sys.stderr)

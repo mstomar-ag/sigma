@@ -597,6 +597,10 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
                 unparked.append(n)
                 text = _UNPARK_COMMENT.format(refs=", ".join(f"#{r}" for r in refs),
                                               label=source.goal_label)
+                try:                            # #1499: a sweep unpark closes the applier's pending ask
+                    _load("applier").close_for_issue(sdlc_dir, config, n, "auto-unpark")
+                except Exception:
+                    pass
                 posted = []
 
                 def _post(num, body, _n=n):

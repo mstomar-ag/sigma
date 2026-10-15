@@ -161,8 +161,11 @@ Housekeeping:
 ## Question kinds
 
 The agent that parks a goal declares the kind with `loop.py record <sdlc_dir> <goal> parked "<text>" --qkind <kind>`,
-which adds one machine line (`sigma-qkind: <kind>`) to the park comment. Without the flag the kind is guessed from the
-text, and the Rulebook treats an undeclared kind as not learnable. The closed list:
+which adds one machine line (`sigma-qkind: <kind>`) to the park comment. Without the flag the park is undeclared (one
+stderr line suggests a kind; nothing is guessed from the text), and the Rulebook treats it as not learnable.
+`unpark.py declare <sdlc_dir> <issue> <kind>` declares one afterwards; only Sigma's own park comments and an
+OWNER, MEMBER or COLLABORATOR declaration count. A filing the deny-list parks is declared a hard-stop kind and
+carries `sigma-hardstop: <class>`. The closed list:
 
 `irreversible`, `needs_decision`, `merge_conflict`, `failing_check`, `no_evidence`, `dependency`, `review_cap`,
 `quota`, `unknown`, `scope_hold`, `owner_hold`, `reviewer_down`, `review_post_ambiguous`.
@@ -258,6 +261,24 @@ fails closed on a small held-out set, a tie, a missing option, a hard-stop kind,
 has a rule. It needs the rules, autonomy and records parts all open. On a public repository only answers that are bank options
 are stored, so drafts and comparisons work from those alone.
 
+`rule_draft.py list --why` also prints one `skipped <kind> / <area>: <reason>` line for each pair left out (hard-stop
+or unknown kind, level below 2, or the share of the most common answer). `rule_draft.py due` prints, for each approved
+rule due for re-asking, `rule <id>: K of N live answers accepted since <date>`.
+
+**The recommendation.** With the rules part open, `unpark.py brief` shows an approved rule as `recommendation`
+(`rule_id`, `option`, `gesture`, `due`) only for a declared, learnable kind whose rule option is among the options on
+offer, and a `pair` line (level, answers, comparisons, agreement; with autonomy open). The interview lists that option
+first with "(recommended)" in the label, and the answers payload carries `rule_id` as a top-level key (never inside
+`answers`). `resolve` then records `rule_id`, `shown` (the recommendation was displayed) and `accepted` (the answer
+equals the rule's option) on the decision record. Comparisons made while a recommendation was shown are reported apart
+from the others, and level 3 is judged on the ones that were not shown. At level 3 and above the applier acts on a rule
+only after `l3_min_answers` live comparisons whose predicted option is that rule's own, recorded since it was
+confirmed, agree at `l3_agreement`; a newly approved rule does not inherit the trust earned by an older prediction.
+The autonomy row also lists the top three `misses` (predicted instead of chosen; free text reads "a free-text answer")
+and says "cannot reach N%" when the most common answer's share is below what the next level needs. The doctor flags a
+rule whose option never matches a recorded answer and shows each rule's acceptance line. With all of these parts
+closed, brief and resolve output is unchanged.
+
 `approve` refuses, with one line, for an unknown id, an already approved rule, a non-owner, an unresolved login or a
 closed gate. For a login that is not an owner it prints the line that asks an owner to approve, and the rule stays proposed.
 
@@ -295,6 +316,10 @@ A keep-parked or demote on an issue whose ask was applied inside its window reco
 The tick writes `applier-heartbeat.json`; the doctor reads a tick as dead when it is missing or older than
 `stale_after_intervals` (default 3) watch intervals. A dead tick is harmless: the goal stays parked. Applied asks with no
 pending veto are deleted after `prune_after_days` (default 30); answered and vetoed asks after two days.
+
+A `keep-parked` on a dependency park (route answer "wait for it") no longer posts the opt-out marker, even with the gates closed. This is intended; the owner is to ratify it.
+
+A quota ask matched to the "wait it out" rule is applied only after the reset time the ask records (`reset_at`). A reset time that is missing or unreadable counts as not yet reached, so the ask stays with the person. Other kinds are not affected.
 
 ## Hard stops and the record-done net
 
@@ -565,6 +590,8 @@ All scripts are in `skills/sigma-loop/scripts/` unless noted.
 | import | `decision_import.py scan`, `plan`, `apply` | see [Importing](#importing-past-decisions) |
 | publish records | `decision_store.py publish <sdlc_dir>` | the local commit that `records.publish` does for you |
 | run the applier once | `applier.py [sdlc_dir]` | the watcher runs it each tick |
+| plan the applier without writing | `applier.py [sdlc_dir] --dry-run` | prints each action with rule, level and window |
+| open asks for existing parks | `applier.py sync [sdlc_dir]` | also runs before each tick |
 | read levels | `skills/sigma-doctor/scripts/doctor.py features [sdlc_dir]` | the `rulebook`, `autonomy levels` and `applier tick` rows |
 
 Library modules (no command line): `rulebook.py` (rule file, seal, match), `rulebook_cfg.py` (the total config reader),

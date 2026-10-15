@@ -179,8 +179,8 @@ Then repeat until the helper says stop:
    to the review queue for a human; never edit a standing doc unattended.
 6. Record the outcome, including the retro grade from step 5 if Retrospective ran:
    `python3 "${CLAUDE_SKILL_DIR}/scripts/loop.py" record .sdlc "$goal" done --retro-grade
-   achieved|partial|diverged` (or `parked "reason" --qkind <kind>` / `failed "reason" ...`; omit the flag on a
-   goal that never reached Retrospective). The grade never substitutes for verified `done_when`. Passing it also refreshes the graph
+   achieved|partial|diverged` (or `parked "reason" --qkind <kind>` (required) / `failed "reason" ...`; omit it on a
+   goal that never reached Retrospective). The grade never substitutes for verified `done_when`. It also refreshes the graph
    when `knowledge_graph.auto_refresh` is `true`. **Never also run a graph build by hand.**
 
    **REQUIRED PATTERN** — any blocking call (`loop.py verify`, `work.py merge`, a dispatched
