@@ -132,7 +132,7 @@ and the difference decides what you may rely on:
 - **the sanctioned exit is an ack** (#2756). Commits a human has confirmed arrived through a pull
   request but lost its trace are acked with `feature_rebase.py ack .sdlc <unit> <sha>...` (or
   `--all`), which writes `.sdlc/features/rebase-acks/<unit>.json`. The ack is keyed by
-  **patch-id**, so it survives the rebase it unblocks; it is read from the working tree AND from
+  **patch-id**, so it survives the rebase it unblocks (a merge or empty commit has none and is keyed by author, author date, message and parent count, #1470); it is read from the working tree AND from
   the remote integration branch, so landing that file on the integration branch through a pull
   request makes it every teammate's answer. Only a commit the check currently reports can be
   acked; everything else stays strict.
