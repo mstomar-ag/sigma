@@ -331,6 +331,24 @@ def _duplicate_search(sdlc_dir, config, title, text, exclude_refs=None, run=None
         return {"schema": dedup.SCHEMA, "candidates": [], "degraded": ["error"]}
 
 
+def _cross_unit_refs(source, unit, candidates):
+    """#1505: refs of "duplicate"-strength candidates whose unit differs from the filing `unit`.
+    Empty when there is no filing unit (no reads at all) or on any read failure. Never raises."""
+    out = set()
+    if not unit:
+        return out
+    for c in candidates:
+        if c.get("strength") != "duplicate":
+            continue
+        try:
+            other, _ = feature_stamp.unit_of(source, _issue_id_from_ref(c["ref"]))
+        except Exception:                                      # noqa: BLE001 - fail-open
+            continue
+        if other and other != unit:
+            out.add(str(c["ref"]))
+    return out
+
+
 #: #1217: a match against a CLOSED issue folds a follow-up away only when it is near-exact; nobody
 #: rereads a closed issue, so a mid-score closed match is reported as related and the follow-up files.
 _DEFAULT_CLOSED_DUPLICATE_THRESHOLD = 0.8
@@ -949,12 +967,18 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         # nor the wasted corpus fetch.
         candidates = []
         duplicate = None
+        cross_unit = set()
         if dedup:
             dup_pack = _duplicate_search(sdlc_dir, config, heading, text, exclude_refs=[str(goal)],
                                          run=run)
             candidates = dup_pack.get("candidates") or []
+            # #1505: a "duplicate" that belongs to a DIFFERENT unit than the filing one must not
+            # swallow this follow-up -- it stays in `candidates` as related. No filing unit, an
+            # unreadable candidate, or a candidate with no unit: unchanged (fail-open).
+            cross_unit = _cross_unit_refs(source, unit, candidates)
             duplicate = next((c for c in candidates if c.get("strength") == "duplicate"
-                              and _closed_match_is_exact(c, config)), None)
+                              and _closed_match_is_exact(c, config)
+                              and str(c.get("ref")) not in cross_unit), None)
 
         if duplicate is not None:
             # a confident match: reuse the existing issue instead of filing a second one. The
@@ -1040,6 +1064,9 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
             # neither effect changes an outcome. Same family as the shared-boilerplate inflation
             # that made decompose_check opt out of the search entirely (`dedup=False`, above), just
             # far smaller.
+            if cross_unit:
+                text = "%s\n\nRelated: %s (other unit)" % (
+                    text.rstrip("\n"), ", ".join("#" + r for r in sorted(cross_unit)))
             if triage is not None and triage["depth"] is not None:
                 text = ai_filed_counter.stamp(text, triage["depth"])
             if unit:
