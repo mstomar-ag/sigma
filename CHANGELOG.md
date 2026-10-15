@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **The two automatic blocker writers read explicit edges only (#1467).** The reconcile-tick repair and the board-pass promotion took edges from the broad pattern, so a sentence like "after #N lands" or "needs #N" raised an unrelated issue, wrote a board field and a comment on it, and stripped its legacy confirmation label. They now read only "blocked by", "depends on" and "depends upon" (unpark Q&A text excluded) plus ledger hand-offs; weak-word mentions are reported on stderr and never written.
+
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
 - **A person's free-text answer stays out of the applier ask file on a public repository (#1429).** The ask file kept the answer verbatim and the autonomy folder is published with the records; with `repo_visibility` public it now stores `recorded privately`, a private repository is unchanged.
