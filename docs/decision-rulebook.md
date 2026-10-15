@@ -343,6 +343,15 @@ python3 skills/sigma-loop/scripts/decision_import.py remove .sdlc --project-dir 
   profile, folder and cwd are short hashes. `plan` and `apply` print one line per folder (candidates, new records);
   folders other than this repository's own are marked `(extra)`. `--only-in-repo` (or `rulebook.import.require_repo_cwd`
   `true`, default `false`) keeps only answers whose transcript `cwd` is inside this repository and prints how many were dropped.
+- **Several folders, bash and zsh.** Give one folder per flag and repeat the flag:
+  `--project-dir A --project-dir B`. To build the list in a variable, use an array and expand it as a quoted list
+  (`dirs=(--project-dir A --project-dir B)` then `"${dirs[@]}"`). A single unquoted variable holding several words is one
+  argument in zsh (zsh does not split it), so it is read as one folder that does not exist and is skipped. Every scan,
+  `plan` and `apply` prints a `folders read:` line on stderr naming the folders it resolved.
+- **Profiles and missing folders.** Each `--project-dir` is searched under every `--profile` given.
+  A folder found under none of them is skipped with a `skipped: project folder ... not found under ...` note, and the run continues with the other folders.
+  One call with several `--profile` options is the intended way to cover several profiles.
+  `plan` and `apply` print these notices on stderr; when a time budget, size cap or candidate cap cut the import short, `apply` also prints `partial import: N files not read, raise rulebook.import.time_budget_s and run apply again`.
 - **Removing one folder's import.** `remove .sdlc --project-dir DIR` lists the imported records and watch files whose
   origin names that folder (add `--profile` to narrow); `--apply` deletes them. Records written before origins existed
   have none: they are counted ("N legacy records have no origin; not removed") and never deleted.
