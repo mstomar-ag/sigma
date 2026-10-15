@@ -262,7 +262,9 @@ WORKTREE_DIRNAME = "rebase"
 LOCK_DIRNAME = "rebase-locks"
 LOCK_SUFFIX = ".lock"
 #: ONE non-blocking attempt. A pick that WAITS on another process's rebase is a pick that stalls the
-#: whole loop for a git operation it does not need; the other process is already doing the work.
+#: whole loop. The pick does need the unit brought forward before its cut, so a `busy` pick does not skip
+#: that need: `work.start` re-checks the unit tip right after the cut and moves the still-empty goal branch
+#: onto it (#1483), and the goal's recorded cut tip makes any later rebase replay only its own commits.
 LOCK_TIMEOUT = 0.0
 
 DEFAULT_REMOTE = "origin"
@@ -2433,7 +2435,8 @@ def _clear_blocked(sdlc_dir, unit):
 #: saying nothing -- a mutant that removes a kind from the clause must break something visible.
 _WORDING = {
     BUSY: ("could not take %(branch)s's rebase lock -- another pass holds it, or the lock file "
-           "could not be opened"),
+           "could not be opened -- so this goal may have been cut from a tip that pass may be rewriting; "
+           "it is re-checked right after the cut and rebased onto the new tip before verify"),
     #: `%(path)s`, NOT `%(why)s`: the clause truncates `why` at `_CLAUSE_WHY_CHARS`, and the one
     #: thing an operator needs from this line is the path to clear -- which a deep `tmp`/CI path
     #: pushes past that limit. A path is one line by construction, so quoting it whole is safe.

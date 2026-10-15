@@ -296,16 +296,14 @@ class Recorder:
         return real_run(cwd, argv)
 
 
-def test_cut_tip_helper_gate_closed_adds_no_key_and_no_call():
+def test_cut_tip_helper_not_a_unit_base_adds_no_key_and_no_call():
     calls = []
-    for config in CLOSED:
-        assert work()._cut_tip_fields(config, lambda c, a: calls.append(a), "/x", "origin", "feature/u") == {}
     assert work()._cut_tip_fields(OPEN, lambda c, a: calls.append(a), "/x", "origin", "main") == {}     # not a unit branch
     assert calls == []
 
 
 def test_cut_tip_helper_records_the_unit_tip_under_the_gate(world):
-    got = work()._cut_tip_fields(OPEN, real_run, str(world.goal), "origin", "feature/u")
+    got = work()._cut_tip_fields(OPEN, real_run, str(world.goal), "origin", "feature/u", ref="origin/feature/u")
     assert got == {"cut_tip": world.cut}
 
 
@@ -338,14 +336,14 @@ def test_goal_rebase_without_a_record_uses_the_legacy_argv(world):
     assert "cut_tip" not in work()._record(str(world.sdlc), "9")
 
 
-def test_goal_rebase_gate_closed_ignores_a_record(world):
+def test_goal_rebase_gate_closed_still_uses_a_record(world):
+    """#1483: the cut tip no longer depends on the opt-in; a record holding one gets the --onto replay."""
     rewrite_unit(world, "unit-line")
     record(world)
     run = Recorder()
     work().rebase(str(world.sdlc), {}, "9", run=run)
     rebases = [c for c in run.calls if c[:2] == ["git", "rebase"]]
-    assert rebases and all("--onto" not in c for c in rebases)
-    assert run.calls[-1][:3] != ["git", "rev-parse", "origin/feature/u"]
+    assert rebases and all("--onto" in c for c in rebases)
 
 
 def test_goal_rebase_with_a_cut_tip_not_in_history_uses_the_legacy_path(world):

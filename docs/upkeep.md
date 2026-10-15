@@ -30,7 +30,10 @@ It does not do the following:
 ## The two ways a unit gets brought forward
 
 1. **At pick time.** When a goal that declares a unit is picked, the pick-time pass brings that unit's branch
-   (and the goal's own branch) up to date. This is the older mechanism. `work.rebase_upkeep` (on by default;
+   (and the goal's own branch) up to date. If another pass holds the unit's rebase lock, the pick does not wait: the
+   new goal is cut, the unit tip is re-checked right after the cut, and the still-empty goal branch is moved onto
+   the new tip if it changed. The pick line says so, and the goal's recorded cut tip makes its later rebase replay
+   only its own commits. This is the older mechanism. `work.rebase_upkeep` (on by default;
    `"off"` turns it off) governs it.
 2. **On a window.** With the scheduler, one bounded sweep brings every unit that is behind its base up to
    date, once per window. This is the subject of the next sections.
