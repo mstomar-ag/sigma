@@ -84,6 +84,8 @@ PROPOSED_LABEL = "sdlc:needs-confirmation"
 #: as an AI-discovered finding" a reliable, always-present signal rather than an optional
 #: `--label` a caller has to remember to type (SKILL.md previously showed it only as an example).
 FOLLOWUP_LABEL = "sdlc:followup"
+#: #1473: stamped on the body of every `upkeep_finding=True` filing; `promote.py` reads it (a copy, pinned by a test).
+UPKEEP_FINDING_MARKER = "<!-- sigma:upkeep-finding -->"
 
 
 def _settings(config):
@@ -1042,6 +1044,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
             # far smaller.
             if triage is not None and triage["depth"] is not None:
                 text = ai_filed_counter.stamp(text, triage["depth"])
+            if upkeep_finding and UPKEEP_FINDING_MARKER not in text:
+                text = text.rstrip("\n") + "\n\n" + UPKEEP_FINDING_MARKER + "\n"
             if unit:
                 stamped = feature_stamp.stamp_body(text, unit)
                 text, unit = stamped.body, stamped.unit

@@ -387,13 +387,17 @@ defaults are provisional.
 
 ## Migrating the old confirmation label
 
-Nothing writes the legacy `sdlc:needs-confirmation` label any more: a filed follow-up is already a goal, armed or
-parked with a declared question. Boards that still carry leftovers are cleared with:
+Nothing writes the legacy `sdlc:needs-confirmation` label any more except the rebase upkeep's own findings (a report for
+a person, never a goal): a filed follow-up is already a goal, armed or parked with a declared question. Boards that
+still carry leftovers are cleared with:
 
 ```
 python3 skills/sigma-loop/scripts/promote.py migrate-confirmation .sdlc                    # dry run (the default)
 python3 skills/sigma-loop/scripts/promote.py migrate-confirmation .sdlc --apply [--unit NAME] [--only N,N] [--limit K]
 ```
+
+An upkeep finding (body marker `<!-- sigma:upkeep-finding -->`, or the line "Filed by Sigma's rebase upkeep for unit" on older ones)
+is its own population and is always parked, never armed: `merge_conflict` for a rebase conflict, `needs_decision` for direct commits.
 
 The dry run prints each issue's destination, population and reason. `--unit` (case-insensitive), `--only` and
 `--limit` (open issues only) let you run a board in slices; an empty filter, or one that matches nothing, exits non-zero

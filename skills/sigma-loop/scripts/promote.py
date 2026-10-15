@@ -691,6 +691,9 @@ MIGRATE_MARKER = "<!-- sigma:migrate-confirmation -->"
 _OWNER_MARKER = "<!-- sigma:feature-ownership -->"
 _SCOPE_MARKER = "<!-- sigma:feature-scope-expansion -->"
 _FOLLOWUP_LABEL = "sdlc:followup"
+_UPKEEP_MARKER = "<!-- sigma:upkeep-finding -->"
+#: #1473: findings filed before the marker existed carry this line instead.
+_UPKEEP_BODY_LINE = "Filed by Sigma's rebase upkeep for unit"
 #: PROVISIONAL: the most labelled issues one run will read; a fetch that reaches it reports itself incomplete.
 #: Override with `ai_filed.migration.max_issues`.
 MIGRATE_FETCH_CAP = 10000
@@ -708,13 +711,18 @@ def _comment_bodies(issue):
 
 
 def classify_population(issue):
-    """`ownership_hold`, `scope_hold`, `followup` or `human` for one labelled issue: the gate flag comments
-    first (they carry a registry decision), then the follow-up label, else a human-typed proposal."""
+    """`ownership_hold`, `scope_hold`, `upkeep_finding`, `followup` or `human` for one labelled issue: the gate
+    flag comments first (they carry a registry decision), then an upkeep finding (body marker, or the body line
+    older ones carry; it also carries the follow-up label, so it is tested first), then the follow-up label,
+    else a human-typed proposal."""
     bodies = _comment_bodies(issue)
     if any(_OWNER_MARKER in b for b in bodies):
         return "ownership_hold"
     if any(_SCOPE_MARKER in b for b in bodies):
         return "scope_hold"
+    body = issue.get("body") or ""
+    if _UPKEEP_MARKER in body or _UPKEEP_BODY_LINE in body:
+        return "upkeep_finding"
     if _FOLLOWUP_LABEL in _label_names(issue):
         return "followup"
     return "human"
@@ -733,6 +741,11 @@ def plan_for(issue, config, unresolved=(), hold=None):
         return Park("open blocker(s) not confirmed closed: " + ", ".join(unresolved), "dependency")
     if hold:
         return Park("gate hold: " + str(hold), "needs_decision")
+    if pop == "upkeep_finding":                         # #1473: a report for a person, never armed
+        text = (issue.get("title") or "") + "\n" + (issue.get("body") or "")
+        direct = "Direct commits on" in text or "no pull request accounts for" in text
+        return Park("upkeep finding: a report for a person, never armed as a goal",
+                    "needs_decision" if direct else "merge_conflict")
     ft = _feature("file_triage")
     title, body = issue.get("title") or "", issue.get("body") or ""
     if pop == "human":
