@@ -286,6 +286,7 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
             refusals.append("project folder reference %s unknown: cannot be resolved" % r)
     profs = _profiles(config, limits, profile_dirs)
     seen = set()
+    unread = [0]
     for name in dict.fromkeys(names):
         found = False
         for prof in profs:
@@ -298,16 +299,21 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
             except OSError:
                 files = []
             for f in files:
-                if full or timed_out or f in seen:
+                if f in seen:
+                    continue
+                if full or timed_out:
+                    unread[0] += 1
                     continue
                 seen.add(f)
                 if clock() > deadline:
                     timed_out = True
+                    unread[0] += 1
                     continue
                 try:
                     size = f.stat().st_size
                     if size > limits["max_file_bytes"]:
                         stats["transcript"]["skipped"] += 1
+                        unread[0] += 1
                         refusals.append("%s (%d bytes) skipped: over the size cap of %d bytes" % (
                             f.name, size, limits["max_file_bytes"]))
                         continue
@@ -329,7 +335,8 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
                 cands += got
                 full = len(cands) >= cap
         if not found and name != names[0]:
-            refusals.append("project folder %s not found under the given profiles" % name)
+            refusals.append("project folder %s not found under %s; the other folders were read" % (
+                name, ", ".join(str(x) for x in profs) or "no profile"))
     comments_timed_out = False
     if not full and limits["comments"]:
         try:
@@ -365,10 +372,34 @@ def scan(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None, pro
     for c in cands:
         stats[c["source"]]["candidates"] += 1
         stats[c["source"]]["superseded"] += 1 if c["superseded"] else 0
-    res = {"candidates": cands, "stats": stats, "refusals": refusals}
+    res = {"candidates": cands, "stats": stats, "refusals": refusals,
+           "unread": unread[0] + stats["transcript"]["partial"]}
     if filtering:
         res["dropped"] = dropped[0]
     return res
+
+
+_TRUNCATIONS = ("time budget reached", "candidate cap of", "over the size cap", "partially read")
+
+
+def _notice_lines(out):
+    """Scan notices as printed lines: a missing project folder is `skipped:`, the rest keep `refused:`."""
+    lines = []
+    for r in out.get("refusals", []):
+        skipped = r.startswith("project folder ") and " not found under " in r
+        lines.append(("skipped: " if skipped else "refused: ") + r)
+    return lines
+
+
+def _print_notices(out):
+    for line in _notice_lines(out):
+        print(line, file=sys.stderr)
+
+
+def _print_partial(out):
+    if any(t in r for r in out.get("refusals", []) for t in _TRUNCATIONS):
+        print("partial import: %d files not read, raise rulebook.import.time_budget_s and run apply again" % (
+            out.get("unread", 0)))
 
 
 def candidates(sdlc_dir, config, profile_dirs=None, issues=None, comments_fn=None):
@@ -850,6 +881,8 @@ def main(argv=None, lister=None, comments_fn=None):
                 " ".join(str(exc).split())[:160] or type(exc).__name__), file=sys.stderr)
     out = scan(args.sdlc_dir, config, args.profile or None, issues=issues, comments_fn=comments_fn,
                project_dirs=args.project_dir or None, only_in_repo=True if args.only_in_repo else None)
+    if args.verb in ("plan", "apply"):
+        _print_notices(out)
     if args.verb == "plan":
         pl = plan(args.sdlc_dir, config, out["candidates"])
         if not pl["gate"]:
@@ -879,6 +912,7 @@ def main(argv=None, lister=None, comments_fn=None):
                                                           (" (%s)" % res["note"]) if res["note"] else ""))
         _print_folders(res["folders"])
         _print_dropped(out)
+        _print_partial(out)
         if res.get("over_budget"):
             m = res["model"]
             print("%d call(s) exceeded the per-call budget $%.2f (real cost about $%.2f each, answers discarded, run "
@@ -897,8 +931,8 @@ def main(argv=None, lister=None, comments_fn=None):
             name, st["files_read"], st["candidates"], st["skipped"], st["superseded"],
             st["partial"], st["bytes_read"]))
     _print_dropped(out)
-    for r in out["refusals"]:
-        print("refused: " + r)
+    for line in _notice_lines(out):
+        print(line)
     for c in out["candidates"][:SAMPLE_LINES]:
         print("  - [%s] %s -> %s%s" % (c["source"], _clip(c["question"]), _clip(c["choice"]),
                                        " (superseded)" if c["superseded"] else ""))
