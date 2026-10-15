@@ -751,7 +751,7 @@ def plan_for(issue, config, unresolved=(), hold=None):
     else:
         d = ft.decide(title, body, {}, config)
     if d.kind != "arm":
-        if d.matched:                               # #1498: a deny-list match is a hard stop
+        if getattr(d, "matched", None):             # #1498: a deny-list match is a hard stop
             return Park(d.reason, _feature("hard_stop").first_hardstop_kind(config), d.matched)
         return Park(d.reason, "needs_decision")
     why = "human-confirmed filing" if pop == "human" else d.reason
