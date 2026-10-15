@@ -5,6 +5,7 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - **The acceptance record now reaches the goal branch, and landed root copies are cleaned up (#1474).** `work.py commit` copies the root acceptance record into the worktree, `work.py pr` refuses a branch missing it, a confirmed merge removes untracked root plan, research and acceptance files byte-identical to what landed (differing or unlanded ones are reported, never removed), and doctor reports old untracked records and modified registry files.
+- **The model import classifier charges a cut-off call its real cost and stops at the first budget cut-off (#1471).** The CLI checks `--max-budget-usd` only after a turn, so the default 0.05 cut off every call yet billed about 3 times the charge; a failed call now costs its envelope cost, the first cut-off stops the run with a message naming `rulebook.import.max_budget_usd_per_call`, the drift judge charges known cost on an invalid verdict, and the default is 0.50.
 
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
