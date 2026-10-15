@@ -81,13 +81,19 @@ class FakeHost:
         argv = [str(a) for a in argv]
         self.calls.append(argv)
         if argv[:2] == ["git", "ls-remote"]:
+            if "--heads" in argv and argv[-1] == "refs/heads/" + "main":
+                return "abc123\t" + argv[-1]
             if "--heads" in argv and argv[-1] in self.branches:
                 return "abc123\trefs/heads/%s" % argv[-1]
             if "--heads" in argv and argv[-1].startswith("refs/heads/"):
                 return "\n".join("abc123\trefs/heads/%s" % b for b in sorted(self.branches))
             return ""
+        if argv[:2] == ["git", "fetch"]:
+            return ""
+        if argv[:3] == ["gh", "api", "user"]:
+            return "tester"
         if argv[:2] == ["git", "rev-parse"]:
-            return self.head
+            return "f" * 40 if "--verify" in argv else self.head
         if argv[:2] == ["git", "show-ref"]:
             return ""
         if argv[:2] == ["git", "push"]:
@@ -307,7 +313,8 @@ def test_the_branch_and_the_label_exist_before_any_issue_declares_the_unit(tmp_p
     module's own account of itself and the call log is what happened."""
     flow = _flow(tmp_path)
     kinds = [a[0] for a in flow["host"].calls
-             if a[:2] not in (["git", "status"], ["git", "add"], ["git", "commit"])]   # #1312: record commit is last
+             if a[:2] not in (["git", "status"], ["git", "add"], ["git", "commit"])
+             and a[:3] != ["gh", "api", "user"] and a[:3] != ["git", "remote", "get-url"]]   # #1312: record commit is last
     assert kinds[0] == "git" and "gh" in kinds
     assert kinds.index("gh") > max(i for i, k in enumerate(kinds) if k == "git")
     assert "feature/%s" % UNIT in flow["host"].branches

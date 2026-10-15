@@ -39,7 +39,7 @@ comment (prefix-stripped), and `decision_tier.classify` -- the UNGATED, pure cla
     python3 unpark.py resolve <sdlc_dir> <issue> --answers <file.json>
                               --decision keep-parked|unpark [--dry-run]
 """
-import json, pathlib, re, sys, importlib.util
+import datetime, json, pathlib, re, sys, importlib.util
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -245,6 +245,8 @@ def route_answer(kind, answers):
     """The normalised route answer for `kind`: a bank option, or 'free'; None when the kind has no
     route question or none was answered."""
     slot = route_slot(kind)
+    if slot is None and kind in QUESTIONS and kind != "unknown":
+        slot = CLOSING_QUESTION                 # #1521: no route question, so the closing answer is the key
     raw = (answers or {}).get(slot["id"]) if slot else None
     if raw is None or not str(raw).strip():
         return None
@@ -349,16 +351,45 @@ def brief(sdlc_dir, config, number, source=None, run=None):
 
     answered = _recorded_answers(body)
     current, block = park_stamp(data.get("comments")), _block_stamp(body)
-    if current and block and block != current:          # M-01: that block answered an earlier park
+    if current and block != current and (block or decision_record.enabled(config)):
+        # M-01: that block answered an earlier park; #1522: with records open an unstamped (legacy) one did too
         answered = {}
     questions = _questions_for(reason_class, reason, open_refs, answered)
     learning = _load("autonomy").learning_line(sdlc_dir, reason_class, config)
+    extra = _recommendation(sdlc_dir, config, declared, data.get("labels"))
     return {"number": str(number), "title": data.get("title") or "",
             "state": data.get("state"), "labels": sorted(names),
             "park_reason": reason, "park_reason_is_sigmas": from_sigma,
             "reason_class": reason_class, "decision_tier": tier, "tier_signal": tier_signal,
             "blockers": blockers, "prior_answers": answered,
-            "questions": questions, "degraded": [], **({"learning": learning} if learning else {})}
+            "questions": questions, "degraded": [], **({"learning": learning} if learning else {}), **extra}
+
+
+def _recommendation(sdlc_dir, config, kind, labels):
+    """#1496: `{"recommendation": ..., "pair": ...}` for a declared, learnable kind with the rules part
+    open and one approved rule whose option is on offer; `{}` otherwise (closed gates add nothing)."""
+    try:
+        rb = _load("rulebook")
+        if not kind or kind == "unknown" or not rb.enabled(config) or not route_slot(kind):
+            return {}
+        area = decision_record.area_of(labels)
+        pre = rb.prefill(sdlc_dir, kind, area, valid_options(kind), config)
+        if not pre:
+            return {}
+        due = pre["rule"] in rb.due_for_reask(rb.load(sdlc_dir, config),
+                                              datetime.datetime.now(datetime.timezone.utc), config)
+        out = {"recommendation": {"rule_id": pre["rule"], "option": pre["recommend"],
+                                  "gesture": option_gestures(kind).get(pre["recommend"], "none"), "due": due}}
+        au = _load("autonomy")
+        if au.enabled(config):
+            row = au._state(sdlc_dir, kind, area, config)
+            row.update(au._need(row, config))
+            out["pair"] = {k: row.get(k) for k in ("level", "answers", "comparisons", "agreement",
+                                                     "next_level", "answers_needed", "comparisons_needed",
+                                                     "agreement_needed")}
+        return out
+    except Exception:                                   # noqa: BLE001 - a recommendation never breaks a brief
+        return {}
 
 
 def _questions_for(reason_class, reason, open_refs, answered):
@@ -511,7 +542,7 @@ def _replace_block(body, block):
 
 
 def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, apply=True,
-            questions_asked=()):
+            questions_asked=(), rule_id=None):
     """Record the answers, then either keep the park or undo it.
 
     `decision`:
@@ -596,7 +627,7 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         err = _comment_decision(sdlc_dir, config, source, n, block + ("" if waits else "\n\n"
                                 + auto_unpark.keep_parked_comment(_one_line(
                                     PRIVATE_VALUE if _keys_only(config) else _substantive_reason(answers)))),
-                                "keep-parked", answers, data)
+                                "keep-parked", answers, data, rule_id)
         _append_block(source, n, data.get("body") or "", block)
         return {"number": n, "decision": decision, "outcome": "kept-parked",
                 "detail": "answers recorded; the automatic sweep will leave it alone" + err}
@@ -616,7 +647,7 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
     if not source._set_board_status(n, source.col["ready"]) and source.board_active:
         detail += ("; the label landed but the board card did not move to %r — move it by hand if "
                    "this repo picks from the board" % source.col["ready"])
-    detail += _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data)
+    detail += _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data, rule_id)
     _append_block(source, n, data.get("body") or "", block)
     return {"number": n, "decision": decision, "outcome": "unparked", "detail": detail}
 
@@ -629,7 +660,7 @@ def _declared_kind(data):
     return found or "unknown"
 
 
-def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, data):
+def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, data, rule_id=None):
     """Post `text`. With the records part open it is posted WITH the decision record's id and the
     record is stored; closed, this is exactly `_comment` (byte-identical). Returns "" or a
     "; <error>" suffix for the caller's detail."""
@@ -648,8 +679,13 @@ def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, 
                                         _substantive_reason(answers), decision_record.how_for(gesture),
                                         area=decision_record.area_of(data.get("labels")))
             ans = route_answer(kind, answers)
+            if rule_id:                                 # #1496: the person was shown this rule's recommendation
+                rec["rule_id"], rec["shown"] = str(rule_id), True
             if ans and not (ans == "free" and decision_record.visibility(config) == "public"):
                 rec["answer"] = ans                     # F-01: the key rules and comparisons share
+            if rule_id:
+                shown = next((r for r in _load("rulebook").load(sdlc_dir, config) if r.get("id") == rule_id), None)
+                rec["accepted"] = bool(shown) and decision_record.key_of(rec) == shown.get("option")
             park = park_stamp(data.get("comments"))
             if park:
                 rec["park"] = park
@@ -722,6 +758,19 @@ def render_brief(b):
         lines.append("  already answered: %s" % ", ".join(sorted(b["prior_answers"])))
     if b.get("learning"):
         lines.append("  %s" % b["learning"])
+    rec, pair = b.get("recommendation"), b.get("pair")
+    if rec:
+        lines.append("  approved rule %s recommends: %s (will %s)%s" % (
+            rec["rule_id"], rec["option"], {"unpark": "unpark", "keep-parked": "keep parked"}.get(
+                rec["gesture"], "only recommend"), "; due to be re-asked" if rec.get("due") else ""))
+    if pair:
+        have = "none yet" if pair["agreement"] is None else "%d%%" % round(pair["agreement"] * 100)
+        lines.append("  pair: level %s, %s answers, %s comparisons, agreement %s%s" % (
+            pair["level"], pair["answers"], pair["comparisons"], have,
+            "; level %s needs %s answers, %s comparisons at %d%%" % (
+                pair["next_level"], pair["answers_needed"], pair["comparisons_needed"],
+                round(pair["agreement_needed"] * 100)) if pair.get("next_level") and pair.get("agreement_needed") is not None
+            else ""))
     lines.append("  questions:")
     for q in b["questions"]:
         opts = ("  [%s]" % " / ".join(q["options"])) if q.get("options") else ""
@@ -801,7 +850,8 @@ def _main(argv, run=None):
             return blocked
         result = resolve(sdlc_dir, triage.config_strict(sdlc_dir), number, answers, decision, run=run,
                          apply="--dry-run" not in tail,
-                         questions_asked=(payload.get("questions") or []))
+                         questions_asked=(payload.get("questions") or []),
+                         rule_id=payload.get("rule_id") if isinstance(payload.get("rule_id"), str) else None)
         print("[%s] #%s: %s" % (result["outcome"], result["number"], result["detail"]))
         return 1 if result["outcome"] == "failed" else 0
     print(_USAGE, file=sys.stderr)

@@ -156,7 +156,7 @@ def _ask_path(sdlc_dir, aid):
     return os.path.join(_folder(sdlc_dir), _PREFIX + aid + ".json")
 
 
-def open_ask(sdlc_dir, issue, qkind, area, options, config, now, gesture="unpark"):
+def open_ask(sdlc_dir, issue, qkind, area, options, config, now, gesture="unpark", reset_at=None):
     """Record one question waiting on a person; returns its id, or None when closed or unusable."""
     try:
         if not enabled(config) or gesture not in GESTURES or not isinstance(qkind, str) or not qkind:
@@ -164,7 +164,8 @@ def open_ask(sdlc_dir, issue, qkind, area, options, config, now, gesture="unpark
         if not isinstance(options, list) or not options or not all(isinstance(o, str) for o in options):
             return None
         aid = "%s-%s" % (now.strftime("%Y%m%dT%H%M%S"), uuid.uuid4().hex[:6])
-        _write_atomic(_ask_path(sdlc_dir, aid), {"id": aid, "issue": issue, "qkind": qkind,
+        extra = {"reset_at": reset_at.isoformat()} if isinstance(reset_at, datetime.datetime) else {}
+        _write_atomic(_ask_path(sdlc_dir, aid), {**extra, "id": aid, "issue": issue, "qkind": qkind,
                                                   "area": area if isinstance(area, str) else "",
                                                   "options": options, "gesture": gesture,
                                                   "opened": now.isoformat(), "state": "pending"})
@@ -287,6 +288,27 @@ def close_for_issue(sdlc_dir, config, issue, text, now=None, refuse=False):
     return None
 
 
+_QUOTA_RESET_MINUTES = 1440
+
+
+def _quota_wait_pending(ask, m, now):
+    """#1522: a quota ask matched to "wait it out" is applied only once the quota has reset: its recorded
+    `reset_at`, else a day after it was opened. An unreadable time counts as still in the future.
+    Every other kind and option is untouched."""
+    if ask.get("qkind") != "quota" or m.option != "wait it out":
+        return False
+    try:
+        if ask.get("reset_at"):
+            reset = datetime.datetime.fromisoformat(str(ask.get("reset_at")))
+        else:
+            reset = datetime.datetime.fromisoformat(str(ask.get("opened"))) + datetime.timedelta(minutes=_QUOTA_RESET_MINUTES)
+        if reset.tzinfo is None:
+            reset = reset.replace(tzinfo=datetime.timezone.utc)
+        return now < reset
+    except (ValueError, TypeError):
+        return True
+
+
 def window_open(ask, config, now):
     """True while the question is still inside its window (nobody may be overridden yet)."""
     opened = _parse(ask.get("opened")) if isinstance(ask, dict) else None
@@ -309,6 +331,18 @@ def silent_allowed(qkind, config, rule=None):
         if _load("hard_stop").is_hardstop_kind(qkind, None, config):
             return False
         return _rule_is_approved(rule)
+    except Exception:
+        return False
+
+
+def _rule_has_own_support(sdlc_dir, qkind, area, rule, config):
+    """Level 3 and above apply a rule only when `l3_min_answers` live comparisons that chose the
+    rule's own option, recorded since it was confirmed, agree at `l3_agreement`."""
+    try:
+        au = _load("autonomy")
+        cfg = au._pair_settings(sdlc_dir, qkind, area, config)[0]
+        n, rate = au.rule_support(sdlc_dir, qkind, area, rule.get("option"), rule.get("confirmed"), config)
+        return n >= cfg["l3_min_answers"] and rate >= cfg["l3_agreement"]
     except Exception:
         return False
 
@@ -492,8 +526,12 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
             m = _load("rulebook").match(qkind, area, ask.get("options"), rules)
             if m is None:
                 continue
+            if _quota_wait_pending(ask, m, now):
+                continue
             rule = next((r for r in rules if r.get("id") == m.rule_id), None)
             level = _level(sdlc_dir, qkind, area, config)
+            if not _rule_has_own_support(sdlc_dir, qkind, area, rule, config):
+                continue    # #1496 M-04: a rule needs its own live comparisons, not its pair's older ones
             silent = False
             key = None
             if level >= 4 and silent_allowed(qkind, config, rule):
