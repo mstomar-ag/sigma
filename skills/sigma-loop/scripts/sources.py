@@ -3499,7 +3499,7 @@ class GitHubSource:
         for attempt in range(self._NOTE_RETRIES):
             try:
                 gh_api.comment_issue(self._run, self._n(goal), text, **kw)
-                return
+                return True
             except gh_api.GhApiError as exc:
                 if (fell or gh_api._write_case(exc) not in ("server_5xx", "transport_ambiguous")
                         or attempt == self._NOTE_RETRIES - 1):
