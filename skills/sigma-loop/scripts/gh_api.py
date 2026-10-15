@@ -429,7 +429,8 @@ def view_issue(run, number, repo=None, comments="all"):
 
 # ---------------------------------------------------------------- gh-shape normaliser (#895)
 
-GH_FIELDS = ("number", "title", "state", "stateReason", "author", "closedAt", "body", "labels", "assignees", "comments")
+GH_FIELDS = ("number", "title", "state", "stateReason", "author", "closedAt", "body", "labels", "assignees", "comments",
+             "isPullRequest")
 
 
 def _check_fields(fields):
@@ -483,6 +484,8 @@ def to_gh_shape(issue, fields):
             pr = issue.get("pull_request")
             merged = isinstance(pr, dict) and pr.get("merged_at")
             out[f] = "MERGED" if merged else str(issue.get("state") or "").upper()
+        elif f == "isPullRequest":
+            out[f] = isinstance(issue.get("pull_request"), dict)
         elif f == "stateReason":
             out[f] = str(issue.get("state_reason") or "").upper() or None
         elif f == "author":
