@@ -160,7 +160,7 @@ python3 skills/sigma-loop/scripts/feature_rebase.py ack .sdlc <unit> --all
 ```
 
 `ack --all` acknowledges only the commits the filed issue listed. The acknowledgement is keyed by patch id, so
-it survives the rewrite it unblocks, and it lives under `.sdlc/features/`, so it travels by pull request to
+it survives the rewrite it unblocks (a merge or empty commit, which has no patch id, is keyed by author, author date, message and parent count), and it lives under `.sdlc/features/`, so it travels by pull request to
 every teammate. Sigma only detects a violation; only host branch protection can prevent one, and ordinary
 protection on `feature/*` blocks upkeep's own force push, so grant upkeep's actor a bypass.
 
