@@ -373,8 +373,12 @@ board moves the gestures already made. See [privacy.md](privacy.md).
 | Where | Per call | Over time | Default |
 |---|---|---|---|
 | drift judge | `drift.max_budget_usd_per_call` (0.10) | `drift.spend_ceiling_usd_per_day` (rolling 24 hours) | no ceiling means no call |
-| import classifier | `import.max_budget_usd_per_call` (0.05) | `import.max_budget_usd_per_run` (1.0) | `"table"` calls nothing |
+| import classifier | `import.max_budget_usd_per_call` (0.50) | `import.max_budget_usd_per_run` (1.0) | `"table"` calls nothing |
 | applier | | `autonomy.applier.max_auto_applied_per_day` (3) | a count of applies, not money |
+
+The per-call figure is passed to the CLI as `--max-budget-usd`, which the CLI checks only after a model turn: one call can
+bill more than it, and the answer is then discarded. A failed call is charged its real cost, and the first budget
+cut-off stops the import run with a message naming `rulebook.import.max_budget_usd_per_call`; a failed call whose cost is not reported is charged the larger of the per-call figure and the dearest real call so far, and `plan` warns when the figure is below 0.15, the lowest fixed per-call cost measured from a repository root (default 0.50).
 
 The import ceiling applies to **one run** only. There is no daily or cross-run cap, so repeated runs add up. All dollar
 defaults are provisional.
@@ -468,7 +472,7 @@ flag, which closes the whole block.
 | `import.profile_dirs`, `import.project_dirs` | `[]` | same as `--profile`, `--project-dir` |
 | `import.classifier` | `"table"` | `"table"` or `"model"` |
 | `import.model` | `"haiku"` | model for the classifier |
-| `import.max_budget_usd_per_call` | `0.05` | classifier per call |
+| `import.max_budget_usd_per_call` | `0.50` | classifier per call |
 | `import.max_budget_usd_per_run` | `1.0` | classifier per run |
 | `import.timeout_s` | `60` | classifier per call |
 

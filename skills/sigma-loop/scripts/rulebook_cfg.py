@@ -70,7 +70,7 @@ def public_repo_warning(config, remote_is_public):
 IMPORT_DEFAULTS = {"max_file_bytes": 500000000, "max_candidates": 500, "max_issues": 50,
                    "time_budget_s": 60, "comments": False, "profile_dirs": [], "project_dirs": [],
                    "classifier": "table", "model": "haiku",
-                   "max_budget_usd_per_call": 0.05, "max_budget_usd_per_run": 1.0,  # budgets PROVISIONAL
+                   "max_budget_usd_per_call": 0.50, "max_budget_usd_per_run": 1.0,  # budgets PROVISIONAL; the CLI checks the cap after a turn
                    "timeout_s": 60}  # per model-classifier call, seconds (#1310); longer is allowed
 
 

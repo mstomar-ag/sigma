@@ -5,6 +5,7 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - **`migrate-confirmation --apply` no longer reports complete when an armed card stayed off the Ready lane (#1469).** The card move's result was dropped, so a spent GraphQL budget left cards in Backlog under a green run; each such row now carries a note, the summary counts and names them, a board-queue repo exits non-zero, and a migrated park moves its card to Parked (falling back to Blocked).
+- **The model import classifier charges a cut-off call its real cost and stops at the first budget cut-off (#1471).** The CLI checks `--max-budget-usd` only after a turn, so the default 0.05 cut off every call yet billed about 3 times the charge; a failed call now costs its envelope cost, the first cut-off stops the run with a message naming `rulebook.import.max_budget_usd_per_call`, the drift judge charges known cost on an invalid verdict, and the default is 0.50.
 
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
