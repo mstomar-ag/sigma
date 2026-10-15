@@ -489,6 +489,14 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_judge.py",
+      "function": "ask_claude",
+      "rule": "fs-rmtree",
+      "count": 1,
+      "gate": "removes only the empty temporary working directory it created with `tempfile.mkdtemp()` for one model call; never a repository tree",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/backlog_check.py",
       "function": "_dense_channel",
       "rule": "fs-write",
