@@ -1220,6 +1220,27 @@ class GitHubSource:
         # is what keeps an unscoped run byte-identical: same calls, same order, same output.
         self.feature = None
         self.feature_label = None
+        # #1575: the ONE temporary label this run is confined to (`--label <name>`), or None. Same
+        # contract as `feature`: set once through the module-level `scope_to_label`, a property of
+        # this invocation, and every use below is guarded on it so an unscoped run is byte-identical.
+        # `_label_seen` holds the label names of each goal as of the LAST read of it (the backlog
+        # list, then the claim's own body/labels read) so the pick-time check costs zero calls.
+        self.label_scope = None
+        self._label_seen = {}
+
+    def scope_to_label(self, name):
+        """Confine every pick this source makes to goals carrying label `name` as well as the goal
+        label. Mechanism only; validation is the module-level `scope_to_label`."""
+        self.label_scope = name
+
+    def scope_label_current(self, goal):
+        """Does `goal` still carry the scope label, per the most recent read this process made of
+        it? -> True / False, or None when it was never read (callers treat None as not-in-scope).
+        Costs no call: it only reads what the list read and the claim's own read already fetched."""
+        names = self._label_seen.get(str(goal))
+        if names is None:
+            return None
+        return str(self.label_scope).lower() in names
 
     def scope_to_feature(self, unit):
         """Confine every pick this source makes to `unit`, for the rest of this process.
@@ -2383,7 +2404,7 @@ class GitHubSource:
         drag-order WITHIN one unit is a far smaller loss than getting membership wrong, and it
         lasts only as long as the flag does; an unscoped run on the same repo is untouched."""
         skip = {str(s) for s in skip}
-        board = None if self.feature else self._board_queue()
+        board = None if (self.feature or self.label_scope) else self._board_queue()
         if board is None:
             return self._first_by_label(skip)
         ready, carded = board
@@ -2474,6 +2495,8 @@ class GitHubSource:
         # client-side below — so a scoped run is otherwise byte-identical to an unscoped one: same
         # call, same fields, same order, same output.
         labels = [self.goal_label, *extra_labels]
+        if self.label_scope:                          # #1575: membership IS the label -- exact, server-side
+            labels.append(self.label_scope)
         skip = {str(s) for s in skip}                 # goals a claim lease says belong to someone else
         self._last_read_degraded = False              # #905: reset every call -- see read_degraded()
         # #1829 REQUIRED FIX (Plan-Review missed this too -- caught only by running the new test
@@ -2550,6 +2573,8 @@ class GitHubSource:
             # per-issue cross-check.
             for i in issues:
                 names = {l.get("name") for l in (i.get("labels") or [])}
+                if self.label_scope:                  # #1575: remember what THIS read saw, for the claim
+                    self._label_seen[str(i.get("number"))] = {str(n).lower() for n in names if n}
                 # #1198: `mark_in_progress` writes `in_progress_label` on every pick, durably and
                 # visibly to every session (a GitHub label, not a local/instant-scoped marker) --
                 # but until that fix this filter excluded ONLY `parked_label`, so an issue the loop
@@ -3621,6 +3646,10 @@ class GitHubSource:
         payload shape, so an unusable payload is honestly an absent declaration. Labels are handed
         back RAW (`[{"name": ...}]`); `features._label_name` reads both shapes this repo produces."""
         data = self._read_issue(goal, ["body", "labels"])
+        if self.label_scope:                          # #1575: the claim's own read supersedes the list's
+            self._label_seen[str(goal)] = {
+                str((l.get("name") if isinstance(l, dict) else l) or "").lower()
+                for l in (data.get("labels") or [])}
         return {"body": data.get("body") or "", "labels": data.get("labels") or []}
 
     def fetch_body_labels_rest(self, goal):
@@ -6062,6 +6091,55 @@ def scope_to_feature(source, unit):
             "Nothing was queried." % feature_labels.features.LABEL_PREFIX)
     scope(unit)
     return unit
+
+
+class LabelScopeError(ValueError):
+    """`--label` was handed something this run cannot honour. Its own type so the CLI turns it into
+    one stderr line and exit 2 rather than a traceback (same shape as `FeatureScopeError`)."""
+
+
+def scope_to_label(source, name, feature=None):
+    """Confine `source` to goals carrying the label `name` (and the goal label), for this run.
+    -> the label name, or None when `name` is None. The ONE ENTRY POINT; mirrors `scope_to_feature`.
+
+    Everything is refused UP FRONT, before any backlog query: a name starting `sdlc:` or `feature:`
+    (the lifecycle and unit namespaces are not run scopes), the configured goal label (it would
+    scope to everything), `--label` together with `--feature` (two scopes, no defined meaning), a
+    source that cannot express labels, and a label the repository does not have -- `gh` answers an
+    unknown label with an empty list, which would read as "drained". The existence check is one
+    label lookup and Sigma never creates the label. A lookup that cannot be answered refuses too:
+    not knowing is not evidence the label exists."""
+    if name is None:
+        return None
+    name = str(name)
+    if feature:
+        raise LabelScopeError("--label cannot be combined with --feature: pick one scope. "
+                              "Nothing was queried.")
+    if not name.strip() or name == "true":
+        raise LabelScopeError("--label needs a label name (e.g. --label validation-run-1). "
+                              "Nothing was queried.")
+    if name.lower().startswith(("sdlc:", "feature:")):
+        raise LabelScopeError("--label %r is in a namespace Sigma owns (sdlc:* is the lifecycle, "
+                              "feature:* is --feature's unit scope); use a plain label. "
+                              "Nothing was queried." % name)
+    scope = getattr(source, "scope_to_label", None)
+    if not callable(scope):
+        raise LabelScopeError("--label needs a backlog whose goals carry labels, and this project's "
+                              "discovery.source is 'local-goals' -- a goal there is a markdown file, "
+                              "so the scope would match nothing. Nothing was queried.")
+    if name.lower() == str(getattr(source, "goal_label", "sdlc:goal")).lower():
+        raise LabelScopeError("--label %r is the goal label itself and would not narrow anything. "
+                              "Nothing was queried." % name)
+    exists = source.label_exists(name)
+    if exists is not True:
+        raise LabelScopeError(
+            ("--label %r does not exist on this repository (an unknown label lists as empty, which "
+             "would read as a drained backlog). Sigma does not create it; create it and label the "
+             "goals first." % name) if exists is False else
+            ("--label %r could not be checked against the repository (lookup failed); refusing "
+             "rather than guessing. Nothing was queried for goals." % name))
+    scope(name)
+    return name
 
 
 def local_goal_missing(sdlc_dir, config, goal):

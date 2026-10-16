@@ -1453,6 +1453,23 @@ def _feature_scope_ok(source, goal, unit):
     return False
 
 
+def _label_scope_ok(source, goal):
+    """#1575: the pick-time half of `--label` exclusivity -- may this run claim `goal`? True when no
+    label scope is in force. Re-checks that the candidate still carries the label, from labels the
+    list read and the claim's own body/labels read already fetched (zero extra calls). A goal that
+    lost the label (or whose labels were never read) is LEFT UNTOUCHED -- no claim, no label write,
+    no comment -- and passed over like a `--skip`ped goal."""
+    wanted = getattr(source, "label_scope", None)
+    if not wanted:
+        return True
+    if source.scope_label_current(goal) is True:
+        return True
+    print("loop.py: not claiming #%s — this run is confined to label %r and #%s no longer carries "
+          "it. Left untouched (no claim); taking the next candidate" % (goal, wanted, goal),
+          file=sys.stderr)
+    return False
+
+
 def _feature_drained_note(source, skip):
     """#1661: the ONE thing a scoped run owes its operator when it stops -- WHICH kind of empty.
 
@@ -2306,10 +2323,27 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
                                 session_pid=session_pid)
             return admission_stop
         try:
+            # #1575: an excluded goal must receive NO write, and `attach_at_pick` can write (attach
+            # label, refusal overlay + comment, no-unit handling). So the scope label is re-checked
+            # from a FRESH read BEFORE it. Cost: ONE extra `fetch_body_labels` read, on label-scoped
+            # runs only (`attach_at_pick` does its own read and cannot share this one); unscoped
+            # runs make exactly the same calls as before. A failed read falls back to the list
+            # read's labels (`scope_label_current`), and unknown means not-in-scope.
+            if getattr(source, "label_scope", None):
+                try:
+                    source.fetch_body_labels(goal)
+                except Exception:       # noqa: BLE001 - fail to the list read's labels, below
+                    pass
+                if not _label_scope_ok(source, goal):
+                    _cancel_goal_slot(sdlc_dir, session_pid, goal)
+                    _release_claim_lock(lock_fd)
+                    skip.add(goal)
+                    continue
             decision = feature_labels.attach_at_pick(sdlc_dir, source, goal, config)
             unit = _unit_at_pick(sdlc_dir, goal, config, decision)
             proceed = (decision.proceed
                        and _feature_scope_ok(source, goal, unit)
+                       and _label_scope_ok(source, goal)
                        and _scope_ok_at_pick(sdlc_dir, source, goal, config, unit)
                        and _owner_ok_at_pick(sdlc_dir, source, goal, config, unit))
         except BaseException:
@@ -5892,7 +5926,7 @@ def run_loop(sdlc_dir, run_goal):
 #: `thread`, `session-pid`, `skip`). Computed from `ledger.EVENT_FIELDS`/`actionlog.AGENT_FIELDS`
 #: themselves, not re-listed, so this set can never drift from the real field vocabulary.
 _VALUE_FLAGS = frozenset(
-    {"pid", "thread", "session-pid", "session-generation", "skip", "feature"}
+    {"pid", "thread", "session-pid", "session-generation", "skip", "feature", "label"}
     | {f for fields in ledger.EVENT_FIELDS.values() for f in fields}
     | {f for fields in actionlog.AGENT_FIELDS.values() for f in fields}
 )
@@ -5973,6 +6007,30 @@ def _cli_feature(argv_tail, source):
         raise sources.FeatureScopeError(
             "--feature needs a unit name (e.g. --feature voice-interview). Nothing was queried.")
     return sources.scope_to_feature(source, raw)
+
+
+def _cli_label(argv_tail, source):
+    """#1575: parse `--label <name>` off a CLI tail and confine `source` to it -> the name, or None.
+    Raises `sources.LabelScopeError` (one stderr line, exit 2, before any backlog query). A bare
+    `--label` arrives from `_flags` as the string "true" and is refused, never read as a label."""
+    flags = _flags(argv_tail)
+    raw = flags.get("label")
+    if raw is None:
+        return None
+    return sources.scope_to_label(source, raw, feature=flags.get("feature"))
+
+
+def _cli_scopes(argv_tail, source):
+    """Apply `--feature` and `--label` -> exit code 2 (after printing one line) on a refusal, else
+    None. `--label` is validated first so a combined call is refused as such."""
+    try:
+        if "label" in _flags(argv_tail):
+            _cli_label(argv_tail, source)
+        _cli_feature(argv_tail, source)
+    except (sources.FeatureScopeError, sources.LabelScopeError) as exc:
+        print(f"loop.py: {exc}", file=sys.stderr)
+        return 2
+    return None
 
 
 def _phase_gate_notice(sdlc_dir, config, kind, payload):
@@ -6131,8 +6189,8 @@ def _validate_event(kind, flags, kind_allowlist=None):
 
 
 USAGE = ("usage: loop.py start <dir> [--session-pid PID] | start-run <dir> [--session-pid PID] | "
-         "next <dir> [--skip a,b] [--feature NAME] [--session-pid PID] | "
-         "next-batch <dir> [--skip a,b] [--feature NAME] [--session-pid PID] | "
+         "next <dir> [--skip a,b] [--feature NAME] [--label NAME] [--session-pid PID] | "
+         "next-batch <dir> [--skip a,b] [--feature NAME] [--label NAME] [--session-pid PID] | "
          "session-active <dir> | prune-state <dir> [--dry-run] [--keep-days N] [--limit N] | session-end <dir> [--session-pid PID] | "
          "claim <dir> <goal> [--session-pid PID] | "
          "agent-start <dir> <goal> --pid PID [--thread T] | agent-reclaim <dir> <goal> [--thread T] | "
@@ -6609,10 +6667,7 @@ def _dispatch(argv):
         # made, no side effect to undo. `get_source` is a pure constructor; moving it up changes no
         # call and no order.
         source = sources.get_source(argv[2], config)
-        try:
-            _cli_feature(argv[3:], source)
-        except sources.FeatureScopeError as exc:
-            print(f"loop.py: {exc}", file=sys.stderr)
+        if _cli_scopes(argv[3:], source) == 2:
             return 2
         _ensure_watcher(argv[2], config)            # every loop trigger keeps the watcher (and the ledger) alive
         _ensure_ledger_delivery(argv[2], config)    # ...and notices when that flow has stalled (#2393)
@@ -6634,10 +6689,7 @@ def _dispatch(argv):
     if len(argv) >= 3 and argv[1] == "next-batch":  # F10.5-3/#375: up to parallel.goals.max_concurrent
         config = state.load_config(argv[2])         # goals to dispatch as concurrent worktree subagents
         source = sources.get_source(argv[2], config)
-        try:
-            _cli_feature(argv[3:], source)          # #1661: same up-front refusal as `next` above
-        except sources.FeatureScopeError as exc:
-            print(f"loop.py: {exc}", file=sys.stderr)
+        if _cli_scopes(argv[3:], source) == 2:      # #1661/#1575: same up-front refusal as `next`
             return 2
         _ensure_watcher(argv[2], config)
         _ensure_ledger_delivery(argv[2], config)    # ...and notices when that flow has stalled (#2393)

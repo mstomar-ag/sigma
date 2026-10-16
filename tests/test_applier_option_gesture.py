@@ -97,3 +97,37 @@ def test_closed_gate_is_byte_identical(tmp_path):
     assert AP.open_for_park(sd, cfg, 7, "needs_decision", source=src, now=T0) is None
     assert AP.tick(sd, cfg, T0 + 61 * MIN, source=src) == []
     assert sorted(os.walk(str(tmp_path))) == snap and src.swaps == [] and src.notes == []
+
+
+def _silent_cfg():
+    cfg = T._cfg({"allow_silent": ["needs_decision"], "spot_check_one_in": 100})
+    return cfg
+
+
+def test_silent_refused_when_ask_gesture_mismatches_rule_option(tmp_path):
+    """#1362: a keep-parked rule at level 4 with an unpark-gesture ask comments instead of applying silently."""
+    cfg = _silent_cfg()
+    sd = T._sd(tmp_path)
+    T._train(sd, cfg, qkind="needs_decision", area="repo", level=4)
+    T._rule(sd, cfg, qkind="needs_decision", area="repo", option="leave it parked")
+    for _ in range(8):
+        AU.record_watch(sd, "needs_decision", "repo", "leave it parked", "leave it parked", cfg, now=T0, machine="m1")
+    AP.open_ask(sd, 7, "needs_decision", "repo", ["leave it parked"], cfg, T0, gesture="unpark")
+    src = T.Src()
+    acts = AP.tick(sd, cfg, T0 + 61 * MIN, source=src)
+    assert [a["silent"] for a in acts] == [False]
+    assert len(src.notes) == 1
+
+
+def test_silent_kept_when_gesture_matches(tmp_path):
+    cfg = _silent_cfg()
+    sd = T._sd(tmp_path)
+    T._train(sd, cfg, qkind="needs_decision", area="repo", level=4)
+    T._rule(sd, cfg, qkind="needs_decision", area="repo", option="leave it parked")
+    for _ in range(8):
+        AU.record_watch(sd, "needs_decision", "repo", "leave it parked", "leave it parked", cfg, now=T0, machine="m1")
+    AP.open_ask(sd, 7, "needs_decision", "repo", ["leave it parked"], cfg, T0, gesture="keep-parked")
+    src = T.Src()
+    acts = AP.tick(sd, cfg, T0 + 61 * MIN, source=src)
+    assert [a["silent"] for a in acts] == [True]
+    assert src.notes == []

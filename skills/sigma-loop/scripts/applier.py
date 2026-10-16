@@ -498,6 +498,11 @@ def window_open(ask, config, now):
     return now < opened + datetime.timedelta(minutes=settings(config)["window_minutes"])
 
 
+def _ask_gesture(ask):
+    g = ask.get("gesture")
+    return g if g in GESTURES else "unpark"
+
+
 def _rule_is_approved(rule):
     return isinstance(rule, dict) and rule.get("status") == "approved" and bool(rule.get("confirmed")) \
         and bool(rule.get("seal"))
@@ -764,11 +769,12 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 continue    # #1496 M-04: a rule needs its own live comparisons, not its pair's older ones
             silent = False
             key = None
-            if level >= 4 and silent_allowed(qkind, config, rule):
+            if level >= 4 and silent_allowed(qkind, config, rule) \
+                    and _ask_gesture(ask) == option_gesture(qkind, m.option):    # #1362: a mismatch always comments
                 key = "%s|%s" % (qkind, area)
                 silent = not _spot_check(counts, key, config)
             text = "" if silent else _loud_text(m, qkind, config)
-            actions.append({"kind": ask.get("gesture") if ask.get("gesture") in GESTURES else "unpark",
+            actions.append({"kind": _ask_gesture(ask),
                             "ask": ask["id"], "issue": ask.get("issue"), "qkind": qkind, "area": area,
                             "option": m.option, "rule_id": m.rule_id, "level": level, "silent": silent,
                             "text": text})
