@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **`resource_guard.py sample [--json]` reads the machine's memory, swap, pressure and CPU (#1597).** New stdlib-only readers (ctypes on macOS; /proc and cgroup v2 on Linux) return a typed `Sample` plus a per-process `footprint(pid)`; any other platform or an unreadable total raises `Unsupported` and the command exits 3. Nothing calls it yet; no process is spawned and no file written.
 - A quota park that names a reset time or retry-after now records `reset_at` on the park and the ask, and the ask is held until then; when no reset is named it waits the ordinary window (`window_minutes`), replacing the fixed 24 hours (#1563).
 - **Upkeep's agent level resolves in one scratch session per unit (#1573).** One history-less, remote-less copy re-entered at each conflicted commit, with base/ours/theirs, commit messages and earlier stops as context, edit/build/test allowed, a network wall where the platform has one (the doctor says which), a whole-session wall clock, and the same write-back and proof gates; the plain export remains for plans without `session`.
 - **`unpark.py report <sdlc_dir>` shows what the applier would do (#1561).** Read-only: every parked or blocked issue with its declared or suggested kind, area, matching rule and gesture, the pair's level, and whether the applier would act now, later (window) or never (and why), then one total per outcome; `--json` for tools.
