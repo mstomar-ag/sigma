@@ -1705,6 +1705,14 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/resource_guard.py",
+      "function": "write_hold",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "removes only its own per-process temp file (hold.json.<pid>.tmp) when the write fails; same state folder as the write",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/retention.py",
       "function": "_unlink_streams",
       "rule": "fs-remove",
