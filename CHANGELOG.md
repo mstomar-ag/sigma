@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- Filing triage now parks euro and pound amounts (symbol, code or word) near a compute noun as spend, like dollar amounts; fenced blocks and amounts with no compute noun still arm (#1710).
 - The Decision Rulebook doc's migration section no longer says rebase upkeep findings still get the legacy confirmation label while triage is on; it names the triage-off exception, and a docs-claim test pins it (#1709).
 - **The applier now says when evidence behind the default branch holds it (#1699).** A real tick and `--dry-run` print `applier: held - <reason>` instead of nothing or `would behind`, and the doctor applier row adds `HELD: <reason>` until a later tick runs; pull to clear. Output with current evidence is unchanged.
 - **`resource_lease.py admit|release|status|wait` keeps a lease table over the resource guard (#1599).** Under an `fcntl.flock` lock each admit reclaims stale leases (dead pid or past ttl), counts the unmaterialised remainder of every lease, and grants the largest fitting count or holds with a retry time (exit 10); costs are the p90 of the last 32 measured footprints per kind, outliers above 4x the median excluded and logged, and a verify gets at least one worker when one fits. State is in the XDG state folder beside `hold.json`; admission is paused, never a process. Not called by anything yet (operator-run); POSIX only.
