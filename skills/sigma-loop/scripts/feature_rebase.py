@@ -1901,6 +1901,7 @@ def _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd,
     goal without one is passed over in silence. A goal that HAS a record and still was not replayed
     is a real deferral and is always said."""
     work = _work()
+    probe_deadline = _probe_deadline()    # (#1537) one probe budget for the whole pass
     for number in goals:
         name = str(number)
         if name == str(goal):
@@ -1947,7 +1948,7 @@ def _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd,
             continue
         report["conflicts"].append(goal_branch)
         cause = _conflict_cause(cwd, unit_before, before,
-                                remote_tip(run, cwd, remote, branch), outcome)
+                                remote_tip(run, cwd, remote, branch), outcome, deadline=probe_deadline)
         _file_issue(sdlc_dir, config, goal, report,
                     slot="goal-conflict:%s" % goal_branch,
                     key="%s@%s" % (goal_branch, before or "?"),
@@ -2227,7 +2228,18 @@ def _probe_paths(out):
     return paths
 
 
-def _conflict_cause(cwd, unit_before, goal_tip, unit_after=None, outcome=None):
+#: (#1537) One upkeep pass may spend at most this many guard timeouts on cause probes in total, so a unit with
+#: many conflicting goals cannot stall the pass; once spent, findings fall back to the legacy wording.
+_PROBE_BUDGET_TIMEOUTS = 3
+_REPORTED_MAX = 2000
+_clock = time.monotonic
+
+
+def _probe_deadline():
+    return _clock() + _PROBE_BUDGET_TIMEOUTS * _guard_timeout()
+
+
+def _conflict_cause(cwd, unit_before, goal_tip, unit_after=None, outcome=None, deadline=None):
     """(#1494) Did this pass cause a goal's replay conflict? -> (classification, conflicted paths).
 
     READ-ONLY probes: `git merge-tree --write-tree --name-only <unit tip> <goal tip>` writes no ref,
@@ -2235,14 +2247,19 @@ def _conflict_cause(cwd, unit_before, goal_tip, unit_after=None, outcome=None):
     previous tip to conflict (exit 1). INTRODUCED needs evidence on both sides: the previous tip merges
     cleanly (exit 0) AND the NEW tip conflicts (exit 1); the paths come from the new-tip probe. Anything
     else (non-conflict outcome, old git, missing object, timeout, clean new tip, no tips) is UNKNOWN and
-    makes no causal claim."""
+    makes no causal claim. The probe is one three-way merge while the replay goes commit by commit, so on rare
+    histories they disagree; that lands in UNKNOWN too. Past `deadline` (the pass's probe budget) no git runs."""
     if not unit_before or not goal_tip or not _is_conflict_outcome(outcome):
+        return CAUSE_UNKNOWN, []
+    if deadline is not None and _clock() >= deadline:
         return CAUSE_UNKNOWN, []
     try:
         code, out = _merge_probe(cwd, unit_before, goal_tip)
         if code == 1:
             return CAUSE_PRE_EXISTING, _probe_paths(out)
         if code != 0 or not unit_after:
+            return CAUSE_UNKNOWN, []
+        if deadline is not None and _clock() >= deadline:
             return CAUSE_UNKNOWN, []
         new_code, new_out = _merge_probe(cwd, unit_after, goal_tip)
     except Exception:                     # noqa: BLE001 - a probe that cannot run is just unknown
@@ -2256,6 +2273,12 @@ def _code_span(text):
     """A path from a branch is data: no backtick, newline or control character may end the span."""
     clean = "".join("?" if (ord(c) < 32 or ord(c) == 127) else c for c in str(text)).replace("`", "'")
     return "`%s`" % clean
+
+
+def _reported(text):
+    """The rebase's own words are data inside a fence: no backtick, newline or control character, and capped."""
+    clean = "".join(" " if (ord(c) < 32 or ord(c) == 127) else c for c in str(text)).replace("`", "'")
+    return clean if len(clean) <= _REPORTED_MAX else clean[:_REPORTED_MAX - 3] + "..."
 
 
 def _paths_phrase(paths):
@@ -2289,6 +2312,7 @@ def _cause_paragraph(cause, unit_before, backup_ref):
 
 def _goal_conflict_body(unit, goal_branch, branch, why, state, cause=None, unit_before=None, backup_ref=None):
     kind = (cause or (CAUSE_UNKNOWN, []))[0]
+    why = _reported(why)
     if kind == CAUSE_UNKNOWN:
         # Byte-identical to the body before #1494: no cause is claimed, so nothing is added or reworded.
         return (

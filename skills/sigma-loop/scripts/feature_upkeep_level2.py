@@ -80,6 +80,9 @@ UNIT_DROPPED = "unit-line-dropped"
 SPEND_CEILING = "spend-ceiling"
 SWEEP_LIMIT = "max-units-per-sweep"
 SWEEP_REL = "state/upkeep/level2-sweep.json"
+SWEEP_RUN_ENV = "SIGMA_UPKEEP_SWEEP_RUN"      # set by the sweep job in each child it starts (#1536); unset in the single-unit pass
+BASE_DROPPED = "base-line-dropped"
+BASE_LINES_SHOWN = 3
 MAX_ATTEMPT_TEXT = 1500
 
 STORE_REL = "state/upkeep/level2"
@@ -282,14 +285,17 @@ def sweep_take(sdlc_dir, unit, limit):
     sweep is running (the pick-time single-unit pass): allowed. A counter that is PRESENT but unreadable, malformed or not
     updatable fails CLOSED (False): a sweep whose cap cannot be counted must not run unbounded. `limit` None cannot be enforced,
     so it is allowed only with no active sweep. A unit already counted stays allowed."""
+    sweep_run = os.environ.get(SWEEP_RUN_ENV)         # set: this child belongs to a sweep, so a counter that is not that sweep's fails closed
     try:
         doc = json.loads(_sweep_path(sdlc_dir).read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return True
+        return not sweep_run
     except (OSError, ValueError):
         return False
     try:
         if not isinstance(doc, dict):
+            return False
+        if sweep_run and (doc.get("active") is not True or doc.get("run_id") != sweep_run[:80]):
             return False
         if doc.get("active") is False:
             return True
@@ -313,6 +319,12 @@ def dropped_unit_lines(base, theirs, resolved):
         return collections.Counter(l.strip() for l in str(text).splitlines() if l.strip())
     have, added = lines(resolved), lines(theirs) - lines(base)
     return [line for line, n in sorted(added.items()) if have[line] < n]
+
+
+def dropped_base_lines(base, ours, resolved):
+    """The lines the integration (base) side added against the merge base (whitespace-trimmed, blanks ignored, as a multiset)
+    that the resolved text no longer holds. Same rule as `dropped_unit_lines`, applied to the other side (#1536)."""
+    return dropped_unit_lines(base, ours, resolved)
 
 
 def attempt_text(evidence):
@@ -425,6 +437,13 @@ def resolve_stop(run, path, plan, evidence, stamped):
         if lost:
             settle_attempt(sdlc_dir, unit, attempt, "dropped", result.charged_usd)
             return refusal(UNIT_DROPPED, "%s lost %d line(s) the unit added" % (name, len(lost)), paths=[name],
+                           attempt=attempt_text([(name, texts[name][0], texts[name][1], texts[name][2], resolved_text[name])]))
+    for name in conflicted:
+        lost = dropped_base_lines(texts[name][0], texts[name][1], resolved_text[name])
+        if lost:
+            settle_attempt(sdlc_dir, unit, attempt, "dropped", result.charged_usd)
+            shown = "; ".join(l.strip()[:80] for l in lost[:BASE_LINES_SHOWN])
+            return refusal(BASE_DROPPED, "%s lost %d line(s) the integration side added: %s" % (name, len(lost), shown), paths=[name],
                            attempt=attempt_text([(name, texts[name][0], texts[name][1], texts[name][2], resolved_text[name])]))
     try:
         for name, text in resolved_text.items():

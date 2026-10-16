@@ -55,6 +55,8 @@ reviewer share, the strict line rule and the sweep counter are defaults for the 
 stay unverified and its model catalog is still the placeholder, so the real CLI run is refused at run time at no cost until
 the owner-gated probe of the real flags and model id; see `skills/sigma-doctor/references/resolver-readiness.md`.
 
+The same line rule applies to the integration side: a result that drops a line it added is refused as `base-line-dropped`, and the finding names up to three of the lines (#1536). A sweep hands its run id to each child it starts, and a child whose sweep counter is missing, inactive or from another run counts as over the limit; the single-unit pass sets no run id and is unchanged. The doctor row `resolver configured` fails while the chosen model still resolves to the placeholder id.
+
 A merge made outside the loop is noticed at the next watcher tick (up to the watch interval); only
 `work.py merge` starts a pass at once, and only with `SIGMA_UPKEEP_JOB=1` in that shell. A pure fast-forward push keeps no
 backup ref (nothing is replaced); the lease still applies.

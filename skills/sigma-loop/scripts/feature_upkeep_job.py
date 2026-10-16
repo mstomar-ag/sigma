@@ -221,6 +221,8 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
             stops = (sched.path_of(sdlc_dir, sched.STOP_REL), sched.path_of(sdlc_dir, sched.WATCH_STOP_REL))
             env = bounded.unattended_env(sched.allowed_env(os.environ if environ is None else environ,
                                                            (sched.CALL_TIMEOUT_ENV, feature_upkeep.ENV_MACHINE)))
+            if agent:                                         # #1536: the children know their sweep, so a lost counter fails closed
+                env[sched.SWEEP_RUN_ENV] = str(run_id)[:80]
             if counter_failed:
                 unreached = list(names)
             for index, name in enumerate([] if counter_failed else names):
