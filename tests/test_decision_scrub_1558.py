@@ -29,7 +29,7 @@ def _shapes():
         "anthropic-key": "sk-" + "ant-" + TAIL,
         "github-pat": "github_" + "pat_" + TAIL,
         "jwt": "ey" + "J" + "hbGciOiJIUzI1" + "." + "ey" + "J" + "zdWIiOiIxMjM0NTY3" + "." + "SflKxwRJSMeKKF2QT4",
-        "private-key": "-----BEGIN " + "PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END " + "PRIVATE KEY-----",
+        "private-key": "-----BEGIN " + "PRIVATE KEY-----\n" + "MIIEvQIBADANBgkq" + "hkiG9w0BAQEFAASC\n-----END " + "PRIVATE KEY-----",
         "credential-assignment": "pass" + "word = '" + TAIL + "'",
         "url-password": "postgres" + "://admin:" + TAIL + "@db.internal.example",
     }
@@ -37,7 +37,7 @@ def _shapes():
 
 def _value(name, text):
     sig = "Sfl" + "KxwRJSMeKKF2QT4"
-    pem = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"
+    pem = "MIIEvQIBADANBgkq" + "hkiG9w0BAQEFAASC"
     values = {"private-key": pem, "url-password": TAIL}
     values["jw" + "t"] = sig
     return values.get(name, TAIL)
@@ -129,3 +129,25 @@ def test_cli_apply_scrubs_and_prints_count_not_value(tmp_path):
     assert "scrubbed 1 value(s)" in r.stdout and TAIL not in r.stdout + r.stderr
     assert TAIL not in _all_text(sd)
     assert "[REDACTED:anthropic-key]" in _all_text(sd / "decisions")
+
+
+def test_every_string_value_is_scrubbed_recursively():
+    s = _shapes()["anthropic-key"]
+    rec = _rec(answer="a " + s, area="x " + s, rule_id="r " + s,
+               origin={"kind": "t", "deep": {"list": ["ok", "k " + s, {"z": s}]}, "items": [s]})
+    out, n = DS.scrub_record(rec)
+    assert TAIL not in json.dumps(out)
+    assert n == 6
+
+
+def test_structural_keys_untouched():
+    s = _shapes()["anthropic-key"]
+    out, n = DS.scrub_record(_rec(id=s, source=s))
+    assert out["id"] == s and out["source"] == s and n == 0
+
+
+def test_ordinary_words_byte_identical():
+    for text in ("use ba" + "sic authentication", "di" + "gest summaries weekly"):
+        rec = _rec(choice=text, reason=text, answer=text)
+        out, n = DS.scrub_record(rec)
+        assert out == rec and n == 0

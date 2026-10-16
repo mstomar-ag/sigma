@@ -126,23 +126,32 @@ def _scrub_mod():
     return mod
 
 
+#: Structural ids/timestamps/enums never carry free text; everything else string-valued is scrubbed.
+_SCRUB_SKIP = frozenset({"id", "time", "gesture", "qkind", "how", "source", "original_time", "issue", "fp"})
+
+
 def scrub_record(record):
-    """Secret-shape scrub (the leak scan's shape set) over the free-text keys and string values under
-    `origin`. -> (new record, number of substitutions); a clean record comes back equal."""
-    sc, out, n = _scrub_mod(), dict(record), 0
+    """Secret-shape scrub (the leak scan's SHAPE_RULES only, so ordinary prose is untouched) over every
+    string value of the record, recursively through dicts and lists, except the structural keys in
+    `_SCRUB_SKIP`. -> (new record, number of substitutions); a clean record comes back equal."""
+    sc, n = _scrub_mod(), 0
 
     def one(text):
         nonlocal n
-        new = sc.scrub(text)
+        new = sc.scrub_shapes(text)
         n += max(0, new.count("[REDACTED") - text.count("[REDACTED"))
         return new
 
-    for key in FREE_TEXT + ("shape",):
-        if isinstance(out.get(key), str):
-            out[key] = one(out[key])
-    if isinstance(out.get("origin"), dict):
-        out["origin"] = {k: one(v) if isinstance(v, str) else v for k, v in out["origin"].items()}
-    return out, n
+    def walk(v):
+        if isinstance(v, str):
+            return one(v)
+        if isinstance(v, dict):
+            return {k: (x if k in _SCRUB_SKIP else walk(x)) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return v
+
+    return walk(record), n
 
 
 def append(sdlc_dir, record, config, now=None):

@@ -433,3 +433,21 @@ def scrub(text):
     for pat, repl in _SECRET_PATTERNS:
         text = pat.sub(repl, text)
     return text
+
+
+#: The leak scan's secret set only: the labelled specific shapes (`_SECRET_PATTERNS` names below) plus
+#: `SHAPE_RULES`. Excludes the redactor-only rules (`auth`, generic key:value, authorization header),
+#: which rewrite ordinary prose (plain words).
+_SHAPE_SPEC_NAMES = frozenset({"private-key", "aws-key", "gh-token", "jwt"})
+_SHAPE_SUBS = tuple((rx, repl) for name, rx, repl in _SECRET_PATTERN_SPECS if name in _SHAPE_SPEC_NAMES) \
+    + tuple((rx, _replacement(name, rx)) for name, rx in SHAPE_RULES)
+
+
+def scrub_shapes(text):
+    """Like `scrub`, but applies ONLY the leak scan's SHAPE_RULES -- none of the redactor-only rules
+    (`auth`, key:value) that rewrite ordinary prose. Ordinary text comes back byte-identical."""
+    if not text:
+        return text
+    for rx, repl in _SHAPE_SUBS:
+        text = rx.sub(repl, text)
+    return text
