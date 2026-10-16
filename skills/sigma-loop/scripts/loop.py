@@ -2030,7 +2030,72 @@ def _ensure_unit_tracking(sdlc_dir, goal, cooldown_s=300):
         print(f"loop: unit-tracking not checked (non-fatal): {exc}", file=sys.stderr)
 
 
-def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True):
+HOLD_RETRY_FLOOR = 30   # seconds; a HOLD never advertises a retry sooner than the sampler can change its mind
+
+
+def _resource_gate(config):
+    """#1600: the machine's say on admitting new goals, asked once per picker call and before any claim.
+
+    Returns None when no limit applies (`resource.mode` off, observe, or an observe-mode guard failure),
+    an int `fit` (how many session-cost units the headroom admits, at least 1) or ("HOLD", reason) when
+    nothing fits under `enforce`. An unsupported platform or any unexpected guard exception under
+    `enforce` clamps to ONE goal with a one-line stderr notice, never a crash and never silently
+    unguarded. Mode `off` returns before anything is imported. Read-only apart from the hold marker
+    (`last.json`) and the would-hold event log in the resource state folder."""
+    block = (config or {}).get("resource")
+    mode = block.get("mode") if isinstance(block, dict) else None
+    forced = os.environ.get("SIGMA_RESOURCE_MODE")       # an operator or test override of the config key
+    if forced in ("off", "observe", "enforce"):
+        mode, block = forced, dict(block if isinstance(block, dict) else {}, mode=forced)
+    if mode == "off":
+        return None
+    try:
+        if str(_HERE) not in sys.path:
+            sys.path.insert(0, str(_HERE))
+        lease = importlib.import_module("resource_lease")
+        directory = lease.state_dir()
+        now = time.time()
+        _sample, limits, live, observed = lease._view(directory, now, block if isinstance(block, dict) else None)
+        cost = lease.learned_cost(observed.get("goal", [])) if isinstance(observed.get("goal"), list) else None
+        cost = max(1, cost or limits.session_cost)
+        if limits.critical:
+            reason = "critical: memory below half the reserve"
+        elif limits.goal_block:
+            reason = "pressure: new work is held"
+        else:
+            reason = "memory: headroom %d below one goal unit (%d)" % (max(limits.headroom, 0), cost)
+        fit = 0 if (limits.critical or limits.goal_block) else max(0, int(limits.headroom // cost))
+        if limits.max_goals:
+            running = sum(1 for _, r in live if r.get("kind") == "goal")
+            fit = min(fit, max(0, limits.max_goals - running))
+            if fit == 0 and not (limits.critical or limits.goal_block):
+                reason = "max_goals reached"
+        last_path = os.path.join(directory, "last.json")
+        previous = lease._read_json(last_path, {})
+        if fit == 0:
+            if limits.mode != "enforce":
+                lease.log_event(directory, {"event": "would_hold", "kind": "goal", "reason": reason})
+                return None
+            since = previous.get("since") if previous.get("state") == "hold" else now
+            lease._atomic_write(last_path, {"state": "hold", "since": since, "reason": reason,
+                                            "kind": "goal", "goal": "", "at": now})
+            lease.log_event(directory, {"event": "hold", "kind": "goal", "reason": reason, "at": now})
+            stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(since))
+            retry = max(HOLD_RETRY_FLOOR, int(lease._retry()))
+            return ("HOLD", "%s; retry ~%ds; held since %s" % (reason, retry, stamp))
+        if previous.get("state") == "hold":
+            lease._atomic_write(last_path, {"state": "open", "since": now, "reason": "ok",
+                                            "kind": "goal", "goal": "", "at": now})
+        return None if limits.mode != "enforce" else fit
+    except Exception as exc:    # noqa: BLE001 - the guard must never crash a pick
+        if mode == "observe":
+            return None
+        print("loop: resource guard unavailable (%s); admitting ONE goal" % (str(exc) or type(exc).__name__),
+              file=sys.stderr)
+        return 1
+
+
+def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True, gate=True):
     """(kind, goal_or_reason): 'goal' (+marks in_progress, the commit point — second element is
     the goal ref), 'DONE' (drained — second element None on a genuine empty read, or, #1084, a
     short degraded-read reason string when `source.read_degraded()` is True — mirrors BUDGET's own
@@ -2137,6 +2202,10 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
     # already prevented by its own TTL watermark (gate 2), which makes a not-due call one file read.
     # The cost of leaving it out was total: an operator who uses `next` rather than `next-batch`
     # NEVER swept, so a repo could sit ~23h past a 60-minute TTL while `next` ran repeatedly.
+    if gate:                       # #1600: before any claim; `next_batch` asks once and passes gate=False
+        fit = _resource_gate(config)
+        if isinstance(fit, tuple):
+            return fit
     session_pid = os.getppid() if session_pid is None else session_pid
     # A standalone picker pass is a loop tick, including an empty backlog. `next_batch` already
     # refreshed immediately before its one prologue sweep, so its slot calls opt out explicitly.
@@ -2479,6 +2548,11 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
     # Keep the old batch shape (only the remaining number of goal lines, with the
     # terminal reported on the next call) using the SAME session-local count that
     # `_next` reserves atomically. The reservation remains the final race guard.
+    fit = _resource_gate(config)                  # #1600: one sample per call, before any claim
+    if isinstance(fit, tuple):
+        return [fit]
+    if fit is not None:
+        max_concurrent = min(int(max_concurrent or 1), fit)
     ceiling_applied = False
     ceilings = [n for n in (_handoff_ceiling(config.get("handoff") or {}),
                              (config.get("budget") or {}).get("max_iterations")) if n]
@@ -2519,7 +2593,7 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
             slots -= held
     for _ in range(slots):
         kind, goal = _next(sdlc_dir, source, config, extra_skip=skip, session_pid=session_pid,
-                           refresh_heartbeat=False)
+                           refresh_heartbeat=False, gate=False)
         if kind != "goal":
             picks.append((kind, goal))
             break
@@ -5858,7 +5932,7 @@ def run_loop(sdlc_dir, run_goal):
                           # REST OF THIS RUN so a doubly-failing source can't spin on one goal forever
     while True:
         kind, goal = _next(sdlc_dir, source, config, extra_skip=poisoned,
-                           session_pid=session_pid)
+                           session_pid=session_pid, gate=False)
         if kind == "DONE":
             # #905: _next() itself already emitted (gated/deduped/degradation-checked) before
             # returning — nothing to do here but record the outcome for THIS function's own caller.
@@ -6071,7 +6145,7 @@ def _print_pick(kind, payload):
         print(payload)
         return
     print(kind)
-    if payload and kind in ("BUDGET", "DONE", "HANDOFF", "FULL"):
+    if payload and kind in ("BUDGET", "DONE", "HANDOFF", "FULL", "HOLD"):
         print(f"{kind} ({payload})", file=sys.stderr)
 
 
