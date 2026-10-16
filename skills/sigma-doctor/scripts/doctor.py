@@ -2850,6 +2850,25 @@ def _watcher_build_rows(base, cfg):
         return []
 
 
+def _stale_watch_stop_rows(base, cfg):
+    """#1510: warn when a leftover state/watch.stop exists and no watcher is live (it would exit at once). Silent otherwise. Read-only."""
+    try:
+        st = pathlib.Path(base) / "state"
+        if not (st / "watch.stop").is_file():
+            return []
+        try:
+            os.kill(int((st / "watch.pid").read_text(encoding="utf-8").strip()), 0)
+            if _load_loop_script("sync").watcher_liveness(base, cfg)[0] == "live":
+                return []
+        except Exception:                    # noqa: BLE001 - no readable live pid means no live watcher
+            pass
+        return [_chk("no leftover watcher stop file", False,
+                     "state/watch.stop exists and no watcher is running, so a watcher started now exits at once; "
+                     "remove it with `rm .sdlc/state/watch.stop`, then start the watcher.")]
+    except Exception:                        # noqa: BLE001 - a detector that cannot run says nothing
+        return []
+
+
 _PROGRESS_ON = False
 
 
@@ -3021,6 +3040,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
             out.extend(_landing_rows(base, cfg, run, which))        # #974: branch-creation rulesets
     out.extend(_origin_mismatch_rows(base, disc, run))      # #1314
     out.extend(_watcher_build_rows(base, cfg))                # #1315
+    out.extend(_stale_watch_stop_rows(base, cfg))             # #1510
     _progress("unit branch readiness")
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
     _progress("resolvers")

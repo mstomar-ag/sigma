@@ -99,7 +99,7 @@ closed.
 
 1. In `.sdlc/config.json`, set `upkeep.enabled` to the JSON boolean `true`. The scaffold writes the block with
    `enabled` false; a repository adopted earlier copies the block in from the config template.
-2. Set `ledger.enabled` to exactly `true`. The watcher that runs the tick is the ledger watcher.
+2. Set `ledger.enabled` to exactly `true`. The watcher that runs the tick is the ledger watcher. Remove a leftover `.sdlc/state/watch.stop` first, or the watcher exits at once.
 3. Set the environment variable `SIGMA_UPKEEP_JOB` to exactly `1` in the environment of the process that
    starts the sweep, on **one** machine. Opt in one machine for any given set of units: two opted-in machines
    would both start passes. The lease makes the second push refuse, but each wastes a fetch and a replay. To
