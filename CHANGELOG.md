@@ -4,11 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-<<<<<<< HEAD
 - The source-error downgrade-to-park declares `quota` for a quota or budget failure and `needs_decision` otherwise, and the stale-worktree escalation park declares `needs_decision` (#1524).
-=======
 - **Upkeep's mechanical level resolves two append-only shapes (#1515).** A dated `## YYYY-MM` log and a bullet-list file that both sides only added to are unioned (per section in date order; base order then the unit's new items); an edit or removal on either side still parks.
->>>>>>> fork/feature/rulebook-learning
 - A config that sets `discovery.blocker_promotion.mode` to `"smart"` now gets a one-time skip line from the reconcile tick and a not-OK "blocker priority rule inactive" doctor row naming the one-word fix to `"always"`; what smart, always and off do is unchanged (#1489).
 - `board_migrate.py --apply` now snapshots every card by project item id (issues, pull requests, drafts), fails if any card's Status changed during the option write, and prints counts that add up to the board (moved cards shown as a subset); an existing lane prints no kept-their-Status claim (#1491).
 - **Ledger entry file names can use an alias or a per-repository salted host token, and the doctor warns about raw host names on a public repository (#1514).** `ledger.host_alias` and `ledger.salt_host_token` (both off by default, which changes no file name) replace or salt the hash of the host name in `entries/<actor>-<host>.<pid>.jsonl`; older files stay read and attributed, and the doctor's `ledger entries carry no raw host name` row reads the local copy of the ledger branch.
