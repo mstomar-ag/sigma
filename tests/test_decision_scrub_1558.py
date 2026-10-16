@@ -182,3 +182,29 @@ def test_1631_short_records_byte_identical():
     DR = _mod("decision_record")
     rec = DR.build("import", 7, "scope", "option  a", "because\nreason", "imported")
     assert rec["choice"] == "option a" and rec["reason"] == "because reason"
+
+
+def _prompt_data(prompt):
+    return prompt.split(">>>\n", 1)[1].rsplit("\n<<<", 1)[0]
+
+
+def test_import_request_scrubs_each_shape_in_question_and_labels():
+    """#1698: the outbound model prompt never carries a secret shape, in the question or in a label."""
+    for name, secret in _shapes().items():
+        req = DI.build_request({"question": "Keep " + secret + " in the script?",
+                                "options": ["keep " + secret, "rotate it"]}, nonce="n")
+        assert _value(name, secret) not in req, name
+        assert "[REDACTED" in req, name
+
+
+def test_import_request_key_straddling_the_clip_leaves_no_fragment():
+    key = _shapes()["anthropic-key"]
+    pad = "x" * (DI.QUESTION_CLIP - 10)
+    req = DI.build_request({"question": pad + " " + key + " tail", "options": ["a"]}, nonce="n")
+    assert "sk-" + "ant" not in req and TAIL[:6] not in req
+
+
+def test_import_request_for_an_ordinary_question_is_unchanged():
+    q = "Should we merge the docs change?"
+    req = DI.build_request({"question": q, "options": ["yes", "no"]}, nonce="n")
+    assert _prompt_data(req) == q + "\nyes\nno"

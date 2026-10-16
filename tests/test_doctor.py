@@ -7841,3 +7841,43 @@ def test_doctor_flags_unreachable_project_rules(tmp_path):
 def test_doctor_has_no_project_rules_row_when_absent(tmp_path):
     _sdlc(tmp_path, {})
     assert "project rules reachable" not in _ns_reachable_rows(tmp_path)
+
+
+def _ai_filed_names(tmp_path, cfg, counter=None):
+    base = _sdlc(tmp_path, cfg)
+    if counter is not None:
+        st = pathlib.Path(base) / "state"
+        st.mkdir()
+        (st / "ai_filed_counter.json").write_text(counter)
+    return _by_name(_doc().check(base, run=_runner()))
+
+
+def test_ai_filed_non_boolean_enabled_gives_a_not_ok_row_naming_the_key(tmp_path):
+    rows = _ai_filed_names(tmp_path, {"ai_filed": {"triage": {"enabled": "yes"}}})
+    row = rows["AI-filed triage config is valid"]
+    assert row["ok"] is False and "ai_filed.triage.enabled" in row["fix"]
+
+
+def test_ai_filed_out_of_range_bucket_gives_a_not_ok_row_naming_the_key(tmp_path):
+    rows = _ai_filed_names(tmp_path, {"ai_filed": {"buckets": {"urgent": "P9"}}})
+    row = rows["AI-filed triage config is valid"]
+    assert row["ok"] is False and "ai_filed.buckets.urgent" in row["fix"]
+
+
+def test_ai_filed_unreadable_counter_gives_a_not_ok_row_naming_file_and_remedy(tmp_path):
+    rows = _ai_filed_names(tmp_path, {"ai_filed": {}}, counter="{not json")
+    row = rows["AI-filed counter is readable"]
+    assert row["ok"] is False and "ai_filed_counter.json" in row["fix"] and "delete" in row["fix"]
+
+
+def test_ai_filed_missing_or_valid_counter_and_default_config_show_no_row(tmp_path):
+    rows = _ai_filed_names(tmp_path / "a", {"ai_filed": {}})
+    assert "AI-filed counter is readable" not in rows and "AI-filed triage config is valid" not in rows
+    rows = _ai_filed_names(tmp_path / "b", {"ai_filed": {}}, counter='{"entries": []}')
+    assert "AI-filed counter is readable" not in rows
+
+
+def test_ai_filed_rows_silent_when_triage_is_json_false(tmp_path):
+    rows = _ai_filed_names(tmp_path, {"ai_filed": {"triage": {"enabled": False}, "buckets": {"urgent": "P9"}}},
+                           counter="{not json")
+    assert "AI-filed counter is readable" not in rows and "AI-filed triage config is valid" not in rows
