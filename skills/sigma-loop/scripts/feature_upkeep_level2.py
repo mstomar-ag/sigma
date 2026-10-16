@@ -278,12 +278,23 @@ def sweep_end(sdlc_dir):
 
 
 def sweep_take(sdlc_dir, unit, limit):
-    """-> True when `unit` may use the resolver in the active sweep (no active sweep: no limit; a unit already counted stays
-    allowed). Unreadable counter state reads as no limit, because the per-unit caps and the spend ceiling still bind."""
+    """-> True when `unit` may use the resolver in the active sweep. No counter file, or one that says `active: false`, means no
+    sweep is running (the pick-time single-unit pass): allowed. A counter that is PRESENT but unreadable, malformed or not
+    updatable fails CLOSED (False): a sweep whose cap cannot be counted must not run unbounded. `limit` None cannot be enforced,
+    so it is allowed only with no active sweep. A unit already counted stays allowed."""
     try:
         doc = json.loads(_sweep_path(sdlc_dir).read_text(encoding="utf-8"))
-        if not (isinstance(doc, dict) and doc.get("active") is True and isinstance(doc.get("units"), list)):
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    try:
+        if not isinstance(doc, dict):
+            return False
+        if doc.get("active") is False:
             return True
+        if doc.get("active") is not True or not isinstance(doc.get("units"), list):
+            return False
         if unit in doc["units"]:
             return True
         if limit is None or len(doc["units"]) >= int(limit):
@@ -291,8 +302,8 @@ def sweep_take(sdlc_dir, unit, limit):
         doc["units"].append(str(unit)[:200])
         _sweep_write(sdlc_dir, doc)
         return True
-    except (OSError, ValueError):
-        return True
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def dropped_unit_lines(base, theirs, resolved):
@@ -372,7 +383,7 @@ def resolve_stop(run, path, plan, evidence, stamped):
     if not got.ok:
         return refusal(got.code, got.detail)
     if not sweep_take(sdlc_dir, unit, plan.get("max_units_per_sweep")):
-        return refusal(SWEEP_LIMIT, "agent resolver: max_units_per_sweep reached")
+        return refusal(SWEEP_LIMIT, "agent resolver: max_units_per_sweep reached (or the sweep counter is unreadable, so the cap cannot be enforced)")
     conflicted = state.conflicted_paths(run, str(path))
     original = str(run(str(path), ["git", "rev-parse", "REBASE_HEAD"]) or "").strip()
     before_stage0 = state.stage0_listing(run, str(path))

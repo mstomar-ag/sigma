@@ -216,6 +216,61 @@ def test_max_units_per_sweep_parks_the_rest_without_a_model_call(rig, tmp_path, 
     assert level2.sweep_take(str(w.sdlc), "u9", 1) is True            # no active sweep: no limit
 
 
+def _l2():
+    return l1.mod()._load("feature_upkeep_level2")
+
+
+def _sweep_file(w_sdlc, text):
+    path = pathlib.Path(w_sdlc, "state/upkeep/level2-sweep.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("text", ["{not json", "[]", '"x"', '{"active": true, "units": "u1"}', '{"active": true}', ""])
+def test_a_present_but_unusable_sweep_counter_fails_closed(tmp_path, text):
+    level2 = _l2()
+    _sweep_file(tmp_path, text)
+    assert level2.sweep_take(str(tmp_path), "u1", 5) is False
+
+
+def test_sweep_counter_absent_or_inactive_is_allowed_and_limit_none_needs_no_sweep(tmp_path):
+    level2 = _l2()
+    assert level2.sweep_take(str(tmp_path), "u1", 5) is True and level2.sweep_take(str(tmp_path), "u1", None) is True
+    _sweep_file(tmp_path, '{"active": false, "run_id": "", "units": []}')
+    assert level2.sweep_take(str(tmp_path), "u1", 5) is True and level2.sweep_take(str(tmp_path), "u1", None) is True
+    _sweep_file(tmp_path, '{"active": true, "run_id": "r", "units": ["u1"]}')
+    assert level2.sweep_take(str(tmp_path), "u1", None) is True   # already counted stays allowed
+    assert level2.sweep_take(str(tmp_path), "u2", None) is False
+
+
+def test_an_unwritable_sweep_counter_update_fails_closed(tmp_path, monkeypatch):
+    level2 = _l2()
+    _sweep_file(tmp_path, '{"active": true, "run_id": "r", "units": []}')
+
+    def boom(*a, **k):
+        raise OSError("read-only")
+    monkeypatch.setattr(level2, "_sweep_write", boom)
+    assert level2.sweep_take(str(tmp_path), "u1", 5) is False
+
+
+def test_a_sweep_that_cannot_open_its_counter_does_not_run_the_agent_level(tmp_path):
+    import test_upkeep_sched as T
+    import test_upkeep_window_1387 as W
+    j = T.job()
+    sdlc = T.project(tmp_path / "a")
+    ran = []
+    pathlib.Path(sdlc, "state/upkeep/level2-sweep.json").mkdir(parents=True)   # os.replace onto a directory: the counter cannot be written
+    config = T.open_config()
+    config["upkeep"]["conflicts"]["resolve"] = "agent"
+
+    def command(unit):
+        ran.append(unit)
+        return W.engine([], {})(unit)
+    out = j.run_sweep(config, sdlc, str(tmp_path), "run1", 600, environ=W.ENV, command=command, list_units=lambda _s: ["a"], now=W.NOW)
+    assert ran == [] and out["outcome"] != "swept"
+
+
 def test_the_sweep_opens_and_closes_the_counter_only_at_level_agent(tmp_path):
     import test_upkeep_sched as T
     import test_upkeep_window_1387 as W
