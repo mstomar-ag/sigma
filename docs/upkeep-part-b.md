@@ -26,6 +26,11 @@ version heading, the unit's new entries are filed under Unreleased above that re
 as they are, and an entry the base already has is dropped by its text; an edit to an existing line, a link footer or an
 unknown heading still parks.
 
+Level 1 also takes two append-only files (#1515): a dated log with `## YYYY-MM` sections (lines unioned per section, sections in
+date order) and a bullet-list file (the base side's order, then the unit's new items). Only when both sides purely added lines and
+no line of either side is lost; an edit or removal on either side parks exactly as before. The record, backup ref and
+`sigma-resolution:` trailer are the changelog path's.
+
 Level 1 needs a verify command. With none set the pass parks, unless `upkeep.conflicts.mechanical_without_verify` is the
 boolean true. That key IS acted on by Level 1 (the config table in `docs/branching-model.md` still says it is validated
 only; this page is the correction). `upkeep.verify.clean_rebase` is validated and not acted on.

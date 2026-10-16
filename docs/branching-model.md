@@ -63,6 +63,8 @@ change. One prefix is what makes every branch belonging to a unit greppable, for
 after the unit finishes. Reopening finished work reuses the original name as a sub-child rather than
 minting a new top-level name, for the same reason.
 
+**A merged goal branch is deleted on the remote.** After `work.py merge` lands a goal (and again when `work.py finish` confirms an asynchronous landing), the `sdlc/<goal-id>` branch is removed on the remote through a REST call; the pull request and its commits stay on the host. There is no setting that turns this off: the only configurable part is `work.branch_prefix`, and the delete refuses any branch outside that prefix, a protected default, or the base. To keep a goal branch for audit, copy it to a ref of your own (a tag or a differently named branch) before the merge.
+
 **Depth 3 is the model's rule, and nothing enforces it.** Stated plainly because it is the kind of
 thing a reader assumes is checked: no code counts branch segments. What *is* enforced is one segment
 narrower — a declared unit name may not contain `/` at all (§5), so `feature/<name>/<sub>` can never

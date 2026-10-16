@@ -1215,9 +1215,15 @@ def _blocker_rank_row(cfg, sdlc_dir, now=None):
     source is not github or the rule is explicitly off."""
     try:
         disc = (cfg or {}).get("discovery") or {}
-        block = disc.get("blocker_promotion")
-        if disc.get("source") != "github" or (isinstance(block, dict) and block.get("mode") == "off"):
+        if disc.get("source") != "github":
             return None
+        mode = _load_loop_script("sources")._blocker_promotion(cfg)
+        if mode == "off":
+            return None
+        if mode == "smart":
+            return _chk('blocker priority rule inactive: discovery.blocker_promotion.mode is "smart" (board '
+                        "pass only; the reconcile repair and block-time raise are skipped)", False,
+                        'set it to "always" (or remove the key) to turn the rule on')
         tick = _load_loop_script("reconcile_tick")
         loop = tick.loop
         st = tick.read_repair_state(sdlc_dir)
@@ -5423,6 +5429,18 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
                 extra.append("%d local commit%s touching %s %s not on the default branch; push or merge %s"
                              % (n, "" if n == 1 else "s", ", ".join(names), "is" if n == 1 else "are",
                                 "it" if n == 1 else "them"))
+        if sdlc_dir is not None and rub.part_enabled("rules"):
+            rbm = _load_loop_script("rulebook")
+            if rbm.enabled(cfg):
+                import datetime as _dt
+                due = rbm.due_ages(rbm.load(sdlc_dir, cfg), _dt.datetime.now(_dt.timezone.utc), cfg)
+                if due:
+                    extra.append("%d approved rule(s) due for confirmation (older than reask_days): %s"
+                                 % (len(due), ", ".join(str(i) for i, _ in due)))
+                bad = rbm.invalid(sdlc_dir, cfg)
+                if bad:
+                    extra.append("%d invalid rule(s) in the rulebook, never acting (retire them with "
+                                 "rule_draft.py retire): %s" % (len(bad), "; ".join("%s (%s)" % b for b in bad)))
         if sdlc_dir is not None:
             at = _load_loop_script("drift_judge").ceiling_paused_at(cfg, time.time(), sdlc_dir)
             if at is not None:
@@ -5473,6 +5491,7 @@ def _autonomy_state(cfg, sdlc_dir=None):
                 if r.get("comparisons", 0) < need and recent < need:
                     lines.append("%s / %s: level %d unreachable: needs %d comparisons, %d recorded in the last %d days"
                                  % (r["qkind"], r["area"] or "-", r["next_level"], need, recent, days))
+        lines += _load_loop_script("autonomy").category_notes(sdlc_dir if sdlc_dir is not None else ".sdlc", cfg)
         return head + "".join("\n      " + l for l in lines)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__

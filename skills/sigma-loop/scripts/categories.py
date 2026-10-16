@@ -42,6 +42,21 @@ def _good(k, v):
     return isinstance(v, int) and v >= 1
 
 
+ANY_AREA = "*"      # areas ['*'] covers every area, 'repo' included; an exact area wins
+
+_COUNTS = ("l1_min_answers", "l2_min_answers", "l3_min_answers", "l4_min_answers")
+_RATES = ("l2_agreement", "l3_agreement", "l4_agreement")
+
+
+def order_ok(levels):
+    """False when the thresholds present break l1 <= l2 <= l3 <= l4 or l2_agreement <= l3_agreement <= l4_agreement."""
+    for chain in (_COUNTS, _RATES):
+        vals = [levels[k] for k in chain if k in levels]
+        if any(a > b for a, b in zip(vals, vals[1:])):
+            return False
+    return True
+
+
 def _strs(v):
     return isinstance(v, list) and all(isinstance(x, str) and x for x in v)
 
@@ -57,6 +72,8 @@ def _entry(raw):
         return None
     levels = raw.get("levels", {})
     if not isinstance(levels, dict) or any(k not in KEYS or not _good(k, v) for k, v in levels.items()):
+        return None
+    if not order_ok(levels):
         return None
     title = raw.get("title")
     words = raw.get("match_words")
@@ -87,12 +104,34 @@ def load(sdlc_dir):
         return []
 
 
+def dropped(sdlc_dir):
+    """`[(id, reason)]` for entries dropped for breaking the threshold order (a doctor note). Never raises."""
+    try:
+        with open(path(sdlc_dir), encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict) or data.get("schema") != SCHEMA or not isinstance(data.get("categories"), list):
+            return []
+        out = []
+        for raw in data["categories"]:
+            lv = raw.get("levels") if isinstance(raw, dict) else None
+            if (isinstance(lv, dict) and all(k in KEYS and _good(k, v) for k, v in lv.items())
+                    and not order_ok(lv) and isinstance(raw.get("id"), str)):
+                out.append((raw["id"], "thresholds break the order l1 <= l2 <= l3 <= l4 or l2 <= l3 <= l4 agreement"))
+        return out
+    except Exception:
+        return []
+
+
 def resolve(sdlc_dir, qkind, area):
-    """The first category covering the pair, or None. Never raises."""
+    """The first category covering the pair (an exact area before a '*' category), or None. Never raises."""
     try:
         a = _norm(area)
-        for c in load(sdlc_dir):
-            if a in c["areas"] and (c["qkinds"] is None or qkind in c["qkinds"]):
+        cats = [c for c in load(sdlc_dir) if c["qkinds"] is None or qkind in c["qkinds"]]
+        for c in cats:
+            if a in c["areas"]:
+                return c
+        for c in cats:
+            if ANY_AREA in c["areas"]:
                 return c
     except Exception:
         pass

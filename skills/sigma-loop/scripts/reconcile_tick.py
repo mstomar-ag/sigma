@@ -120,6 +120,13 @@ def _blocker_rank_repair(sdlc_dir, config, run=None, now=None):
             return ""
         sources = _load("sources")
         src = sources.GitHubSource(config, run=run, sdlc_dir=sdlc_dir)
+        if src.blocker_promotion_mode == "smart":
+            # #1489: smart is the board pass only; say so once instead of staying silent.
+            if read_repair_state(sdlc_dir).get("mode") != "smart":
+                print("reconcile_tick: blocker rank repair skipped: mode is smart; set always to enable",
+                      file=sys.stderr)
+                _write_repair_state(sdlc_dir, {"mode": "smart", "rollout_reported": True})
+            return ""
         if src.blocker_promotion_mode != "always":
             return ""
         now = now if now is not None else time.time()
