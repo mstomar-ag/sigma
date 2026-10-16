@@ -1949,7 +1949,7 @@ def _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd,
                     slot="goal-conflict:%s" % goal_branch,
                     key="%s@%s" % (goal_branch, before or "?"),
                     title="Rebase conflict: %s onto %s" % (goal_branch, branch),
-                    why="%s could not be replayed onto %s" % (goal_branch, branch),
+                    why="%s could not be replayed onto %s" % (goal_branch, branch), qkind="merge_conflict",
                     body=_goal_conflict_body(unit, goal_branch, branch, outcome,
                                              _goal_state(run, path, goal_branch, cwd, remote,
                                                          before)))
@@ -2103,7 +2103,7 @@ DIRECT_SLOT = "direct:"
 DIRECT_ISSUE_SLOT = "directissue:"
 
 
-def _file_issue(sdlc_dir, config, goal, report, title, why, body, slot="", key=""):
+def _file_issue(sdlc_dir, config, goal, report, title, why, body, slot="", key="", qkind="needs_decision"):
     """File the finding as tracked work. Never raises, and never blocks the goal that found it.
 
     `handoff.create_tracked_issue` is the one place the kit opens an issue on its own behalf, so
@@ -2135,7 +2135,7 @@ def _file_issue(sdlc_dir, config, goal, report, title, why, body, slot="", key="
         result = _handoff().create_tracked_issue(
             sdlc_dir, config, goal, AREA, why,
             same_area=True, immediately_actionable=False, blocks_goal=False,
-            title=title, body=body, upkeep_finding=True,
+            title=title, body=body, upkeep_finding=True, upkeep_qkind=qkind,   # #1490
             # No goal to inherit a unit from: name the unit explicitly (`target_unit`), never read issue "None".
             **({"target_unit": report["unit"]} if goal is None else {}))
     except Exception as exc:              # noqa: BLE001 - a filing must never break a pick
@@ -2406,7 +2406,7 @@ def _file_park(sdlc_dir, config, report, branch, base, run=None, cwd=None, remot
         result = _handoff().create_tracked_issue(
             sdlc_dir, config, None, AREA, "%s could not be replayed onto %s (parked)" % (branch, base),
             same_area=True, immediately_actionable=False, blocks_goal=False, title=title,
-            upkeep_finding=True,
+            upkeep_finding=True, upkeep_qkind="merge_conflict",   # #1490
             body=_park_body(report["unit"], branch, base, info, report["leftovers"], report["tip"])
             + ("\nThis supersedes the earlier finding #%d, which named a different conflict for this unit; that one is "
                "left open for a person to close.\n" % supersedes["number"] if supersedes else ""),
@@ -3009,7 +3009,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
         _file_issue(sdlc_dir, config, goal, report,
                     slot="feature-conflict:%s" % branch, key=before,
                     title="Rebase conflict: %s onto %s" % (branch, base),
-                    why="%s could not be replayed onto %s" % (branch, base),
+                    why="%s could not be replayed onto %s" % (branch, base), qkind="merge_conflict",
                     body=_feature_conflict_body(unit, branch, base, before, report["why"],
                                                 report["leftovers"], report["tip"]))
         return report
