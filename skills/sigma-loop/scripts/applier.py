@@ -558,6 +558,16 @@ def read_heartbeat(sdlc_dir):
         return None
 
 
+def read_hold(sdlc_dir):
+    """The reason the last tick was held (evidence behind the default branch), or "" (not held, or unreadable)."""
+    try:
+        with open(os.path.join(_folder(sdlc_dir), _HEARTBEAT), encoding="utf-8") as fh:
+            held = json.load(fh).get("held")
+        return held if isinstance(held, str) else ""
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
 def _level(sdlc_dir, qkind, area, config):
     fn = level_fn
     return fn(sdlc_dir, qkind, area, config) if fn else _load("autonomy").level(sdlc_dir, qkind, area, config)
@@ -612,6 +622,19 @@ def _is_stuck(ask, period, now):
     return base is not None and now - base > 2 * period
 
 
+def _cannot_apply(sdlc_dir, config, ask, rules, capped):
+    """#1702: True when a pending ask cannot apply now: the daily cap is reached, its kind is a hard stop,
+    no rule matches, or its level is below 3. Anything unreadable reads as "could apply" (read every tick)."""
+    try:
+        qkind, area = ask.get("qkind"), ask.get("area") or "repo"
+        if capped or not isinstance(qkind, str) or _load("hard_stop").is_hardstop_kind(qkind, None, config):
+            return True
+        m = _load("rulebook").match(qkind, area, ask.get("options"), rules)
+        return m is None or not _level_ok(sdlc_dir, config, qkind, area, _auto_rule(rules, m.rule_id, config))
+    except Exception:
+        return False
+
+
 def read_vetoes(sdlc_dir, config, asks, now, comments_fn):
     """An owner's `no` comment is passed to `answer`. On a pending ask (created at or after it opened)
     it cancels the ask; on an applied ask (posted after `applied_at` and by `applied_at` + window) it
@@ -622,11 +645,17 @@ def read_vetoes(sdlc_dir, config, asks, now, comments_fn):
     cfg = settings(config)
     period = datetime.timedelta(minutes=cfg["window_minutes"])
     grace = datetime.timedelta(seconds=_interval(config) * cfg["stale_after_intervals"])
+    rules, capped = None, None
     for ask in asks:
         try:
             if ask.get("state") == "pending" and ask.get("answer") is None:
                 opened = _parse(ask.get("opened"))
                 stuck = _is_stuck(ask, period, now)
+                if not stuck:   # #1702: an ask that cannot apply now is throttled like a stuck one
+                    if rules is None:
+                        rules = _load("rulebook").load(sdlc_dir, config)
+                        capped = _applied_in_last_day(asks, now) >= cfg["max_auto_applied_per_day"]
+                    stuck = _cannot_apply(sdlc_dir, config, ask, rules, capped)
                 last_read = _parse(ask.get("veto_read_at"))
                 if stuck and last_read is not None and now - last_read < period:
                     continue    # #1360: a stuck ask is read at most once a window
@@ -693,7 +722,8 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
     if behind:
         with contextlib.suppress(Exception):
             if not dry_run:     # #1499: a dry run writes nothing, on any branch
-                _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT), {"time": now.isoformat()})
+                _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT),
+                               {"time": now.isoformat(), "held": behind})
         return [{"kind": "behind", "result": "skipped", "reason": behind}]
     started = monotonic_fn()    # #1390: each ask is stamped when its own gesture lands, not at tick start
     clock = lambda: now + datetime.timedelta(seconds=monotonic_fn() - started)  # noqa: E731
@@ -985,6 +1015,9 @@ def _dry_run(sdlc_dir, config):
         if a.get("kind") == "error":
             print("applier dry-run: error %s" % a.get("error"))
             continue
+        if a.get("kind") == "behind":
+            print("applier dry-run: held - %s" % a.get("reason"))
+            continue
         print("applier dry-run: would %s #%s rule %s level %s window %sm" % (
             a.get("kind"), str(a.get("issue")).lstrip("#"), a.get("rule_id", a.get("rid", "-")),
             a.get("level", "-"), window))
@@ -1029,6 +1062,9 @@ def main(argv):
             print("applier: %d vetoed" % len(vetoed))
         if armed and verbose:
             print("applier: %d ask(s) armed" % len(armed))
+        for a in acts:
+            if a.get("kind") == "behind" and a.get("result") == "skipped":
+                print("applier: held - %s" % a.get("reason"))
         failed = [a for a in acts if a.get("result") == "failed"]
         if failed:                                      # #1403: a failed ask stays pending; say so
             print("applier: %d asks failed and will be retried" % len(failed), file=sys.stderr)

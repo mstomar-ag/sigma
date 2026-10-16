@@ -315,7 +315,7 @@ What the tick does, in order:
 1. Reads owner comments. An owner's exact `no` on a **pending** ask cancels it. An owner's `no` on an **applied** ask,
    posted after it was applied and inside the window, records a veto. The veto is judged by the comment's own time, so
    a late tick still honours it, up to `stale_after_intervals` watch intervals past the window.
-   A pending ask stuck past twice its window is read at most once per window (`veto_read_at` on the ask), so its `no` can land up to one window late.
+   A pending ask that cannot apply now (no matching rule, level below 3, hard-stop kind or the daily cap reached, #1702) or is stuck past twice its window is read at most once per window (`veto_read_at` on the ask), so its `no` can land up to one window late; a young ask that could apply is still read every tick.
 2. Plans actions. An ask is applied only when all hold: nobody answered, the window (`window_minutes`, default 1440)
    has passed, the kind is not a hard-stop kind, the derived level is at least 3, exactly one sealed approved rule
    matches, and fewer than `max_auto_applied_per_day` (default 3, 0 stops it) were applied in the last 24 hours.
@@ -326,6 +326,10 @@ What the tick does, in order:
    gesture lands it writes the record and posts the comment naming the rule id.
 4. Handles vetoes. A vetoed unpark is parked again (labels, and the board card on a board-active repository), a
    comment says so, and the kind drops a level.
+
+If another machine's evidence commits are ahead of this checkout, the tick acts on nothing: it prints
+`applier: held - <reason>` (and `--dry-run` prints the same), and the doctor's applier row adds `HELD: <reason>`.
+Pull the default branch to clear it; the next tick drops the hold.
 
 Level 3 comments every time. Level 4 is silent only for a kind in `allow_silent` on an owner-approved rule, and every
 `spot_check_one_in`-th silent-eligible apply per kind and area (default 5) still comments. That counter advances only
@@ -436,7 +440,7 @@ python3 skills/sigma-loop/scripts/decision_import.py remove .sdlc --project-dir 
 - **Bounds.** `max_file_bytes` (500 MB, streaming), `time_budget_s` (60, a total per scan; a file cut short is reported
   as partial), `max_candidates` (500). A dash-leading folder name takes two words: `--project-dir -srv-demo-work-repo`.
 - **Classifier.** `rulebook.import.classifier` is `"table"` (default: a fixed keyword table in code) or `"model"`. With
-  `"model"` and the records gate open, `apply` sends the clipped question and option labels to the named small model
+  `"model"` and the records gate open, `apply` sends the question and option labels, scrubbed for secret shapes and then clipped (#1698), to the named small model
   (`model`, default `haiku`) and nothing from the project: each call runs in a fresh empty temporary directory (refused if an
   instruction file sits above it), without `CLAUDE_PROJECT_DIR`, and with project settings, hooks, skills and MCP config
   skipped when the installed CLI lists those flags. User-level instructions still load. It accepts only a listed kind and area (else `unknown`), caches by fingerprint so a second run
@@ -598,6 +602,8 @@ flag, which closes the whole block.
 | `import.max_budget_usd_per_run` | `1.0` | classifier per run |
 | `import.timeout_s` | `60` | classifier per call |
 | `import.require_repo_cwd` | `false` | same as `--only-in-repo` |
+
+Doctor rows for the filing triage (advisory, shown only when wrong, silent with `ai_filed.triage.enabled` false): "AI-filed triage config is valid" names the offending `ai_filed` key, and "AI-filed counter is readable" names the counter file; either fault parks every AI-filed filing until fixed.
 
 Related keys outside the block: `ai_filed.triage.enabled` (gate holds), `ai_filed.migration.*` (the label migration),
 `ledger.watch.interval_seconds` (the interval the dead-tick check is measured in), `action_log.enabled` (the record-done
