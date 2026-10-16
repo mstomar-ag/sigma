@@ -1602,14 +1602,18 @@ def _prove():
 
 
 def _park_resolved(report, item):
-    """Turn a Level 1 refusal that left no stop to describe into a parked CONFLICT: a synthetic stop record whose id is
-    derived from the unit, the refusal code and the conflicted file, so the same refusal is one finding."""
-    report["why"] = "level 1 refused (%s): %s" % (item.get("code"), item.get("detail"))
-    paths = [_prove().CHANGELOG]
-    cid = park.conflict_id(report["unit"], "", item.get("code") or "", "level1", paths)
-    report["park"] = {"id": cid, "sha": "", "subject": "", "paths": paths,
-                      "brief": "Level 1 refused (%s): %s\n" % (park.neutralise(item.get("code")),
-                                                              park.neutralise(item.get("detail")))}
+    """Turn a Level 1 or Level 2 refusal that left no stop to describe into a parked CONFLICT: a synthetic stop record whose
+    id is derived from the unit, the refusal code and the conflicted file, so the same refusal is one finding. A Level 2
+    refusal carries the attempt (a bounded diff of the unit's side against what the resolver produced) when there was one."""
+    level = 2 if item.get("level") == 2 else 1
+    report["why"] = "level %d refused (%s): %s" % (level, item.get("code"), item.get("detail"))
+    paths = [str(p) for p in (item.get("paths") or [])][:8] if level == 2 else []
+    paths = paths or [_prove().CHANGELOG]
+    cid = park.conflict_id(report["unit"], "", item.get("code") or "", "level%d" % level, paths)
+    brief = "Level %d refused (%s): %s\n" % (level, park.neutralise(item.get("code")), park.neutralise(item.get("detail")))
+    if level == 2 and item.get("attempt"):
+        brief += "The attempted resolution, as a diff against the unit's side:\n%s\n" % park.neutralise(item["attempt"])
+    report["park"] = {"id": cid, "sha": "", "subject": "", "paths": paths, "brief": brief}
     return CONFLICT
 
 
@@ -1640,16 +1644,81 @@ def _level1(run, cwd, path, base_ref, report, level1):
     return {"parked": True}
 
 
-#: Level 2 (upkeep part B, slice 10). A seam, None in the shipped engine: until the owner supplies the binary, the credential
-#: route and the caps (nothing reads them from configuration) the resolver is unreachable. A function `(config) -> plan dict`.
-LEVEL2_PLAN_FACTORY = None
+#: Level 2 (upkeep part B). A seam: `(config) -> plan dict`. Tests replace it; the shipped value builds the plan from the
+#: `upkeep.conflicts.agent` keys (#1516) and answers None, which behaves exactly as `off`, until a budget and a daily
+#: ceiling are set and the model resolves. The launcher's unverified flags and placeholder model catalog are NOT touched here:
+#: with the placeholder in place the launcher refuses the run, at no cost, and the finding says so.
+_LAUNCHER = None
 
 
-def _level2_plan(config):
+def _launcher():
+    global _LAUNCHER
+    if _LAUNCHER is None:
+        _LAUNCHER = _load("feature_upkeep_launcher")
+    return _LAUNCHER
+
+
+LEVEL2_SPEND_REL = "state/upkeep/spend"
+LEVEL2_ROOT_PREFIX = "sigma-upkeep-l2-"
+
+
+def level2_off_reason(config, which=None):
+    """None when the config would yield a Level 2 plan, else the exact reason it behaves as off. Pure; reads PATH only."""
+    try:
+        reading = gate.read(config)
+        if not reading.enabled or reading.settings["conflicts.resolve"] != "agent":
+            return "conflicts.resolve is not agent"
+        s = reading.settings
+        if s["conflicts.agent.max_budget_usd_per_unit"] is None:
+            return "conflicts.agent.max_budget_usd_per_unit is not set"
+        if s["conflicts.agent.spend_ceiling_usd_per_day"] is None:
+            return "conflicts.agent.spend_ceiling_usd_per_day is not set"
+        catalog = _launcher().CATALOG
+        for key in ("conflicts.agent.model", "conflicts.agent.reviewer.model"):
+            if not catalog.get(s[key]):
+                return "%s %r has no model id in the catalog" % (key, s[key])
+        if not (which or shutil.which)("claude"):
+            return "the claude command is not on PATH"
+        return None
+    except Exception as exc:              # noqa: BLE001 - any doubt reads as off
+        return "the settings could not be read (%s)" % type(exc).__name__
+
+
+def _default_level2_plan(config, sdlc_dir=None, cwd=None):
+    """The Level 2 plan from configuration, or None (off) for any missing piece. No model is called here."""
+    if sdlc_dir is None or level2_off_reason(config) is not None:
+        return None
+    import hashlib
+    import tempfile
+    s = gate.read(config).settings
+    launcher = _launcher()
+    root = os.path.join(tempfile.gettempdir(), LEVEL2_ROOT_PREFIX + hashlib.sha256(str(sdlc_dir).encode()).hexdigest()[:10])
+    for name in ("resolver", "scratch", "review"):
+        os.makedirs(os.path.join(root, name), exist_ok=True)
+    budget = float(s["conflicts.agent.max_budget_usd_per_unit"])
+    ceiling = float(s["conflicts.agent.spend_ceiling_usd_per_day"])
+    common = dict(state_dir=os.path.join(str(sdlc_dir), *LEVEL2_SPEND_REL.split("/")), repo_root=str(cwd) if cwd else None,
+                  binary=shutil.which("claude"), flags=(), credential_var=None, scratch_parent=os.path.join(root, "scratch"), rates=None,
+                  ceiling_machine_usd=ceiling, ceiling_team_usd=ceiling, budget_seconds=5.0, home=os.path.expanduser("~"),
+                  timeout=int(s["conflicts.agent.timeout_minutes"]) * 60, cap_usd=budget, sdlc_dir=str(sdlc_dir))
+    # the reviewer gets half the per-unit budget: the launcher requires its cap to be smaller than the resolver's
+    review_model = launcher.CATALOG[s["conflicts.agent.reviewer.model"]]      # reviewer.enabled is validated, never honoured: a push needs a review
+    return {"sdlc_dir": str(sdlc_dir), "launch": dict(common, model=launcher.CATALOG[s["conflicts.agent.model"]]),
+            "review_launch": dict(common, model=review_model, directory=os.path.join(root, "review"), cap_usd=budget * 0.5), "review_cap_usd": budget * 0.5,
+            "review_model": review_model, "resolver_root": os.path.join(root, "resolver"), "limits": None, "host": "claude",
+            "environ": None, "config": config, "max_units_per_sweep": int(s["conflicts.agent.max_units_per_sweep"])}
+
+
+LEVEL2_PLAN_FACTORY = _default_level2_plan
+
+
+def _level2_plan(config, sdlc_dir=None, cwd=None):
     """The Level 2 plan, or None -- the factory unset, the level not `agent`, or any doubt. Pure query."""
     try:
         if LEVEL2_PLAN_FACTORY is None or gate.conflict_level(config) != "agent":
             return None
+        if LEVEL2_PLAN_FACTORY is _default_level2_plan:
+            return _default_level2_plan(config, sdlc_dir, cwd)
         return LEVEL2_PLAN_FACTORY(config)
     except Exception:                     # noqa: BLE001 - a doubtful plan reads closed
         return None
@@ -1663,10 +1732,17 @@ def _level2(run, path, report, level1):
     out = level2.resolve_stops(run, path, plan, rebase_stopped)
     report["level2_charged"] = out["charged"]
     if out["refusal"]:
-        _park_resolved(report, out["refusal"])
+        _park_resolved(report, dict(out["refusal"], level=2))
         return {"parked": True}
     return {"run_id": level1["run_id"], "stops": out["stops"], "files": out["files"], "level": 2, "evidence": out["evidence"],
             "charged": out["charged"], "plan": plan}
+
+
+def _attempt_of(resolved):
+    """The Level 2 attempt for a finding: its bounded diff and the files it touched."""
+    evidence = resolved.get("evidence") or []
+    return {"attempt": _load("feature_upkeep_level2").attempt_text(evidence),
+            "paths": sorted({str(e[0]).split("@")[0] for e in evidence})}
 
 
 def _review_level2(run, path, base_ref, sha, after, report, resolved):
@@ -1676,7 +1752,7 @@ def _review_level2(run, path, base_ref, sha, after, report, resolved):
     resolved["review"] = review
     if refused:
         report["level2_charged"] = round(resolved["charged"] + float(refused.get("charged") or 0.0), 6)
-        _park_resolved(report, refused)
+        _park_resolved(report, dict(refused, level=2, **_attempt_of(resolved)))
         return True
     return False
 
@@ -1690,7 +1766,7 @@ def _prove_level1(run, cwd, path, base_ref, sha, after, report, level1, resolved
                       run_verify=level1.get("run_verify"))
     resolved["checks"], resolved["pairs"] = got["checks"], got["pairs"]
     if got["refusals"]:
-        _park_resolved(report, got["refusals"][0])
+        _park_resolved(report, dict(got["refusals"][0], **(dict(level=2, **_attempt_of(resolved)) if resolved.get("level") == 2 else {})))
         return True
     if resolved.get("level") == 2:
         return _review_level2(run, path, base_ref, sha, after, report, resolved)
@@ -2740,7 +2816,7 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
         _release(lock)
 
 
-def _level1_options(config):
+def _level1_options(config, sdlc_dir=None, cwd=None):
     """What Level 1 needs, or None -- the gate closed, `conflicts.resolve` off, or any doubt. Pure queries: no command, no
     file. None is today's behaviour exactly."""
     try:
@@ -2752,7 +2828,7 @@ def _level1_options(config):
                 "verify_command": verify if isinstance(verify, str) else None,
                 "verify_timeout": int(settings["verify.timeout_minutes"]) * 60,
                 "allow_no_verify": settings["conflicts.mechanical_without_verify"] is True,
-                "level2": _level2_plan(config)}
+                "level2": _level2_plan(config, sdlc_dir, cwd)}
     except Exception:                     # noqa: BLE001 - a doubtful gate reads closed
         return None
 
@@ -2918,7 +2994,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
             return report
     path = worktree_path(sdlc_dir, unit)
     outcome = _rebase_feature(run, cwd, path, branch, base_ref, before, remote, report,
-                              strict=gate.enabled(config), backup=backup, level1=_level1_options(config))
+                              strict=gate.enabled(config), backup=backup, level1=_level1_options(config, sdlc_dir, cwd))
     if outcome == CONFLICT and gate.enabled(config) and report.get("park"):
         outcome = PARKED                  # the gate is open and the stop was described before the drop
     report["outcome"] = outcome

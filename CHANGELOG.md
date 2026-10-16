@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Upkeep's agent conflict level is fed from configuration (#1516).** `upkeep.conflicts.agent` adds model, per-unit budget, daily spend ceiling, timeout, sweep unit limit and reviewer keys; the level behaves as off until both spend keys are set, a reached ceiling parks the unit as `spend ceiling reached`, a resolver result that drops a unit line is refused with the attempt in the finding, and the doctor reports configuration, spend today and the last resolution. The launcher's unverified flags and placeholder model catalog are unchanged, so a real run is still refused until the owner-gated probe.
 - **`rule_draft.py suggest` ranks which question kind and area pairs deserve a rule (#1513).** It scores each pair from parks, hours parked, goals blocked and answer agreement, names the majority option and whether one any-area rule covers it, never lists hard-stop or unknown kinds, and `--propose N` drafts the top N as proposals (never approved); the doctor's rulebook row lists the top uncovered pairs when rules are on.
 - The source-error downgrade-to-park declares `quota` for a quota or budget failure and `needs_decision` otherwise, and the stale-worktree escalation park declares `needs_decision` (#1524).
 - **Upkeep's mechanical level resolves two append-only shapes (#1515).** A dated `## YYYY-MM` log and a bullet-list file that both sides only added to are unioned (per section in date order; base order then the unit's new items); an edit or removal on either side still parks.

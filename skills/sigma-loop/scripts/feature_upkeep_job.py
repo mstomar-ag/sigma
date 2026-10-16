@@ -200,6 +200,9 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
         counts, unreached, outcome = {}, [], "failed"
         try:
             reading = feature_upkeep.read(config)
+            agent = feature_upkeep.conflict_level(config) == "agent"
+            if agent:                                             # #1516: count the units that reach the Level 2 resolver in this sweep
+                _sibling("feature_upkeep_level2").sweep_begin(sdlc_dir, run_id)
             names = sched.selected((list_units or sched.list_units)(sdlc_dir), reading.settings["units.include"],
                                    reading.settings["units.exclude"])
             clk = beat or BeatingClock(lambda: _touch(beat_path), base=clock)
@@ -225,6 +228,11 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
                     break
             outcome = "swept"
         finally:
+            if feature_upkeep.conflict_level(config) == "agent":
+                try:
+                    _sibling("feature_upkeep_level2").sweep_end(sdlc_dir)
+                except Exception:                                 # noqa: BLE001 - a counter that cannot close is bounded by the next begin
+                    pass
             summary = {"counts": counts, "unreached": unreached}
             _record(sdlc_dir, dict(head, state="done", outcome=outcome, unit_tip=None, finished_at=stamp_now(), sweep=summary))
             done_units = sum(n for w, n in counts.items() if w not in ("timeout", "stopped"))
