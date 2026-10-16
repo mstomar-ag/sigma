@@ -136,3 +136,34 @@ def test_usage_names_the_verb(capsys):
     u = _mod("unpark")
     assert u.main(["unpark.py", "--help"]) == 0
     assert "unpark.py report <sdlc_dir>" in capsys.readouterr().out
+
+
+def _auto_world(tmp_path, train):
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    sd, cfg = str(tmp_path / ".sdlc"), _cfg()
+    (tmp_path / ".sdlc").mkdir()
+    cfg["rulebook"]["rules"]["auto_approve"] = True
+    cfg["rulebook"]["autonomy"]["owners"] = ["boss"]
+    if train:
+        _train(sd, cfg, "merge_conflict", "docs", "rebase it")
+    RB.propose(sd, {"qkind": "merge_conflict", "area": "docs", "option": "rebase it", "reason": "low"}, cfg, now=T0)
+    RB.approve(sd, RB.load(sd, cfg)[-1]["id"], "boss", cfg, now=T0, auto=True)
+    AP.open_ask(sd, 11, "merge_conflict", "docs", ["rebase it"], cfg, T0)
+    row = _issue(11, ["sdlc:parked", "area:docs"], [_declared("merge_conflict")])
+    run = tu._runner(views={"11": row[2]}, by_label={"sdlc:parked": json.dumps([row[1]]), "sdlc:blocked": "[]"})
+    return sd, cfg, run
+
+
+def test_an_auto_approved_rule_below_level_three_without_own_support_would_act(tmp_path):
+    sd, cfg, run = _auto_world(tmp_path, train=False)
+    assert AP._level(sd, "merge_conflict", "docs", cfg) < 3
+    r = _mod("unpark").report(sd, cfg, run=run, now=NOW)["issues"][0]
+    assert r["verdict"] == "now", r
+
+
+def test_a_vetoed_auto_rule_is_reported_held(tmp_path):
+    sd, cfg, run = _auto_world(tmp_path, train=False)
+    rid = DS.append(sd, {"how": "autonomous", "qkind": "merge_conflict", "area": "docs", "choice": "rebase it"}, cfg)
+    AU.veto(sd, rid, cfg, now=T0 + MIN)
+    r = _mod("unpark").report(sd, cfg, run=run, now=NOW)["issues"][0]
+    assert r["verdict"] == "never" and "veto" in r["why"], r

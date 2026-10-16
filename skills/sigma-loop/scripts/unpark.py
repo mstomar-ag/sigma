@@ -831,7 +831,11 @@ def _applier_verdict(sdlc_dir, config, ap, number, kind, declared, area, comment
     if kind in ("unknown", "scope_hold", "owner_hold"):
         return None, None, None, "never", "kind %s is never applied automatically" % kind
     rules = rb.load(sdlc_dir, config)
-    m = rb.match(kind, area, None, rules, config)
+    ask = next((a for a in asks if ap._issue_key(a.get("issue")) == ap._issue_key(number)
+                and a.get("state") == "pending" and a.get("answer") is None), None)
+    # tick's own call (the pending ask's options, no config); open_for_park's when there is no ask yet
+    m = (rb.match(kind, area, ask.get("options"), rules) if ask is not None
+         else rb.match(kind, area, None, rules, config))
     if m is None:
         return None, None, None, "never", "no approved rule for %s / %s" % (kind, area)
     gesture = ap.option_gesture(kind, m.option)
@@ -841,16 +845,17 @@ def _applier_verdict(sdlc_dir, config, ap, number, kind, declared, area, comment
     park = park_stamp(comments)
     if park and decision_record.answered_park(sdlc_dir, config, number, park):
         return (*out, "never", "a person already answered this park")
+    auto_rule = ap._auto_rule(rules, m.rule_id, config)       # #1555: tick's order, veto then level
+    if auto_rule is not None and ap._vetoed(sdlc_dir, config, kind, area, auto_rule):
+        return (*out, "never", "held: an owner vetoed this auto-approved rule; it waits for a hand reconfirmation")
     level = ap._level(sdlc_dir, kind, area, config)
-    if level < 3:
+    if not ap._level_ok(sdlc_dir, config, kind, area, auto_rule):
         return (*out, "never", "the pair is at level %s, below 3" % level)
     if m.rule_id in set(rb.due_for_reask(rules, now, config)):
         return (*out, "never", "the rule is due to be reconfirmed by an owner")
     rule = next((r for r in rules if r.get("id") == m.rule_id), None)
-    if not ap._rule_has_own_support(sdlc_dir, kind, area, rule, config):
+    if auto_rule is None and not ap._rule_has_own_support(sdlc_dir, kind, area, rule, config):
         return (*out, "never", "the rule lacks its own live comparisons")
-    ask = next((a for a in asks if ap._issue_key(a.get("issue")) == ap._issue_key(number)
-                and a.get("state") == "pending" and a.get("answer") is None), None)
     if ask is None:
         return (*out, "later", "no ask yet: it opens at the next sync, then waits its window")
     if "armed_at" in ask and ask.get("armed_at") is None:
