@@ -5530,6 +5530,8 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
                     extra.append(public_msg)
             else:
                 real = _real_repo_public(cfg, run, sdlc_dir)
+                if real is False and warn in extra:
+                    extra.remove(warn)  # the heuristic guessed public; the real read says private (#1548)
                 if real is True:
                     extra.append(public_msg + " (read from GitHub)")
                 elif real is None:
