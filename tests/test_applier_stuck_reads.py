@@ -60,11 +60,54 @@ def test_stuck_ask_is_read_once_per_window(tmp_path):
     assert AP._asks(sd)[0]["veto_read_at"] == (T0 + 191 * MIN).isoformat()
 
 
-def test_young_asks_are_read_every_tick(tmp_path):
-    sd, cfg = _world(tmp_path)
+def _rule_world(tmp_path, issues=(7,)):
+    """Like _world, plus a sealed rule for the asks and enough human answers to reach level 3."""
+    sd, cfg = _world(tmp_path, issues)
+    for _ in range(8):
+        DS.append(sd, {"how": "human", "qkind": "merge_conflict", "area": "docs", "choice": "rebase it"}, cfg)
+        AU.record_watch(sd, "merge_conflict", "docs", "rebase it", "rebase it", cfg, now=T0, machine="m1")
+    RB.propose(sd, {"qkind": "merge_conflict", "area": "docs", "option": "rebase it", "reason": "low risk"}, cfg, now=T0)
+    RB.approve(sd, RB.load(sd, cfg)[-1]["id"], "boss", cfg, now=T0)
+    return sd, cfg
+
+
+def test_young_asks_that_could_apply_are_read_every_tick(tmp_path):
+    sd, cfg = _rule_world(tmp_path)
     assert _read(sd, cfg, 30) == [7] and _read(sd, cfg, 31) == [7]
     assert _read(sd, cfg, 100) == [7] and _read(sd, cfg, 101) == [7]   # between 1 and 2 windows
     assert "veto_read_at" not in AP._asks(sd)[0]
+
+
+def test_owner_no_inside_the_window_cancels_a_young_ask_that_could_apply(tmp_path):
+    sd, cfg = _rule_world(tmp_path)
+    assert _read(sd, cfg, 20, [_comment("no", 10)]) == [7]
+    assert AP._asks(sd)[0]["state"] == "answered"
+
+
+def test_young_asks_with_no_matching_rule_are_read_once_per_window(tmp_path):
+    sd, cfg = _world(tmp_path, issues=(7, 8, 9))
+    assert sorted(_read(sd, cfg, 5)) == [7, 8, 9]
+    for minutes in (10, 15, 20, 25, 30, 59):
+        assert _read(sd, cfg, minutes) == [], minutes
+    assert sorted(_read(sd, cfg, 66)) == [7, 8, 9]       # a window after the first read
+    assert _read(sd, cfg, 70) == []
+
+
+def test_owner_no_on_a_throttled_young_ask_lands_within_one_window(tmp_path):
+    sd, cfg = _world(tmp_path)
+    _read(sd, cfg, 5)
+    assert _read(sd, cfg, 30, [_comment("no", 10)]) == []
+    assert _read(sd, cfg, 66, [_comment("no", 10)]) == [7]
+    assert AP._asks(sd)[0]["state"] == "answered"
+
+
+def test_level_below_three_and_the_daily_cap_throttle_a_young_ask(tmp_path):
+    sd, cfg = _rule_world(tmp_path)
+    for _ in range(8):      # a human split drops the pair below level 3
+        DS.append(sd, {"how": "human", "qkind": "merge_conflict", "area": "docs", "choice": "start fresh"}, cfg)
+    cfg["rulebook"]["autonomy"]["applier"]["max_auto_applied_per_day"] = 0
+    assert _read(sd, cfg, 5) == [7]
+    assert _read(sd, cfg, 10) == []       # capped: cannot apply now, so once a window
 
 
 def test_owner_no_still_cancels_a_stuck_ask(tmp_path):

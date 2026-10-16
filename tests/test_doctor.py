@@ -126,7 +126,11 @@ def test_gh_auth_check_default_failure_keeps_the_pre_existing_fix():
     d = _doc()
     with tempfile.TemporaryDirectory() as t:
         base = _sdlc(t, {"discovery": {"source": "github"}})
-        c = _by_name(d.check(base, run=_runner()))              # default gh_auth=""
+        base_run = _runner()                                    # default gh_auth=""
+
+        def run(args):                                          # #1708: only a REST 401 is "logged out"
+            return d._RawFailure("gh: Bad credentials (HTTP 401)") if args[:2] == ["gh", "api"] else base_run(args)
+        c = _by_name(d.check(base, run=run))
         assert c["gh auth"]["ok"] is False
         # #229: the login now names the host and the scopes the loop needs, then what Sigma does
         # meanwhile; still `gh auth login` because gh IS installed here (the fake `which`).
@@ -897,7 +901,8 @@ def test_cheap_only_still_reports_real_setup_gaps():
                          "knowledge_graph": {"enabled": True, "builder": "graphify"}})
         run, _ = _exploding_runner(("claude", "plugin", "list"), ("curl",))
         c = _by_name(d.check(base, run=run, cheap_only=True))
-        assert c["gh auth"]["ok"] is False              # the fake serves "" for gh auth status
+        # #1708: the fake serves "" for gh auth status AND the REST read, which is "cannot verify" now
+        assert c["gh auth (cannot verify)"]["ok"] is False
         assert c["graphify installed"]["ok"] is False
 
 

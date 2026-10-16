@@ -1620,7 +1620,7 @@ keeping the restored tip as a backup; set `work.rebase_upkeep` to `off` first to
 
 Limits, stated rather than discovered: a host that rejects, hides or caps the namespace, or that cannot do an
 atomic push, fails the whole push on every pass (turn upkeep off, which restores the plain push); a client pre-push
-hook that allows only branches refuses the backup; the commands have no network timeout of their own.
+hook that allows only branches refuses the backup; the backup commands have no network timeout of their own, except the upkeep prune, which carries the sweep's remaining cap as a deadline (#1700).
 
 With the gate closed, or on a machine that has only a plain clone, restore by hand with plain git. A plain clone does
 not carry `refs/sigma/*`, and the old tip is on no branch, so fetch the backup before pushing it:
