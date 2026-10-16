@@ -508,6 +508,17 @@ def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text
     return plan
 
 
+def _upkeep_plan(config, text):
+    """#1490: the forced park plan of an upkeep finding, or None when triage is off (the legacy path then runs
+    unchanged). A report for a person is parked at filing with a declared kind and the 'unclear' bucket priority."""
+    if file_triage.decide("", "", {}, config).kind == "queue":
+        return None
+    v = file_triage.validate_buckets(config)
+    prio = (v["buckets"].get("unclear") if v.get("ok") else None) or file_triage.DEFAULT_BUCKETS["unclear"]
+    return {"kind": "park", "priority": prio, "reason": "upkeep finding: a person decides",
+            "qkind": "needs_decision", "text": text, "depth": None, "report": True}
+
+
 def _run_id():
     try:
         return _load("state").run_identity()
@@ -534,6 +545,8 @@ def _triage_finish(sdlc_dir, config, source, plan, issue, key_goal, report):
         except Exception as exc:                               # noqa: BLE001 - never block the filing
             report["warnings"].append("could not park #%s at filing (%s): it carries no goal label and "
                                       "no parked label until a human looks at it" % (issue, exc))
+    if plan.get("report"):                                     # #1490: a report for a person, not a loop follow-up
+        return
     if not ai_filed_counter.bump(plan["counter_path"], _run_id(), key_goal, time.time(), config):
         report["warnings"].append("ai_filed counter could not be updated (unreadable or unwritable): "
                                   "later filings are parked until it is fixed or removed")
@@ -545,7 +558,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                           priority=DEFAULT_PRIORITY, title=None, body=None,
                           extra_labels=(), source=None, run=None, dedup=True,
                           upstream_run=None, target_unit=None, idempotency_key=None,
-                          upkeep_finding=False):
+                          upkeep_finding=False, upkeep_qkind="needs_decision"):
     """Open a tracked issue, address it, record it. The one real place the kit ever opens an issue on
     its own behalf — `hand_off()` below is a thin wrapper around this. Generalizes what used to be
     hand-off-only discipline (owner resolution, labels, the `gh` call, the ledger write, the dual
@@ -837,12 +850,19 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         # all pass through here). None = switched off: everything below is the legacy behaviour.
         # #1331: an upkeep finding (default off) is a report for a person, never work: it skips triage so it
         # cannot be armed as `sdlc:goal`, and files in the queue bucket exactly as triage-off does.
-        triage = None if upkeep_finding else _triage_plan(
-            sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, immediately_actionable)
+        # #1490: with triage on it is parked at filing (declared kind, unclear-bucket priority); only triage off
+        # keeps the legacy label.
+        if upkeep_finding:
+            triage = _upkeep_plan(config, text)
+            if triage is not None:
+                triage["qkind"] = upkeep_qkind
+        else:
+            triage = _triage_plan(
+                sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, immediately_actionable)
         if triage is not None:
             text = triage["text"]
         labels = [f"priority:{priority}", f"area:{area}", *extra_labels]
-        if triage is not None and triage["kind"] == "arm":
+        if triage is not None and (triage["kind"] == "arm" or triage.get("report")):
             labels[0] = f"priority:{triage['priority']}"
         if blocks_goal and goal and hasattr(source, "blocker_filing_priority"):    # #1408: never below the blocked goal
             labels[0] = f"priority:{source.blocker_filing_priority(str(goal), labels[0]) or labels[0][9:]}"
