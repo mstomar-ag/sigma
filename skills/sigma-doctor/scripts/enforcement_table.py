@@ -146,7 +146,7 @@ EXTERNAL_CONTROLS = (
                   "session given a brief without the resolver's transcript; the route is `verified: false`, was never "
                   "run against the real command line, and cannot prove the resolver did not influence the reviewer. "
                   "It can only add a refusal; a block, a bad reply, a timeout or a moved tree all stop the push",
-     "condition": "needs a validated model id; the shipped catalog holds only a placeholder, so the route stays closed"},
+     "condition": "needs a model id from the launcher catalog or a validated override"},
     {"control": "Unit landing is user-requested", "kind": "python-gate", "hosts": "all",
      "enabled_by": ("upkeep.enabled",), "settings": (),
      "mechanism": "`feature_land.py` `land` and `feature_land_merge.py`: land a unit only on an explicit request, behind the "

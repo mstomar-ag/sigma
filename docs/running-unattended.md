@@ -33,14 +33,10 @@ are open in #721. Until then the literal-pid form above is the workaround.
 
 Separate from the permission setup above: with `conflicts.resolve: agent` the upkeep job may start one headless
 `claude -p` session to resolve a unit conflict (`skills/sigma-loop/scripts/feature_upkeep_launcher.py`). It is off by default,
-so the kit starts no unattended model session unless that setting is on. The shipped model catalog holds only a placeholder id,
-so the resolver stays closed until a validated override is supplied. The launcher passes only `-p`, `--output-format` and
-`--model` (alias form), flags already used in the tree and not probed by this change; every other design flag
-(`--max-budget-usd`, `--permission-mode`, `--allowedTools`, `--disallowedTools`, `--tools`, `--settings`,
-`--setting-sources`, `--strict-mcp-config`, `--no-session-persistence`, `--add-dir`, `--bare`, `--append-system-prompt`) is
-UNVERIFIED and refused: the launcher's own registry still lists them as unprobed. On 2026-10-14 `claude --help` on
-the installed host was read (no model call): it lists every one of those flags by name, and `-p`, `--output-format` (print
-mode only) and `--model` (aliases accepted). That settles that the flags exist, not what they do, so the launcher is unchanged.
+so the kit starts no unattended model session unless that setting is on. The shipped model catalog holds real ids for `haiku`, `sonnet`, `opus` and `fable`, and with no spend key set the level runs with
+no spend limit; set `upkeep.conflicts.agent.max_budget_usd_per_unit` (and optionally `spend_ceiling_usd_per_day`) to cap it.
+The launcher's confirmed-flag table lists every design flag except `--bare`, which did not authenticate with the subscription
+login in the probe and is refused by name; the resolver does not request it. See `docs/launch/evidence/resolver-flags-confirmation-2026-10-16.md`.
 The variable that moves the configuration directory is `CLAUDE_CONFIG_DIR`: with it set to a temporary directory, plugin
 installs, marketplace records and the user settings file all landed there and the real profile was not written. The place and
 shape of the session transcript remain UNVERIFIED. The ledger guard keeps 10,000 entry files as its ceiling of record; the working limit is derived
