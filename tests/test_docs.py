@@ -2467,6 +2467,43 @@ def test_goal_design_py_exists_and_matches_the_contracts_own_numbers():
 
 
 
+# --- #1694: the upkeep pages say what the agent level does with unset spend keys -----------------------------------
+UPKEEP_PAGES = ("docs/upkeep.md", "docs/configuration.md", "docs/features.md", "docs/upkeep-part-b.md",
+                "docs/enforcement.md", "docs/running-unattended.md")
+STALE_UPKEEP_PHRASES = ("both spend keys are set", "both spend caps are set", "behaves as `off` until",
+                        "behaves as off until", "not available yet", "only a placeholder", "still the placeholder",
+                        "is a placeholder")
+NO_LIMIT_SENTENCE = ("With no spend key set the agent level runs with no spend limit; set "
+                     "`max_budget_usd_per_unit` (and optionally `spend_ceiling_usd_per_day`) to cap it.")
+
+
+@pytest.mark.parametrize("rel", UPKEEP_PAGES)
+def test_upkeep_pages_carry_no_stale_spend_or_catalog_claim(rel):
+    text = (ROOT / rel).read_text(encoding="utf-8")
+    found = [p for p in STALE_UPKEEP_PHRASES if p in text]
+    assert not found, (rel, found)
+
+
+@pytest.mark.parametrize("rel", ("docs/upkeep.md", "docs/upkeep-part-b.md"))
+def test_upkeep_pages_say_plainly_that_no_spend_key_means_no_limit(rel):
+    text = " ".join((ROOT / rel).read_text(encoding="utf-8").split())
+    assert NO_LIMIT_SENTENCE in text, rel
+
+
+@pytest.mark.parametrize("rel", ("skills/sigma-loop/scripts/feature_upkeep_launcher.py",
+                                 "skills/sigma-loop/scripts/feature_upkeep_level2.py"))
+def test_resolver_module_docstrings_do_not_claim_it_is_uncalled_or_never_run(rel):
+    text = (ROOT / rel).read_text(encoding="utf-8")
+    head = text[:text.index('"""', 3)]
+    for stale in ("NOTHING CALLS IT YET", "NO REAL MODEL CALL", "holds only the\n     placeholder"):
+        assert stale not in head, (rel, stale)
+
+
+def test_resolver_readiness_reference_matches_the_rows():
+    text = (ROOT / "skills/sigma-doctor/references/resolver-readiness.md").read_text(encoding="utf-8")
+    assert "fails unless both" not in text and "holds only the placeholder" not in text
+
+
 def test_resolver_confinement_is_documented_with_what_it_does_not_cover():
     part_b = (ROOT / "docs" / "upkeep-part-b.md").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
