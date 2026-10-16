@@ -33,10 +33,11 @@ REGISTERED_CALLERS = (
 )
 #: Registered callers that run only behind the upkeep gate: `feature_upkeep_prove.py` is loaded by `feature_rebase.py`
 #: only after `gate.enabled(config)` and the `conflicts.resolve` level check pass (see `_level1_inputs`), so with the
-#: gate closed it is never reached. Any further caller must be added here in the same change that gates it.
+#: gate closed it is never reached. `resource_verify.py` runs only when `resource.mode` is enforce. Any further caller must be added here in the same change that gates it.
 GATED_CALLERS = (
     "skills/sigma-loop/scripts/feature_upkeep_prove.py:228",
     "skills/sigma-loop/scripts/feature_upkeep_prove.py:235",
+    "skills/sigma-loop/scripts/resource_verify.py:146",
 )
 ALLOWED_LOADS = {"shell_policy", "bounded_run"}
 #: Names of the one place a claim is armed and its helpers.

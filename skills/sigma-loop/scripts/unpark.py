@@ -145,6 +145,14 @@ QUESTIONS = {
          "options": ["keep going", "look into it first"],
          "gestures": {"keep going": "unpark", "look into it first": "keep-parked"}},
     ],
+    # #1579: like "handoff", a run-level run_stop reason (a `--label` drain that stopped with open
+    # members it cannot pick), never written by a real `park`.
+    "label-held": [
+        {"id": "route", "ask": "This run stopped with goals still open in its label. Look at what "
+                               "holds them, or leave them for now?",
+         "options": ["look into it first", "leave them"],
+         "gestures": {"look into it first": "keep-parked", "leave them": "keep-parked"}},
+    ],
     # #1005: the gate-hold kinds. Releasing either without the registry edit sends the goal back for
     # exactly one pick, so `resolve` refuses until the registry allows it.
     "scope_hold": [

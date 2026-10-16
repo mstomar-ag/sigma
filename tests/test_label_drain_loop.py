@@ -1,0 +1,236 @@
+"""#1579: label-drain behaviour inside a `--label` run -- pull blockers on hold, refuse to start on open
+questions, and stop `label-held` rather than `backlog-empty`.
+
+The loop wiring is tested against the dependency-gate fake (`_Board`) with a recording stand-in for
+`label_drain`, so every assertion is on what the loop asked for. The real `pull` is tested against the
+stateful fake `gh` of the arm tests. Nothing here touches a network or a model.
+"""
+import tempfile
+
+import pytest
+
+from journal_events import journal_events
+from test_pick_dependency_gate import _Board, _base, _blocked_by, _cfg, _issue, _loop
+
+LBL = "validation-run-1"
+CHAIN_OPEN = [_blocked_by(1, 7), _issue(7)]
+CHAIN_DONE = [_blocked_by(1, 7), _issue(7, state="CLOSED")]
+
+
+class Scoped(_Board):
+    label_scope = LBL
+    repo = "acme/widget"
+    goal_label = "sdlc:goal"
+
+    def scope_label_current(self, goal):
+        return True
+
+
+class Stub:
+    """Stands in for the label_drain module: records pulls, serves a canned plan."""
+
+    def __init__(self, members=(), results=None, on_pull=None):
+        self.pulls, self.plans = [], 0
+        self.members, self.results, self.on_pull = list(members), results or {}, on_pull
+
+    def pull(self, sdlc_dir, label, ref, for_goal, config=None, run=None):
+        self.pulls.append(str(ref))
+        if self.on_pull:
+            self.on_pull(ref)
+        return self.results.get(str(ref), {"ref": str(ref), "result": "pulled", "reason": "", "actions": []})
+
+    def plan(self, sdlc_dir, label, config=None, run=None):
+        self.plans += 1
+        return {"label": label, "members": self.members}
+
+
+def _run(lp, stub, base, src, **kw):
+    lp._label_drain = lambda: stub
+    lp._LABEL_PULLED.clear()
+    lp._LABEL_CAP_SAID.clear()
+    return lp._next(base, src, _cfg(lp, base), **kw)
+
+
+def _ev(base):
+    lp = _loop()
+    return [e for e in journal_events(lp.ledger, base) if e["kind"] == "run_stop"]
+
+
+# --- pull on hold ------------------------------------------------------------------------------
+
+def test_a_held_member_pulls_its_outside_blocker_then_is_picked_after_it_closes(capsys):
+    lp, stub = _loop(), Stub()
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        # the blocker, once pulled, is part of the label and offered by the next backlog read
+        stub.on_pull = lambda ref: src.order.append(ref)
+        kind, goal = _run(lp, stub, base, src)
+        assert (kind, goal) == ("goal", "7")             # member 1 held, #7 pulled and picked
+        assert stub.pulls == ["7"]
+        src.live = list(CHAIN_DONE)                      # #7 closes
+        lp._MIRROR_FORCED.clear()
+        src.order.remove("7")
+        again = lp._next(base, src, _cfg(lp, base))
+    assert again == ("goal", "1") and stub.pulls == ["7"]  # picked, and not pulled a second time
+
+
+@pytest.mark.parametrize("why", ["parked: carries sdlc:parked", "assigned-elsewhere: assigned to bob",
+                                 "upper-tier: labelled sdlc:epic", "in another repository (o/r#7)"])
+def test_a_refused_blocker_stays_held_and_the_stop_note_names_it(why, capsys):
+    lp = _loop()
+    res = {"7": {"ref": "7", "result": "refused", "reason": why, "actions": []}}
+    stub = Stub(members=[{"number": 1, "verdict": "armed", "reason": "waiting on open #7"}], results=res)
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        assert _run(lp, stub, base, src)[0] == "DONE"
+    err = capsys.readouterr().err
+    assert src.marked == [] and why in err and "#7" in err
+    assert "prerequisite #7 left out of the label" in err
+
+
+def test_sixty_blockers_pull_fifty_once_each_and_name_the_cap(capsys):
+    lp = _loop()
+    refs = list(range(100, 160))
+    body = "".join("**Blocked by:** #%d\n" % r for r in refs)
+    issues = [_issue(1, body=body)] + [_issue(r) for r in refs]
+    stub = Stub()
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=issues)
+        src = Scoped(["1"], live=issues)
+        _run(lp, stub, base, src)
+        before = len(stub.pulls)
+        lp._next(base, src, _cfg(lp, base))              # a second pick in the same run
+    assert before == 50 and len(stub.pulls) == 50 and len(set(stub.pulls)) == 50
+    assert "pull cap of 50" in capsys.readouterr().err
+
+
+# --- refuse to start ---------------------------------------------------------------------------
+
+def test_open_questions_refuse_the_start_and_claim_nothing():
+    lp = _loop()
+    stub = Stub(members=[{"number": 3, "verdict": "parked", "reason": "parked (needs_decision)"},
+                         {"number": 4, "verdict": "unarmed", "reason": "unarmed"}])
+    calls = []
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN, calls=calls)
+        kind, payload = _run(lp, stub, base, src)
+    assert kind == "DONE" and "label_drain.py arm" in payload and "1 unarmed" in payload
+    assert src.marked == [] and src.released == [] and stub.pulls == [] and calls == []
+
+
+# --- stop classes ------------------------------------------------------------------------------
+
+def _stop(monkeypatch, tmp, members):
+    lp = _loop()
+    monkeypatch.setenv("SIGMA_RUN_ID", "r-1579")
+    stub = Stub(members=members)
+    base = _base(tmp, mirror=[_issue(9)], extra={"ledger": {"enabled": True, "actor": "me"}, "journal": {"enabled": True}})
+    src = Scoped([], live=[_issue(9)])
+    assert _run(lp, stub, base, src)[0] == "DONE"
+    return [e.get("reason_class") for e in _ev(base)]
+
+
+def test_open_but_unpickable_members_stop_label_held(monkeypatch):
+    with tempfile.TemporaryDirectory() as d:
+        classes = _stop(monkeypatch, d, [{"number": 5, "verdict": "armed", "reason": "in progress (claimed by a run)"}])
+    assert classes == ["label-held"]
+
+
+def test_no_open_members_stop_backlog_empty(monkeypatch):
+    with tempfile.TemporaryDirectory() as d:
+        classes = _stop(monkeypatch, d, [])
+    assert classes == ["backlog-empty"]
+
+
+# --- unscoped and --feature runs are untouched --------------------------------------------------
+
+#: recorded from the commit before #1579 (the call list of the dependency-gate trial backlog).
+GOLDEN_CALLS = [["api", "repos/acme/widget/issues", "--method", "GET", "-f", "labels=sdlc:goal", "-f", "state=open", "-f", "sort=created", "-f", "direction=asc", "-f", "per_page=100", "-f", "page=1"], ["api", "repos/acme/widget/issues", "--method", "GET", "-f", "state=closed", "-f", "sort=updated", "-f", "direction=desc", "-f", "per_page=100", "-f", "page=1"], ["api", "repos/acme/widget/issues", "--method", "GET", "-f", "labels=sdlc:goal", "-f", "state=open", "-f", "sort=created", "-f", "direction=asc", "-f", "per_page=100", "-f", "page=1"], ["api", "repos/acme/widget/issues", "--method", "GET", "-f", "state=closed", "-f", "sort=updated", "-f", "direction=desc", "-f", "per_page=100", "-f", "page=1"]]
+
+GOLDEN_FEATURE = [[["DONE", None]], [["api", "repos/acme/widget/issues", "--method", "GET", "-f", "labels=sdlc:goal", "-f", "state=open", "-f", "sort=created", "-f", "direction=asc", "-f", "per_page=100", "-f", "page=1"], ["api", "repos/acme/widget/issues", "--method", "GET", "-f", "state=closed", "-f", "sort=updated", "-f", "direction=desc", "-f", "per_page=100", "-f", "page=1"]], []]
+
+
+def _trial_calls(feature=False):
+    lp = _loop()
+    lp._label_drain = lambda: (_ for _ in ()).throw(AssertionError("label_drain used outside --label"))
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d)
+        src = _Board(["1595", "1596", "1594"])
+        if feature:
+            src.feature = "some-unit"
+        out = lp.next_batch(base, src, _cfg(lp, base), max_concurrent=4)
+    return out, src.calls, src.marked
+
+
+def test_unscoped_and_feature_runs_make_the_same_calls_as_before():
+    out, calls, marked = _trial_calls()
+    assert out == [("goal", "1594"), ("DONE", None)] and marked == ["1594"]
+    assert calls == GOLDEN_CALLS
+    out2, calls2, marked2 = _trial_calls(feature=True)
+    assert [[list(x) for x in out2], calls2, marked2] == GOLDEN_FEATURE
+
+
+# --- the real `pull`, against the stateful fake gh of the arm tests ---------------------------------
+
+import test_label_drain_arm as A
+
+
+def _pull(tmp_path, issues, ref=7, extra=None):
+    ld = A._mod("label_drain")
+    base = A._repo(tmp_path, "alice", extra)
+    fk = A.Fake(issues)
+    return fk, ld.pull(base, A.LBL, ref, 1, run=fk)
+
+
+def test_pull_arms_an_unarmed_outside_blocker_like_arm_does(tmp_path):
+    fk, res = _pull(tmp_path, [A._issue(7, "sdlc:blocked")])
+    assert res["result"] == "pulled"
+    assert {"sdlc:goal", "priority:P2", A.LBL} <= fk._names(7) and "sdlc:blocked" not in fk._names(7)
+    assert len(fk.comments()) == 1 and "as a prerequisite of #1." in fk.comments()[0][-1]
+
+
+def test_pull_of_an_already_armed_blocker_adds_only_the_label_and_the_comment(tmp_path):
+    fk, res = _pull(tmp_path, [A._issue(7, "sdlc:goal", assignees=("alice",))])
+    assert res["result"] == "pulled" and fk._names(7) == {"sdlc:goal", A.LBL}
+    assert len(fk.comments()) == 1
+
+
+@pytest.mark.parametrize("issue, ref, word", [
+    (lambda: A._issue(7, "sdlc:parked"), 7, "parked"),
+    (lambda: A._issue(7, "sdlc:goal", assignees=("bob",)), 7, "assigned"),
+    (lambda: A._issue(7, "epic"), 7, "upper-tier"),
+    (lambda: A._issue(7, "sdlc:goal"), "other/repo#9", "another repository"),
+])
+def test_pull_refuses_without_writing_anything(tmp_path, issue, ref, word):
+    fk, res = _pull(tmp_path, [issue()], ref=ref)
+    assert res["result"] == "refused" and word in res["reason"]
+    assert fk.writes() == []
+
+
+def test_pull_leaves_closed_and_already_labelled_issues_alone(tmp_path):
+    fk, res = _pull(tmp_path, [A._issue(7, "sdlc:goal", state="closed")])
+    assert res["result"] == "closed" and fk.writes() == []
+    (tmp_path / "b").mkdir()
+    fk, res = _pull(tmp_path / "b", [A._issue(7, "sdlc:goal", A.LBL, assignees=("alice",))])
+    assert res["result"] == "already" and fk.writes() == []
+
+
+# --- the CLI gesture: `loop.py next --label L` ------------------------------------------------------
+
+def test_next_label_refuses_to_start_on_an_unarmed_member(tmp_path, monkeypatch, capsys):
+    lp = _loop()
+    base = A._repo(tmp_path, "alice")
+    fk = A.Fake([A._issue(1, "sdlc:blocked", A.LBL)])
+    cfg = lp.state.load_config(base)
+    monkeypatch.setattr(lp.sources, "get_source",
+                        lambda d, c: lp.sources.GitHubSource(c, run=fk, sdlc_dir=d))
+    for hook in ("_ensure_watcher", "_ensure_ledger_delivery", "_surface_inbox", "_warn_knowledge_graph"):
+        monkeypatch.setattr(lp, hook, lambda *a, **k: None)
+    assert lp.main(["loop.py", "next", base, "--label", A.LBL]) == 0
+    out = capsys.readouterr()
+    assert out.out.strip() == "DONE"
+    assert "label_drain.py arm" in out.err and "1 unarmed" in out.err
+    assert fk.writes() == []

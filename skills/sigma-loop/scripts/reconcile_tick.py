@@ -147,11 +147,14 @@ def _blocker_rank_repair(sdlc_dir, config, run=None, now=None):
         wrote = res["raised"] or res["stripped"] or res["unmarked"]
         found = res["violations"]
         first = prior.get("first_seen_nonzero")
-        _write_repair_state(sdlc_dir, {
+        record = {
             "violations": found,
             "last_repair": now if wrote else prior.get("last_repair"),
             "first_seen_nonzero": (first or now) if found else None,
-            "rollout_reported": True})
+            "rollout_reported": True}
+        if res.get("unread"):       # #1706: the key exists only while a blocker went unread
+            record["unread"] = int(res["unread"])
+        _write_repair_state(sdlc_dir, record)
         bits = []
         if res["raised"]:
             bits.append("%d blocker(s) raised" % len(res["raised"]))
