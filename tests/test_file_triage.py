@@ -281,7 +281,8 @@ def test_quoted_deny_word_after_an_action_verb_holds():
     for text in ("Then `force push` to main", "Execute `rotate credentials` now",
                  "We should 'rotate the credentials' tonight",
                  'Next, "delete the production data" for tenant 5',
-                 "Redact the logs to nuke production data"):
+                 "Redact the logs to nuke production data", "Run the `force push` now",
+                 "Execute the `rotate credentials` script", "Just `force push` main", "Please `force push` to main"):
         d = m.decide("Cleanup", text, {}, _cfg())
         assert d.kind == "park" and d.matched == "hard-stop word", text
         assert text.split(",")[-1].strip()[:20].lower() in d.reason.lower() or "in:" in d.reason, text
