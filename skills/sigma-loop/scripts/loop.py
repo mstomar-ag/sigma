@@ -2444,6 +2444,8 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
     # Keep the old batch shape (only the remaining number of goal lines, with the
     # terminal reported on the next call) using the SAME session-local count that
     # `_next` reserves atomically. The reservation remains the final race guard.
+    ceiling_applied = False
+    over_cap = False
     ceilings = [n for n in (_handoff_ceiling(config.get("handoff") or {}),
                              (config.get("budget") or {}).get("max_iterations")) if n]
     if ceilings:
@@ -2454,24 +2456,39 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
         else:
             admitted = snapshot["settled_admissions"] + len(set(snapshot["in_flight"]))
             try:
-                max_concurrent = min(int(max_concurrent or 1), max(0, min(ceilings) - admitted))
+                cap_free = int(max_concurrent or 1)
+                if capped_by_config and claim_hold_seconds(config):
+                    cap_free = max(0, cap_free - len(set(snapshot["in_flight"])))   # #1531
+                # the ceiling term's `admitted` already counts in-flight goals: take the tighter
+                # of the two free-slot bounds, never both subtracted
+                max_concurrent = min(cap_free, max(0, min(ceilings) - admitted))
+                ceiling_applied = True
+                over_cap = cap_free == 0
             except (TypeError, ValueError):
                 pass  # malformed optional config still leaves the atomic `_next` guard in charge
     picks = []
     skip = set(extra_skip) | _release_held_unstarted(sdlc_dir, config)      # #1531
     slots = max(1, max_concurrent)
-    try:                                   # #1531: never claim past this session's free slots
-        own = _session_marker_path(sdlc_dir, session_pid)
-        held = len(set(_session_read(own)["in_flight"])) if own.is_file() else 0
-    except (OSError, TypeError, ValueError):
-        held = 0
-    if held and capped_by_config:
-        slots = max(0, slots - held)
+    # #1531: never claim past this session's free slots. Applies only when the hold is on, the
+    # cap is the configured one, and the ceilings branch (whose `admitted` already counts
+    # in-flight goals) did not already subtract them.
+    if capped_by_config and not ceiling_applied and claim_hold_seconds(config):
+        try:
+            own = _session_marker_path(sdlc_dir, session_pid)
+            held = len(set(_session_read(own)["in_flight"])) if own.is_file() else 0
+        except (OSError, TypeError, ValueError):
+            held = 0
+        if held:
+            over_cap = held >= slots
+            slots = max(1, slots - held)     # floor of one pick: the terminal line still prints
     for _ in range(slots):
         kind, goal = _next(sdlc_dir, source, config, extra_skip=skip, session_pid=session_pid,
                            refresh_heartbeat=False)
         if kind != "goal":
             picks.append((kind, goal))
+            break
+        if over_cap:                         # no free slot: hand the probe's claim straight back
+            _release_unstarted(sdlc_dir, [goal], "claimed but not started: no free slot")
             break
         picks.append(("goal", goal))
         skip.add(goal)

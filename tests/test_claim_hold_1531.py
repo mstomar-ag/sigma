@@ -112,3 +112,52 @@ def test_next_batch_fresh_session_shape_is_unchanged():
         out = lp.next_batch(base, lp.sources.get_source(base, {}), lp.state.load_config(base),
                             session_pid=os.getpid())
         assert len(out) == 3
+
+
+def _batch(extra, held_goals, fake_next_goals, pid=None):
+    import tempfile
+    pid = pid or os.getpid()
+    with tempfile.TemporaryDirectory() as d:
+        lp, base, calls = _setup(d, extra)
+        h._register(lp, base, pid, held_goals)
+        for g in held_goals:
+            _claimed_ago(lp, base, g, 1)
+        picked = []
+
+        def fake_next(sdlc_dir, source, config, **kw):
+            if len(picked) >= len(fake_next_goals):
+                return ("DONE", None)
+            g = fake_next_goals[len(picked)]; picked.append(g)
+            return ("goal", g)
+        lp._next = fake_next
+        rel = []
+        lp._release_unstarted = lambda sd, goals, why: rel.append(list(goals)) or True
+        out = lp.next_batch(base, lp.sources.get_source(base, {}), lp.state.load_config(base),
+                            session_pid=pid)
+        return out, rel
+
+
+_PAR = {"parallel": {"goals": {"enabled": True, "max_concurrent": 3}}, "work": {"enabled": True}}
+
+
+def test_hold_off_leaves_next_batch_unchanged_even_with_held_goals():
+    for off in (0, False):
+        cfg = dict(_PAR, session_release={"hold_minutes": off})
+        out, rel = _batch(cfg, ["91", "92"], ["a", "b", "c", "d"])
+        assert out == [("goal", "a"), ("goal", "b"), ("goal", "c")] and rel == []
+
+
+def test_ceilings_case_does_not_subtract_held_goals_twice():
+    cfg = {"parallel": {"goals": {"enabled": True, "max_concurrent": 5}}, "work": {"enabled": True},
+           "budget": {"max_iterations": 4}}
+    # ceiling 4, 2 admitted (in flight) -> 2 left; cap free 5-2=3; picks = min = 2, NOT 2-2 = 0
+    out, rel = _batch(cfg, ["91", "92"], ["a", "b", "c", "d"])
+    assert out == [("goal", "a"), ("goal", "b")] and rel == []
+
+
+def test_zero_free_slots_still_prints_the_terminal_and_keeps_no_goal():
+    held = ["91", "92", "93"]
+    out, rel = _batch(_PAR, held, [])                 # nothing left: the terminal must show
+    assert out == [("DONE", None)]
+    out, rel = _batch(_PAR, held, ["a", "b"])         # work left: probe claim handed back
+    assert out == [] and rel == [["a"]]
