@@ -1592,11 +1592,12 @@ def _newest_resolution(store, suffix, limit=200):
         return None
 
 
-def _resolver_auth_row(launcher, binary, var, runner=None):
+def _resolver_auth_row(launcher, binary, var, runner=None, which=None):
     """#1691: `<cli> auth status` (no model call) in the launcher's own scrubbed environment; names the route (variable name or none)."""
     import tempfile
     route = var or "none"
     fix = ("set conflicts.agent.credential_var to the NAME of one environment variable holding the model login and export it; "
+           "the default (unset) parks until it is set, every agent-level launch refused as not logged in; "
            "the live run against a real CLI is Awaiting (owner-gated)")
     try:
         if var and not os.environ.get(var):
@@ -1604,7 +1605,9 @@ def _resolver_auth_row(launcher, binary, var, runner=None):
         parent = tempfile.gettempdir()
         scratch, _ = launcher.make_scratch(parent, "")       # the launcher's own scratch tree, removed by its own remover
         try:
-            ok = (runner or launcher.auth_status)(launcher.build_env(scratch, var, os.environ), binary, str(scratch))
+            wall = launcher.session_wall(sys.platform, which or shutil.which, os.path.expanduser("~"), str(scratch), [parent])[0]
+            kw = {"prefix": wall} if wall else {}                # #1713: the session's own confinement where one exists
+            ok = (runner or launcher.auth_status)(launcher.build_env(scratch, var, os.environ), binary, str(scratch), **kw)
         finally:
             launcher.remove_scratch(scratch, parent)
     except Exception:                       # noqa: BLE001 - a probe that could not run is not a login
@@ -1643,7 +1646,7 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None, auth_runner=None):
             rows.append(_chk("resolver cli: " + ("answers a version probe" if res else "did not answer a bounded version probe"),
                              bool(res), "check the CLI runs by hand; the probe is limited to %gs" % RESOLVER_PROBE_SECONDS))
         if binary and not cheap_only:                                                                # #1691
-            rows.append(_resolver_auth_row(launcher, binary, settings.get("conflicts.agent.credential_var"), auth_runner))
+            rows.append(_resolver_auth_row(launcher, binary, settings.get("conflicts.agent.credential_var"), auth_runner, which))
         unverified = list(getattr(launcher, "UNVERIFIED_FLAGS", ()))
         # The flags the launcher itself puts on the command line; the resolver passes no extra flag (#1694).
         requested = set(getattr(launcher, "BASE_ARGV", ())) | set(launcher.session_argv(True)) | {"--model", "--max-budget-usd"}
