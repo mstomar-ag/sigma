@@ -954,7 +954,7 @@ def _read_config(sdlc_dir):
         return {}
 
 
-USAGE = "usage: applier.py [sdlc_dir] [--dry-run] | applier.py sync [sdlc_dir]"
+USAGE = "usage: applier.py [sdlc_dir] [--dry-run] [--verbose] | applier.py sync [sdlc_dir]"
 
 
 DRY_RUN_OFF = ("applier dry-run: the applier is off (rulebook.autonomy.applier.enabled is not true); "
@@ -985,7 +985,8 @@ def main(argv):
         print(USAGE)
         return 0
     dry = "--dry-run" in args
-    args = [x for x in args if x != "--dry-run"]
+    verbose = "--verbose" in args
+    args = [x for x in args if x not in ("--dry-run", "--verbose")]
     do_sync = bool(args) and args[0] == "sync"
     if do_sync:
         args = args[1:]
@@ -999,7 +1000,7 @@ def main(argv):
         if enabled(config):                    # #1499: existing parks get their ask before the tick plans
             try:
                 opened = sync(sdlc_dir, config, _load("sources").GitHubSource(config))
-                if opened or do_sync:
+                if (opened and verbose) or do_sync:
                     print("applier: %d ask(s) opened for existing parks" % len(opened))
             except Exception:                  # noqa: BLE001 - best effort, the tick still runs
                 pass
@@ -1007,8 +1008,15 @@ def main(argv):
             return 0
         acts = tick(sdlc_dir, config, datetime.datetime.now(datetime.timezone.utc))
         done = [a for a in acts if a.get("result") == "done"]
-        if done:
-            print("applier: %d answer(s) applied or vetoed" % len(done))
+        vetoed = [a for a in done if a.get("kind") == "veto"]
+        armed = [a for a in done if a.get("kind") == "arm"]
+        applied = len(done) - len(vetoed) - len(armed)      # #1564: only actions taken on issues are printed
+        if applied:
+            print("applier: %d applied" % applied)
+        if vetoed:
+            print("applier: %d vetoed" % len(vetoed))
+        if armed and verbose:
+            print("applier: %d ask(s) armed" % len(armed))
         failed = [a for a in acts if a.get("result") == "failed"]
         if failed:                                      # #1403: a failed ask stays pending; say so
             print("applier: %d asks failed and will be retried" % len(failed), file=sys.stderr)
