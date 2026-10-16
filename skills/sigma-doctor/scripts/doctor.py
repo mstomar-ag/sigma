@@ -5573,6 +5573,13 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
                 if due:
                     extra.append("%d approved rule(s) due for confirmation (older than reask_days): %s"
                                  % (len(due), ", ".join(str(i) for i, _ in due)))
+                rdr = _load_loop_script("rule_draft").approved_rows(sdlc_dir, cfg)
+                if rdr:
+                    counts = {}
+                    for x in rdr:
+                        counts[x["action"]] = counts.get(x["action"], 0) + 1
+                    extra.append("actions: %s (list them: rule_draft.py rules <dir>)" % ", ".join(
+                        "%d %s" % (n, a) for a, n in counts.items()))
                 bad = rbm.invalid(sdlc_dir, cfg)
                 if bad:
                     extra.append("%d invalid rule(s) in the rulebook, never acting (retire them with "

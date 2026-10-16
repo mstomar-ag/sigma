@@ -254,6 +254,7 @@ python3 skills/sigma-loop/scripts/rule_draft.py list    .sdlc                 # 
 python3 skills/sigma-loop/scripts/rule_draft.py draft   .sdlc <qkind> <area>  # proposes; never approves
 python3 skills/sigma-loop/scripts/rule_draft.py suggest .sdlc [--propose N]  # ranks the pairs that matter; N drafts proposals
 python3 skills/sigma-loop/scripts/rule_draft.py approve .sdlc <rule_id>       # owner only
+python3 skills/sigma-loop/scripts/rule_draft.py rules   .sdlc                 # every approved rule: id, kind, area, option, action, last confirmed
 ```
 
 `draft` splits the pair's human answers deterministically by a hash of the record id. The majority option of one part
@@ -264,6 +265,8 @@ has a rule. It needs the rules, autonomy and records parts all open. On a public
 are stored, so drafts and comparisons work from those alone.
 
 `rule_draft.py suggest .sdlc` ranks the question kind and area pairs by importance from the repository's own records: how many parks, how many hours the goals stayed parked (until that goal's next record, else now), how many goals the parked goals block (directly or through chains, read from the open issues' own `Blocked by` text; zero when that cannot be read), and how often the answers repeat (the comparison key of `decision_record.key_of`). The score is parks plus hours divided by 24 plus blocked goals, times the agreement. Each line names the suggested option (the majority key) and whether one any-area rule (area `*`) covers the pair or the area needs its own rule because its answers differ from the kind's. Hard-stop and `unknown` kinds are never listed. `--propose N` drafts the top N uncovered rules through the same exam as `draft` (one `*` rule per kind where the areas agree) and never approves; the owner approves with `rule_draft.py approve`. When rules are on, the doctor's rulebook row lists the top three uncovered pairs.
+
+`rule_draft.py rules .sdlc` lists every approved rule with what it does (unpark, keep parked, or only recommends) and when it was last confirmed; the doctor's rulebook row counts the approved rules per action and names this verb.
 
 `rule_draft.py list --why` also prints one `skipped <kind> / <area>: <reason>` line for each pair left out (hard-stop
 or unknown kind, level below 2, or the share of the most common answer). `rule_draft.py due` prints, for each approved
