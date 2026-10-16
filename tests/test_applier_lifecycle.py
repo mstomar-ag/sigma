@@ -159,6 +159,24 @@ def test_dry_run_prints_the_plan_and_writes_nothing(tmp_path):
     assert _snapshot(sd) == before
 
 
+OFF_LINE = ("applier dry-run: the applier is off (rulebook.autonomy.applier.enabled is not true); "
+            "set it to true to see planned actions")
+
+
+def test_dry_run_with_the_applier_off_says_so_and_writes_nothing(tmp_path):
+    """#1545: the off line is the whole output; removing it (or printing nothing) turns this red."""
+    sd, cfg, rid = _setup(tmp_path)
+    cfg = json.loads(json.dumps(cfg))
+    cfg["rulebook"]["autonomy"]["applier"]["enabled"] = False
+    json.dump(cfg, open(os.path.join(sd, "config.json"), "w"))
+    before = _snapshot(sd)
+    out = subprocess.run([sys.executable, str(SCRIPTS / "applier.py"), sd, "--dry-run"],
+                         capture_output=True, text=True, env={"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path)})
+    assert out.returncode == 0
+    assert out.stdout == OFF_LINE + "\n"
+    assert _snapshot(sd) == before
+
+
 def _snapshot(sd):
     snap = {}
     for d, _, fs in os.walk(sd):

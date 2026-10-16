@@ -39,7 +39,7 @@ applier is on, do these steps in order. `<dir>` is your `.sdlc` directory. Scrip
    - `rulebook.rules.reask_days`: choose it (default 90).
    - `rulebook.autonomy.applier.window_minutes` 1440, `max_auto_applied_per_day` 3, `allow_silent` `[]`.
 9. **Dry-run the applier.** `python3 applier.py <dir> --dry-run` prints each planned action with its rule, level and
-   window, and writes nothing (#1499). Review every line.
+   window, and writes nothing (#1499); with the applier off it prints one line saying so and exits 0 (#1545). Review every line.
 10. **Clear or re-arm the old pending asks** from before the upgrade, so none is applied the moment its pair reaches
     level 3. An ask opened below level 3 is now armed with one notice comment and a fresh window (#1499).
 11. **Re-enable the applier** (`rulebook.autonomy.applier.enabled` `true`). Watch the first applied asks for a week:
