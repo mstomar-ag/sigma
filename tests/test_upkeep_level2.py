@@ -340,3 +340,49 @@ def test_count_conflicts_and_protected_table():
     for name in (".github/workflows/ci.yml", "a/migrations/001.sql", "Cargo.lock", "x/CLAUDE.md", "evals/a.py", ".sdlc/x.md"):
         assert level2.is_protected(name), name
     assert not level2.is_protected("src/app.txt")
+
+
+# --------------------------------------------------------------------------- #1692: session mode drops the count limits
+
+
+def _session_rig(rig):
+    import test_upkeep_session_1573 as S
+    rig.binary.write_text(S.STUB % {"python": sys.executable, "dir": str(rig.fake)})
+    return S
+
+
+def test_1692_a_session_replay_larger_than_the_old_count_limits_is_not_refused(rig, tmp_path):
+    S = _session_rig(rig)
+    rig.limits = {"max_files": 1, "max_hunks": 1, "max_lines": 3}
+    two = {"CHANGELOG.md": l1.LOG % "", "a.txt": "1\nx\n3\n", "b.txt": "1\nx\n3\n"}
+    w = l1.world(mk(tmp_path / "w"), feat={"a.txt": "1\nF\n3\n", "b.txt": "1\nF\n3\n"},
+                 integ={"a.txt": "1\nI\n3\n", "b.txt": "1\nI\n3\n"}, base_files=two)
+    m, w, report, spy = S.run_session(rig, tmp_path, world=w)
+    assert report["outcome"] == m.REBASED, report.get("why")
+    assert len(spy.pushes()) == 1
+
+
+def test_1692_the_only_stop_ceiling_left_in_session_mode_is_a_safety_cap_far_above_the_old_fifty():
+    level2 = base._load("feature_upkeep_level2")
+    assert level2.SESSION_MAX_STOPS >= 500 and "timeout_minutes" in level2.SESSION_STOPS_REASON
+
+
+def test_1692_session_eligibility_skips_the_merge_structural_protected_and_count_refusals_but_legacy_keeps_them():
+    level2 = base._load("feature_upkeep_level2")
+
+    def run(cwd, argv):
+        if "MERGE_HEAD" in argv:
+            return "abc123"
+        if argv[:3] == ["git", "ls-files", "-u"]:
+            return "100644 aaa 2\tpackage.json\0100644 bbb 3\tpackage.json\0"
+        return ""
+    legacy = level2.eligibility(run, "/nowhere", None)
+    assert (legacy.ok, legacy.code) == (False, "merge-commit-stop")
+    assert level2.eligibility(run, "/nowhere", {"max_files": 1}, session=True).ok is True
+
+
+def test_1692_session_eligibility_still_refuses_what_the_session_copy_cannot_hold():
+    level2 = base._load("feature_upkeep_level2")
+    run = lambda cwd, argv: "100644 aaa 2\t.sdlc/x.md\0100644 bbb 3\t.sdlc/x.md\0" if argv[:3] == ["git", "ls-files", "-u"] else ""  # noqa: E731
+    got = level2.eligibility(run, "/nowhere", None, session=True)
+    assert (got.ok, got.code) == (False, "protected-path") and "session copy" in got.detail
