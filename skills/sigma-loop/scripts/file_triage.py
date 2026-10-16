@@ -136,7 +136,7 @@ _PASSIVE = re.compile(r"\b(?:are|is) (?:read|listed|reported|detected|logged|red
 _WORD = re.compile(r"[a-z']+")
 
 
-_NAMING = frozenset("make call name label term mention list".split())
+_NAMING = frozenset("make call name label term mention list rename".split())
 _FILLER = frozenset("the a an this that these those just please now also then".split())
 _MODAL = frozenset("should must will can could next now".split())
 
@@ -146,10 +146,11 @@ def _quoted_holds(clause, at, span_at):
     before = _WORD.findall(clause[:span_at])
     if not before:
         return not (_PASSIVE.search(clause) or any(w in _COPULA for w in _WORD.findall(clause[at:])))
+    opener = before[0]
     while before and before[-1] in _FILLER:
         before.pop()
     if not before:
-        return True
+        return opener in _FILLER and opener not in _DETERMINER     # "Then/Just/Please `x`" holds; "The `x` guard" does not
     last = before[-1]
     if last in _NAMING:
         return False
