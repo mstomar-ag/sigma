@@ -87,11 +87,20 @@ def pid_alive(pid):
     return True
 
 
-def process_start(pid):
-    """When the process began, in a number that is stable for one process (None when it cannot be read).
+def clock_ticks():
+    """Clock ticks per second (the /proc starttime unit); 100 when the system will not say."""
+    try:
+        value = int(os.sysconf("SC_CLK_TCK"))
+    except (OSError, ValueError, AttributeError, TypeError):
+        return 100
+    return value if value > 0 else 100
 
-    Only compared with the value recorded at admit, so the unit may differ per platform: Linux gives clock ticks
-    since boot (/proc), macOS gives epoch seconds (libproc). Reads only; no child process is started.
+
+def process_start(pid):
+    """When the process began, in seconds (None when it cannot be read).
+
+    Only compared with the value recorded at admit: Linux gives seconds since boot (/proc starttime ticks divided
+    by clock_ticks()), macOS gives epoch seconds (libproc). Reads only; no child process is started.
     """
     try:
         if sys.platform == "darwin":
@@ -105,7 +114,7 @@ def process_start(pid):
             return sec + usec / 1e6
         with open("/proc/%d/stat" % int(pid), "r") as handle:
             text = handle.read()
-        return float(text[text.rindex(")") + 2:].split()[19])  # field 22, starttime
+        return float(text[text.rindex(")") + 2:].split()[19]) / clock_ticks()  # field 22, starttime
     except (OSError, ValueError, IndexError, TypeError, AttributeError, ImportError):
         return None
 
@@ -253,7 +262,8 @@ def _seen(record):
 def _finish(directory, path, record, why):
     """Record the unit's measured peak into its ring and remove the lease file."""
     if record is not None:
-        peak = _seen(record)
+        # a reused pid is a foreign process: measuring it would feed its size into the ring
+        peak = record.get("peak", 0) if reused(record) else _seen(record)
         workers = max(1, record.get("workers", 1))
         if peak > 0:
             record_observation(directory, record.get("kind", "unknown"), [peak // workers or 1])
@@ -300,7 +310,7 @@ def _waiting(directory, now):
 
 def _choose(kind, want, goal, limits, live, ring, waiting, now):
     """(n, est_mem) or a Hold. Pure over its inputs; the caller holds the lock."""
-    started = {r["goal"] for _, r in live}
+    started = {r.get("goal") for _, r in live}
     if limits.critical:
         return Hold("critical: memory below half the reserve", _retry())
     if kind in ("goal", "session") and not limits.admits(kind, running=len(live)):
@@ -429,9 +439,11 @@ def wait(max_s, kind="goal", env=None, config=None):
         cost = learned_cost(observed.get(kind, []))
         room = _room(kind, limits)
         open_ = not limits.critical and (room > 0 if cost is None else room >= cost)
-        if kind == "goal" and limits.goal_block:
+        if kind in ("goal", "session") and not limits.admits(kind, running=len(live)):
             open_ = False
-        if kind == "goal" and any(g in {r["goal"] for _, r in live} for g in _waiting(directory, time.time())):
+        if kind == "goal" and limits.max_goals and sum(1 for _, r in live if r["kind"] == "goal") >= limits.max_goals:
+            open_ = False
+        if kind == "goal" and any(g in {r.get("goal") for _, r in live} for g in _waiting(directory, time.time())):
             open_ = False  # a started goal's verify is waiting: admit would hold a new goal start
         if open_:
             return 0

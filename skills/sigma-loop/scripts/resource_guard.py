@@ -603,6 +603,19 @@ def read_hold(path):
     return open_record, ["hold.json corrupt; read as open"]
 
 
+def run(kind, command, root, timeout, goal, **kwargs):
+    """Verify under admission (#1601): admit, run `command` in its own process group, measure, release.
+    Implemented in resource_verify.py (kept apart: this module starts no process); -> its Outcome."""
+    import importlib.util as _util
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    spec = _util.spec_from_file_location("resource_verify", os.path.join(here, "resource_verify.py"))
+    module = _util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.run(kind, command, root, timeout, goal, **kwargs)
+
+
 USAGE = ("usage: resource_guard.py sample [--json]\n"
          "  sample    print one machine reading (exit 3 and one stderr line when the platform is unsupported)\n"
          "  --json    print it as one JSON object\n")
