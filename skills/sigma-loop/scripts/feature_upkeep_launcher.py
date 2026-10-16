@@ -257,13 +257,14 @@ NOT_LOGGED_IN = "resolver cli is not logged in in the scrubbed environment"
 AUTH_PROBE_SECONDS = 15.0
 
 
-def auth_status(env, binary, cwd, timeout=AUTH_PROBE_SECONDS):
+def auth_status(env, binary, cwd, timeout=AUTH_PROBE_SECONDS, prefix=None):
     """-> True (logged in) or False, from `<binary> auth status` run bounded in `env`. No model call. Logged out is a non-zero exit
     or a JSON `loggedIn` that is false; any run that did not finish is False. UNVERIFIED against a real CLI (#1691): exit 0 with
-    text that is not JSON counts as logged in, since only the exit code is relied on."""
+    text that is not JSON counts as logged in, since only the exit code is relied on. `prefix` is the session wall's argv (#1713):
+    the probe runs inside the same confinement as the session where one exists, plain where none does."""
     bounded = _sibling("bounded_run")
     try:
-        done = bounded.run_group([binary, "auth", "status"], cwd, timeout, env=env)
+        done = bounded.run_group([str(a) for a in (prefix or ())] + [binary, "auth", "status"], cwd, timeout, env=env)
     except Exception:                                       # noqa: BLE001 - a probe that could not run is not a login
         return False
     if done.outcome != bounded.OK or (done.code or 0) != 0:
@@ -590,7 +591,8 @@ def _logged_in(req, binary, environ):
     scratch = None
     try:
         scratch, _ = make_scratch(req.scratch_parent, "")
-        return auth_status(build_env(scratch, req.credential_var, environ), binary, str(scratch))
+        return auth_status(build_env(scratch, req.credential_var, environ), binary, str(scratch),
+                           prefix=list(req.net_prefix) if req.net_prefix else None)
     except Exception:                                       # noqa: BLE001
         return False
     finally:

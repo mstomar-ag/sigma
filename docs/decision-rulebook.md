@@ -177,6 +177,8 @@ carries `sigma-hardstop: <class>`. The closed list:
 
 `label_set` is never declared on a park: it is the one route question `label_drain.py plan` asks per run label (arm the unarmed issues, arm only the ones that can start, or leave them), listed with the other up-front questions and the `ready` field.
 
+`label_drain.py answer <sdlc_dir> <label> --answers <file.json> [--dry-run]` applies the answers to those questions. The file maps question ids (as `plan` prints them) to one of the question's options; an unknown id or an option outside the bank refuses the whole file with exit 2 and no write. Each answer applies its effect first (`arm` for the arming route, `unpark.py resolve` for a parked member's route, the first-line `sigma:spend-approved=<token>` marker for `go ahead`) and then writes one decision record (scope `label:<name>`) and its one comment, so a failed effect writes no record. The marker is written only on a paid member whose author is a listed spend approver; the others are named in the output and left as they are. Dependency and registry answers are recorded only; Sigma does not reassign or close issues for you. A question left out stays open, the command re-runs `plan` and prints what is still open and whether the label is `ready`, and answering the same question twice records once.
+
 `scope_hold` and `owner_hold` are written by the two pick gates (scope expansion and ownership). With AI-filed
 triage on (`ai_filed.triage.enabled`, default true) those gates park a held goal with that kind instead of writing the
 old confirmation label. `/sigma-unpark` lists them, and the automatic sweep never resumes them.

@@ -390,6 +390,10 @@ def derive(sample, config=None, leases=(), observed=None):
     reserve = int(sample.total * (cfg["reserve_fraction"] or RESERVE_FRACTION))
     share_cap = int(sample.total * (cfg["max_share_fraction"] or SHARE_FRACTION))
     cpu_reserve = cfg["cpu_reserve_cores"] or max(1, -(-sample.cpu_count // 8))
+    if cfg["cpu_reserve_cores"] and cfg["cpu_reserve_cores"] >= sample.cpu_count:
+        notes.append("resource.cpu_reserve_cores: %r is not below the %d cores here; read as derived"
+                     % (cfg["cpu_reserve_cores"], sample.cpu_count))
+        cpu_reserve = max(1, -(-sample.cpu_count // 8))
     load_hold = (cfg["load_hold_ratio"] or LOAD_HOLD_RATIO) * sample.cpu_count
     session = (observed or {}).get("session_cost")
     session_cost = int(session) if _number(session) and session > 0 else int(sample.total * SESSION_FRACTION)
@@ -451,12 +455,17 @@ def swap_rate(history):
 
 
 def decide(history, limits, unit_cost, prior="open", resume_samples=RESUME_SAMPLES, sample_gap=SAMPLE_GAP,
-           now=None):
-    """Hold or open for one requested unit costing `unit_cost` bytes. `history` is oldest first."""
+           now=None, prior_since=None):
+    """Hold or open for one requested unit costing `unit_cost` bytes. `history` is oldest first.
+
+    `prior_since` is the start of the hold already in force; a repeat hold keeps it. No history reads as open."""
     now = time.time() if now is None else now
+    if not history:
+        return Decision("open", "no samples", None, now, None, None)
     rate = swap_rate(history)
     avail = [s.available for s in history]
     held = prior == "hold"
+    since = prior_since if held and prior_since is not None else now
     resume_line = unit_cost + limits.session_cost
     reason = resource = None
     if limits.critical:
@@ -474,7 +483,7 @@ def decide(history, limits, unit_cost, prior="open", resume_samples=RESUME_SAMPL
     if reason and limits.mode != "enforce":
         return Decision("open", "%s: would hold (%s)" % (limits.mode, reason), None, now, None, rate)
     if reason:
-        return Decision("hold", reason, resource, now, now + sample_gap * resume_samples, rate)
+        return Decision("hold", reason, resource, since, now + sample_gap * resume_samples, rate)
     return Decision("open", "ok", None, now, None, rate)
 
 
@@ -490,12 +499,19 @@ def hold_path(env=None):
 def write_hold(path, decision, _replace=os.replace):
     """Write the decision as hold.json by atomic rename: a reader sees the old file or the new, never half."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as handle:
-        handle.write(json.dumps(decision.as_dict(), sort_keys=True))
-        handle.flush()
-        os.fsync(handle.fileno())
-    _replace(tmp, path)
+    tmp = path + "." + str(os.getpid()) + ".tmp"
+    try:
+        with open(tmp, "w") as handle:
+            handle.write(json.dumps(decision.as_dict(), sort_keys=True))
+            handle.flush()
+            os.fsync(handle.fileno())
+        _replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def read_hold(path):

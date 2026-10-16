@@ -589,7 +589,7 @@ def _replace_block(body, block):
 
 
 def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, apply=True,
-            questions_asked=(), kind=None, rule_id=None):
+            questions_asked=(), kind=None, rule_id=None, extra=None):
     """Record the answers, then either keep the park or undo it.
 
     `kind` (#1498): a kind to declare; its machine line rides inside the decision comment and the
@@ -679,7 +679,7 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         err = _comment_decision(sdlc_dir, config, source, n, block + (("\n\n" + auto_unpark.WAITING_NOTE if declared == "dependency" else "") if waits else "\n\n"
                                 + auto_unpark.keep_parked_comment(_one_line(
                                     PRIVATE_VALUE if _keys_only(config) else _substantive_reason(answers)))),
-                                "keep-parked", answers, data, kind, rule_id)
+                                "keep-parked", answers, data, kind, rule_id, extra)
         _append_block(source, n, data.get("body") or "", block)
         return {"number": n, "decision": decision, "outcome": "kept-parked",
                 "detail": "answers recorded; the automatic sweep will leave it alone" + err}
@@ -699,7 +699,7 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
     if not source._set_board_status(n, source.col["ready"]) and source.board_active:
         detail += ("; the label landed but the board card did not move to %r — move it by hand if "
                    "this repo picks from the board" % source.col["ready"])
-    detail += _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data, kind, rule_id)
+    detail += _comment_decision(sdlc_dir, config, source, n, block, "unpark", answers, data, kind, rule_id, extra)
     _append_block(source, n, data.get("body") or "", block)
     return {"number": n, "decision": decision, "outcome": "unparked", "detail": detail}
 
@@ -709,7 +709,8 @@ def _declared_kind(data):
     return qkind.resolve(data.get("comments") or [], goal=data.get("number")) or "unknown"
 
 
-def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, data, kind=None, rule_id=None):
+def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, data, kind=None, rule_id=None,
+                      extra=None):
     """Post `text`. With the records part open it is posted WITH the decision record's id and the
     record is stored; closed, this is exactly `_comment` (byte-identical). Returns "" or a
     "; <error>" suffix for the caller's detail."""
@@ -739,6 +740,8 @@ def _comment_decision(sdlc_dir, config, source, number, text, gesture, answers, 
             if rule_id:
                 shown = next((r for r in _load("rulebook").load(sdlc_dir, config) if r.get("id") == rule_id), None)
                 rec["accepted"] = bool(shown) and decision_record.key_of(rec) == shown.get("option")
+            if isinstance(extra, dict):                 # #1580: fields a caller adds (`scope`, `qid`)
+                rec.update({k: v for k, v in extra.items() if k not in rec})
             park = park_stamp(data.get("comments"))
             if park:
                 rec["park"] = park
