@@ -166,6 +166,32 @@ def _read_raw(path):
         return []
 
 
+def _read_tombs(path):
+    """Raw `retired_pairs` (#1696): only `{qkind, area}` string pairs survive; anything else is dropped."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        raw = data.get("retired_pairs") if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return []
+    out = []
+    for t in raw if isinstance(raw, list) else []:
+        if isinstance(t, dict) and isinstance(t.get("qkind"), str) and isinstance(t.get("area"), str):
+            pair = {"qkind": t["qkind"], "area": t["area"]}
+            if pair not in out:
+                out.append(pair)
+    return out
+
+
+def retired_pairs(sdlc_dir, config):
+    """#1696: the (qkind, area) pairs whose auto-approved rule an owner retired; the auto path must not
+    redraft them. Cleared by a hand draft (`propose`) or an `approve`. Unsealed: it only restricts the
+    auto path. [] when closed."""
+    if not enabled(config):
+        return []
+    return _read_tombs(_file(sdlc_dir, config))
+
+
 def _effective(rule):
     out = dict(rule)
     if rule["status"] == "approved" and not (rule.get("confirmed") and rule.get("seal") == _seal(rule)):
@@ -202,17 +228,25 @@ def retire(sdlc_dir, rule_id, actor, config, only_proposed=False):
     gone = next(r for r in rules if r.get("id") == rule_id)
     if only_proposed and gone.get("status") == "approved":
         raise ValueError(rule_id)
-    _write(path, keep)
+    tombs = _read_tombs(path)
+    if auto_approve_on(config) and is_auto(gone):
+        pair = {"qkind": gone.get("qkind"), "area": gone.get("area")}
+        if all(isinstance(v, str) for v in pair.values()) and pair not in tombs:
+            tombs.append(pair)
+    _write(path, keep, tombs)
     with contextlib.suppress(Exception):
         _load("decision_store").publish(sdlc_dir, config)
 
 
-def _write(path, rules):
+def _write(path, rules, tombs=()):
     folder = os.path.dirname(path)
     if os.path.islink(folder):
         raise OSError("rulebook folder is a link")
     os.makedirs(folder, exist_ok=True)
-    text = json.dumps({"rules": rules}, indent=2, sort_keys=True) + "\n"
+    body = {"rules": rules}
+    if tombs:
+        body["retired_pairs"] = list(tombs)
+    text = json.dumps(body, indent=2, sort_keys=True) + "\n"
     fd, tmp = tempfile.mkstemp(dir=folder, prefix="._rulebook", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -224,6 +258,10 @@ def _write(path, rules):
         except OSError:
             pass
         raise
+
+
+def _without(tombs, rule):
+    return [t for t in tombs if (t["qkind"], t["area"]) != (rule.get("qkind"), rule.get("area"))]
 
 
 def propose(sdlc_dir, draft, config, now=None):
@@ -239,7 +277,7 @@ def propose(sdlc_dir, draft, config, now=None):
     if extra or not ok:
         return None
     path = _file(sdlc_dir, config)
-    _write(path, _read_raw(path) + [rule])
+    _write(path, _read_raw(path) + [rule], _without(_read_tombs(path), rule))
     return path
 
 
@@ -275,7 +313,7 @@ def approve(sdlc_dir, rule_id, login, config, now=None, auto=False):
             if auto or r.get("auto") is True:
                 r["auto"], r["approved_by"] = True, login.strip().lower()
             r["seal"] = _seal(r)
-            _write(path, rules)
+            _write(path, rules, _without(_read_tombs(path), r) if not auto else _read_tombs(path))
             with contextlib.suppress(Exception):        # #1313: commit only, best effort
                 _load("decision_store").publish(sdlc_dir, config)
             return None

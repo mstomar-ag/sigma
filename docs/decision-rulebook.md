@@ -300,7 +300,7 @@ The rule is approved as the first configured owner and carries `approved_by` and
 The applier arms such a rule at once, at any level, and applies it after the window; the window, the daily cap, the re-ask age, the person-wins rule and an owner `no` all still apply.
 A `no` after an auto rule was applied reverts the goal and lowers the pair as usual, and the rule is then held until an owner reconfirms it by hand with `rule_draft.py reconfirm`.
 Hard-stop kinds, the `unknown` kind, shape-only options and pairs that already have a rule are never drafted.
-The doctor shows a warning row, `rules: auto-approve ON (rulebook.rules.auto_approve)`, while it is on. Hand-editing `auto` or `approved_by` breaks the seal and the rule stops counting.
+The doctor shows a warning row, `rules: auto-approve ON (rulebook.rules.auto_approve)`, while it is on. Hand-editing `auto` or `approved_by` breaks the seal and the rule stops counting. Retiring an auto-approved rule records its pair in a top-level `retired_pairs` list in the rulebook file (only `qkind` and `area`, unsealed, since it can only restrict the auto path), and auto-approve then skips that pair until a hand `rule_draft.py draft` or an `approve` of the pair clears it (#1696).
 
 ## The applier and the veto window
 
