@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **The upkeep resolver session is confined, or has no Bash (#1693).** Where `sandbox-exec` exists (macOS) the launch is wrapped in a profile that denies reads of credential directories and writes outside the session, and limits network to port 443 (not filtered by host); where no wall exists the session runs without the Bash tool. The doctor row `resolver session confinement` is computed from the same function and says which. PROVISIONAL: no live run yet (owner-gated); this corrects the #1573 entry's claim of a wall.
 - **The applier no longer applies silently when the ask's gesture does not match the rule option's gesture (#1362).** At level 4 such an apply now comments (and is not counted by the spot check); matching applies and a closed gate are unchanged.
 - The newest-parked-label-event read now follows event pages (at most 10 pages of 100) instead of giving up on a full first page, so a label-only re-park on an issue with 100 or more events is no longer resumed by the sweep; a timeline longer than the cap still reads as no signal (#1639).
 - **The applier tick prints only actions taken on issues (#1564).** It reports `applier: N applied` and `applier: N vetoed` on separate lines, each only when N is above zero; ask bookkeeping (opened, armed) no longer counts as applied and prints only with the new `--verbose` flag (the `sync` verb still prints its opened count).
