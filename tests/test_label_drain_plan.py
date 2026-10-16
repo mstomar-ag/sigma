@@ -168,6 +168,50 @@ def test_assigned_elsewhere_and_held_by_gate(tmp_path):
     assert _by(p, 1)["verdict"] == "assigned-elsewhere"
 
 
+def test_assignee_compare_is_case_insensitive_on_both_sides(tmp_path):
+    p, _ = _plan(tmp_path, [_goal(1, assignees=["Me-Login"])], assignee="me-login")
+    assert _by(p, 1)["verdict"] == "armed", _by(p, 1)
+
+
+def test_read_only_guard_refuses_every_write_shape():
+    ld = _mod("label_drain")
+    for bad in (["api", "repos/a/b/issues/1", "-X", "PATCH"],
+                ["api", "repos/a/b/issues/1", "-X", "post"],
+                ["api", "repos/a/b/issues/1", "--method=DELETE"],
+                ["api", "repos/a/b/issues/1", "-XPUT"],
+                ["api", "repos/a/b/issues/1", "-f", "state=closed"],
+                ["api", "repos/a/b/issues/1", "-F", "x=1"],
+                ["api", "repos/a/b/issues/1", "--field", "x=1"],
+                ["api", "repos/a/b/issues/1", "--raw-field", "x=1"],
+                ["api", "repos/a/b/issues/1", "--input", "f.json"],
+                ["api", "repos/a/b/issues/1", "--field=x=1"]):
+        ro = ld._ReadOnly(lambda a: "")
+        with pytest.raises(RuntimeError):
+            ro(bad)
+        assert ro.counts["total"] == 0, bad
+    ro = ld._ReadOnly(lambda a: "")
+    for ok in (["api", "repos/a/b/issues/1", "--method", "GET"], ["api", "-X", "GET", "repos/a/b/issues"],
+               ["api", "--method=GET", "repos/a/b/issues", "-f", "state=open"],
+               ["api", "repos/a/b/issues/1"], ["api", "graphql", "-f", "query=query { x }"]):
+        ro(ok)
+    assert ro.counts["total"] == 5
+
+
+def test_parked_members_are_briefed_up_to_the_cap_then_reported_without_a_question(tmp_path):
+    ld = _mod("label_drain")
+    assert ld.MAX_PARKED_BRIEFS == 20
+    issues = [_goal(k, "sdlc:parked", comments=[PARK]) for k in range(1, 26)]
+    p, calls = _plan(tmp_path, issues)
+    briefed = [r for r in p["members"] if r["question"]]
+    assert len(briefed) == 20 and len(p["members"]) == 25
+    bare = [r for r in p["members"] if not r["question"]]
+    assert len(bare) == 5 and all(r["verdict"] == "parked" and r["kind"] == "not-read" for r in bare)
+    msgs = p["warnings"]["parked_not_briefed"]
+    assert len(msgs) == 1 and "20" in msgs[0] and "5" in msgs[0]
+    assert p["calls"]["total"] == len(calls)
+    assert p["calls"]["total"] <= 1 + 1 + 20 * 4 + 5, p["calls"]     # label + list + bounded briefs
+
+
 # --- the four blocker cases ----------------------------------------------------------------------
 
 def test_four_blockers_one_case_each(tmp_path):

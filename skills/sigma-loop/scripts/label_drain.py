@@ -28,6 +28,13 @@ BOUNDS. At most `MAX_MEMBERS` (200) members (more is refused with the count, nev
 most `MAX_PULLED` (50) single-issue GETs, depth `MAX_DEPTH` (8). Hitting either walk bound stops the
 walk and the output says which bound and where. Calls are counted and printed (`calls` in --json).
 
+The "one list + at most 50 GETs" bound covers the label lookup, the member list and the blocker walk.
+A parked member's brief (`unpark.brief`) adds its own reads (comments, uncached blocker lookups; its
+API takes no shared cache, so they are not deduplicated), so at most `MAX_PARKED_BRIEFS` (20) parked
+members are briefed; the rest are reported `parked` with kind `not-read`, no question text, and a
+`parked_not_briefed` warning. Those reads are counted in `calls` like any other, so the total is
+bounded by the above plus 20 briefs, not by the 50-GET walk bound alone.
+
 `closure()` takes a seed set of issue numbers, not a label, so a later dependency-chain feature can
 call it with one end goal as the seed.
 """
@@ -55,6 +62,7 @@ USAGE = ("usage: label_drain.py plan|status <sdlc_dir> <label> [--json]\n"
 MAX_MEMBERS = 200
 MAX_PULLED = 50
 MAX_DEPTH = 8
+MAX_PARKED_BRIEFS = 20
 
 _PAID_RE = re.compile(r"(?im)^\s*(?:[-*]\s+)?(?:\*\*)?paid[ -]step(?:\*\*)?\s*:")
 _WRITE_VERBS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -76,13 +84,35 @@ class _ReadOnly:
         return self._run(args)
 
     @staticmethod
+    def _methods(args):
+        """Every HTTP method the args name: `--method M`, `--method=M`, `-X M`, `-XM`, `-X=M`."""
+        out = []
+        for i, a in enumerate(args):
+            if a in ("--method", "-X"):
+                out.append(args[i + 1] if i + 1 < len(args) else "")
+            elif a.startswith("--method="):
+                out.append(a[len("--method="):])
+            elif a.startswith("-X"):
+                out.append(a[2:].lstrip("="))
+        return [m.upper() for m in out]
+
+    @staticmethod
     def _check(args):
         if args[:1] == ["api"]:
-            if "--method" in args and args[args.index("--method") + 1].upper() in _WRITE_VERBS:
+            methods = _ReadOnly._methods(args)
+            if any(m != "GET" for m in methods):
                 raise RuntimeError("label_drain is read-only: refused %s" % " ".join(args[:4]))
-            doc = next((a for a in args if a.startswith("query=")), "")
+            doc = next((a for a in args if a.startswith("query=") or "=query=" in a), "")
             if "mutation" in doc.lower():
                 raise RuntimeError("label_drain is read-only: refused a GraphQL mutation")
+            graphql = args[1:2] == ["graphql"]
+            has_body = any(a in ("-f", "-F", "--field", "--raw-field", "--input")
+                           or a.startswith(("--field=", "--raw-field=", "--input=")) for a in args)
+            # `gh api` turns any field/input flag into a POST unless the method is explicitly GET.
+            # GraphQL is always a POST and is a read only because it is a query.
+            if has_body and not graphql and "GET" not in methods:
+                raise RuntimeError("label_drain is read-only: refused a `gh api` call with a body "
+                                   "and no explicit GET: %s" % " ".join(args[:4]))
             return
         if " ".join(args[:2]) in _READ_VERBS:
             return
@@ -240,7 +270,7 @@ class _Judge:
         logins = [(a.get("login") if isinstance(a, dict) else str(a)) for a in (issue.get("assignees") or [])]
         if logins and getattr(self.source, "assignee", None):
             me = self.login()
-            if me and me not in logins:
+            if me and me.casefold() not in {x.casefold() for x in logins}:
                 return "assigned-elsewhere", "assigned to %s, not %s" % (", ".join(logins), me)
         held = self._gate(issue, names)
         if held:
@@ -308,6 +338,7 @@ def plan(sdlc_dir, label, config=None, run=None):
     clo = closure(members, get, preloaded=members, blocker_scan=blocker_scan)
     judge = _Judge(sdlc_dir, config, source)
     unpark = None
+    briefed, not_briefed = 0, []
     rows, outside = [], []
     for n in sorted(clo["nodes"]):
         node = clo["nodes"][n]
@@ -326,13 +357,18 @@ def plan(sdlc_dir, label, config=None, run=None):
             outside.append(row)
             continue
         if verdict == "parked":
-            unpark = unpark or _load("unpark")
-            try:
-                b = unpark.brief(sdlc_dir, config, n, source=source)
-                row["kind"] = b.get("reason_class") if b.get("kind_declared") else "undeclared"
-                row["question"] = scrub(str(b.get("park_reason") or ""))
-            except Exception:      # noqa: BLE001 - say so rather than guess
-                row["kind"], row["question"] = "unreadable", ""
+            if briefed >= MAX_PARKED_BRIEFS:
+                row["kind"], row["question"] = "not-read", ""
+                not_briefed.append(n)
+            else:
+                briefed += 1
+                unpark = unpark or _load("unpark")
+                try:
+                    b = unpark.brief(sdlc_dir, config, n, source=source)
+                    row["kind"] = b.get("reason_class") if b.get("kind_declared") else "undeclared"
+                    row["question"] = scrub(str(b.get("park_reason") or ""))
+                except Exception:  # noqa: BLE001 - say so rather than guess
+                    row["kind"], row["question"] = "unreadable", ""
         row["display"] = verdict
         in_progress = source.in_progress_label in names
         row["in_progress"] = in_progress
@@ -362,6 +398,10 @@ def plan(sdlc_dir, label, config=None, run=None):
         "no_done_when": sorted(i["number"] for i in member_issues
                                if _done_when_missing(i.get("body"), acceptance)),
         "paid_step": sorted(i["number"] for i in member_issues if _PAID_RE.search(i.get("body") or "")),
+        "parked_not_briefed": (["%d parked member(s) not briefed: only the first %d parked members get "
+                                "their kind and question read (each read costs several GETs): %s"
+                                % (len(not_briefed), MAX_PARKED_BRIEFS,
+                                   ", ".join("#%d" % x for x in not_briefed))] if not_briefed else []),
     }
     unresolved_all = collections.defaultdict(list)
     for r in rows + outside:
@@ -420,6 +460,8 @@ def render_plan(p):
         out.append("  warning: no Done when: " + ", ".join("#%d" % x for x in w["no_done_when"]))
     if w["paid_step"]:
         out.append("  warning: declares a paid step: " + ", ".join("#%d" % x for x in w["paid_step"]))
+    for m in w["parked_not_briefed"]:
+        out.append("  warning: " + m)
     for s in p["stops"]:
         out.append("  STOPPED: " + s)
     out.append("calls: %s" % json.dumps(p["calls"], sort_keys=True))
