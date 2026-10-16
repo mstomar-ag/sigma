@@ -77,7 +77,7 @@ The model may edit, build and run tests there (`acceptEdits` with Read, Edit, Wr
 before/after discard of the plain export does not apply; the copy is thrown away. Confinement (#1693, PROVISIONAL: the live run is owner-gated). Where a wall helper exists
 (macOS `sandbox-exec`), the launch argv starts with it: reads of the account's credential directories are denied,
 writes outside the session and scratch directories are denied, and outbound network is limited to port 443. It cannot
-filter by host name, so any host on port 443 stays reachable; it is not a proof against a determined session. Where no
+filter by host name, so any host on port 443 stays reachable; it is not a proof against a determined session. What the wall does not cover: the profile allows everything by default and denies only the listed items, so the keychain and mach services stay reachable (only reads of the credential directories are denied, not a lookup through a system service); reads outside the listed credential directories stay open; and writes to the temp areas (`/private/tmp` and `/private/var/folders`, besides the device files) stay open. Where no
 wall exists (Linux, or the helper missing) the session runs WITHOUT the Bash tool, with Read, Edit, Write, Glob and Grep
 only, so it cannot run commands, read credentials or open connections. The doctor row `resolver session confinement`
 says which applies. Besides this, the copy is credential-free: no token, no agent socket, no credential helper, a
@@ -142,6 +142,14 @@ Set `upkeep.conflicts.agent.credential_var` to the NAME of one environment varia
 value); that single variable is the only credential passed on. Git, gh and ssh credentials (`GH_TOKEN`, `GITHUB_TOKEN`,
 `SSH_AUTH_SOCK`, any `GIT_*` name) are refused as the name and never forwarded. Before any spend is reserved, the launcher runs
 a bounded `claude auth status` in that environment; when it reports logged out, the unit parks with "resolver cli is not
-logged in in the scrubbed environment". The doctor row `resolver auth` runs the same probe. The agent level has not been run
+logged in in the scrubbed environment". The doctor row `resolver auth` runs the same probe.
+
+**The default parks (#1713).** With `upkeep.conflicts.agent.credential_var` unset, which is the default, every agent-level launch
+runs `claude auth status` in the scrubbed environment and parks as not logged in: the unit parks until
+`upkeep.conflicts.agent.credential_var` is set to the name of a variable that holds the model login. This is intended, not a fault.
+Where the platform has a session wall (macOS `sandbox-exec`), both the launcher preflight and the doctor row run the probe inside
+that same wall; where none exists the probe runs plain. The wall itself is unverified against a live session (owner-gated).
+
+The agent level has not been run
 against a real CLI, and the shape of the real `auth status` output is unverified (only its exit code and a false `loggedIn`
 are read). The live run on a throwaway repository: Awaiting (owner-gated).
