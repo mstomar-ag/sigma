@@ -26,7 +26,7 @@ Defaults below are what `/sigma-init` scaffolds (`config.json.tmpl`). Not everyt
 | `rulebook.autonomy.veto_recover_after` | `l3_min_answers` / 6, at least 5 | agreeing live comparisons after which a veto's one-level drop wears off |
 | `rulebook.import.require_repo_cwd` | `false` | keep only transcript answers whose working directory is inside this repository (same as `--only-in-repo`) |
 | `rulebook.import.max_budget_usd_per_call` | `0.50` (was `0.05` before 1.0.15) | classifier per-call ceiling |
-| `upkeep.conflicts.agent.*` | model `sonnet`, both spend keys `null`, `timeout_minutes` 30, `max_units_per_sweep` 5, `reviewer.model` `sonnet` | the agent conflict level; it behaves as off until `max_budget_usd_per_unit` and `spend_ceiling_usd_per_day` are both set, see [Upkeep part B](upkeep-part-b.md) |
+| `upkeep.conflicts.agent.*` | model `sonnet`, both spend keys `null`, `timeout_minutes` 30, `max_units_per_sweep` 5, `reviewer.model` `sonnet`, `credential_var` `null` | the agent conflict level; with both spend keys `null` it runs with no spend limit; set `max_budget_usd_per_unit` (and optionally `spend_ceiling_usd_per_day`) to cap it, see [Upkeep part B](upkeep-part-b.md) |
 | `action_log: {"enabled": true}` | on | a full local, gitignored trace of loop activity per goal (`.sdlc/state/log/<goal>.jsonl`) — read via the `sigma-log` skill; never touches the shared ledger either direction |
 | `agent_watch: {"enabled": true}` | off | background-agent-death watch — a claimed goal's registered pid confirmed dead notifies (email if `notify.email` is also configured, else always a ledger note); needs `ledger.enabled` too, since `watch_daemon.py` is what runs the check |
 | `comment_watch: {"enabled": true}` | off | in-flight comment watch — a new comment on a claimed issue notifies the claimant via a ledger note (self-comments suppressed); needs `ledger.enabled` too, since `watch_daemon.py` is what runs the check, and github discovery (comments aren't a concept for local goal files) |
@@ -45,6 +45,23 @@ Defaults below are what `/sigma-init` scaffolds (`config.json.tmpl`). Not everyt
 > For any zero-touch / unattended multi-issue run, turn `backlog_check.enabled: true` on — it is
 > what makes a human-authored, comment-only dependency marker (bypassing `hand_off()`) actually
 > honored, not just silently ignored.
+
+## Resource limits
+
+The `resource` block holds the limits `resource_guard.py` derives from the machine. Every key defaults to `null`, which means derived; a bad value (negative, boolean, string, NaN, or a fraction outside 0 to 1) reads as derived with a note. The fractions are policy ratios not yet calibrated against a real exhaustion, so they are labelled uncalibrated wherever printed.
+
+| Key | Default | What it sets |
+|---|---|---|
+| `resource.mode` | derived (`enforce`; also `observe`, `off`) | `observe` computes a hold but never holds; `off` skips the check; uncalibrated |
+| `resource.reserve_fraction` | derived (0.20 of total memory) | memory kept free for the machine; uncalibrated |
+| `resource.max_share_fraction` | derived (0.60 of total memory) | most memory all sessions together may lease; uncalibrated |
+| `resource.cpu_reserve_cores` | derived (one eighth of the cores, at least 1) | cores kept free; uncalibrated |
+| `resource.load_hold_ratio` | derived (1.0 per core) | one-minute load per core above which load is reported high; uncalibrated |
+| `resource.swapout_hold_mb_per_s` | derived (shown, never holds) | when set, a swap-out rate above it holds and resumes at a quarter of it; uncalibrated |
+| `resource.shed` | derived (`verify`; also `off`) | what is shed first under pressure; uncalibrated |
+| `resource.max_goals` | derived (no extra cap) | cap on concurrent goals; uncalibrated |
+| `resource.max_verify_workers` | derived (no extra cap) | cap on concurrent verify workers; uncalibrated |
+| `resource.hold_alert_minutes` | derived (no alert) | minutes a hold may last before it is reported; uncalibrated |
 
 ## Where the optional features are documented
 

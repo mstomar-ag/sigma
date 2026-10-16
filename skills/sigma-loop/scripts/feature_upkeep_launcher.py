@@ -1,14 +1,13 @@
 """The resolver launcher: one capped, confined, headless model session for a unit conflict (upkeep part B, slice 8).
 
-A library, loaded by path; no command line, nothing at import time, and NOTHING CALLS IT YET: the caller is the upkeep
-pass, behind its gate. While the gate is closed (the default) `launch` returns `closed` having read nothing, written
+A library, loaded by path; no command line, nothing at import time. The caller is the upkeep
+level 2 plan in `feature_rebase.py`, behind its gate. While the gate is closed (the default) `launch` returns `closed` having read nothing, written
 nothing and spawned nothing.
 
 THE ORDER of `launch(request)` (it returns a `Result` and raises only for a programming error):
   1. the gate: the project block must be on and `conflicts.resolve` must be `agent`, else `closed`;
   2. the platform: no process groups (Windows) -> `refused`, naming the platform;
-  3. the model: an id outside the catalog, or the placeholder id, -> `refused` (the shipped catalog holds only the
-     placeholder, so the resolver stays closed until a validated override is supplied);
+  3. the model: an id outside the catalog, or the placeholder id, -> `refused` (the shipped catalog holds real ids; the placeholder id is never accepted);
   4. the flags: any requested flag not in CONFIRMED_FLAGS -> `refused`, naming it UNVERIFIED, BEFORE anything is spawned;
   5. the directory: an ancestor holding an instruction file, or a location inside the real home or the repository ->
      `refused`; the credential route: an unchosen or unknown route -> `refused`;
@@ -253,6 +252,28 @@ def build_env(scratch, credential_var, environ):
     if credential_var:
         env[credential_var] = environ[credential_var]
     return env
+
+
+NOT_LOGGED_IN = "resolver cli is not logged in in the scrubbed environment"
+AUTH_PROBE_SECONDS = 15.0
+
+
+def auth_status(env, binary, cwd, timeout=AUTH_PROBE_SECONDS):
+    """-> True (logged in) or False, from `<binary> auth status` run bounded in `env`. No model call. Logged out is a non-zero exit
+    or a JSON `loggedIn` that is false; any run that did not finish is False. UNVERIFIED against a real CLI (#1691): exit 0 with
+    text that is not JSON counts as logged in, since only the exit code is relied on."""
+    bounded = _sibling("bounded_run")
+    try:
+        done = bounded.run_group([binary, "auth", "status"], cwd, timeout, env=env)
+    except Exception:                                       # noqa: BLE001 - a probe that could not run is not a login
+        return False
+    if done.outcome != bounded.OK or (done.code or 0) != 0:
+        return False
+    try:
+        parsed = json.loads(done.out)
+    except ValueError:
+        return True
+    return not (isinstance(parsed, dict) and parsed.get("loggedIn") is False)
 
 
 # ------------------------------------------------------------------------------------------ confinement
@@ -539,6 +560,8 @@ def launch(request, environ=None, clock=time.time):
         why = "the chosen credential variable is not set; no credential route is configured"
     if not why and not req.scratch_parent:
         why = "no scratch root was given"
+    if not why and not _logged_in(req, binary, environ):
+        why = NOT_LOGGED_IN
     if not why and ((req.cap_usd is not None and req.cap_usd <= 0) or (req.ceiling_machine_usd is not None and req.ceiling_machine_usd <= 0)
                     or (req.ceiling_team_usd is not None and req.ceiling_team_usd <= 0)):
         why = "a cap or ceiling that is set must be a positive amount"
@@ -561,6 +584,19 @@ def launch(request, environ=None, clock=time.time):
             settle_machine(req.state_dir, run_id, 0.0, clock())      # nothing ran: release the reservation
             return Result(REFUSED, 0.0, (), why or "the team 24-hour ceiling would be passed by this run")
     return _run(req, model, binary, environ, run_id, clock)
+
+
+def _logged_in(req, binary, environ):
+    """The #1691 preflight, before any spend is reserved: the same scrubbed environment the run gets, one bounded `auth status`."""
+    scratch = None
+    try:
+        scratch, _ = make_scratch(req.scratch_parent, "")
+        return auth_status(build_env(scratch, req.credential_var, environ), binary, str(scratch))
+    except Exception:                                       # noqa: BLE001
+        return False
+    finally:
+        if scratch is not None:
+            remove_scratch(scratch, req.scratch_parent)
 
 
 def _run(req, model, binary, environ, run_id, clock):

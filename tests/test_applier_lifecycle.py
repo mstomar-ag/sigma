@@ -163,9 +163,10 @@ OFF_LINE = ("applier dry-run: the applier is off (rulebook.autonomy.applier.enab
             "set it to true to see planned actions")
 
 
-def test_dry_run_with_the_applier_off_says_so_and_writes_nothing(tmp_path):
-    """#1545: the off line is the whole output; removing it (or printing nothing) turns this red."""
+def test_dry_run_with_the_applier_off_says_so_then_shows_the_plan_and_writes_nothing(tmp_path):
+    """#1545/#1695: the off line comes first, then the plan; removing either turns this red."""
     sd, cfg, rid = _setup(tmp_path)
+    AP.open_ask(sd, 7, "merge_conflict", "docs", ["rebase it"], cfg, T0)
     cfg = json.loads(json.dumps(cfg))
     cfg["rulebook"]["autonomy"]["applier"]["enabled"] = False
     json.dump(cfg, open(os.path.join(sd, "config.json"), "w"))
@@ -173,7 +174,9 @@ def test_dry_run_with_the_applier_off_says_so_and_writes_nothing(tmp_path):
     out = subprocess.run([sys.executable, str(SCRIPTS / "applier.py"), sd, "--dry-run"],
                          capture_output=True, text=True, env={"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path)})
     assert out.returncode == 0
-    assert out.stdout == OFF_LINE + "\n"
+    lines = out.stdout.splitlines()
+    assert lines[0] == OFF_LINE
+    assert len(lines) == 2 and lines[1].startswith("applier dry-run: would unpark #7 rule %s level 3" % rid)
     assert _snapshot(sd) == before
 
 

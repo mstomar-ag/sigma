@@ -33,6 +33,8 @@ FAKE = '''#!%(python)s
 import json, os, pathlib, sys
 here = pathlib.Path(%(dir)r)
 mode = json.loads((here / "mode.json").read_text())
+if sys.argv[1:3] == ["auth", "status"]:
+    raise SystemExit(0)
 stdin = sys.stdin.read()
 reviewer = "independent reviewer" in stdin
 calls = json.loads((here / "calls.json").read_text()) if (here / "calls.json").exists() else []
@@ -329,7 +331,7 @@ def test_the_launcher_still_refuses_every_unverified_flag_and_nothing_here_adds_
     src = (SCRIPTS / "feature_upkeep_level2.py").read_text()
     for flag in launcher.UNVERIFIED_FLAGS:
         assert flag not in src.replace(launcher.__name__, ""), flag
-    assert "UNVERIFIED" in src and "PROVISIONAL" in src and "NO REAL MODEL CALL" in src
+    assert "UNVERIFIED" in src and "PROVISIONAL" in src
 
 
 def test_count_conflicts_and_protected_table():

@@ -46,6 +46,7 @@ EXPECTED_SCHEMA = {   # key -> (kind, lo, hi, min_items)
     "conflicts.agent.max_units_per_sweep": ("int", 1, 100, None),
     "conflicts.agent.reviewer.enabled": ("bool", None, None, None),
     "conflicts.agent.reviewer.model": ("enum", None, None, None),
+    "conflicts.agent.credential_var": ("env_name_null", None, None, None),
     "backup.former_prefixes": ("name_list", None, None, 0),
 }
 DEFAULT_TABLE = {
@@ -58,7 +59,7 @@ DEFAULT_TABLE = {
     "conflicts.agent.model": "sonnet", "conflicts.agent.max_budget_usd_per_unit": None,
     "conflicts.agent.spend_ceiling_usd_per_day": None, "conflicts.agent.timeout_minutes": 30,
     "conflicts.agent.max_units_per_sweep": 5, "conflicts.agent.reviewer.enabled": True,
-    "conflicts.agent.reviewer.model": "sonnet",
+    "conflicts.agent.reviewer.model": "sonnet", "conflicts.agent.credential_var": None,
     "backup.former_prefixes": [],
 }
 #: The acceptance matrix (None, True, 0, -1, 1.5, nan, inf, "", "x", [], [1], {}, {"x": 1}) plus the values that
@@ -73,6 +74,9 @@ def valid_value(kind, lo, hi, min_items, v, key=None):          # the oracle, in
         return type(v) is bool
     if kind == "usd_null":
         return v is None or (type(v) in (int, float) and 0 < v <= 100000)
+    if kind == "env_name_null":
+        return v is None or (type(v) is str and v.isascii() and v.isidentifier() and v not in ("GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK")
+                             and not v.startswith("GIT_"))
     if kind == "enum":
         if key is not None and key.endswith("model"):
             return type(v) is str and v in ("haiku", "sonnet", "opus", "fable")

@@ -25,7 +25,7 @@ It does not do the following:
   refs that match the backup namespace exactly.
 - It never commits to a unit branch itself. It rewrites the branch by replaying existing commits.
 - It does not land a unit unless a person asks for that (see [Landing a unit](#landing-a-unit)).
-- It does not run a language model to resolve a conflict unless `upkeep.conflicts.resolve` is `agent` and both spend caps are set. See [Conflicts](#conflicts).
+- It does not run a language model to resolve a conflict unless `upkeep.conflicts.resolve` is `agent`; with no spend key set that level has no spend limit. See [Conflicts](#conflicts).
 
 ## The two ways a unit gets brought forward
 
@@ -183,9 +183,11 @@ protection on `feature/*` blocks upkeep's own force push, so grant upkeep's acto
 |---|---|
 | `off` (default) | the conflict is parked: the unit branch is left untouched, nothing is pushed, one issue records why |
 | `mechanical` | a conflict confined to the changelog is resolved by a heading-aware union, proved, and pushed once through the atomic backup push; anything else parks |
-| `agent` | a capped headless resolver plus an independent reviewer (#1516); it behaves as `off` until `upkeep.conflicts.agent.max_budget_usd_per_unit` and `spend_ceiling_usd_per_day` are both set; see [Upkeep part B](upkeep-part-b.md) |
+| `agent` | a capped headless resolver plus an independent reviewer (#1516); it needs no spend key to run, and with none set it has no spend limit; see [Upkeep part B](upkeep-part-b.md) |
 
 Level `mechanical` needs a verify command unless `upkeep.conflicts.mechanical_without_verify` is `true`.
+With no spend key set the agent level runs with no spend limit; set `max_budget_usd_per_unit` (and optionally `spend_ceiling_usd_per_day`) to cap it.
+
 A parked conflict is one finding: before filing, the pass looks for an open issue with the same conflict id and
 comments on it at most once a day instead of filing again. Upkeep findings are filed parked with a declared
 question kind and the lowest AI bucket priority (the `unclear` bucket, P4 by default), never armed as goals (with triage off they keep the legacy
@@ -288,7 +290,7 @@ key path. (`work.rebase_upkeep` has the opposite typo rule: an unrecognised valu
 | `backup.keep_days` | `14` | 1 to 3650 | prune removes only backups older than this |
 | `backup.keep_last` | `5` | 1 to 1000 | newest backups of each unit kept whatever their age |
 | `backup.former_prefixes` | `[]` | list of `refs/<name>/backup/` | namespaces an earlier product wrote, pruned the same way |
-| `conflicts.resolve` | `"off"` | `off`, `mechanical`, `agent` | how far a unit conflict may be resolved; `agent` is not available yet |
+| `conflicts.resolve` | `"off"` | `off`, `mechanical`, `agent` | how far a unit conflict may be resolved; `agent` runs a capped headless resolver, see [Upkeep part B](upkeep-part-b.md) |
 | `conflicts.mechanical_without_verify` | `false` | boolean | lets the mechanical level run with no verify command |
 | `triggers.*`, `auto.*` | see branching-model.md 13e | | still read and validated for one release; they no longer schedule anything |
 

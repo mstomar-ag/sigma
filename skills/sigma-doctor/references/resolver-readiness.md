@@ -10,11 +10,11 @@ Rows, built by `_resolver_rows` in `skills/sigma-doctor/scripts/doctor.py`:
   the bounded runner with a 5 second limit. No model is run. UNVERIFIED: the version flag was not run against a real
   binary; PROVISIONAL: the 5 second limit.
 - resolver flags: counts the design flags still listed as unverified in `skills/sigma-loop/scripts/feature_upkeep_launcher.py`.
-  Any unverified flag keeps the row failing, because the launcher refuses those flags.
-- resolver model: fails while the launcher catalog holds only the placeholder id.
-- resolver configured: the model and caps read from `conflicts.agent`, or the exact reason the level behaves as off (a cap
-  unset, a model tier missing from the catalog, no `claude` on the path).
-- resolver spend: fails unless both `conflicts.agent` spend keys are set.
+  The row fails only for an unverified flag the launcher puts on the command line; `--bare` is unverified, refused by name
+  and never requested, so it is reported and the row passes.
+- resolver model: fails only if the launcher catalog holds nothing but the placeholder id; the shipped catalog holds real ids.
+- resolver configured: the model and caps read from `conflicts.agent`, or the exact reason the level behaves as off (a model tier missing from the catalog, no `claude` on the path).
+- resolver spend: always passes; it reports finite caps when both `conflicts.agent` spend keys are set, else that no spend limit is configured (each run bounded by the timeout only).
 - resolver spend today: the rolling 24 hour total from the launcher spend store (bounded read) against the daily ceiling.
 - last resolution: level and verdict of the newest resolution record; no row when there is none.
 - units parked on conflict: the count of park markers; no row when there are none.
