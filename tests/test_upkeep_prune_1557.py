@@ -110,3 +110,30 @@ def test_doctor_row_shows_count_last_prune_and_never(tmp_path):
     pathlib.Path(sdlc, "state/upkeep/prune.json").write_text(json.dumps({"outcome": "failed", "listed": 2, "at": 5}))
     r = rows(doctor, sdlc, 10)
     assert r[0]["ok"] is False and r[0]["fix"]
+
+
+def test_a_spent_cap_skips_the_prune_1632(tmp_path):
+    root, sdlc = seeded(tmp_path)
+    calls = []
+    ticks = iter([0, 10 ** 6, 10 ** 6, 10 ** 6])
+    out = T.job().run_sweep(T.open_config(), sdlc, str(root), "r1", 600, environ=T.ENV, command=cmd,
+                            list_units=lambda _s: [], now=2_000_000, beat=lambda: next(ticks),
+                            prune=lambda *a, **k: calls.append(1) or {"outcome": "pruned"})
+    assert out["outcome"] == "swept" and not calls and out["sweep"]["prune"]["outcome"] == "skipped", out
+    assert not pathlib.Path(sdlc, "state/upkeep/prune.json").exists() and len(bare_refs(tmp_path)) == 8
+
+
+def test_the_beat_is_touched_during_the_prune_1632(tmp_path):
+    import os
+    root, sdlc = seeded(tmp_path)
+    B = T.job()._sibling("feature_backup")
+    beat = pathlib.Path(sdlc, T.job().sched.BEAT_REL)
+    seen = []
+
+    def watching(cwd, argv, *a, **k):
+        seen.append(os.path.getmtime(beat))
+        os.utime(beat, (1, 1))
+        return B.sync._run(cwd, argv, *a, **k)
+    out = sweep(sdlc, root, prune_run=watching)
+    assert out["sweep"]["prune"]["outcome"] == "pruned" and len(seen) >= 2, seen
+    assert all(m > 1 for m in seen), seen

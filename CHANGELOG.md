@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 - **`resource_guard.py sample [--json]` reads the machine's memory, swap, pressure and CPU (#1597).** New stdlib-only readers (ctypes on macOS; /proc and cgroup v2 on Linux) return a typed `Sample` plus a per-process `footprint(pid)`; any other platform or an unreadable total raises `Unsupported` and the command exits 3. Nothing calls it yet; no process is spawned and no file written.
+- The upkeep sweep skips its backup prune when the sweep cap is already spent, and touches the sweep beat before every git call during the prune, so a slow remote can no longer hold the sweep past its cap or make it look dead; the cap-not-spent path is unchanged (#1632).
 - A quota reset time read back from a park comment is now bounded like the parser's (#1641): one more than 7 days after the park counts as unknown, so the ordinary window applies.
 - A park re-applied by label only (no Sigma park comment) after a waiting note is no longer resumed by the sweep when its blocker closes; the signal is the newest `sdlc:parked` label event, and an unreadable event keeps the old behaviour (provisional, owner to ratify) (#1630).
 - A quota park that names a reset time or retry-after now records `reset_at` on the park and the ask, and the ask is held until then; when no reset is named it waits the ordinary window (`window_minutes`), replacing the fixed 24 hours (#1563).
