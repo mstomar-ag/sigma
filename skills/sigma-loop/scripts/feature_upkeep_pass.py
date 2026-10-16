@@ -245,13 +245,13 @@ def classify_push_refusal(*, pr_merged, remote_branch_exists):
 # ------------------------------------------------------------------------------------------ the ledger note
 
 @feature_upkeep.gated("project")
-def ledger_note(config, sdlc_dir, unit_key, outcome, sha12, *, append=None):
+def ledger_note(config, sdlc_dir, unit_key, outcome, sha12, *, append=None, units=None):
     """One UNADDRESSED `note` for a pass outcome: goal `upkeep-<unit-key>`, ref `upkeep:<outcome>:<sha12>`, written in this
     process with `ledger.safe_append`. Never through `loop.py note` (it arms a real claim) and never addressed (an addressed
-    note wakes the inbox and the autowatcher). The append is injectable for tests. -> {"ok": bool, "entry"}."""
+    note wakes the inbox and the autowatcher). A sweep note passes `units` (#1535) and its ref ends `:units=<n>`. The append is injectable for tests. -> {"ok": bool, "entry"}."""
     append = append or _sibling("ledger").safe_append
     entry = append(sdlc_dir, "note", "upkeep-" + str(unit_key).lower(), config=config,
-                   ref="upkeep:%s:%s" % (outcome, str(sha12)[:12]))
+                   ref="upkeep:%s:%s" % (outcome, str(sha12)[:12]) + ("" if units is None else ":units=%d" % units))
     return {"ok": entry is not None, "entry": entry}
 
 
