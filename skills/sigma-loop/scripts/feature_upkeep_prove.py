@@ -60,13 +60,36 @@ def refusal(code, detail, **where):
     return out
 
 
-def eligible(run, path, changelog=CHANGELOG):
-    """Exactly one unmerged path, the changelog, with a base stage. A read that fails is not eligible."""
+def _stage_blobs(run, path, name):
+    """(base, ours, theirs) texts of one unmerged path, or None when any is unreadable."""
+    try:
+        return tuple(str(run(str(path), ["git", "show", ":%d:%s" % (n, name)]) or "") for n in (1, 2, 3))
+    except Exception:                        # noqa: BLE001
+        return None
+
+
+def _append_text(run, path, name):
+    """#1515: the append-only union of a single non-changelog conflicted file, or None (not that shape)."""
+    blobs = _stage_blobs(run, path, name)
+    return None if blobs is None else _sibling("conflict_proof").append_union(*blobs)
+
+
+def conflicted_file(run, path, changelog=CHANGELOG):
+    """The one file Level 1 can take at this stop -- the changelog, or (#1515) a file whose two sides purely appended
+    in a recognised append-only shape -- else None. Exactly one unmerged path, with a base stage."""
     try:
         stages = _sibling("conflict_state").stage_map(run, str(path))
     except Exception:                        # noqa: BLE001
-        return False
-    return list(stages) == [changelog] and 1 in stages[changelog]
+        return None
+    if len(stages) != 1 or 1 not in next(iter(stages.values())):
+        return None
+    name = next(iter(stages))
+    return name if name == changelog or _append_text(run, path, name) is not None else None
+
+
+def eligible(run, path, changelog=CHANGELOG):
+    """Exactly one unmerged path with a base stage: the changelog, or an append-only shape. A failed read is not eligible."""
+    return conflicted_file(run, path, changelog) is not None
 
 
 def _text(run, path, argv):
@@ -77,28 +100,46 @@ def _text(run, path, argv):
         return str(exc)
 
 
+def _union_appended(run, path, name):
+    """Write and stage the append-only union of `name` -> True when it resolved (nothing is written otherwise)."""
+    text = _append_text(run, path, name)
+    if text is None:
+        return False
+    try:
+        _sibling("state").atomic_write_text(str(pathlib.Path(path) / name), text)
+        run(str(path), ["git", "add", "--", name])
+    except Exception:                        # noqa: BLE001
+        return False
+    return True
+
+
 def _one_stop(run, path, union, run_id, stops, files, stopped_at):
     """Resolve and stamp the stop the rebase is at -> a refusal dict, or None. `stopped_at` records whether the commit
     was made (past that point the conflict cannot be restored)."""
     state, proof, res = _sibling("conflict_state"), _sibling("conflict_proof"), _sibling("feature_upkeep_resolution")
-    if not eligible(run, path):
+    name = conflicted_file(run, path)
+    if name is None:
         return refusal(NOT_ELIGIBLE, "the stop is not a single changelog conflict with a base stage")
     orig = str(run(str(path), ["git", "rev-parse", "REBASE_HEAD"]) or "").strip()
     unmerged = state.conflicted_paths(run, str(path))
     before = state.stage0_listing(run, str(path))
     try:
-        original_text = str(run(str(path), ["git", "show", "REBASE_HEAD:" + CHANGELOG]) or "")
+        original_text = str(run(str(path), ["git", "show", "REBASE_HEAD:" + name]) or "")
     except Exception:                        # noqa: BLE001 - deleted in the original: nothing to compare against
         original_text = ""
     original_check = _text(run, path, ["git", "show", "--check", "--format=", "REBASE_HEAD"])
-    if not _sibling("work")._try_union_changelog(str(path), run, union):
+    if name == CHANGELOG:
+        done = _sibling("work")._try_union_changelog(str(path), run, union)
+    else:
+        done = _union_appended(run, path, name)
+    if not done:
         return refusal(UNION_DECLINED, "the heading-aware union did not resolve the changelog")
     if state.empty_commit_about_to_land(run, str(path)):
         return refusal(WOULD_EMPTY, "the resolved commit would be empty and git would drop it")
     found = proof.only_conflicted_differ(before, state.stage0_listing(run, str(path)), unmerged)
-    resolved = pathlib.Path(path) / CHANGELOG
+    resolved = pathlib.Path(path) / name
     blob = resolved.read_text(encoding="utf-8", errors="replace")
-    found += proof.check_markers({CHANGELOG: blob}, {CHANGELOG: original_text})
+    found += proof.check_markers({name: blob}, {name: original_text})
     found += proof.new_whitespace_findings(_text(run, path, ["git", "diff", "--cached", "--check"]), original_check)
     if found:
         return found[0]
@@ -113,8 +154,8 @@ def _one_stop(run, path, union, run_id, stops, files, stopped_at):
         return refusal(AUTHORSHIP, str(exc)[:200])
     if changed:
         return refusal(AUTHORSHIP, "the stamping commit changed: " + ", ".join(changed))
-    stops[orig] = {"new_head": new}
-    files[CHANGELOG] = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    stops[orig] = {"new_head": new} if name == CHANGELOG else {"new_head": new, "files": [name]}
+    files[name] = hashlib.sha256(resolved.read_bytes()).hexdigest()
     return None
 
 
@@ -125,6 +166,7 @@ def resolve_stops(run, path, union, run_id, stopped, rounds=ROUNDS):
     out = {"stops": stops, "files": files, "refusal": None, "stamped": stamped}
     for _ in range(rounds):
         made = []
+        out["file"] = conflicted_file(run, path) or CHANGELOG
         try:
             out["refusal"] = _one_stop(run, path, union, run_id, stops, files, made)
         except Exception as exc:             # noqa: BLE001 - an unread state is not a resolution

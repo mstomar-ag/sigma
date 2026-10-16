@@ -344,3 +344,103 @@ def check_tests(path, base, ours, theirs, resolved):
     if c["resolved"][1] > max(c["ours"][1], c["theirs"][1]):
         out.append(_refuse(TEST_SKIP, "a skip marker was added beyond both sides", path=path))
     return out
+
+
+# ------------------------------------------------------------------------------------------------ append-only union (#1515)
+
+_DATED = re.compile(r"^## (\d{4}-\d{2})\b")
+_BULLET = re.compile(r"^\s*[-*] \S")
+
+
+def would_drop(resolved, *sides):
+    """Non-blank lines of any side that the resolved text holds fewer times than that side does (empty = none lost)."""
+    have = collections.Counter(ln for ln in resolved.split("\n") if ln.strip())
+    lost = []
+    for side in sides:
+        for ln, n in collections.Counter(x for x in side.split("\n") if x.strip()).items():
+            if have[ln] < n and ln not in lost:
+                lost.append(ln)
+    return lost
+
+
+def _added(whole, part):
+    """Lines of `whole` left when `part` is matched as an in-order subsequence (a pure addition), else None."""
+    extras, j = [], 0
+    for ln in whole:
+        if j < len(part) and ln == part[j]:
+            j += 1
+        else:
+            extras.append(ln)
+    return extras if j == len(part) else None
+
+
+def _trim(lines):
+    lines = list(lines)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return lines
+
+
+def _merge_lines(base, ours, theirs, per_line):
+    """ours, then what theirs added to base that ours lacks -> lines, or None when either side edited or removed."""
+    if _added(ours, base) is None:
+        return None
+    extras = _added(theirs, base)
+    if extras is None:
+        return None
+    head = _trim(ours)
+    if per_line:
+        extras = [ln for ln in extras if not ln.strip() or ln not in head]
+    elif _trim(extras) and "\n".join(_trim(extras)) in "\n".join(head):
+        extras = []
+    return head + (_trim(extras) if any(x.strip() for x in extras) else [])
+
+
+def _sections(lines):
+    """{key: lines} in file order (key "" is the preamble), or None for a repeated dated heading."""
+    out, key = {"": []}, ""
+    for ln in lines:
+        hit = _DATED.match(ln)
+        if hit:
+            key = hit.group(1)
+            if key in out:
+                return None
+            out[key] = []
+        out[key].append(ln)
+    return out
+
+
+def append_union(base, ours, theirs):
+    """The union of two pure appends to a dated `## YYYY-MM` log (sections in date order, lines unioned per section)
+    or a bullet-list file (ours first, then theirs' new items) -> the text, or None. None is every other shape and
+    any edit or removal on either side: the caller falls through exactly as before. Refuses a result that
+    `would_drop` finds a line of either side missing from."""
+    b, o, t = (str(x).split("\n") for x in (base, ours, theirs))
+    if not any(ln.strip() for ln in b):
+        return None
+    body = [ln for side in (b, o, t) for ln in side if ln.strip()]
+    if all(_BULLET.match(ln) for ln in body):
+        merged = _merge_lines(b, o, t, True)
+        text = None if merged is None else "\n".join(merged) + "\n"
+    elif any(_DATED.match(ln) for ln in body):
+        sb, so, st = _sections(b), _sections(o), _sections(t)
+        if None in (sb, so, st) or not set(sb) <= set(so) & set(st):
+            return None
+        keys = sorted((set(so) | set(st)) - {""})
+        for seq in (sb, so, st):
+            order = [k for k in seq if k]
+            if len(order) > 1:
+                keys.sort(reverse=order == sorted(order, reverse=True))
+                break
+        parts = []
+        for key in [""] + keys:
+            got = _merge_lines(sb.get(key, []), so.get(key, []), st.get(key, []), False)
+            if got is None:
+                return None
+            parts.append(got)
+        text = "\n\n".join("\n".join(p) for p in parts if p) + "\n"
+    else:
+        return None
+    if text is None or text == ours or would_drop(text, ours, theirs):
+        return None
+    return text
