@@ -27,9 +27,9 @@ blocker_scan = _load("blocker_scan")
 qkind = _load("qkind")
 ledger_pointer = _load("ledger_pointer")
 
-#: gesture -> how. The sweep is the only autonomous writer.
+#: gesture -> how. The sweep and the rulebook's auto approval (#1555) are the autonomous writers.
 GESTURES = {"unpark": "human", "keep-parked": "human", "promote": "human", "demote": "human",
-            "ack": "human", "sweep": "autonomous"}
+            "ack": "human", "sweep": "autonomous", "approve": "autonomous"}
 
 
 def enabled(config):
@@ -120,7 +120,7 @@ def visibility(config):
 
 #: Gestures that are not an answer to a park question: they never feed a pair's answers, its
 #: majority, its draft or its level (F-10 by gesture; ack records are written as kind `unknown`).
-NOT_PARK_ANSWERS = ("promote", "demote", "ack")
+NOT_PARK_ANSWERS = ("promote", "demote", "ack", "approve")
 
 #: Keys that are never a prediction and never agreement (M-06): a non-bank answer, an unclassified kind.
 UNLEARNABLE_KEYS = ("free", "unknown")
