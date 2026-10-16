@@ -326,6 +326,10 @@
       "role": "library"
     },
     {
+      "path": "skills/sigma-loop/scripts/label_drain.py",
+      "role": "gesture"
+    },
+    {
       "path": "skills/sigma-loop/scripts/landing_preflight.py",
       "role": "library"
     },
