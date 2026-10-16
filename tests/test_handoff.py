@@ -2783,21 +2783,30 @@ _ALL = {"urgent": "P2", "routine": "P2", "unclear": "P2"}
 
 def _five_armed(tmp_path, cfg):
     for _ in range(5):
-        _r, src = _file(tmp_path, cfg)
+        _r, src = _file(tmp_path, cfg, priority="P2")
         assert src.parked == []
 
 
 def test_sixth_p1_filing_is_armed_past_the_goal_cap_1553(tmp_path):
-    cfg = {"ai_filed": {"human_default_priority": "P0", "buckets": {"urgent": "P1", "routine": "P2", "unclear": "P2"}}}
-    _five_armed(tmp_path, cfg)
-    cfg = {"ai_filed": {"human_default_priority": "P0", "buckets": {"urgent": "P1", "routine": "P1", "unclear": "P1"}}}
-    _r, src = _file(tmp_path, cfg)
-    assert src.parked == [] and "priority:P1" in src.created["labels"]
+    """DEFAULT config: the bucket clamps the label to P2+, but the REQUESTED --priority P1 keys the bypass."""
+    _five_armed(tmp_path, None)
+    _r, src = _file(tmp_path, None, priority="P1", priority_requested=True)
+    assert src.parked == [] and src.created["goal_label"] is True
+    assert "priority:P1" not in src.created["labels"] and "priority:P3" in src.created["labels"]
+
+
+def test_per_run_cap_still_parks_a_requested_p1_1553(tmp_path, monkeypatch):
+    monkeypatch.setattr(handoff, "_run_id", lambda: "run-1553")
+    cfg = {"ai_filed": {"max_per_run": 2}}
+    for _ in range(2):
+        _r, src = _file(tmp_path, cfg, priority="P2", goal=str(_ + 100))
+        assert src.parked == []
+    _r, src = _file(tmp_path, cfg, priority="P1", priority_requested=True, goal="300")
+    assert len(src.parked) == 1 and "ai_filed.max_per_run" in src.parked[0][1]
 
 
 def test_sixth_p2_filing_is_parked_naming_the_cap_key_1553(tmp_path):
-    cfg = {"ai_filed": {"buckets": _ALL}}
-    _five_armed(tmp_path, cfg)
-    _r, src = _file(tmp_path, cfg)
+    _five_armed(tmp_path, None)
+    _r, src = _file(tmp_path, None, priority="P2", priority_requested=True)
     assert len(src.parked) == 1
     assert "ai_filed.max_per_goal" in src.parked[0][1] and "cap" in src.parked[0][1]

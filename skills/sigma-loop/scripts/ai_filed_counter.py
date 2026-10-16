@@ -72,13 +72,14 @@ def load(path):
         return None
 
 
-def over_cap(counter, goal, run, config):
-    """True when one more filing would pass the per-goal or per-run cap, or the counter is unreadable."""
+def over_cap(counter, goal, run, config, per_goal=True):
+    """True when one more filing would pass the per-goal or per-run cap, or the counter is unreadable.
+    `per_goal=False` skips only the per-goal check (#1553 bypass); the per-run cap and an unreadable counter still count."""
     if counter is None:
         return True
     lim = limits(config)
     ents = counter.get("entries", [])
-    if sum(1 for e in ents if e.get("goal") == str(goal)) >= lim["max_per_goal"]:
+    if per_goal and sum(1 for e in ents if e.get("goal") == str(goal)) >= lim["max_per_goal"]:
         return True
     return run is not None and sum(1 for e in ents if e.get("run") == run) >= lim["max_per_run"]
 
