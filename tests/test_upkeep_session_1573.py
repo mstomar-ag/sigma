@@ -38,6 +38,23 @@ if reviewer:
     print(json.dumps({"verdict": "approve", "reasons": ["keeps both sides"]}))
     raise SystemExit(0)
 how = mode.get("resolve", "both")
+nresolve = len([c for c in calls if c["role"] == "resolve"])
+if how == "drop_first":
+    how = "drop" if nresolve == 1 else "both"
+if how == "both" and nresolve > 1 and "was refused" in stdin and (cwd / ".sigma-context").exists():
+    # a retry: the files hold the earlier attempt, so rebuild them as ours + the unit's added lines from the context
+    latest = sorted((cwd / ".sigma-context").glob("stop*"))[-1]
+    for theirs in latest.glob("*.theirs"):
+        stem = theirs.name[:-len(".theirs")]
+        ours = latest / (stem + ".ours")
+        if not ours.exists():
+            continue
+        keep = [l if l.endswith("\\n") else l + "\\n" for l in ours.read_text().splitlines(True)]
+        keep += [l if l.endswith("\\n") else l + "\\n" for l in theirs.read_text().splitlines(True) if l not in keep]
+        (cwd / stem.replace("__", "/")).write_text("".join(keep))
+for gone in mode.get("rm", []):
+    if (cwd / gone).exists():
+        (cwd / gone).unlink()
 for p in sorted(cwd.rglob("*")):
     if ".git" in p.parts or ".sigma-context" in p.parts or not p.is_file() or p.is_symlink():
         continue
@@ -189,7 +206,7 @@ def test_a_dropped_unit_line_in_a_session_is_parked_with_the_attempted_diff(srig
     assert "unit-line-dropped" in report["why"]
     brief = report["park"]["brief"]
     assert "attempted resolution" in brief and "-feature side" in brief
-    assert [c["role"] for c in srig.calls()] == ["resolve"]
+    assert set(c["role"] for c in srig.calls()) == {"resolve"}              # refused proof retried in the session (#1692), never reviewed
 
 
 # --------------------------------------------------------------------------- 6: the whole-session clock
@@ -252,3 +269,110 @@ def test_network_prefix_per_platform_and_the_doctor_row(tmp_path):
     rows = [c for c in dr.rows(d, sdlc, config, which=have) if c["name"].startswith("resolver session network")]
     assert len(rows) == 1 and rows[0]["ok"] is True
     assert rows[0]["name"].endswith("not isolated on this platform")
+
+
+# --------------------------------------------------------------------------- #1692: every shape a person could resolve
+
+SHAPES = ("package.json", "requirements.txt", "uv.lock", ".github/workflows/ci.yml", "db/migrations/0001.sql")
+
+
+def _one_conflict(tmp, path):
+    return l1.world(mk(tmp), feat={path: "line1\nfeature side\nline3\n"}, integ={path: "line1\nintegration side\nline3\n"},
+                    base_files={"CHANGELOG.md": l1.LOG % "", path: "line1\nshared\nline3\n"})
+
+
+@pytest.mark.parametrize("path", SHAPES)
+def test_1692_a_session_conflict_in_a_manifest_lockfile_workflow_or_migration_is_resolved_and_pushed_once(srig, tmp_path, path):
+    w = _one_conflict(tmp_path / "w", path)
+    m, w, report, spy = run_session(srig, tmp_path, world=w)
+    assert report["outcome"] == m.REBASED and report["resolved"]["level"] == 2, report.get("why")
+    assert len(spy.pushes()) == 1 and report["backup"] and len(resolves(srig)) == 1
+    text = base._git(w.local, "show", "origin/%s:%s" % (FEATURE, path))
+    assert "feature side" in text and "integration side" in text and "<<<<" not in text
+
+
+def test_1692_the_plain_export_still_parks_a_protected_path_before_any_spawn(srig, tmp_path):
+    """Legacy (no `session` key) is unchanged: the same package.json conflict is refused and the resolver never runs."""
+    w = _one_conflict(tmp_path / "w", "package.json")
+    m, w, report, spy = run_session(srig, tmp_path, world=w, session=False)
+    assert "protected-path" in report["why"] and resolves(srig) == [] and not spy.pushes()
+
+
+def test_1692_an_agent_file_the_session_copy_cannot_hold_is_parked_with_the_reason(srig, tmp_path):
+    w = _one_conflict(tmp_path / "w", "CLAUDE.md")
+    m, w, report, spy = run_session(srig, tmp_path, world=w)
+    assert "protected-path" in report["why"] and "session copy" in report["why"] and resolves(srig) == []
+
+
+def _delete_in_base(w, path):
+    base._git(w.local, "checkout", "-q", l1.MAIN)
+    base._git(w.local, "rm", "-q", path)
+    l1._commit(w.local, "chore: remove the file")
+    base._git(w.local, "push", "-q", "origin", l1.MAIN)
+
+
+def test_1692_a_delete_modify_stop_reaches_the_resolver_and_the_unit_edit_is_kept(srig, tmp_path):
+    w = l1.world(mk(tmp_path / "w"), feat={APP: "line1\nfeature side\nline3\n"}, integ={"other.txt": "x\n"},
+                 base_files={"CHANGELOG.md": l1.LOG % "", APP: "line1\nshared\nline3\n"})
+    _delete_in_base(w, APP)
+    m, w, report, spy = run_session(srig, tmp_path, world=w)
+    assert "structural-conflict" not in str(report.get("why")) and len(resolves(srig)) == 1
+    assert report["outcome"] == m.REBASED, report.get("why")
+    assert "feature side" in base._git(w.local, "show", "origin/%s:%s" % (FEATURE, APP))
+    stages = resolves(srig)[0]["ctx"]
+    assert ".sigma-context/stop0/src__app.txt.theirs" in stages and ".sigma-context/stop0/src__app.txt.ours" not in stages
+
+
+def test_1692_a_resolver_that_deletes_the_file_is_parked_with_the_proof_reason_not_a_shape_code(srig, tmp_path):
+    srig.mode({"rm": [APP]})
+    w = l1.world(mk(tmp_path / "w"), feat={APP: "line1\nfeature side\nline3\n"}, integ={"other.txt": "x\n"},
+                 base_files={"CHANGELOG.md": l1.LOG % "", APP: "line1\nshared\nline3\n"})
+    _delete_in_base(w, APP)
+    before = w.tip(FEATURE)
+    m, w, report, spy = run_session(srig, tmp_path, world=w)
+    assert not spy.pushes() and w.tip(FEATURE) == before
+    assert "unit-line-dropped" in report["why"] and "structural-conflict" not in report["why"], report["why"]
+
+
+def test_1692_an_add_add_stop_reaches_the_resolver_and_both_sides_are_kept(srig, tmp_path):
+    w = l1.world(mk(tmp_path / "w"), feat={"src/new.txt": "ours line\n"}, integ={"src/new.txt": "theirs line\n"})
+    m, w, report, spy = run_session(srig, tmp_path, world=w)
+    assert report["outcome"] == m.REBASED, report.get("why")
+    assert len(resolves(srig)) == 1 and len(spy.pushes()) == 1
+    text = base._git(w.local, "show", "origin/%s:src/new.txt" % FEATURE)
+    assert "ours line" in text and "theirs line" in text
+
+
+def test_1692_a_refused_proof_is_fed_back_to_the_same_session_and_the_retry_resolves(srig, tmp_path):
+    srig.mode({"resolve": "drop_first"})
+    w = _one_conflict(tmp_path / "w", APP)
+    m, w, report, spy = run_session(srig, tmp_path, world=w)
+    assert report["outcome"] == m.REBASED, report.get("why")
+    first, second = resolves(srig)
+    assert first["cwd"] == second["cwd"] and "was refused" not in first["stdin"]
+    assert "was refused" in second["stdin"] and "unit-line-dropped" in second["stdin"]
+    assert len(spy.pushes()) == 1
+    assert "feature side" in base._git(w.local, "show", "origin/%s:%s" % (FEATURE, APP))
+
+
+def test_1692_a_proof_still_refused_after_the_retries_parks_and_names_why_the_last_try_failed(srig, tmp_path):
+    level2 = base._load("feature_upkeep_level2")
+    srig.mode({"resolve": "drop"})
+    w = _one_conflict(tmp_path / "w", APP)
+    before = w.tip(FEATURE)
+    m, w, report, spy = run_session(srig, tmp_path, world=w)
+    assert not spy.pushes() and w.tip(FEATURE) == before
+    assert len(resolves(srig)) == 1 + level2.SESSION_RETRIES and [c["role"] for c in srig.calls()].count("review") == 0
+    assert "unit-line-dropped" in report["why"] and "try %d of %d" % (1 + level2.SESSION_RETRIES, 1 + level2.SESSION_RETRIES) in report["why"]
+
+
+def test_1692_no_time_left_for_a_retry_parks_with_the_last_reason(srig, tmp_path, monkeypatch):
+    level2 = base._load("feature_upkeep_level2")
+    srig.mode({"resolve": "drop"})
+    real, calls = time.monotonic, srig.fake / "calls.json"
+    in_engine = lambda: sys._getframe(2).f_globals.get("__file__", "").endswith("feature_upkeep_level2.py")  # noqa: E731
+    monkeypatch.setattr(time, "monotonic", lambda: real() + (10 ** 6 if calls.exists() and in_engine() else 0))   # only the session clock jumps
+    w = _one_conflict(tmp_path / "w", APP)
+    m, w, report, spy = run_session(srig, tmp_path, world=w)
+    assert len(resolves(srig)) == 1 and "unit-line-dropped" in report["why"] and not spy.pushes()
+    assert level2.SESSION_RETRIES >= 1
