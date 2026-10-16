@@ -327,6 +327,10 @@ What the tick does, in order:
 4. Handles vetoes. A vetoed unpark is parked again (labels, and the board card on a board-active repository), a
    comment says so, and the kind drops a level.
 
+If another machine's evidence commits are ahead of this checkout, the tick acts on nothing: it prints
+`applier: held - <reason>` (and `--dry-run` prints the same), and the doctor's applier row adds `HELD: <reason>`.
+Pull the default branch to clear it; the next tick drops the hold.
+
 Level 3 comments every time. Level 4 is silent only for a kind in `allow_silent` on an owner-approved rule, and every
 `spot_check_one_in`-th silent-eligible apply per kind and area (default 5) still comments. That counter advances only
 for applies that landed, and it is decided per action at apply time.
@@ -436,7 +440,7 @@ python3 skills/sigma-loop/scripts/decision_import.py remove .sdlc --project-dir 
 - **Bounds.** `max_file_bytes` (500 MB, streaming), `time_budget_s` (60, a total per scan; a file cut short is reported
   as partial), `max_candidates` (500). A dash-leading folder name takes two words: `--project-dir -srv-demo-work-repo`.
 - **Classifier.** `rulebook.import.classifier` is `"table"` (default: a fixed keyword table in code) or `"model"`. With
-  `"model"` and the records gate open, `apply` sends the clipped question and option labels to the named small model
+  `"model"` and the records gate open, `apply` sends the question and option labels, scrubbed for secret shapes and then clipped (#1698), to the named small model
   (`model`, default `haiku`) and nothing from the project: each call runs in a fresh empty temporary directory (refused if an
   instruction file sits above it), without `CLAUDE_PROJECT_DIR`, and with project settings, hooks, skills and MCP config
   skipped when the installed CLI lists those flags. User-level instructions still load. It accepts only a listed kind and area (else `unknown`), caches by fingerprint so a second run
@@ -598,6 +602,8 @@ flag, which closes the whole block.
 | `import.max_budget_usd_per_run` | `1.0` | classifier per run |
 | `import.timeout_s` | `60` | classifier per call |
 | `import.require_repo_cwd` | `false` | same as `--only-in-repo` |
+
+Doctor rows for the filing triage (advisory, shown only when wrong, silent with `ai_filed.triage.enabled` false): "AI-filed triage config is valid" names the offending `ai_filed` key, and "AI-filed counter is readable" names the counter file; either fault parks every AI-filed filing until fixed.
 
 Related keys outside the block: `ai_filed.triage.enabled` (gate holds), `ai_filed.migration.*` (the label migration),
 `ledger.watch.interval_seconds` (the interval the dead-tick check is measured in), `action_log.enabled` (the record-done
