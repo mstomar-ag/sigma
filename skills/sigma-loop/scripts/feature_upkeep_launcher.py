@@ -1,14 +1,13 @@
 """The resolver launcher: one capped, confined, headless model session for a unit conflict (upkeep part B, slice 8).
 
-A library, loaded by path; no command line, nothing at import time, and NOTHING CALLS IT YET: the caller is the upkeep
-pass, behind its gate. While the gate is closed (the default) `launch` returns `closed` having read nothing, written
+A library, loaded by path; no command line, nothing at import time. The caller is the upkeep
+level 2 plan in `feature_rebase.py`, behind its gate. While the gate is closed (the default) `launch` returns `closed` having read nothing, written
 nothing and spawned nothing.
 
 THE ORDER of `launch(request)` (it returns a `Result` and raises only for a programming error):
   1. the gate: the project block must be on and `conflicts.resolve` must be `agent`, else `closed`;
   2. the platform: no process groups (Windows) -> `refused`, naming the platform;
-  3. the model: an id outside the catalog, or the placeholder id, -> `refused` (the shipped catalog holds only the
-     placeholder, so the resolver stays closed until a validated override is supplied);
+  3. the model: an id outside the catalog, or the placeholder id, -> `refused` (the shipped catalog holds real ids; the placeholder id is never accepted);
   4. the flags: any requested flag not in CONFIRMED_FLAGS -> `refused`, naming it UNVERIFIED, BEFORE anything is spawned;
   5. the directory: an ancestor holding an instruction file, or a location inside the real home or the repository ->
      `refused`; the credential route: an unchosen or unknown route -> `refused`;
