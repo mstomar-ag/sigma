@@ -26,9 +26,9 @@ returned in `charged` so the record can carry it.
 
 PROVISIONAL (not measured here, D-10): the default limits below are the part A numbers carried forward. The caller may
 pass others; nothing reads them from configuration, because the schema is pinned and these are unmeasured.
-UNVERIFIED: every model flag beyond the launcher's confirmed table (the launcher refuses them), the reply envelope of the
-real command line, and that a real model resolves a conflict at all. NO REAL MODEL CALL has been made by this slice: the
-tests drive a fake executable. The drill (D-24) has been run only against that fake.
+UNVERIFIED: the one design flag outside the launcher's confirmed table (the launcher refuses it and this level never
+requests it), the reply envelope of the real command line, and that a real model resolves a conflict at all. The tests and
+the drill (D-24) drive a fake executable.
 """
 import collections
 import hashlib
