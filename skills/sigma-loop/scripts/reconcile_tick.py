@@ -149,6 +149,7 @@ def _blocker_rank_repair(sdlc_dir, config, run=None, now=None):
         first = prior.get("first_seen_nonzero")
         _write_repair_state(sdlc_dir, {
             "violations": found,
+            "unread": int(res.get("unread") or 0),
             "last_repair": now if wrote else prior.get("last_repair"),
             "first_seen_nonzero": (first or now) if found else None,
             "rollout_reported": True})
