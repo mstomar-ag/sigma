@@ -649,11 +649,11 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         # reimplemented, and not approximated by pasting its marker. A human deciding "leave it
         # parked" here is making exactly the decision that comment exists to record, so the
         # automatic sweep must see it in the form it already knows how to read.
-        # F-02(4): "wait for it" on a dependency park posts NO opt-out marker, so the blocker sweep
-        # still resumes the goal when its blocker closes.
+        # F-02(4)/#1549: "wait for it" on a dependency park posts the waiting note, not the opt-out
+        # marker, so the sweep resumes the goal when its blocker closes.
         waits = (_declared_kind(data) == "dependency"
                  and route_answer("dependency", answers) == "wait for it")
-        err = _comment_decision(sdlc_dir, config, source, n, block + ("" if waits else "\n\n"
+        err = _comment_decision(sdlc_dir, config, source, n, block + ("\n\n" + auto_unpark.WAITING_NOTE if waits else "\n\n"
                                 + auto_unpark.keep_parked_comment(_one_line(
                                     PRIVATE_VALUE if _keys_only(config) else _substantive_reason(answers)))),
                                 "keep-parked", answers, data, kind, rule_id)
