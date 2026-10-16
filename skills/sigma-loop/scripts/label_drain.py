@@ -268,8 +268,10 @@ class _Judge:
         if self.source.goal_label not in names:
             return "unarmed", "no %s label" % self.source.goal_label
         logins = [(a.get("login") if isinstance(a, dict) else str(a)) for a in (issue.get("assignees") or [])]
-        if logins and getattr(self.source, "assignee", None):
+        if getattr(self.source, "assignee", None):
             me = self.login()
+            if me and not logins:
+                return "assigned-elsewhere", "unassigned; the picker only takes issues assigned to %s" % me
             if me and me.casefold() not in {x.casefold() for x in logins}:
                 return "assigned-elsewhere", "assigned to %s, not %s" % (", ".join(logins), me)
         held = self._gate(issue, names)
@@ -319,7 +321,7 @@ def plan(sdlc_dir, label, config=None, run=None):
     state_mod = _load("state")
     config = config if config is not None else state_mod.load_config(sdlc_dir)
     ro = _ReadOnly(run or sources._run_gh)
-    source = sources.GitHubSource(config, run=ro, sdlc_dir=sdlc_dir)
+    source = sources.GitHubSource(config, run=ro)   # no sdlc_dir: gh_api cannot write breaker state
     sources.scope_to_label(source, label)             # slice #1575's rules, not a copy
     repo = source.repo
     listed = sources.fetch_issues_rest(ro, repo, [label], MAX_MEMBERS + 1)

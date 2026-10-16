@@ -51,7 +51,7 @@ def _repo(tmp_path, **gh):
     return str(base)
 
 
-def _runner(issues, calls=None, unreadable=()):
+def _runner(issues, calls=None, unreadable=(), flaky=()):
     """Fake `gh`: REST list (AND-labels, state, paging), REST single GET, comments page, label lookup."""
     calls = calls if calls is not None else []
     by = {i["number"]: i for i in issues}
@@ -70,6 +70,8 @@ def _runner(issues, calls=None, unreadable=()):
             m = re.fullmatch(r"repos/[^/]+/[^/]+/issues/(\d+)(/comments)?", args[1])
             if m:
                 n = int(m.group(1))
+                if n in flaky:
+                    raise RuntimeError("HTTP 502 Bad Gateway")
                 if n in unreadable or n not in by:
                     raise RuntimeError("HTTP 404")
                 if m.group(2):
@@ -157,8 +159,8 @@ def test_the_read_only_guard_refuses_a_write_even_if_asked(tmp_path):
 def test_assigned_elsewhere_and_held_by_gate(tmp_path):
     issues = [
         _goal(1, assignees=["other-person"]),
-        _goal(2, body="Feature: billing\n\n## Done when\n- [ ] a\n- [ ] b\n- [ ] c\n"),   # unit in body, no label
-        _goal(3, "feature:alpha", "feature:beta"),                                     # contradicts itself
+        _goal(2, body="Feature: billing\n\n## Done when\n- [ ] a\n- [ ] b\n- [ ] c\n", assignees=["me-login"]),   # unit in body, no label
+        _goal(3, "feature:alpha", "feature:beta", assignees=["me-login"]),                                     # contradicts itself
     ]
     p, _ = _plan(tmp_path, issues, assignee="me-login")
     # @me/login resolution: the explicit login is not in the assignee list -> assigned elsewhere
@@ -166,6 +168,24 @@ def test_assigned_elsewhere_and_held_by_gate(tmp_path):
     assert "feature label is missing" in _by(p, 2)["detail"]
     assert _by(p, 3)["verdict"] == "held-by-gate"
     assert _by(p, 1)["verdict"] == "assigned-elsewhere"
+
+
+def test_unassigned_member_is_not_pickable_when_an_assignee_is_configured(tmp_path):
+    p, _ = _plan(tmp_path, [_goal(1), _goal(2, assignees=["me-login"])], assignee="me-login")
+    assert _by(p, 1)["verdict"] == "assigned-elsewhere" and "unassigned" in _by(p, 1)["detail"]
+    assert _by(p, 2)["verdict"] == "armed"
+    p, _ = _plan(tmp_path / "x", [_goal(1)])                 # no assignee configured: unchanged
+    assert _by(p, 1)["verdict"] == "armed"
+
+
+def test_plan_writes_nothing_under_sdlc_state(tmp_path):
+    base = _repo(tmp_path)
+    snap = lambda: sorted(str(q.relative_to(base)) for q in pathlib.Path(base).rglob("*") if q.is_file())
+    before = snap()
+    blocked = _goal(1, body="**Blocked by:** #99\n\n## Done when\n- [ ] a\n- [ ] b\n- [ ] c\n")
+    for _ in range(4):                       # unreadable reads trip the REST breaker/fallback log
+        _mod("label_drain").plan(base, LBL, run=_runner([blocked, _goal(2, "sdlc:parked", comments=[PARK])], flaky=(2,)))
+    assert snap() == before
 
 
 def test_assignee_compare_is_case_insensitive_on_both_sides(tmp_path):
