@@ -1,0 +1,323 @@
+"""Machine resource readers: one typed `Sample` of memory, swap, pressure and CPU, and a per-process footprint.
+
+WHAT IT IS. A small library with a command line (`resource_guard.py sample [--json]`). It reads what the operating
+system says about this machine so a later caller can DERIVE a limit from it instead of copying a constant from a
+developer's laptop. Nothing in the product calls it yet: this release ships the readers and the proof they agree
+with an independent reader.
+
+THE CONTRACT.
+  * `sample(root="/") -> Sample`. Fields: total, available, swap_used, swap_total (bytes), swapouts (a counter) and
+    swapouts_at (wall-clock seconds when it was read), pressure, cpu_count, load1.
+  * macOS reads through ctypes: `sysctlbyname` (hw.memsize, vm.swapusage, kern.memorystatus_vm_pressure_level) and
+    `host_statistics64` (available = free + inactive pages). `pressure` is the OS level 1, 2 or 4.
+  * Linux reads /proc and cgroup v2 under `root`: MemAvailable, reduced to the smallest `memory.max - memory.current`
+    of every visible cgroup ancestor; `pswpout` from /proc/vmstat; `pressure` is {"some": avg10, "full": avg10} from
+    /proc/pressure/memory, or None when the file is absent; cpu_count from the affinity mask, reduced by `cpu.max`.
+  * `footprint(pid) -> (bytes, approx) | None`. macOS: `ri_phys_footprint` from `proc_pid_rusage` (resident size is
+    NOT the measure: summed RSS undercounted summed footprint by about 2.5x on a measured 24 GiB machine). Linux:
+    `Pss` from smaps_rollup, else `statm` resident pages with approx=True. An unreadable or missing pid is None.
+  * Any other platform, or an unreadable total or available, raises `Unsupported(reason)`. Never a guess, never a
+    shell-command fallback. The command line then prints one line to stderr, nothing to stdout, and exits 3.
+
+NOT HERE, ON PURPOSE. No child process, no file write, no signal, no configuration, no gate, no threshold: this
+module reports facts and decides nothing.
+"""
+import ctypes
+import json
+import os
+import sys
+import time
+
+EXIT_UNSUPPORTED = 3
+
+
+class Unsupported(Exception):
+    """The platform or a required source cannot be read; `reason` says which."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class Sample:
+    FIELDS = ("total", "available", "swap_used", "swap_total", "swapouts", "swapouts_at", "pressure", "cpu_count",
+              "load1")
+    __slots__ = FIELDS
+
+    def __init__(self, **values):
+        for name in self.FIELDS:
+            setattr(self, name, values[name])
+
+    def as_dict(self):
+        return {name: getattr(self, name) for name in self.FIELDS}
+
+    def __repr__(self):
+        return "Sample(%s)" % ", ".join("%s=%r" % kv for kv in self.as_dict().items())
+
+
+# ---------------------------------------------------------------------------------------------------- Linux
+def _read_text(path):
+    with open(path, "r") as handle:
+        return handle.read()
+
+
+def _try(path):
+    try:
+        return _read_text(path)
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _kv_bytes(text):
+    out = {}
+    for line in text.splitlines():
+        name, _, rest = line.partition(":")
+        parts = rest.split()
+        if parts and parts[0].isdigit():
+            out[name.strip()] = int(parts[0]) * (1024 if len(parts) > 1 and parts[1].lower() == "kb" else 1)
+    return out
+
+
+def _cgroup_chain(root):
+    """Directories from the process's cgroup up to the v2 mount, or [] when there is no readable v2 mapping."""
+    cg, mi = _try(os.path.join(root, "proc/self/cgroup")), _try(os.path.join(root, "proc/self/mountinfo"))
+    if cg is None or mi is None:
+        return []
+    rel = next((line[3:] for line in cg.splitlines() if line.startswith("0::")), None)
+    mount = None
+    for line in mi.splitlines():
+        left, sep, right = line.partition(" - ")
+        fields = left.split()
+        if sep and right.split()[:1] == ["cgroup2"] and len(fields) >= 5:
+            mount = fields[4]
+            break
+    if rel is None or mount is None:
+        return []
+    top = os.path.normpath(os.path.join(root, mount.lstrip("/")))
+    path = os.path.normpath(os.path.join(top, rel.strip().lstrip("/")))
+    chain = []
+    while True:
+        chain.append(path)
+        if path == top or len(path) <= len(top):
+            return chain
+        path = os.path.dirname(path)
+
+
+def _cgroup_room(chain):
+    room = None
+    for directory in chain:
+        limit, used = _try(os.path.join(directory, "memory.max")), _try(os.path.join(directory, "memory.current"))
+        if limit is None or used is None or limit.strip() == "max":
+            continue
+        try:
+            left = max(int(limit) - int(used), 0)
+        except ValueError:
+            continue
+        room = left if room is None else min(room, left)
+    return room
+
+
+def _cgroup_cpus(chain):
+    cap = None
+    for directory in chain:
+        text = _try(os.path.join(directory, "cpu.max"))
+        parts = text.split() if text else []
+        if len(parts) == 2 and parts[0] != "max":
+            try:
+                value = int(parts[0]) / int(parts[1])
+            except (ValueError, ZeroDivisionError):
+                continue
+            cap = value if cap is None else min(cap, value)
+    return cap
+
+
+def _pressure(text):
+    found = {}
+    for line in (text or "").splitlines():
+        fields = line.split()
+        if fields and fields[0] in ("some", "full"):
+            for item in fields[1:]:
+                if item.startswith("avg10="):
+                    found[fields[0]] = float(item[6:])
+    return found or None
+
+
+def linux_sample(root="/", cpus=None):
+    """Sample from a /proc and cgroup-v2 tree under `root`. `cpus` overrides the affinity count (fixtures)."""
+    meminfo = _try(os.path.join(root, "proc/meminfo"))
+    if meminfo is None:
+        raise Unsupported("/proc/meminfo is unreadable")
+    mem = _kv_bytes(meminfo)
+    if mem.get("MemTotal", 0) <= 0 or "MemAvailable" not in mem:
+        raise Unsupported("/proc/meminfo lacks MemTotal or MemAvailable")
+    total, available = mem["MemTotal"], min(mem["MemAvailable"], mem["MemTotal"])
+    chain = _cgroup_chain(root)
+    room = _cgroup_room(chain)
+    if room is not None:
+        available = min(available, room)
+    swap_total = mem.get("SwapTotal", 0)
+    swapouts = 0
+    for line in (_try(os.path.join(root, "proc/vmstat")) or "").splitlines():
+        if line.startswith("pswpout "):
+            swapouts = int(line.split()[1])
+    swapouts_at = time.time()
+    if cpus is None:
+        cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+    cap = _cgroup_cpus(chain)
+    load = _try(os.path.join(root, "proc/loadavg"))
+    return Sample(total=total, available=available, swap_used=max(swap_total - mem.get("SwapFree", 0), 0),
+                  swap_total=swap_total, swapouts=swapouts, swapouts_at=swapouts_at,
+                  pressure=_pressure(_try(os.path.join(root, "proc/pressure/memory"))),
+                  cpu_count=cpus if cap is None else min(cpus, cap),
+                  load1=float(load.split()[0]) if load else os.getloadavg()[0])
+
+
+def _linux_footprint(pid):
+    base = "/proc/%d/" % pid
+    text = _try(base + "smaps_rollup")
+    if text:
+        for line in text.splitlines():
+            if line.startswith("Pss:"):
+                return int(line.split()[1]) * 1024, False
+    text = _try(base + "statm")
+    if text and len(text.split()) >= 2:
+        return int(text.split()[1]) * os.sysconf("SC_PAGE_SIZE"), True
+    return None
+
+
+# ---------------------------------------------------------------------------------------------------- macOS
+class _VMStats(ctypes.Structure):
+    _fields_ = [(n, ctypes.c_uint32) for n in ("free_count", "active_count", "inactive_count", "wire_count")]
+    _fields_ += [(n, ctypes.c_uint64) for n in ("zero_fill_count", "reactivations", "pageins", "pageouts", "faults",
+                                                "cow_faults", "lookups", "hits", "purges")]
+    _fields_ += [(n, ctypes.c_uint32) for n in ("purgeable_count", "speculative_count")]
+    _fields_ += [(n, ctypes.c_uint64) for n in ("decompressions", "compressions", "swapins", "swapouts")]
+    _fields_ += [(n, ctypes.c_uint32) for n in ("compressor_page_count", "throttled_count", "external_page_count",
+                                                "internal_page_count")]
+    _fields_ += [("total_uncompressed_pages_in_compressor", ctypes.c_uint64)]
+
+
+class _SwapUsage(ctypes.Structure):
+    _fields_ = [("total", ctypes.c_uint64), ("avail", ctypes.c_uint64), ("used", ctypes.c_uint64),
+                ("pagesize", ctypes.c_int32), ("encrypted", ctypes.c_int32)]
+
+
+class _RusageV2(ctypes.Structure):
+    _fields_ = [("uuid", ctypes.c_uint8 * 16)]
+    _fields_ += [(n, ctypes.c_uint64) for n in (
+        "user_time", "system_time", "pkg_idle_wkups", "interrupt_wkups", "pageins", "wired_size", "resident_size",
+        "phys_footprint", "proc_start_abstime", "proc_exit_abstime", "child_user_time", "child_system_time",
+        "child_pkg_idle_wkups", "child_interrupt_wkups", "child_pageins", "child_elapsed_abstime",
+        "diskio_bytesread", "diskio_byteswritten")]
+
+
+_RUSAGE_INFO_V2 = 2
+_HOST_VM_INFO64 = 4
+
+
+def _darwin_lib():
+    c = ctypes
+    try:
+        lib = c.CDLL("libSystem.B.dylib", use_errno=True)
+        lib.mach_host_self.argtypes, lib.mach_host_self.restype = [], c.c_uint32
+        lib.host_statistics64.argtypes = [c.c_uint32, c.c_int, c.c_void_p, c.POINTER(c.c_uint32)]
+        lib.host_statistics64.restype = c.c_int
+        lib.sysctlbyname.argtypes = [c.c_char_p, c.c_void_p, c.POINTER(c.c_size_t), c.c_void_p, c.c_size_t]
+        lib.sysctlbyname.restype = c.c_int
+        lib.proc_pid_rusage.argtypes, lib.proc_pid_rusage.restype = [c.c_int, c.c_int, c.c_void_p], c.c_int
+        page = c.c_ulong.in_dll(lib, "vm_kernel_page_size").value
+    except (OSError, AttributeError, ValueError):
+        raise Unsupported("libSystem bindings are unavailable") from None
+    if page <= 0:
+        raise Unsupported("vm_kernel_page_size is unreadable")
+    return lib, page
+
+
+def _sysctl(lib, name, ctype):
+    value, size = ctype(), ctypes.c_size_t(ctypes.sizeof(ctype))
+    failed = lib.sysctlbyname(name, ctypes.byref(value), ctypes.byref(size), None, 0) != 0
+    return None if failed or size.value != ctypes.sizeof(ctype) else value
+
+
+def darwin_sample():
+    lib, page = _darwin_lib()
+    total = _sysctl(lib, b"hw.memsize", ctypes.c_uint64)
+    stats = _VMStats()
+    count = ctypes.c_uint32(ctypes.sizeof(stats) // 4)
+    host = lib.mach_host_self()
+    if total is None or total.value <= 0 or not host or lib.host_statistics64(
+            host, _HOST_VM_INFO64, ctypes.byref(stats), ctypes.byref(count)) != 0:
+        raise Unsupported("hw.memsize or host_statistics64 is unreadable")
+    available = min((stats.free_count + stats.inactive_count) * page, total.value)
+    swap = _sysctl(lib, b"vm.swapusage", _SwapUsage)
+    level = _sysctl(lib, b"kern.memorystatus_vm_pressure_level", ctypes.c_int)
+    ncpu = _sysctl(lib, b"hw.logicalcpu", ctypes.c_int)
+    return Sample(total=total.value, available=available, swap_used=swap.used if swap else 0,
+                  swap_total=swap.total if swap else 0, swapouts=stats.swapouts, swapouts_at=time.time(),
+                  pressure=level.value if level else None, cpu_count=ncpu.value if ncpu else (os.cpu_count() or 1),
+                  load1=os.getloadavg()[0])
+
+
+def _darwin_footprint(pid):
+    try:
+        lib, _ = _darwin_lib()
+    except Unsupported:
+        return None
+    info = _RusageV2()
+    if lib.proc_pid_rusage(pid, _RUSAGE_INFO_V2, ctypes.byref(info)) != 0:
+        return None
+    return int(info.phys_footprint), False
+
+
+# ---------------------------------------------------------------------------------------------------- public
+def sample(root="/"):
+    """One reading of this machine. Raises Unsupported rather than guessing."""
+    if sys.platform == "darwin":
+        return darwin_sample()
+    if sys.platform.startswith("linux"):
+        return linux_sample(root)
+    raise Unsupported("no reader for platform %s" % sys.platform)
+
+
+def footprint(pid):
+    """(bytes, approx) for one process, or None if it cannot be read. Never raises."""
+    try:
+        pid = int(pid)
+        if pid <= 0:
+            return None
+        if sys.platform == "darwin":
+            return _darwin_footprint(pid)
+        if sys.platform.startswith("linux"):
+            return _linux_footprint(pid)
+    except (OSError, ValueError, OverflowError):
+        pass
+    return None
+
+
+USAGE = ("usage: resource_guard.py sample [--json]\n"
+         "  sample    print one machine reading (exit 3 and one stderr line when the platform is unsupported)\n"
+         "  --json    print it as one JSON object\n")
+
+
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args or args[0] in ("-h", "--help"):
+        sys.stdout.write(USAGE)
+        return 0
+    if args[0] != "sample" or set(args[1:]) - {"--json"}:
+        sys.stderr.write(USAGE)
+        return 2
+    try:
+        got = sample()
+    except Unsupported as refusal:
+        sys.stderr.write("resource_guard: unsupported: %s\n" % refusal.reason)
+        return EXIT_UNSUPPORTED
+    if "--json" in args:
+        sys.stdout.write(json.dumps(got.as_dict(), sort_keys=True) + "\n")
+    else:
+        sys.stdout.write(" ".join("%s=%s" % kv for kv in got.as_dict().items()) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
