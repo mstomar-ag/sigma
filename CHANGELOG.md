@@ -4,7 +4,11 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+<<<<<<< HEAD
 - Decision records scrub secret shapes (the leak scan's set) from their free text before the file is written, and the import summary prints how many values were scrubbed (#1558).
+=======
+- **The land verb measures the sibling half of a pair itself (#1552).** `feature_land` used to pass no landed measurement, so any unit with a second repository was always refused as "nothing was supplied to measure". It now reads the sibling's pull requests and proceeds only when one merged; an unmerged or unreadable answer still refuses, and the refusal names the goal recorded for that repository and the remedy.
+>>>>>>> fork/feature/rulebook-learning
 
 ## 1.0.15 — 2026-10-16 — the Rulebook learns and acts: declared question kinds, live comparisons, applier asks and vetoes, importance-ranked rule suggestions, upkeep union merge and agent conflict level, claim release, and ledger host privacy
 - The applier opens no ask for a park a person already answered (keep-parked, unpark or promote), so a sync after a rule is approved never turns an earlier human decision into a rule action (found by the acceptance run).
