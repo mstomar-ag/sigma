@@ -255,6 +255,8 @@ base has it on, landing prints one warning naming the disagreement.
 To stop upkeep entirely: set `upkeep.enabled` to `false` (the plain push returns), or create
 `.sdlc/state/upkeep.stop` for a running job.
 
+When an idle goal branch cannot be replayed onto the rebased unit branch, the filed finding says whether the pass caused it, measured by a read-only `git merge-tree` of the goal tip against the unit's previous tip: it either also conflicts with that previous tip (pre-existing, with the backup ref and the conflicted paths), replays cleanly onto it (introduced by this pass, the only wording that says it was brought forward), or could not be checked (no causal claim).
+
 ## Scale and limits
 
 - One sweep per window per machine: at most `24 / window_hours` a day, at the default 2.

@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- The goal-replay conflict finding now says whether the upkeep pass caused it: a read-only `git merge-tree` of the goal tip against the unit's previous tip reports it as pre-existing (with the previous tip, backup ref and conflicted paths), introduced by the pass, or unknown, and only the introduced case says the pass brought the conflict forward (#1494).
 - The upkeep sweep now says what it cannot see: the job record gains `units_listed`, `unregistered` (remote `feature/*` branches with no registry record) and the registry reader's `notes`, and the doctor shows an upkeep units row naming each unmaintained remote feature branch, also when no `.sdlc/features/` exists (#1493).
 - Upkeep findings are now filed at the lowest AI bucket priority (P4 by default) instead of the human default P1; a triage park writes that priority too, and `promote.py migrate-confirmation` swaps a followup's priority label for the bucket priority when it arms it (#1484).
 - The upkeep engine now records the per-unit state file (`.sdlc/state/upkeep/units/<unit>.json`) at its single exit on every pass, under the unit lock, and the job no longer records the same outcome a second time (#1492).

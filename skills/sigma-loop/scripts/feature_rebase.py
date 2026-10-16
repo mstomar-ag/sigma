@@ -1786,7 +1786,8 @@ def _goal_state(run, path, goal_branch, cwd, remote, before):
     return said
 
 
-def _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd, remote):
+def _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd, remote,
+                  unit_before=None, backup_ref=None):
     """Replay each of the unit's goal branches onto the freshly-rebased feature branch.
 
     `work.rebase()` DOES THE REPLAY, unchanged -- it already fetches, rebases `--autostash`,
@@ -1869,6 +1870,7 @@ def _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd,
             report["replayed"].append(goal_branch)
             continue
         report["conflicts"].append(goal_branch)
+        cause = _conflict_cause(cwd, unit_before, before)
         _file_issue(sdlc_dir, config, goal, report,
                     slot="goal-conflict:%s" % goal_branch,
                     key="%s@%s" % (goal_branch, before or "?"),
@@ -1876,7 +1878,8 @@ def _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd,
                     why="%s could not be replayed onto %s" % (goal_branch, branch), qkind="merge_conflict",
                     body=_goal_conflict_body(unit, goal_branch, branch, outcome,
                                              _goal_state(run, path, goal_branch, cwd, remote,
-                                                         before)))
+                                                         before),
+                                             cause=cause, unit_before=unit_before, backup_ref=backup_ref))
 
 
 # --------------------------------------------------------------------------- surfacing
@@ -2123,15 +2126,77 @@ def _feature_conflict_body(unit, branch, base, before, why, left, tip):
            base, branch, branch, base, why, unit, base))
 
 
-def _goal_conflict_body(unit, goal_branch, branch, why, state):
+CAUSE_PRE_EXISTING, CAUSE_INTRODUCED, CAUSE_UNKNOWN = "pre-existing", "introduced", "unknown"
+_CAUSE_PATHS_MAX = 20
+
+
+def _conflict_cause(cwd, unit_before, goal_tip):
+    """(#1494) Did this pass cause a goal's replay conflict? -> (classification, conflicted paths).
+
+    A READ-ONLY probe: `git merge-tree --write-tree --name-only <unit's previous tip> <goal tip>`
+    writes no ref, no worktree and no index. Exit 0 means the goal merges cleanly with the unit as it
+    stood BEFORE this pass, so the conflict is introduced by the pass; exit 1 means it already
+    conflicted with the previous tip; anything else (old git, a missing object, a timeout, no
+    previous tip or goal tip to compare) is UNKNOWN and makes no causal claim."""
+    if not unit_before or not goal_tip:
+        return CAUSE_UNKNOWN, []
+    try:
+        code, out = _merge_probe(cwd, unit_before, goal_tip)
+    except Exception:                     # noqa: BLE001 - a probe that cannot run is just unknown
+        return CAUSE_UNKNOWN, []
+    if code == 0:
+        return CAUSE_INTRODUCED, []
+    if code != 1:
+        return CAUSE_UNKNOWN, []
+    paths = []
+    for line in out.splitlines()[1:]:     # line 1 is the result tree; the paths end at the first blank line
+        if not line.strip():
+            break
+        paths.append(line.strip())
+    return CAUSE_PRE_EXISTING, paths
+
+
+def _merge_probe(cwd, left, right):
+    """-> (exit code, stdout) of one bounded, config-pinned `git merge-tree`; raises on the timeout."""
+    import subprocess
+    argv = ["git"]
+    for pin in _GUARD_CONFIG:
+        argv += ["-c", pin]
+    argv += ["merge-tree", "--write-tree", "--name-only", left, right]
+    proc = subprocess.run(argv, cwd=str(cwd), capture_output=True, timeout=_guard_timeout())
+    return proc.returncode, (proc.stdout or b"").decode("utf-8", "replace")
+
+
+def _cause_paragraph(cause, unit_before, backup_ref):
+    kind, paths = cause
+    tip = "`%s`" % unit_before[:12] if unit_before else "its previous tip"
+    backup = " (backup `%s`)" % backup_ref if backup_ref else ""
+    if kind == CAUSE_PRE_EXISTING:
+        shown = ", ".join("`%s`" % one for one in paths[:_CAUSE_PATHS_MAX])
+        more = " and %d more" % (len(paths) - _CAUSE_PATHS_MAX) if len(paths) > _CAUSE_PATHS_MAX else ""
+        return ("This pass did not cause it: the goal branch also conflicts with the unit's previous tip "
+                "%s%s%s." % (tip, backup, (" in " + shown + more) if shown else ""))
+    if kind == CAUSE_INTRODUCED:
+        return ("The goal branch replays cleanly onto the unit's previous tip %s%s but not onto the new one, "
+                "so this pass brought the conflict forward. To undo the pass, restore the previous tip with "
+                "`feature_rebase.py restore` if needed." % (tip, backup))
+    return "Whether this pass caused it could not be determined, so no cause is claimed."
+
+
+def _goal_conflict_body(unit, goal_branch, branch, why, state, cause=None, unit_before=None, backup_ref=None):
+    cause = cause or (CAUSE_UNKNOWN, [])
+    head = ("`%s` could not be replayed onto `%s` after that feature branch was brought forward.\n\n"
+            if cause[0] == CAUSE_INTRODUCED else
+            "`%s` could not be replayed onto `%s`.\n\n") % (goal_branch, branch)
     return (
-        "`%s` could not be replayed onto `%s` after that feature branch was brought forward.\n\n"
+        "%s%s\n\n"
         "Measured afterwards:\n\n%s\n\n"
         "Reproduce and resolve:\n\n"
         "```\ngit switch %s\ngit rebase origin/%s\n```\n\n"
         "it reported:\n\n```\n%s\n```\n\n"
         "Filed by Sigma's rebase upkeep for unit `%s`.\n"
-        % (goal_branch, branch, "\n".join("- %s" % one for one in state),
+        % (head, _cause_paragraph(cause, unit_before, backup_ref),
+           "\n".join("- %s" % one for one in state),
            goal_branch, branch, why, unit))
 
 
@@ -3040,7 +3105,8 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
     # path. Either way there is nothing recorded for this repo and nothing here to replay.
     repos = registry.normalise_entry(entry).get("repos") or {}
     goals = (repos.get(sync.repo_key(repos, repo)) or {}).get("goals") or []
-    _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd, remote)
+    _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd, remote,
+                  unit_before=before, backup_ref=report.get("backup"))
     return report
 
 
