@@ -1003,7 +1003,6 @@ def _main(argv, run=None):
                              undeclared="--undeclared" in tail)
         print(json.dumps(result, indent=2) if "--json" in tail else render_list(result))
         return 0 if result["complete"] else 1
-<<<<<<< HEAD
     if len(argv) >= 3 and argv[1] == "report":
         sdlc_dir, tail = argv[2], argv[3:]
         blocked = triage.needs_github(triage.config_strict(sdlc_dir), "unparking", 1, run, None)
@@ -1012,7 +1011,6 @@ def _main(argv, run=None):
         result = report(sdlc_dir, triage.config_strict(sdlc_dir), run=run)
         print(json.dumps(result, indent=2) if "--json" in tail else render_report(result))
         return 0 if result["complete"] else 1
-=======
     if len(argv) >= 4 and argv[1] == "declare" and "--from-suggestions" in argv[3:]:
         sdlc_dir, tail = argv[2], argv[3:]
         only = _value(tail, "--kind")
@@ -1027,7 +1025,6 @@ def _main(argv, run=None):
                                                  apply="--dry-run" not in tail, run=run)
         print("\n".join(lines))
         return 1 if failed else 0
->>>>>>> fork/feature/rulebook-learning
     if len(argv) >= 5 and argv[1] == "declare":
         sdlc_dir, number, kind = argv[2], argv[3], argv[4]
         if kind not in qkind.QKINDS:
