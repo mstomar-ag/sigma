@@ -4289,6 +4289,8 @@ def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transit
                   "recording as parked instead of losing the terminal record entirely", file=sys.stderr)
             result = "parked"
             detail = f"source error recording 'done' ({exc})"
+            if qkind is None:                     # #1524: our own park declares its kind
+                qkind = "quota" if _reason_class(detail) == "quota" else "needs_decision"
     reason_class = None
     tier = None
     if result == "failed" and hasattr(source, "fail"):

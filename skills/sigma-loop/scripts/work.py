@@ -5339,7 +5339,8 @@ def _stale_resume_refusal(sdlc_dir, config, goal, run=None):
                 rec["stale_resume_releases"] = releases + 1
                 _save(sdlc_dir, goal, rec)
         else:
-            loop._record(sdlc_dir, source, goal, "parked", diagnosis)   # see the release branch
+            loop._record(sdlc_dir, source, goal, "parked", diagnosis,   # see the release branch
+                         qkind="needs_decision")                  # #1524: a person decides
             transitioned = True
             did = "Parked it — this one needs a person"
             certainty = ("The cursor write is certain; the ledger entry is fail-open and the "
