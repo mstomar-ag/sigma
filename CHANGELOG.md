@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- `board_migrate.py --apply` no longer raises when a seeded card is deleted before the final snapshot: it prints a failure, asks the operator to run the migration again and exits 1, and cards with null content are counted as `other` so the board breakdown adds up (#1525).
 - The source-error downgrade-to-park declares `quota` for a quota or budget failure and `needs_decision` otherwise, and the stale-worktree escalation park declares `needs_decision` (#1524).
 - **Upkeep's mechanical level resolves two append-only shapes (#1515).** A dated `## YYYY-MM` log and a bullet-list file that both sides only added to are unioned (per section in date order; base order then the unit's new items); an edit or removal on either side still parks.
 - A config that sets `discovery.blocker_promotion.mode` to `"smart"` now gets a one-time skip line from the reconcile tick and a not-OK "blocker priority rule inactive" doctor row naming the one-word fix to `"always"`; what smart, always and off do is unchanged (#1489).
