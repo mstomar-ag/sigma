@@ -30,6 +30,7 @@ repository.
 NOT HERE, ON PURPOSE. No child process, no signal, no gate that stops anything: this module reports facts and
 decisions; a caller acts on them.
 """
+import contextlib
 import ctypes
 import json
 import math
@@ -390,6 +391,10 @@ def derive(sample, config=None, leases=(), observed=None):
     reserve = int(sample.total * (cfg["reserve_fraction"] or RESERVE_FRACTION))
     share_cap = int(sample.total * (cfg["max_share_fraction"] or SHARE_FRACTION))
     cpu_reserve = cfg["cpu_reserve_cores"] or max(1, -(-sample.cpu_count // 8))
+    if cfg["cpu_reserve_cores"] and cfg["cpu_reserve_cores"] >= sample.cpu_count:
+        notes.append("resource.cpu_reserve_cores: %r is not below the %d cores here; read as derived"
+                     % (cfg["cpu_reserve_cores"], sample.cpu_count))
+        cpu_reserve = max(1, -(-sample.cpu_count // 8))
     load_hold = (cfg["load_hold_ratio"] or LOAD_HOLD_RATIO) * sample.cpu_count
     session = (observed or {}).get("session_cost")
     session_cost = int(session) if _number(session) and session > 0 else int(sample.total * SESSION_FRACTION)
@@ -451,12 +456,17 @@ def swap_rate(history):
 
 
 def decide(history, limits, unit_cost, prior="open", resume_samples=RESUME_SAMPLES, sample_gap=SAMPLE_GAP,
-           now=None):
-    """Hold or open for one requested unit costing `unit_cost` bytes. `history` is oldest first."""
+           now=None, prior_since=None):
+    """Hold or open for one requested unit costing `unit_cost` bytes. `history` is oldest first.
+
+    `prior_since` is the start of the hold already in force; a repeat hold keeps it. No history reads as open."""
     now = time.time() if now is None else now
+    if not history:
+        return Decision("open", "no samples", None, now, None, None)
     rate = swap_rate(history)
     avail = [s.available for s in history]
     held = prior == "hold"
+    since = prior_since if held and prior_since is not None else now
     resume_line = unit_cost + limits.session_cost
     reason = resource = None
     if limits.critical:
@@ -474,8 +484,76 @@ def decide(history, limits, unit_cost, prior="open", resume_samples=RESUME_SAMPL
     if reason and limits.mode != "enforce":
         return Decision("open", "%s: would hold (%s)" % (limits.mode, reason), None, now, None, rate)
     if reason:
-        return Decision("hold", reason, resource, now, now + sample_gap * resume_samples, rate)
+        return Decision("hold", reason, resource, since, now + sample_gap * resume_samples, rate)
     return Decision("open", "ok", None, now, None, rate)
+
+
+# ------------------------------------------------------------------------------------------ session gate (#1603)
+_LEASE = {}
+
+
+def _lease():
+    """The lease module, loaded on first use (resource_lease imports this module, so not at import time)."""
+    if "m" not in _LEASE:
+        import importlib.util
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location("resource_lease", os.path.join(here, "resource_lease.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _LEASE["m"] = module
+    return _LEASE["m"]
+
+
+def session_mode(config=None, env=None):
+    """enforce | observe | off for a model-session spawn: the config block, else SIGMA_RESOURCE_MODE, else off.
+
+    Off by default on purpose: no config route reaches every spawn site yet, so the gate is the operator's opt-in
+    (SAFETY: nothing consumes or records anything unasked). off means no lease, no state, no sample.
+    """
+    env = os.environ if env is None else env
+    mode = config.get("mode") if isinstance(config, dict) else None
+    if mode not in _MODES:
+        mode = env.get("SIGMA_RESOURCE_MODE")
+    return mode if mode in _MODES else "off"
+
+
+@contextlib.contextmanager
+def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None):
+    """Hold one "session" lease around a model-session spawn. Yields None (mode off), a Grant, or a Hold.
+
+    The caller treats a Hold as its own existing "could not start now" outcome. The lease is released in `finally`,
+    so an exception or a timeout in the child never leaves one behind. Never raises for pressure, a busy lock or a
+    table error. On a platform that cannot take a lease (or a table error): observe proceeds unguarded, enforce yields a
+    Hold that says so (refuse loudly rather than a silent half-guarantee).
+    """
+    mode = session_mode(config, env)
+    if mode == "off":
+        yield None
+        return
+    lease = _lease()
+    cfg = dict(config) if isinstance(config, dict) else {}
+    cfg["mode"] = mode
+    try:
+        got = lease.admit("session", 1, repo if repo is not None else os.getcwd(), "%s:%s" % (kind, goal),
+                          ttl=ttl, config=cfg, env=env)
+    except Exception as exc:  # noqa: BLE001 - never a crash; resource_lease holds its own Unsupported class
+        why = ("unsupported: %s" % getattr(exc, "reason", exc)) if type(exc).__name__ == "Unsupported" \
+            else "lease table error (%s)" % type(exc).__name__
+        yield None if mode == "observe" else _Held(why)
+        return
+    try:
+        yield got
+    finally:
+        if hasattr(got, "id"):
+            try:
+                lease.release(got.id, env=env)
+            except Exception:  # noqa: BLE001 - release is best effort; the ttl and the pid check reclaim it
+                pass
+
+
+class _Held:
+    def __init__(self, reason, retry_after=60.0):
+        self.reason, self.retry_after = reason, retry_after
 
 
 # --------------------------------------------------------------------------------------------- hold.json
@@ -490,12 +568,19 @@ def hold_path(env=None):
 def write_hold(path, decision, _replace=os.replace):
     """Write the decision as hold.json by atomic rename: a reader sees the old file or the new, never half."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as handle:
-        handle.write(json.dumps(decision.as_dict(), sort_keys=True))
-        handle.flush()
-        os.fsync(handle.fileno())
-    _replace(tmp, path)
+    tmp = path + "." + str(os.getpid()) + ".tmp"
+    try:
+        with open(tmp, "w") as handle:
+            handle.write(json.dumps(decision.as_dict(), sort_keys=True))
+            handle.flush()
+            os.fsync(handle.fileno())
+        _replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def read_hold(path):
@@ -516,6 +601,19 @@ def read_hold(path):
     except ValueError:
         pass
     return open_record, ["hold.json corrupt; read as open"]
+
+
+def run(kind, command, root, timeout, goal, **kwargs):
+    """Verify under admission (#1601): admit, run `command` in its own process group, measure, release.
+    Implemented in resource_verify.py (kept apart: this module starts no process); -> its Outcome."""
+    import importlib.util as _util
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    spec = _util.spec_from_file_location("resource_verify", os.path.join(here, "resource_verify.py"))
+    module = _util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.run(kind, command, root, timeout, goal, **kwargs)
 
 
 USAGE = ("usage: resource_guard.py sample [--json]\n"

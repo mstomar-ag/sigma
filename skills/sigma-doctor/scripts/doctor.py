@@ -1274,6 +1274,9 @@ def _blocker_rank_row(cfg, sdlc_dir, now=None):
         n = int(st.get("violations") or 0)
         last = st.get("last_repair")
         when = ("last repair %s ago" % _age_words(now - float(last))) if last else "no repair yet"
+        unread = int(st.get("unread") or 0)
+        if unread:                  # #1706: a count that did not read every blocker is not a clean one
+            when = "%s; %d not read" % (when, unread)
         if n == 0:
             return _chk("blockers ranked below what they block: 0 (%s)" % when, True, "")
         since = float(st.get("first_seen_nonzero") or now)

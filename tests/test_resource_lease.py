@@ -218,6 +218,82 @@ def test_process_start_of_this_process_is_stable_and_none_when_unknown(lease):
     assert lease.process_start(-1) is None
 
 
+def test_reclaiming_a_reused_pid_never_measures_the_foreign_process(lease, monkeypatch):
+    """#1722: a reused pid belongs to another process; its size must not reach the cost ring."""
+    seed_ring(lease, "verify", [100])
+    starts = {"now": 5000.0}
+    monkeypatch.setattr(lease, "process_start", lambda pid: starts["now"])
+    old = lease.admit("verify", 1, "r", "g1", pid=os.getpid())
+    path = pathlib.Path(lease.state_dir()) / "leases" / (old.id + ".json")
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), peak=0)))
+    lease.box["foot"][os.getpid()] = 99999
+    starts["now"] = 9000.0
+    asked = []
+    real = lease.take_footprint
+    monkeypatch.setattr(lease, "take_footprint", lambda pid: asked.append(pid) or real(pid))
+    lease.admit("verify", 1, "r", "g2", pid=os.getpid())
+    ring = json.loads((pathlib.Path(lease.state_dir()) / "observed.json").read_text())["verify"]
+    assert 99999 not in ring and ring == [100]
+    assert old.id + ".json" not in _leases(lease)
+
+
+def test_linux_process_start_is_converted_from_ticks_to_seconds(lease, monkeypatch):
+    stat = "42 (a b) S " + " ".join(["0"] * 18) + " 5000 0"  # starttime is field 22
+    monkeypatch.setattr(lease.sys, "platform", "linux")
+    monkeypatch.setattr(lease, "clock_ticks", lambda: 250)
+    import builtins
+    import io
+    real_open = builtins.open
+    monkeypatch.setattr(builtins, "open",
+                        lambda f, *a, **k: io.StringIO(stat) if str(f).startswith("/proc/") else real_open(f, *a, **k))
+    assert lease.process_start(42) == 20.0
+
+
+def test_clock_ticks_falls_back_to_100(lease, monkeypatch):
+    def boom(name):
+        raise OSError("no")
+    monkeypatch.setattr(lease.os, "sysconf", boom)
+    assert lease.clock_ticks() == 100
+
+
+def test_start_tolerance_compares_in_seconds(lease, monkeypatch):
+    monkeypatch.setattr(lease, "process_start", lambda pid: 101.5)
+    assert not lease.reused({"pid": 1, "pid_start": 100.0})
+    monkeypatch.setattr(lease, "process_start", lambda pid: 103.5)
+    assert lease.reused({"pid": 1, "pid_start": 100.0})
+
+
+def test_wait_applies_the_max_goals_cap(lease):
+    seed_ring(lease, "goal", [50])
+    lease.admit("goal", 1, "r", "g1", pid=os.getpid(), config={"max_goals": 1})
+    assert lease.wait(0, "goal", config={"max_goals": 1}) == lease.EXIT_HELD
+    assert lease.wait(0, "goal", config={"max_goals": 2}) == 0
+
+
+def test_wait_agrees_with_admit_under_pressure(lease, monkeypatch):
+    seed_ring(lease, "goal", [50])
+    monkeypatch.setattr(lease.guard.Limits, "admits", lambda self, kind, running=0: False)
+    assert isinstance(lease.admit("goal", 1, "r", "g1", pid=os.getpid()), lease.Hold)
+    assert lease.wait(0, "goal") == lease.EXIT_HELD
+    assert lease.wait(0, "session") == lease.EXIT_HELD
+
+
+def test_a_lease_record_without_a_goal_does_not_raise(lease):
+    seed_ring(lease, "goal", [50])
+    grant = lease.admit("goal", 1, "r", "g1", pid=os.getpid())
+    path = pathlib.Path(lease.state_dir()) / "leases" / (grant.id + ".json")
+    record = json.loads(path.read_text())
+    del record["goal"]
+    path.write_text(json.dumps(record))
+    assert lease.wait(0, "goal") in (0, lease.EXIT_HELD)
+    assert isinstance(lease.admit("goal", 1, "r", "g2", pid=os.getpid()), (lease.Grant, lease.Hold))
+
+
+def test_cli_wait_max_zero_on_a_temp_state_dir(tmp_path):
+    proc, took = cli(tmp_path, 800, "wait", "--max", "0")
+    assert proc.returncode == 0 and took < 4
+
+
 def test_wait_for_goal_holds_while_a_started_goals_verify_waits(lease):
     pathlib.Path(lease.state_dir()).mkdir(parents=True, exist_ok=True)
     seed = {"verify": [100], "goal": [50]}
