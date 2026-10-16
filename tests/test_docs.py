@@ -2511,3 +2511,24 @@ def test_resolver_confinement_is_documented_with_what_it_does_not_cover():
         assert "PROVISIONAL" in text and "port 443" in text and "Bash" in text
     assert "not filtered by host" in changelog and "filter by host name" in part_b
     assert "The session is NOT network" not in part_b
+
+
+def test_resolver_confinement_lists_the_gaps_the_wall_leaves_open():
+    """#1712: the macOS profile is allow-default, so the page and the changelog must name what it leaves open."""
+    part_b = (ROOT / "docs" / "upkeep-part-b.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    entry = [ln for ln in changelog.split("## Unreleased", 1)[1].splitlines() if "1712" in ln]
+    assert entry, "the Unreleased section needs a #1712 entry"
+    gaps = ("keychain", "mach service", "reads outside", "temp")
+    for text in (part_b, entry[0]):
+        low = text.lower()
+        for gap in gaps:
+            assert gap in low, gap
+    assert "does not cover" in part_b
+
+
+def test_session_argv_constant_is_gone_and_the_doctor_uses_the_function():
+    launcher = (ROOT / "skills/sigma-loop/scripts/feature_upkeep_launcher.py").read_text(encoding="utf-8")
+    doctor = (ROOT / "skills/sigma-doctor/scripts/doctor.py").read_text(encoding="utf-8")
+    assert "SESSION_ARGV" not in launcher and "SESSION_ARGV" not in doctor
+    assert "session_argv(" in doctor
