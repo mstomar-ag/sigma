@@ -376,3 +376,42 @@ def test_template_carries_the_resource_block_all_null():
     g = guard()
     block = json.loads(TEMPLATE.read_text(encoding="utf-8"))["resource"]
     assert block == g.DEFAULTS and all(math.isnan(0.0) is False and v is None for v in block.values())
+
+
+# ------------------------------------------------------------------------------------------------ #1714
+def test_repeat_hold_keeps_the_original_since():
+    g = guard()
+    first = _decide(g, [-GIB, -GIB, -GIB], "open", now=100.0)
+    again = _decide(g, [-GIB, -GIB, -GIB], "hold", now=200.0, prior_since=first.since)
+    assert first.state == again.state == "hold"
+    assert again.since == first.since == 100.0
+
+
+def test_empty_history_is_open_not_a_bare_value_error():
+    g = guard()
+    for prior in ("open", "hold"):
+        assert g.decide([], _limits(g), COST, prior, now=5.0).state == "open"
+
+
+def test_failed_hold_write_leaves_no_temp_and_names_are_per_process(tmp_path):
+    g = guard()
+    path = str(tmp_path / "hold.json")
+
+    def die(src, dst):
+        raise OSError("boom")
+
+    with pytest.raises(OSError):
+        g.write_hold(path, g.Decision("open", "ok", None, 2.0, None), _replace=die)
+    assert os.listdir(tmp_path) == []
+    seen = []
+    g.write_hold(path, g.Decision("open", "ok", None, 2.0, None), _replace=lambda s, d: (seen.append(s), os.replace(s, d)))
+    assert seen[0] == path + "." + str(os.getpid()) + ".tmp"
+
+
+def test_oversized_cpu_reserve_reads_as_derived_with_a_note():
+    g = guard()
+    limits = g.derive(smp(g, cpus=8), {"cpu_reserve_cores": 8})
+    assert limits.cpu_reserve == 1
+    assert any("cpu_reserve_cores" in n for n in limits.notes)
+    ok = g.derive(smp(g, cpus=8), {"cpu_reserve_cores": 7})
+    assert ok.cpu_reserve == 7 and not ok.notes
