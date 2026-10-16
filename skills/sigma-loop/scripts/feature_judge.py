@@ -90,6 +90,14 @@ def _load(name):
 
 feature_classify = _load("feature_classify")   # ABSTAIN / make_judgment -- see module docstring
 judge_isolation = _load("judge_isolation")     # #1472: refuse_ancestors, flag probe, child env
+_GUARD = []
+
+
+def _guard():
+    """resource_guard, loaded once (#1603): the one place a model session asks for admission."""
+    if not _GUARD:
+        _GUARD.append(_load("resource_guard"))
+    return _GUARD[0]
 
 
 def _note(message):
@@ -274,7 +282,12 @@ def ask_claude(prompt, json_schema, model="sonnet", timeout_s=60, max_budget_usd
     try:
         if iso.refuse_ancestors(scratch):
             return None, 0.0
-        proc = _run_group(argv, timeout=timeout_s, cwd=scratch, env=iso.child_env())
+        with _guard().session_lease("judge", "feature_judge", ttl=timeout_s * 2 + 60) as lease:   # #1603
+            if lease is not None and hasattr(lease, "reason"):    # held: the refusal path, no spawn
+                if reason_out is not None:
+                    reason_out.append(str(lease.reason))
+                return None, 0.0
+            proc = _run_group(argv, timeout=timeout_s, cwd=scratch, env=iso.child_env())
     except Exception:                          # noqa: BLE001 - launch failure/timeout -> never raise
         return None, 0.0
     finally:
