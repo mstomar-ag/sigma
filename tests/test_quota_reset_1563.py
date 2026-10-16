@@ -149,3 +149,27 @@ def test_closed_gate_and_other_kinds_keep_the_park_text_byte_identical(monkeypat
     other = [b for b in repo2.bodies() if "Retry-After" in b]
     assert len(other) == 1 and other[0].endswith(text + "\nsigma-qkind: needs_decision")
     assert all("sigma-reset-at" not in b for b in closed + other)
+
+
+# ---- #1641: the sync read path applies the parser's far-future bound ----------------------------
+
+class _ReadSrc:
+    def __init__(self, body, created):
+        self._c = [{"body": body, "createdAt": created}]
+
+    def _read_issue(self, issue, fields):
+        return {"labels": [], "comments": self._c}
+
+
+def _park_body(reset):
+    return "%s rate limited\n%s\nsigma-qkind: quota" % (AU.sources.PARK_COMMENT_PREFIX if hasattr(AU, "sources")
+                                                          else AP._load("unpark").sources.PARK_COMMENT_PREFIX,
+                                                          Q.render_reset_line(reset))
+
+
+def test_sync_read_keeps_a_near_reset_and_drops_a_far_future_one():
+    created = T0.isoformat()
+    near = AP._park_info(_ReadSrc(_park_body(T0 + 120 * MIN), created), 5)
+    far = AP._park_info(_ReadSrc(_park_body(T0 + 30 * 24 * 60 * MIN), created), 5)
+    assert near["reset_at"] == T0 + 120 * MIN
+    assert far["qkind"] == "quota" and far["reset_at"] is None
