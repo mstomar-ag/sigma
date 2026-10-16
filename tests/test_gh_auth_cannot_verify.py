@@ -53,3 +53,25 @@ def test_login_required_wording_is_still_logged_out():
                                  "To log in, run: gh auth login", 1, "gh: To get started with GitHub CLI, "
                                  "please run:  gh auth login"), 5, sleep=lambda s: None)
     assert row["ok"] is False and row["interactive"] is True
+
+
+@pytest.mark.parametrize("rest", [
+    (1, "gh: Bad Gateway (HTTP 502)"),
+    (1, "gh: Service Unavailable (HTTP 503)"),
+    (1, "gh: Server Error (HTTP 500)"),
+    (1, 'Post "https://api.github.com": EOF'),
+    (1, ""),
+])
+def test_server_error_eof_or_empty_rest_answer_is_cannot_verify(rest):
+    """#1708: only a REST 401 or the login-required wording is logged out."""
+    row, _ = _pf().check_gh_auth("github.com", _runner("some failure", *rest), 5, sleep=lambda s: None)
+    assert row["ok"] is None and row["interactive"] is False and row["commands"] == []
+    assert "gh auth login" not in json.dumps(row)
+    assert "cannot verify" in row["detail"]
+
+
+def test_successful_auth_status_is_unchanged():
+    def runner(argv, cwd=None, timeout=None):
+        return 0, "github.com\n  Logged in to github.com account octo (keyring)\n  - Active account: true\n"
+    row, _ = _pf().check_gh_auth("github.com", runner, 5, sleep=lambda s: None)
+    assert row["ok"] is True

@@ -551,12 +551,13 @@ def check_gh_auth(host, runner, timeout, sleep=time.sleep):
                     meanwhile="Re-run /sigma-doctor to check it; nothing here needs an interactive "
                               "login."), None
     seen = f"{out} {out2}".lower()
-    if (rrc == 124 or any(m in (rout or "").lower() for m in _NETWORK_MARKERS)) \
-            and "401" not in (rout or "") \
+    # #1708: logged out only on a REST 401 or the login-required wording; a 5xx, EOF, empty or unknown
+    # answer is "cannot verify" (the network markers above remain the documented examples).
+    if "401" not in (rout or "") \
             and not any(m in seen or m in (rout or "").lower() for m in _LOGIN_REQUIRED_MARKERS):
         first = printable(redact((rout or "").strip().splitlines()[0] if (rout or "").strip() else "no output"))
         return _chk("gh-auth", "gh auth", None,
-                    f"cannot verify: `gh auth status` failed and the REST read failed on the network "
+                    f"cannot verify: `gh auth status` failed and the REST read failed on the network or at GitHub "
                     f"({first}); re-run /sigma-doctor when the network is up",
                     meanwhile="Re-run /sigma-doctor to check it; nothing here needs an interactive "
                               "login."), None
