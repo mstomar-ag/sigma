@@ -907,8 +907,16 @@ def _read_config(sdlc_dir):
 USAGE = "usage: applier.py [sdlc_dir] [--dry-run] | applier.py sync [sdlc_dir]"
 
 
+DRY_RUN_OFF = ("applier dry-run: the applier is off (rulebook.autonomy.applier.enabled is not true); "
+               "set it to true to see planned actions")
+
+
 def _dry_run(sdlc_dir, config):
-    """Print each action the next pass would take, with its rule, level and effective window; write nothing."""
+    """Print each action the next pass would take, with its rule, level and effective window; write nothing.
+    With the applier off it prints one line saying so (#1545)."""
+    if not enabled(config):
+        print(DRY_RUN_OFF)
+        return 0
     window = settings(config)["window_minutes"]
     acts = tick(sdlc_dir, config, datetime.datetime.now(datetime.timezone.utc), apply_actions=False, dry_run=True)
     for a in acts:
@@ -935,7 +943,7 @@ def main(argv):
     try:
         config = _read_config(sdlc_dir)
         if dry:
-            return _dry_run(sdlc_dir, config) if enabled(config) else 0
+            return _dry_run(sdlc_dir, config)
         if enabled(config):                    # #1499: existing parks get their ask before the tick plans
             try:
                 opened = sync(sdlc_dir, config, _load("sources").GitHubSource(config))
