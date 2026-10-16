@@ -230,14 +230,16 @@ def test_learned_cost_is_peak_tree_footprint_over_workers_within_20_percent(env,
     cold ring). Control: a meter that sums nothing records the lease-holder's own tiny footprint, far outside 20%."""
     alloc = 300 * MIB
     cmd = sys.executable + " -c \"import time\nb=bytearray(%d)\nfor i in range(0,len(b),4096): b[i]=1\ntime.sleep(3)\"" % alloc
-    for _ in range(3):          # a loaded host can compress pages mid-run and under-read one sample
+    for _ in range(6):          # a loaded host can compress pages mid-run and under-read one sample
         (env.state / "observed.json").unlink(missing_ok=True)
+        # children a previous test left under this worker are counted too: measure and subtract them
+        base = env.tree_footprint(os.getpid(), env.lease.take_footprint)
         out = env.run("verify", cmd, str(tmp_path), 60, "g1", sample_gap=0.2)
         ring = json.loads((env.state / "observed.json").read_text())["verify"]
         assert out.workers == 1 and len(ring) == 1
-        if abs(ring[-1] - alloc) <= 0.2 * alloc:
+        if abs(ring[-1] - base - alloc) <= 0.2 * alloc:
             break
-    assert abs(ring[-1] - alloc) <= 0.2 * alloc, (ring, alloc)
+    assert abs(ring[-1] - base - alloc) <= 0.2 * alloc, (ring, base, alloc)
     assert not list((env.state / "leases").glob("*.json"))      # released in finally
 
 
