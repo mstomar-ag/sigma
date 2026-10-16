@@ -612,6 +612,19 @@ def _is_stuck(ask, period, now):
     return base is not None and now - base > 2 * period
 
 
+def _cannot_apply(sdlc_dir, config, ask, rules, capped):
+    """#1702: True when a pending ask cannot apply now: the daily cap is reached, its kind is a hard stop,
+    no rule matches, or its level is below 3. Anything unreadable reads as "could apply" (read every tick)."""
+    try:
+        qkind, area = ask.get("qkind"), ask.get("area") or "repo"
+        if capped or not isinstance(qkind, str) or _load("hard_stop").is_hardstop_kind(qkind, None, config):
+            return True
+        m = _load("rulebook").match(qkind, area, ask.get("options"), rules)
+        return m is None or not _level_ok(sdlc_dir, config, qkind, area, _auto_rule(rules, m.rule_id, config))
+    except Exception:
+        return False
+
+
 def read_vetoes(sdlc_dir, config, asks, now, comments_fn):
     """An owner's `no` comment is passed to `answer`. On a pending ask (created at or after it opened)
     it cancels the ask; on an applied ask (posted after `applied_at` and by `applied_at` + window) it
@@ -622,11 +635,17 @@ def read_vetoes(sdlc_dir, config, asks, now, comments_fn):
     cfg = settings(config)
     period = datetime.timedelta(minutes=cfg["window_minutes"])
     grace = datetime.timedelta(seconds=_interval(config) * cfg["stale_after_intervals"])
+    rules, capped = None, None
     for ask in asks:
         try:
             if ask.get("state") == "pending" and ask.get("answer") is None:
                 opened = _parse(ask.get("opened"))
                 stuck = _is_stuck(ask, period, now)
+                if not stuck:   # #1702: an ask that cannot apply now is throttled like a stuck one
+                    if rules is None:
+                        rules = _load("rulebook").load(sdlc_dir, config)
+                        capped = _applied_in_last_day(asks, now) >= cfg["max_auto_applied_per_day"]
+                    stuck = _cannot_apply(sdlc_dir, config, ask, rules, capped)
                 last_read = _parse(ask.get("veto_read_at"))
                 if stuck and last_read is not None and now - last_read < period:
                     continue    # #1360: a stuck ask is read at most once a window
