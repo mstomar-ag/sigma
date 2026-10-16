@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **The supervisor session lease now lasts 24h, not the 6h default (#1737).** A live supervised session longer than 6h was reclaimed as expired, freeing its slot while it still ran; both supervisor call sites now pass the ttl, and a dead pid is still reclaimed at once.
 - **Every Sigma-spawned model session now takes a `session` lease first (#1603).** The judge, the supervisor (Claude and Codex) and the upkeep launcher share `resource_guard.session_lease`, which releases on exit, exception or timeout; a hold becomes each site's own refusal, pause-and-relaunch or deferral. Off unless `resource.mode` (upkeep config) or `SIGMA_RESOURCE_MODE` is `observe` or `enforce`; off writes nothing. A ratchet test fails on a new host-CLI spawn that is not gated or listed.
 - **`resource_lease.py` follow-ups (#1722).** Reclaiming a lease whose pid was reused no longer measures the foreign process into the cost ring; Linux process start is in seconds (ticks divided by the clock rate) so the 2 s tolerance means seconds on both platforms; `wait` applies the same pressure and `max_goals` gates as `admit`; a lease record without a goal no longer raises.
 - The resource guard keeps a hold's original start on repeat ticks, reads an empty history as open, writes `hold.json` through a per-process temp name removed on failure, and reads a `cpu_reserve_cores` at or above the core count as derived plus a note (#1714).
