@@ -1777,6 +1777,22 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/resource_verify.py",
+      "function": "check_shed",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "operator-run verify only, when resource.mode is set and resource.shed is not off; writes one tiny stop file shed/<lease id>.stop under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, only after critical pressure held for several consecutive samples; the file is the signal bounded_run polls to stop THIS run's own process group (#1602)",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/resource_verify.py",
+      "function": "run",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "operator-run verify only; unlinks the one stop file of its own run in a finally (a missing file is ignored); never a directory, never another run's file (#1602)",
+      "risk": "medium"
+    },
+    {
       "path": "skills/sigma-loop/scripts/retention.py",
       "function": "_unlink_streams",
       "rule": "fs-remove",
