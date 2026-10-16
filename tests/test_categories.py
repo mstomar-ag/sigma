@@ -65,7 +65,7 @@ def test_override_applies_to_its_pair_only(tmp_path):
     _answer(tmp_path, cfg, 2, "src")
     assert A.level(tmp_path, "needs_decision", "docs", cfg) == 1
     assert A.level(tmp_path, "needs_decision", "src", cfg) == 1
-    _write(tmp_path, [{"id": "slow", "title": "Slow", "areas": ["docs"], "levels": {"l1_min_answers": 5}}])
+    _write(tmp_path, [{"id": "slow", "title": "Slow", "areas": ["docs"], "levels": {"l1_min_answers": 3}}])
     assert A.level(tmp_path, "needs_decision", "docs", cfg) == 0
     assert A.level(tmp_path, "needs_decision", "src", cfg) == 1
     _write(tmp_path, [{"id": "fast", "areas": ["docs"], "levels": {"l1_min_answers": 1}}])
