@@ -251,6 +251,7 @@ Drafting is deliberate and conservative:
 ```
 python3 skills/sigma-loop/scripts/rule_draft.py list    .sdlc                 # pairs at level 2 or more whose answers agree
 python3 skills/sigma-loop/scripts/rule_draft.py draft   .sdlc <qkind> <area>  # proposes; never approves
+python3 skills/sigma-loop/scripts/rule_draft.py suggest .sdlc [--propose N]  # ranks the pairs that matter; N drafts proposals
 python3 skills/sigma-loop/scripts/rule_draft.py approve .sdlc <rule_id>       # owner only
 ```
 
@@ -260,6 +261,8 @@ drafts the rule, and the other part is an exam: the draft passes only when the h
 fails closed on a small held-out set, a tie, a missing option, a hard-stop kind, a level below 2, or a pair that already
 has a rule. It needs the rules, autonomy and records parts all open. On a public repository only answers that are bank options
 are stored, so drafts and comparisons work from those alone.
+
+`rule_draft.py suggest .sdlc` ranks the question kind and area pairs by importance from the repository's own records: how many parks, how many hours the goals stayed parked (until that goal's next record, else now), how many goals the parked goals block (directly or through chains, read from the open issues' own `Blocked by` text; zero when that cannot be read), and how often the answers repeat (the comparison key of `decision_record.key_of`). The score is parks plus hours divided by 24 plus blocked goals, times the agreement. Each line names the suggested option (the majority key) and whether one any-area rule (area `*`) covers the pair or the area needs its own rule because its answers differ from the kind's. Hard-stop and `unknown` kinds are never listed. `--propose N` drafts the top N uncovered rules through the same exam as `draft` (one `*` rule per kind where the areas agree) and never approves; the owner approves with `rule_draft.py approve`. When rules are on, the doctor's rulebook row lists the top three uncovered pairs.
 
 `rule_draft.py list --why` also prints one `skipped <kind> / <area>: <reason>` line for each pair left out (hard-stop
 or unknown kind, level below 2, or the share of the most common answer). `rule_draft.py due` prints, for each approved
