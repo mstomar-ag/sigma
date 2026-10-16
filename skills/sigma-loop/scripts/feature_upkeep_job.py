@@ -156,6 +156,7 @@ def run_job(config, sdlc_dir, root, unit, run_id, cap, *, environ=None, command=
     return {"outcome": outcome, "unit_tip": tip}
 
 
+SWEEP_NOTES_MAX, SWEEP_NOTE_CHARS, SWEEP_UNREGISTERED_MAX = 5, 200, 50      # PROVISIONAL bounds on the record's size (#1493)
 SWEEP_UNIT = "window"          # the record's unit key for a sweep (it is no unit's outcome)
 
 
@@ -196,10 +197,18 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
         beat_path = sched.path_of(sdlc_dir, sched.BEAT_REL)
         _touch(beat_path)
         counts, unreached, outcome = {}, [], "failed"
+        seen = {"units_listed": 0, "unregistered": [], "notes": []}        # #1493: what the sweep could not see
         try:
             reading = feature_upkeep.read(config)
-            names = sched.selected((list_units or sched.list_units)(sdlc_dir), reading.settings["units.include"],
-                                   reading.settings["units.exclude"])
+            if list_units:
+                listed = list(list_units(sdlc_dir))
+            else:
+                listed, seen["notes"] = sched.list_units_notes(sdlc_dir)
+                seen["notes"] = [n[:SWEEP_NOTE_CHARS] for n in seen["notes"][:SWEEP_NOTES_MAX]]
+            seen["units_listed"] = len(listed)
+            seen["unregistered"] = sched.unregistered_heads(sdlc_dir, _sibling("feature_rebase")._remote(config), root,
+                                                            registered=listed)[:SWEEP_UNREGISTERED_MAX]
+            names = sched.selected(listed, reading.settings["units.include"], reading.settings["units.exclude"])
             clk = beat or BeatingClock(lambda: _touch(beat_path), base=clock)
             started = clk()
             stops = (sched.path_of(sdlc_dir, sched.STOP_REL), sched.path_of(sdlc_dir, sched.WATCH_STOP_REL))
@@ -221,7 +230,7 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
                     break
             outcome = "swept"
         finally:
-            summary = {"counts": counts, "unreached": unreached}
+            summary = dict(seen, counts=counts, unreached=unreached)
             _record(sdlc_dir, dict(head, state="done", outcome=outcome, unit_tip=None, finished_at=stamp_now(), sweep=summary))
             done_units = sum(n for w, n in counts.items() if w not in ("timeout", "stopped"))
             every_failed = bool(counts) and set(counts) == {"failed"}       # nothing worked: an attempt, retried after retry_minutes
@@ -229,7 +238,7 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
                 window.stamp(sdlc_dir, stamp_now(), outcome, unreached)
             else:
                 window.stamp_attempt(sdlc_dir, stamp_now(), outcome, unreached)
-    return {"outcome": outcome, "sweep": {"counts": counts, "unreached": unreached}}
+    return {"outcome": outcome, "sweep": summary}
 
 
 SKIPPED_AFTER = "rebased"     # the older pass's outcome word for "I moved the unit": the new unit pass then stays out of the run

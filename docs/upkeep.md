@@ -62,6 +62,9 @@ The scheduler no longer polls each unit. It works on a window, `upkeep.window_ho
   `upkeep.units.exclude` (an exclude always wins), and then runs the per-unit engine for each unit, one at a
   time. A unit already at its base costs one bounded read and nothing else, which is how a user whose window
   opens right after a colleague's sweep changes nothing.
+  The units come from the registry (`.sdlc/features/`) alone: a remote `feature/*` branch with no registry record
+  is not maintained, and the job record (`units_listed`, `unregistered`, `notes`) and the doctor name it, even when
+  the repository has no registry at all. The branching model's registry section says how a unit gets a record.
 - **Failures do not spread.** A unit that is refused, parked or failed does not stop the others.
 - **The time cap.** All units share one total wall-clock cap: `upkeep.verify.timeout_minutes` (default 60)
   plus a fixed 15-minute margin. A unit that the cap, `state/upkeep.stop` or `state/watch.stop` prevented from

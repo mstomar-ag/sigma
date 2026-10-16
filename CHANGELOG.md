@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- The upkeep sweep now says what it cannot see: the job record gains `units_listed`, `unregistered` (remote `feature/*` branches with no registry record) and the registry reader's `notes`, and the doctor shows an upkeep units row naming each unmaintained remote feature branch, also when no `.sdlc/features/` exists (#1493).
 - The upkeep engine now records the per-unit state file (`.sdlc/state/upkeep/units/<unit>.json`) at its single exit on every pass, under the unit lock, and the job no longer records the same outcome a second time (#1492).
 - With triage on, a rebase-upkeep finding (goal-branch conflict, parked conflict, direct commits, would-drop refusal) is now filed parked with a declared question kind (`merge_conflict` or `needs_decision`), a park event and the lowest triage priority instead of P1, and no longer carries the legacy confirmation label, so the doctor no longer reports it as a leftover; with triage off nothing changes (#1490).
 - **`rule_draft.py suggest` ranks which question kind and area pairs deserve a rule (#1513).** It scores each pair from parks, hours parked, goals blocked and answer agreement, names the majority option and whether one any-area rule covers it, never lists hard-stop or unknown kinds, and `--propose N` drafts the top N as proposals (never approved); the doctor's rulebook row lists the top uncovered pairs when rules are on.
