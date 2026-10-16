@@ -89,23 +89,43 @@ def _record(sdlc_dir, doc):
 PRUNE_REL = "state/upkeep/prune.json"     # #1557: the last automatic backup prune (read by the doctor)
 
 
-def _prune_pass(config, sdlc_dir, root, at, prune=None, prune_run=None, beat_path=None):
+PRUNE_CALL_LIMIT = 60.0     # #1700: the longest one git call of the prune may run, seconds
+
+
+def _prune_pass(config, sdlc_dir, root, at, prune=None, prune_run=None, beat_path=None, deadline_s=None, clock=time.monotonic):
     """#1557: once per sweep, prune backup refs past keep_days (newest keep_last per unit kept; at most MAX_DELETES). Never
-    raises: a failure is recorded as outcome `failed` and the next sweep replans the same refs. -> the bounded record."""
+    raises: a failure is recorded as outcome `failed` and the next sweep replans the same refs. #1700: `deadline_s` is the
+    sweep's remaining cap; no git call starts once it is spent and the default runner's call is cut at it (outcome `timeout`,
+    retried next sweep). -> the bounded record."""
+    spent = []
     try:
-        if beat_path:                       # #1632: the prune touches the sweep beat before every git call, so a slow remote never reads as a dead sweep
+        if beat_path or deadline_s is not None:      # #1632: touch the sweep beat before every git call, so a slow remote never reads as a dead sweep
             inner = prune_run or _sibling("feature_backup").sync._run
+            default = prune_run is None
+            end = None if deadline_s is None else clock() + max(0.0, float(deadline_s))
 
             def prune_run(*a, **k):
-                _touch(beat_path)
-                return inner(*a, **k)
+                if beat_path:
+                    _touch(beat_path)
+                if end is not None:
+                    left = end - clock()
+                    if left <= 0:
+                        spent.append(1)
+                        raise _sibling("feature_backup").sync.RunTimeout("the prune deadline is spent")
+                    if default:                   # only the default runner takes a timeout; injected runners keep their signature
+                        k["timeout"] = min(left, PRUNE_CALL_LIMIT)
+                try:
+                    return inner(*a, **k)
+                except _sibling("feature_backup").sync.RunTimeout:
+                    spent.append(1)
+                    raise
         res = (prune or _sibling("feature_backup").prune_backups)(
             config, sdlc_dir, remote=_sibling("feature_rebase")._remote(config), cwd=root, **({"run": prune_run} if prune_run else {}))
-        word = str(res.get("outcome") or "failed")[:20]
+        word = "timeout" if spent else str(res.get("outcome") or "failed")[:20]
         doc = {"outcome": word, "deleted": res.get("deleted") if isinstance(res.get("deleted"), int) else 0,
                "listed": res.get("listed") if isinstance(res.get("listed"), int) else 0, "at": at}
     except Exception:                       # noqa: BLE001 - a prune that cannot run never fails the sweep
-        doc = {"outcome": "failed", "deleted": 0, "listed": 0, "at": at}
+        doc = {"outcome": "timeout" if spent else "failed", "deleted": 0, "listed": 0, "at": at}
     sched.write_json(sdlc_dir, PRUNE_REL, doc)
     return doc
 
@@ -265,10 +285,10 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
                     break
             outcome = "failed" if counter_failed else "swept"
             if not counter_failed and not any(os.path.exists(p) for p in stops):
-                if cap - (clk() - started) <= 0:      # #1632: the cap is spent, so the prune (which has no cap of its own) waits for the next sweep
+                if cap - (clk() - started) <= 0:      # #1632: the cap is spent, so the prune waits for the next sweep
                     seen["prune"] = {"outcome": "skipped", "deleted": 0, "listed": 0, "at": stamp_now()}
                 else:
-                    seen["prune"] = _prune_pass(config, sdlc_dir, root, stamp_now(), prune, prune_run, beat_path)      # #1557
+                    seen["prune"] = _prune_pass(config, sdlc_dir, root, stamp_now(), prune, prune_run, beat_path, cap - (clk() - started), clk)      # #1557, #1700: the prune gets the remaining cap
         finally:
             if feature_upkeep.conflict_level(config) == "agent":
                 try:
