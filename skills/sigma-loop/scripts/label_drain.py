@@ -42,6 +42,7 @@ bounded by the above plus 20 briefs, not by the 50-GET walk bound alone.
 call it with one end goal as the seed.
 """
 import collections
+import hashlib
 import importlib.util
 import json
 import pathlib
@@ -56,6 +57,17 @@ def _load(name):
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
+
+
+_LIGHT = {}
+
+
+def _light(name):
+    """A small sibling module, loaded once (`_load` re-executes the module each call, which is costly for
+    the helpers below that run per question)."""
+    if name not in _LIGHT:
+        _LIGHT[name] = _load(name)
+    return _LIGHT[name]
 
 
 USAGE = ("usage: label_drain.py plan|status <sdlc_dir> <label> [--json]\n"
@@ -428,7 +440,7 @@ def plan(sdlc_dir, label, config=None, run=None):
             unresolved_all[tag].append(r["number"])
     counts = collections.Counter(r["display"] for r in rows)
     paid = {i["number"]: i.get("body") or "" for i in member_issues}
-    qs = questions(label, rows, outside, paid, config)
+    qs = _annotate(sdlc_dir, config, label, questions(label, rows, outside, paid, config))
     unread = [r["number"] for r in rows + outside if r.get("kind") in ("not-read", "unreadable")]
     return {"label": label, "repo": repo, "members": rows, "outside": outside,
             "questions": qs, "ready": not qs and not unread,
@@ -436,6 +448,124 @@ def plan(sdlc_dir, label, config=None, run=None):
             "warnings": warnings, "stops": clo["stops"], "counts": dict(sorted(counts.items())),
             "pickable": sum(1 for r in rows if r["ready"]), "pulled": clo["pulled"],
             "drained": not rows, "calls": ro.summary()}
+
+
+# --- label kinds and scope (#1581) ---------------------------------------------------------------
+
+def label_kind(label, config=None):
+    """The kind a run label belongs to: `label_drain.kinds` (exact name -> kind) when it names this label
+    with a non-empty string, else the name up to its first `:` or `/`, else the whole name. A label with
+    no usable name reads `other`. A wrong-typed map or value is ignored."""
+    name = str(label or "").strip()
+    try:
+        kinds = (config or {}).get("label_drain", {}).get("kinds")
+    except AttributeError:
+        kinds = None
+    if isinstance(kinds, dict):
+        v = kinds.get(name)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    head = re.split(r"[:/]", name, maxsplit=1)[0].strip()
+    return head or name or "other"
+
+
+def _public(config):
+    return _light("decision_store")._visibility(config) == "public"
+
+
+def _hash(text):
+    return hashlib.sha256(str(text).encode("utf-8")).hexdigest()[:12]
+
+
+def _scope(label, config):
+    """The record scope of one run label; under public visibility a short hash, never the name."""
+    return "label:" + (_hash(label) if _public(config) else label)
+
+
+def _kind_area(label, config):
+    """The area a label-level question is recorded and learned under: `label-kind:<kind>` (hashed when
+    public); the old `repo` while the records part is closed, so closed gates change nothing."""
+    if not _light("decision_store").enabled(config):
+        return "repo"
+    kind = label_kind(label, config)
+    return "label-kind:" + (_hash(kind) if _public(config) else kind)
+
+
+def _rec_qid(qid, label, config):
+    """The question id as it is stored: the label-level id carries the label name, so public hashes it."""
+    if _public(config) and qid == "label_set:" + label:
+        return "label_set:" + _hash(label)
+    return qid
+
+
+def _history(sdlc_dir, config, label, q):
+    """#1581: one line saying what was answered before on this label (or, failing that, on labels of its
+    kind); '' when nothing is on record. Only with the records part open."""
+    try:
+        scope, recs = _scope(label, config), _light("decision_store").list_by(sdlc_dir, config)
+        mine = [r for r in recs if r.get("scope") == scope and r.get("qkind") == q["kind"]]
+        if mine:
+            last = mine[-1]
+            return "last time on this label: %s" % (last.get("answer") or last.get("choice") or "(none recorded)")
+        if q["kind"] == "label_set":
+            counts = collections.Counter(r.get("answer") or r.get("choice") for r in recs
+                                         if r.get("qkind") == "label_set" and r.get("area") == q["area"]
+                                         and (r.get("answer") or r.get("choice")))
+            if counts:
+                return "on labels of this kind: " + ", ".join("%s %d" % kv for kv in sorted(counts.items()))
+    except Exception:                                   # noqa: BLE001 - a history line never breaks a plan
+        pass
+    return ""
+
+
+def _recommend(sdlc_dir, config, q):
+    """#1581: the approved rule for the arming question's kind, as `{rule_id, option}`, else None. Only the
+    arming question is learnable; a spend question is never recommended. Never applied by itself."""
+    try:
+        rb = _light("rulebook")
+        if q["kind"] != "label_set" or not rb.enabled(config):
+            return None
+        pre = rb.prefill(sdlc_dir, "label_set", q["area"], q["options"], config)
+        return {"rule_id": pre["rule"], "option": pre["recommend"]} if pre else None
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def _annotate(sdlc_dir, config, label, qs):
+    """Add `history` and `recommendation` to the questions. Closed gates add nothing (same dicts)."""
+    on = _light("decision_store").enabled(config)
+    for q in qs:
+        if on:
+            h = _history(sdlc_dir, config, label, q)
+            if h:
+                q["history"] = h
+        rec = _recommend(sdlc_dir, config, q)
+        if rec:
+            q["recommendation"] = rec
+            q["options"] = [rec["option"]] + [o for o in q["options"] if o != rec["option"]]
+    return qs
+
+
+def kind_summary(sdlc_dir, config):
+    """-> [{"kind", "answers", "level", "covered"}] one per label-level area with records, for the doctor.
+    [] when the records part is closed. Never raises."""
+    try:
+        dr = _light("decision_record")
+        if not dr.enabled(config):
+            return []
+        recs = [r for r in _light("decision_store").list_by(sdlc_dir, config, qkind="label_set")
+                if str(r.get("area") or "").startswith("label-kind:")]
+        au, rb = _light("autonomy"), _light("rulebook")
+        out = []
+        for area in sorted({r["area"] for r in recs}):
+            rules = rb.load(sdlc_dir, config) if rb.enabled(config) else []
+            out.append({"kind": area[len("label-kind:"):],
+                        "answers": sum(1 for r in recs if r["area"] == area and dr.is_park_answer(r)),
+                        "level": au.level(sdlc_dir, "label_set", area, config),
+                        "covered": rb.match("label_set", area, None, rules, config) is not None})
+        return out
+    except Exception:                                   # noqa: BLE001
+        return []
 
 
 # --- up-front questions (#1578) ------------------------------------------------------------------
@@ -524,6 +654,7 @@ def questions(label, rows, outside, paid_bodies, config):
     if unarmed:
         slot = unpark.route_slot("label_set")
         add("label_set:%s" % label, "label_set", [], slot["ask"], slot["options"], unarmed)
+        out[-1]["area"] = _kind_area(label, config)
     for r in sorted(rows, key=lambda x: x["number"]):
         if r["verdict"] in ("upper-tier", "closed"):
             continue
@@ -578,6 +709,11 @@ def render_plan(p):
         out.append("  %d. [%s] %s" % (i, q["id"], q["ask"]))
         if q["options"]:
             out.append("     options: " + " / ".join(q["options"]))
+        if q.get("recommendation"):
+            out.append("     recommended: %s (rule %s, a suggestion; nothing is applied until you answer)" % (
+                q["recommendation"]["option"], q["recommendation"]["rule_id"]))
+        if q.get("history"):
+            out.append("     history: " + q["history"])
         out.append("     unblocks: %s; recorded under area %s" % (
             ", ".join("#%d" % x for x in q["unblocks"]) or "nothing yet", q["area"]))
         if q.get("note"):
@@ -758,7 +894,7 @@ def _bank_match(options, text):
     return None
 
 
-def _lookup(qid, p, label):
+def _lookup(qid, p, label, config=None):
     """-> the question `qid` names, or None. A question `plan` no longer asks (its effect already
     stands, or it was answered before) is still accepted when its id is well formed for this label and
     its options come from the bank, so a repeat or a crash recovery is not refused."""
@@ -773,7 +909,7 @@ def _lookup(qid, p, label):
             return None
         slot = unpark.route_slot("label_set")
         return {"id": qid, "kind": kind, "options": list(slot["options"]), "unblocks": [], "target": target,
-                "area": "repo"}
+                "area": _kind_area(label, config)}
     if not target.isdigit() or int(target) not in rows:
         return None
     r, n = rows[int(target)], int(target)
@@ -791,13 +927,13 @@ def _lookup(qid, p, label):
     return {"id": qid, "kind": kind, "options": opts, "unblocks": [n], "target": target, "area": area}
 
 
-def _validate_answers(answers, p, label):
+def _validate_answers(answers, p, label, config=None):
     """-> (errors, {qid: (question, choice)}). The whole file is judged before any write."""
     errors, good = [], {}
     if not isinstance(answers, dict) or not answers:
         return ["the answers file must be a JSON object mapping question ids to answers"], good
     for qid, raw in answers.items():
-        q = _lookup(qid, p, label)
+        q = _lookup(qid, p, label, config)
         if q is None:
             errors.append("unknown question id %r (run `plan` to list the ids)" % (qid,))
         elif not isinstance(raw, str) or not raw.strip():
@@ -818,8 +954,9 @@ def _recorded(sdlc_dir, config, label):
     out = {}
     try:
         for r in _load("decision_store").list_by(sdlc_dir, config):
-            if r.get("scope") == "label:" + label and r.get("qid"):
-                out.setdefault(r["qid"], set()).update(x for x in (r.get("choice"), r.get("answer")) if x)
+            if r.get("scope") == _scope(label, config) and r.get("qid"):
+                qid = "label_set:" + label if r["qid"] == _rec_qid("label_set:" + label, label, config) else r["qid"]
+                out.setdefault(qid, set()).update(x for x in (r.get("choice"), r.get("answer")) if x)
     except Exception:                                   # noqa: BLE001 - an unreadable store only loses dedupe
         pass
     return out
@@ -870,7 +1007,7 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
     config = config if config is not None else _load("state").load_config(sdlc_dir)
     base = run or sources._run_gh
     p = plan(sdlc_dir, label, config=config, run=base)
-    errors, good = _validate_answers(answers, p, label)
+    errors, good = _validate_answers(answers, p, label, config)
     out = {"label": label, "dry_run": bool(dry_run), "errors": errors, "results": [], "open": [], "ready": False}
     if errors:
         return out                                      # refused whole, nothing written
@@ -879,7 +1016,7 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
     order = [q["id"] for q in p["questions"]]
     done_before = _recorded(sdlc_dir, config, label)
     answered = set()
-    scope = "label:" + label
+    scope = _scope(label, config)
 
     def record(q, kind, choice, gesture="ack"):
         """The one record + comment, through the shared writer. -> list of lines."""
@@ -889,11 +1026,18 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
             return []
         if dry_run:
             return ["would record the decision (%s: %s) and post one comment on #%s" % (q["id"], choice, goal)]
+        if kind == "label_set":                         # #1581: a counted answer (an `ack` never counts toward a level)
+            gesture = "unpark" if str(choice).startswith("arm") else "keep-parked"
         rec = dr.build(gesture, goal, kind, choice, "answer to %s" % q["id"], dr.how_for(gesture),
                        area=q.get("area"), answer=choice)
-        rec["scope"], rec["qid"] = scope, q["id"]
+        rec["scope"], rec["qid"] = scope, _rec_qid(q["id"], label, config)
+        shown = q.get("recommendation")
+        if kind == "label_set" and shown:               # #1581: the person saw a rule's suggestion
+            rec["rule_id"], rec["shown"] = str(shown["rule_id"]), True
+            rec["accepted"] = dr.key_of(rec) == shown["option"]
         res = dr.write_all(sdlc_dir, rec, config, source,
-                           text="Run label %s: answered %r." % (label, choice))
+                           text="Run label %s: answered %r." % ("(name withheld)" if _public(config) else label,
+                                                                choice))
         return ["recorded decision %s" % (res["id"] or "(not stored)")] + (
             [res["error"]] if res["error"] else [])
 

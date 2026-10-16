@@ -5720,6 +5720,9 @@ def _autonomy_state(cfg, sdlc_dir=None):
                     lines.append("%s / %s: level %d unreachable: needs %d comparisons, %d recorded in the last %d days"
                                  % (r["qkind"], r["area"] or "-", r["next_level"], need, recent, days))
         lines += _load_loop_script("autonomy").category_notes(sdlc_dir if sdlc_dir is not None else ".sdlc", cfg)
+        for k in _load_loop_script("label_drain").kind_summary(sdlc_dir if sdlc_dir is not None else ".sdlc", cfg):
+            lines.append("run label kind %s: %d answer(s), level %d, rule covers: %s"
+                         % (k["kind"], k["answers"], k["level"], "yes" if k["covered"] else "no"))
         return head + "".join("\n      " + l for l in lines)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__

@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **Run labels learn by kind (#1581).** `label_drain.py plan` and `answer` record the arming question under `label-kind:<kind>` (kind from the label prefix or `label_drain.kinds`), show an approved rule's option first as recommended and add a history line per question when records are on; the answer record carries `rule_id`, `shown` and `accepted`, public repositories hash the label name, and the doctor lists answers, level and rule coverage per label kind. With the gates closed the output is unchanged.
 - **`resource_lease.py` lease-table fixes (#1715).** A lease whose pid was reused by another process (start time differs from the one recorded at admit) is reclaimed as stale; `wait --kind goal` holds while a started goal's verify is waiting, matching `admit`; releasing a lease file with no id no longer raises KeyError; `wait --max` rejects nan and negative values with a usage error (exit 2).
 - Filing triage now parks euro and pound amounts (symbol, code or word) near a compute noun as spend, like dollar amounts; fenced blocks and amounts with no compute noun still arm (#1710).
 - **A quoted or backticked deny word after an action verb now holds the filing (#1704).** A command in quotes after a verb, a hand-off word or a purpose clause (redact X to nuke Y) parks again; quoted mentions after a noun head or a naming verb still arm.
