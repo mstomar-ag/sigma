@@ -491,3 +491,45 @@ def test_land_prunes_stale_records(tmp_path):
     os.utime(other, (1, 1))
     w.land()
     assert not other.exists()
+
+
+# ------------------------------------------- #1552: the verb measures the sibling half itself (no `landed` supplied)
+
+class SiblingWorld(World):
+    """A World whose gh pull-request list answers differently for the sibling repository's head."""
+
+    sibling_prs, sibling_rc = (), 0
+
+    def run(self, argv, cwd):
+        if argv[0] == "gh" and "head=acme" in " ".join(argv):
+            self.git_calls.append(list(argv))
+            return (self.sibling_rc, json.dumps(list(self.sibling_prs)), "boom" if self.sibling_rc else "")
+        return super().run(argv, cwd)
+
+
+MERGED_ROW = {"number": 9, "state": "closed", "draft": False, "merged_at": "2026-01-01T00:00:00Z",
+              "created_at": "2026-01-01T00:00:00Z", "base_ref": "main", "head_sha": "d" * 40}
+
+
+def test_pair_unit_lands_when_the_verb_itself_finds_the_sibling_pull_request_merged(tmp_path):
+    w = SiblingWorld(tmp_path, sibling_prs=[MERGED_ROW])
+    pair_unit(w)
+    out = w.land()
+    assert out["outcome"] == "rehearsal" and w.passes == ["voice"], out
+
+
+def test_pair_unit_with_an_unmerged_sibling_is_refused_naming_goal_repo_and_remedy(tmp_path):
+    w = SiblingWorld(tmp_path, sibling_prs=[dict(MERGED_ROW, state="open", merged_at=None)])
+    pair_unit(w)
+    out = w.land()
+    assert out["outcome"] == "refused:sibling" and w.passes == [], out
+    assert "goal #2" in out["detail"] and "acme/other" in out["detail"], out
+    assert "remove that repository from the unit's registry entry" in out["detail"], out
+
+
+def test_pair_unit_fails_closed_when_the_sibling_pull_request_list_cannot_be_read(tmp_path):
+    w = SiblingWorld(tmp_path, sibling_rc=1)
+    pair_unit(w)
+    out = w.land()
+    assert out["outcome"] == "refused:sibling" and w.passes == [], out
+    assert "goal #2" in out["detail"] and "could not be determined" in out["detail"], out

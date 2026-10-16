@@ -675,6 +675,12 @@ def _unit_landing_records(sdlc_dir, unit, max_records=None):
     return found, None
 
 
+def _goal_words(goals):
+    """` (goal #2, goal #5)` for the goals the registry records for a repository, or `` when it records none."""
+    ids = [g for g in goals if isinstance(g, int) and not isinstance(g, bool)] if isinstance(goals, list) else []
+    return " (%s)" % ", ".join("goal #%d" % g for g in ids) if ids else ""
+
+
 def unit_sibling_check(sdlc_dir, unit, here, landed=None, max_records=None):
     """-> `(ok, reason)`: has every OTHER repository's half of `unit` landed?
 
@@ -720,10 +726,12 @@ def unit_sibling_check(sdlc_dir, unit, here, landed=None, max_records=None):
     if not repos:
         return True, ""                         # not a pair: nothing to check, nothing looked up
     for repo in sorted(repos.values()):
-        branch = (entry["repos"].get(sync.repo_key(entry["repos"], repo)) or {}).get("branch")
+        recorded = entry["repos"].get(sync.repo_key(entry["repos"], repo)) or {}
+        branch = recorded.get("branch")
+        who = _goal_words(recorded.get("goals"))
         if not branch:
-            return False, ("cross-repo unit `%s`: the feature registry records no branch for %s, so the other half "
-                           "cannot be identified" % (unit, repo))
+            return False, ("cross-repo unit `%s`: the feature registry records no branch for %s%s, so the other half "
+                           "cannot be identified" % (unit, repo, who))
         if landed is None:
             return False, ("cross-repo unit `%s`: nothing was supplied to measure whether %s has landed" % (unit, repo))
         try:
@@ -733,10 +741,10 @@ def unit_sibling_check(sdlc_dir, unit, here, landed=None, max_records=None):
                            % (unit, repo, branch, type(exc).__name__))
         if verdict is not True:
             if verdict is False:
-                return False, ("cross-repo unit `%s`: the other half in %s `%s` has not landed -- landing one half "
-                               "of a pair alone is a human decision" % (unit, repo, branch))
+                return False, ("cross-repo unit `%s`: the other half in %s `%s` has not landed%s -- landing one "
+                               "half of a pair alone is a human decision" % (unit, repo, branch, who))
             return False, ("cross-repo unit `%s`: whether the other half in %s `%s` has landed could not be "
-                           "determined (no clear answer)" % (unit, repo, branch))
+                           "determined%s (no clear answer)" % (unit, repo, branch, who))
     return True, ""
 
 
