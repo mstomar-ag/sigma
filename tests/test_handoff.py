@@ -2856,3 +2856,70 @@ def test_create_tracked_issue_needs_person_ignored_when_triage_is_off_1703(tmp_p
 def test_deny_list_still_wins_over_needs_person_1703(tmp_path):
     _r, src = _file(tmp_path, why="this change is irreversible once merged", needs_person="needs_decision")
     assert "sigma-qkind: irreversible" in src.parked[0][1]
+# --- #1697: the per-goal cap parks the lowest priority; `open --priority` forwards the request -------
+
+class _NumberedSource(TriageSource):
+    def __init__(self):
+        super().__init__("0")
+        self.n = 100
+
+    def create_dependency(self, title, body, assignee, labels=(), goal_label=True):
+        self.n += 1
+        super().create_dependency(title, body, assignee, labels, goal_label)
+        return str(self.n)
+
+
+def _five_requested(tmp_path, prio):
+    for _ in range(5):
+        _r, src = _file(tmp_path, None, priority=prio, priority_requested=True)
+        assert src.parked == []
+
+
+def test_higher_priority_filing_parks_the_newest_lowest_armed_one_1697(tmp_path):
+    src = _NumberedSource()
+    for _ in range(5):
+        _file(tmp_path, None, src=src, priority="P3", priority_requested=True)
+    assert src.parked == []
+    _r, src = _file(tmp_path, None, src=src, priority="P2", priority_requested=True)
+    assert [g for g, _t in src.parked] == ["105"]          # the newest P3, not the new P2
+    assert "ai_filed.max_per_goal" in src.parked[0][1] and "ai_filed.max_per_run" in src.parked[0][1]
+    assert src.created["goal_label"] is True
+    # the parked entry no longer counts: the counter holds five armed filings, so the next P3 is parked itself
+    _r, src = _file(tmp_path, None, src=src, priority="P3", priority_requested=True)
+    assert len(src.parked) == 2 and src.parked[1][0] == "107"
+
+
+def test_open_forwards_requested_priority_past_the_goal_cap_1697(tmp_path):
+    for _ in range(5):
+        _file(tmp_path, None, priority="P2")
+    src = TriageSource()
+    rep = handoff.hand_off(_project(tmp_path), dict(ON), "42", "api", "blocking dependency",
+                           priority="P1", source=src, priority_requested=True)
+    assert rep["issue"] and src.parked == []
+
+
+def test_open_priority_does_not_pass_the_per_run_cap_1697(tmp_path, monkeypatch):
+    monkeypatch.setattr(handoff, "_run_id", lambda: "run-1697")
+    cfg = dict(ON, ai_filed={"max_per_run": 1})
+    _file(tmp_path, cfg, priority="P2", goal="1")
+    src = TriageSource()
+    handoff.hand_off(str(tmp_path), cfg, "2", "api", "blocking dependency", priority="P1", source=src,
+                     priority_requested=True)
+    assert len(src.parked) == 1 and "ai_filed.max_per_run" in src.parked[0][1]
+
+
+def test_cli_track_then_open_scenario_with_fake_gh_1697(tmp_path, monkeypatch):
+    sdlc = _project(tmp_path)
+    src = _NumberedSource()
+    monkeypatch.setattr(handoff.sources, "get_source", lambda *a, **k: src)
+    monkeypatch.setattr(handoff, "_duplicate_search", lambda *a, **k: {"schema": "x", "candidates": [], "degraded": []})
+    base = ["handoff.py", "track", str(sdlc), "g.md", "--area", "engine", "--queue", "queued",
+            "--assignee", "same-area", "--blocks", "no", "--priority"]
+    for i in range(5):
+        assert handoff.main(base + ["P3", "--why", "stale helper cleanup %d" % i]) == 0
+    assert src.parked == []
+    assert handoff.main(base + ["P2", "--why", "a more urgent finding in the same area"]) == 0
+    assert [g for g, _t in src.parked] == ["105"]
+    assert handoff.main(["handoff.py", "open", str(sdlc), "g.md", "--area", "engine", "--priority", "P1",
+                         "--why", "a blocking dependency"]) == 0
+    assert [g for g, _t in src.parked] == ["105"]
