@@ -318,6 +318,22 @@ def _unit(issue, features):
         return None
 
 
+def _brief_row(row, sdlc_dir, config, n, source, scrub, briefed, not_briefed, unpark):
+    """Read one parked issue's kind and question into `row`, within the MAX_PARKED_BRIEFS bound."""
+    if briefed >= MAX_PARKED_BRIEFS:
+        row["kind"], row["question"] = "not-read", ""
+        not_briefed.append(n)
+        return briefed, unpark
+    unpark = unpark or _load("unpark")
+    try:
+        b = unpark.brief(sdlc_dir, config, n, source=source)
+        row["kind"] = b.get("reason_class") if b.get("kind_declared") else "undeclared"
+        row["question"] = scrub(str(b.get("park_reason") or ""))
+    except Exception:  # noqa: BLE001 - say so rather than guess
+        row["kind"], row["question"] = "unreadable", ""
+    return briefed + 1, unpark
+
+
 def plan(sdlc_dir, label, config=None, run=None):
     """-> the full read-only plan dict. Raises `sources.LabelScopeError` or `ValueError` (too many
     members) for the refusals the CLI turns into exit 2."""
@@ -360,21 +376,14 @@ def plan(sdlc_dir, label, config=None, run=None):
             row["depth"] = node["depth"]
             row["verdict"], row["own_verdict"] = "outside", verdict
             row["display"] = "outside/%s" % verdict
+            row["labels"] = sorted(names)
+            if verdict == "parked":
+                briefed, unpark = _brief_row(row, sdlc_dir, config, n, source, scrub, briefed, not_briefed, unpark)
             outside.append(row)
             continue
+        row["labels"] = sorted(names)
         if verdict == "parked":
-            if briefed >= MAX_PARKED_BRIEFS:
-                row["kind"], row["question"] = "not-read", ""
-                not_briefed.append(n)
-            else:
-                briefed += 1
-                unpark = unpark or _load("unpark")
-                try:
-                    b = unpark.brief(sdlc_dir, config, n, source=source)
-                    row["kind"] = b.get("reason_class") if b.get("kind_declared") else "undeclared"
-                    row["question"] = scrub(str(b.get("park_reason") or ""))
-                except Exception:  # noqa: BLE001 - say so rather than guess
-                    row["kind"], row["question"] = "unreadable", ""
+            briefed, unpark = _brief_row(row, sdlc_dir, config, n, source, scrub, briefed, not_briefed, unpark)
         row["display"] = verdict
         in_progress = source.in_progress_label in names
         row["in_progress"] = in_progress
@@ -414,11 +423,114 @@ def plan(sdlc_dir, label, config=None, run=None):
         for tag in r["unresolved"]:
             unresolved_all[tag].append(r["number"])
     counts = collections.Counter(r["display"] for r in rows)
+    paid = {i["number"]: i.get("body") or "" for i in member_issues}
+    qs = questions(label, rows, outside, paid, config)
+    unread = [r["number"] for r in rows + outside if r.get("kind") in ("not-read", "unreadable")]
     return {"label": label, "repo": repo, "members": rows, "outside": outside,
+            "questions": qs, "ready": not qs and not unread,
             "unresolved": [{"ref": t, "dependents": d} for t, d in sorted(unresolved_all.items())],
             "warnings": warnings, "stops": clo["stops"], "counts": dict(sorted(counts.items())),
             "pickable": sum(1 for r in rows if r["ready"]), "pulled": clo["pulled"],
             "drained": not rows, "calls": ro.summary()}
+
+
+# --- up-front questions (#1578) ------------------------------------------------------------------
+
+#: Printed with the spend question. Pinned by a test: it is the whole of what spend approval promises.
+SPEND_NOTE = ("Approval is single-use for each approved item, and Sigma does not meter external spend, "
+              "so no dollar cap is enforced.")
+
+
+def _dependents(rows, outside):
+    """-> {n: sorted member numbers that wait on n, directly or through other issues}."""
+    waits = {r["number"]: r["waiting_on"] for r in rows + outside}
+    members = {r["number"] for r in rows}
+    out = {}
+    for n in waits:
+        seen, todo = set(), [n]
+        while todo:
+            cur = todo.pop()
+            for m, ws in waits.items():
+                if cur in ws and m not in seen:
+                    seen.add(m)
+                    todo.append(m)
+        out[n] = sorted(seen & members)
+    return out
+
+
+def _spend_text(body, hard_stop, config):
+    """The first declared paid step the hard-stop net recognises as spend, else None."""
+    for line in (body or "").splitlines():
+        if not _PAID_RE.search(line):
+            continue
+        res = hard_stop.classify(line.split(":", 1)[1].strip(), {}, config)
+        if res.cls and hard_stop.is_spend_like(res.cls):
+            return res
+    return None
+
+
+def questions(label, rows, outside, paid_bodies, config):
+    """-> the ordered list of questions a person answers once, before the drain starts. Pure: no reads.
+
+    Each is {"id": "<kind>:<issue or label>", "kind", "area", "ask", "options", "unblocks": [n]}.
+    Every text comes from the question bank (`unpark.QUESTIONS`), none is improvised. Order: parked
+    members, members no gate can classify, pulled blockers, the arming route (once), spend. A question
+    that cannot change what the drain does is not asked."""
+    unpark, hard_stop = _load("unpark"), _load("hard_stop")
+    area_of = unpark.decision_record.area_of
+    deps = _dependents(rows, outside)
+    out = []
+
+    def add(qid, kind, labels, slot_text, options, unblocks, **extra):
+        out.append({"id": qid, "kind": kind, "area": area_of(labels), "ask": slot_text,
+                    "options": list(options), "unblocks": sorted(set(unblocks)), **extra})
+
+    def own_question(r):
+        kind, n = r.get("kind"), r["number"]
+        if kind == "undeclared":
+            guess = unpark.loop._suggest_kind(r.get("question") or "")
+            opts = [guess] + [k for k in unpark.qkind.QKINDS if k not in (guess, "label_set")]
+            add("kind:%d" % n, "undeclared", r.get("labels"), "Which kind of question is this?", opts,
+                [n] + deps[n])
+        elif kind in unpark.QUESTIONS:
+            refs = [str(x) for x in r["waiting_on"]]
+            q = unpark._questions_for(kind, r.get("question") or "", refs, {})[0]
+            add("%s:%d" % (kind, n), kind, r.get("labels"), q["ask"], q["options"], [n] + deps[n])
+
+    for r in sorted(rows, key=lambda x: x["number"]):
+        if r["verdict"] == "parked":
+            own_question(r)
+    for r in sorted(rows, key=lambda x: x["number"]):
+        if r["verdict"] == "held-by-gate":
+            slot = unpark.QUESTIONS["scope_hold"][0]
+            add("scope_hold:%d" % r["number"], "scope_hold", r.get("labels"), slot["ask"],
+                slot["options"], [r["number"]] + deps[r["number"]])
+    slots = {s["id"]: s for s in unpark.QUESTIONS["label_set"]}
+    for r in sorted(outside, key=lambda x: x["number"]):
+        own, n = r.get("own_verdict"), r["number"]
+        if own == "parked":
+            own_question(r)
+        elif own == "assigned-elsewhere":
+            add("dependency:%d" % n, "dependency", r.get("labels"), slots["taken"]["ask"],
+                slots["taken"]["options"], deps[n])
+        elif own == "upper-tier":
+            add("dependency:%d" % n, "dependency", r.get("labels"), slots["upper"]["ask"],
+                slots["upper"]["options"], deps[n])
+    unarmed = sorted(r["number"] for r in rows if r["verdict"] == "unarmed")
+    if unarmed:
+        slot = unpark.route_slot("label_set")
+        add("label_set:%s" % label, "label_set", [], slot["ask"], slot["options"], unarmed)
+    for r in sorted(rows, key=lambda x: x["number"]):
+        if r["verdict"] in ("upper-tier", "closed"):
+            continue
+        if _spend_text(paid_bodies.get(r["number"]), hard_stop, config) is None:
+            continue
+        if any(q["id"] == "irreversible:%d" % r["number"] for q in out):
+            continue                      # the member's own parked question is already this one
+        slot = unpark.route_slot("irreversible")
+        add("irreversible:%d" % r["number"], "irreversible", r.get("labels"), slot["ask"],
+            slot["options"], [r["number"]] + deps[r["number"]], note=SPEND_NOTE)
+    return out
 
 
 def _reason(row, in_progress, blocked_overlay):
@@ -457,6 +569,15 @@ def render_plan(p):
         out.append("  #%d %s (blocker, depth %d): %s" % (r["number"], r["display"], r["depth"], r["title"]))
     for u in p["unresolved"]:
         out.append("  unresolved: %s, blocks %s" % (u["ref"], ", ".join("#%d" % d for d in u["dependents"])))
+    out.append("questions: %d open, ready: %s" % (len(p["questions"]), "true" if p["ready"] else "false"))
+    for i, q in enumerate(p["questions"], 1):
+        out.append("  %d. [%s] %s" % (i, q["id"], q["ask"]))
+        if q["options"]:
+            out.append("     options: " + " / ".join(q["options"]))
+        out.append("     unblocks: %s; recorded under area %s" % (
+            ", ".join("#%d" % x for x in q["unblocks"]) or "nothing yet", q["area"]))
+        if q.get("note"):
+            out.append("     " + q["note"])
     w = p["warnings"]
     for c in w["cross_unit"]:
         out.append("  warning: " + c["message"])

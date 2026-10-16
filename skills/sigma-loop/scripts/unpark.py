@@ -175,6 +175,20 @@ QUESTIONS = {
          "options": ["the comment is there", "it is not there"],
          "gestures": {"the comment is there": "none", "it is not there": "none"}},
     ],
+    # #1578: asked once per run label by `label_drain.py plan`, never by a park. The first slot is the
+    # route question; the other two are the pulled-blocker questions the same plan asks.
+    "label_set": [
+        {"id": "route", "ask": "Arm the unarmed issues in this set?",
+         "options": ["arm them", "arm only the ones that can start", "leave them"],
+         "gestures": {"arm them": "none", "arm only the ones that can start": "none", "leave them": "none"}},
+        {"id": "taken", "ask": "Another person has this issue and this set waits on it: take it over, or "
+                               "leave it and wait?", "options": ["take it over", "leave it and wait"],
+         "gestures": {"take it over": "none", "leave it and wait": "none"}},
+        {"id": "upper", "ask": "This set waits on a larger piece of work that is never picked directly: "
+                               "close that dependency, or replace it?",
+         "options": ["close the dependency", "replace the dependency"],
+         "gestures": {"close the dependency": "none", "replace the dependency": "none"}},
+    ],
     "unknown": [
         {"id": "next", "ask": "Here is what it stopped on: {reason} What should happen next?"},
     ],
@@ -387,7 +401,7 @@ def brief(sdlc_dir, config, number, source=None, run=None):
     if not declared and "kind" not in answered:         # #1498: ask for the kind first, suggestion on top
         guess = loop._suggest_kind(reason)
         questions.insert(0, {"id": "kind", "ask": "Which kind of question is this?",
-                             "options": [guess] + [k for k in qkind.QKINDS if k != guess]})
+                             "options": [guess] + [k for k in qkind.QKINDS if k not in (guess, "label_set")]})
     learning = _load("autonomy").learning_line(sdlc_dir, reason_class, config)
     extra = _recommendation(sdlc_dir, config, declared, data.get("labels"))
     return {"number": str(number), "title": data.get("title") or "",
@@ -657,7 +671,8 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         # parked" here is making exactly the decision that comment exists to record, so the
         # automatic sweep must see it in the form it already knows how to read.
         # F-02(4) / #1547: a waiting route (`WAITING_ROUTES`) posts NO opt-out marker, so the sweep
-        # still resumes the goal when its blocker closes or its quota window resets. #1549: a
+        # still resumes a dependency park when its blocker closes; a quota park has no blocker
+        # refs, so the sweep skips it and it stays parked until unparked by hand. #1549: a
         # dependency wait also posts the waiting note, which is what lets the sweep resume a park.
         declared = _declared_kind(data)
         waits = declared in WAITING_ROUTES and route_answer(declared, answers) == WAITING_ROUTES[declared]
