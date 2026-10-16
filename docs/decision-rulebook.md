@@ -503,8 +503,10 @@ has been measured. Setting a cap does not count calls made before it was set.
 
 ## Migrating the old confirmation label
 
-Nothing writes the legacy `sdlc:needs-confirmation` label any more except the rebase upkeep's own findings (a report for
-a person, never a goal): a filed follow-up is already a goal, armed or parked with a declared question. Boards that
+With triage on (`ai_filed.triage.enabled`, the default) nothing writes the legacy `sdlc:needs-confirmation` label any
+more: a filed follow-up is already a goal, armed or parked with a declared question, and a rebase upkeep finding is
+parked at filing with a declared kind (a report for a person, never a goal). Only with `ai_filed.triage.enabled: false`
+are follow-ups and rebase upkeep findings still filed with the label. Boards that
 still carry leftovers are cleared with:
 
 ```
