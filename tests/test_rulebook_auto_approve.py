@@ -248,3 +248,101 @@ def test_turning_the_gate_off_closes_the_level_bypass_for_existing_auto_rules(tm
     AP.open_for_park(sd, off, 7, KIND, source=src, now=T0 + MIN, info={"labels": ["area:docs"], "park": "c1"})
     assert AP._asks(sd)[0]["armed_at"] is None
     assert AP.tick(sd, off, T0 + 300 * MIN, source=src) == [] and src.swaps == []
+
+
+# ---- #1696: a retire of an auto-approved rule is durable for its pair -------------------------------------
+
+OTHER = "docs2"
+
+
+def _auto_rule_id(sd, cfg):
+    RD.auto_approve(sd, cfg, T0)
+    return [r["id"] for r in RB.load(sd, cfg) if r["qkind"] == KIND and r["area"] == AREA][0]
+
+
+def _retire(sd, cfg, rid):
+    RB.retire(sd, rid, "boss", cfg)
+
+
+def test_retired_auto_rule_is_not_redrafted_but_other_pairs_still_are(tmp_path):
+    cfg = _cfg()
+    sd = _sd(tmp_path)
+    _answers(sd, cfg)
+    _retire(sd, cfg, _auto_rule_id(sd, cfg))
+    assert RD.auto_approve(sd, cfg, T0) == [] and RD.auto_approve(sd, cfg, T0) == []
+    assert RB.load(sd, cfg) == []
+    assert RB.retired_pairs(sd, cfg) == [{"qkind": KIND, "area": AREA}]
+    assert RD.draft(sd, KIND, AREA, cfg, now=T0, auto=True)["status"] == "refused"
+    _answers(sd, cfg, area=OTHER)
+    assert len(RD.auto_approve(sd, cfg, T0)) == 1
+    assert [r["area"] for r in RB.load(sd, cfg)] == [OTHER]
+
+
+def test_retire_with_the_gate_off_writes_no_key(tmp_path):
+    cfg = _cfg()
+    sd = _sd(tmp_path)
+    _answers(sd, cfg)
+    rid = _auto_rule_id(sd, cfg)
+    off = _cfg(auto=False)
+    _retire(sd, off, rid)
+    assert "retired_pairs" not in json.load(open(_file(sd)))
+    assert open(_file(sd)).read() == json.dumps({"rules": []}, indent=2, sort_keys=True) + "\n"
+    assert RB.retired_pairs(sd, cfg) == []
+
+
+def test_retire_of_a_hand_approved_rule_leaves_no_tombstone(tmp_path):
+    cfg = _cfg()
+    sd = _sd(tmp_path)
+    rid = T._rule(sd, cfg)
+    RB.approve(sd, rid, "boss", cfg, now=T0)
+    _retire(sd, cfg, rid)
+    assert "retired_pairs" not in json.load(open(_file(sd)))
+
+
+def test_tombstone_is_preserved_across_other_writes_and_read_strictly(tmp_path):
+    cfg = _cfg()
+    sd = _sd(tmp_path)
+    _answers(sd, cfg)
+    _retire(sd, cfg, _auto_rule_id(sd, cfg))
+    RB.propose(sd, {"qkind": "needs_decision", "area": "x", "option": "start it again", "reason": "r"}, cfg, now=T0)
+    assert RB.retired_pairs(sd, cfg) == [{"qkind": KIND, "area": AREA}]
+    data = json.load(open(_file(sd)))
+    data["retired_pairs"] += [{"qkind": 1, "area": "a"}, "junk", {"qkind": "k"}]
+    json.dump(data, open(_file(sd), "w"))
+    assert RB.retired_pairs(sd, cfg) == [{"qkind": KIND, "area": AREA}]
+
+
+def test_hand_draft_and_approve_through_the_cli_clear_the_tombstone(tmp_path, monkeypatch, capsys):
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    cfg = _cfg()
+    cfg["rulebook"]["rules"]["draft"] = {"min_agreement": 0.5, "min_held_out": 1}
+    sd = _sd(tmp_path)
+    _answers(sd, cfg, choices=(OPT,) * 20)
+    json.dump(cfg, open(os.path.join(sd, "config.json"), "w"))
+    monkeypatch.setattr(RD, "_identity", lambda config: {"login": "boss", "confirmed": True})   # fake gh
+    _retire(sd, cfg, _auto_rule_id(sd, cfg))
+    assert RD.auto_approve(sd, cfg, T0) == []
+    monkeypatch.setattr(RD, "_level", lambda *a: 2)          # the level gate is covered elsewhere; this is the tombstone
+    assert RD.main(["draft", sd, KIND, AREA]) == 0          # a hand draft is allowed on the retired pair
+    (rule,) = [r for r in RB.load(sd, cfg)]
+    assert rule["status"] == "proposed" and RB.retired_pairs(sd, cfg) == []
+    assert RD.main(["approve", sd, rule["id"]]) == 0
+    capsys.readouterr()
+    (rule,) = RB.load(sd, cfg)
+    assert rule["status"] == "approved" and not RB.is_auto(rule)
+    assert RD.auto_approve(sd, cfg, T0) == [] and len(_rules_raw(sd)) == 1
+
+
+def test_cli_retire_of_an_auto_rule_then_list_does_not_redraft(tmp_path, monkeypatch, capsys):
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    cfg = _cfg()
+    sd = _sd(tmp_path)
+    _answers(sd, cfg)
+    json.dump(cfg, open(os.path.join(sd, "config.json"), "w"))
+    monkeypatch.setattr(RD, "_identity", lambda config: {"login": "boss", "confirmed": True})
+    assert RD.main(["list", sd]) == 0
+    (rule,) = RB.load(sd, cfg)
+    assert RD.main(["retire", sd, rule["id"]]) == 0
+    assert RD.main(["list", sd]) == 0 and RD.main(["list", sd]) == 0
+    capsys.readouterr()
+    assert RB.load(sd, cfg) == []

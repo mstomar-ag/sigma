@@ -1611,8 +1611,7 @@ window is one `ls-remote` round trip plus the process start of the push, **unmea
 hosting service or on a local remote), so no bound is claimed beyond "one network round trip per chunk". A lookalike also keeps its backup out of the prune, so
 a stalled backup is cleared by removing the lookalike by hand.
 
-Nothing prunes by itself, and the scheduler of section 13d does not either, so while upkeep is enabled run the prune now and
-then; each rewrite adds one ref. The prune is the one sanctioned deletion in Sigma (section 13b): it removes only refs
+The sweep prunes by itself once per sweep while upkeep is enabled (see [upkeep.md](upkeep.md)); each rewrite adds one ref. The prune is the one sanctioned deletion in Sigma (section 13b): it removes only refs
 that parse as exactly the backup prefix, one unit and one stamp, and nothing else.
 
 A restore is not sticky. While upkeep is enabled the next pick of a goal in that unit brings the branch forward again,
