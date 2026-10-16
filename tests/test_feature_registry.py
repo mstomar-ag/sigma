@@ -1855,6 +1855,7 @@ _REGISTRY_WRITE_CALLERS = {
 _REGISTRY_ADJACENT_WRITERS = {
     "feature_rebase": "names the registry files only to read the unit record's tip fields; its writes are the leased push "
                       "of a branch and the per-unit state under `state/upkeep/`, never a unit or index record",
+    "feature_upkeep_level2": "names the registry files only in its refusal wording; its writes are the per-unit attempt store and the per-sweep counter under `state/upkeep/`, never a unit or index record",
     "feature_upkeep_pass": "reads the unit record for its tips; writes only the per-unit upkeep state and the acks "
                            "file under `state/upkeep/`, never a unit or index record",
     "migrate": "the converter: refuses a legacy delta record (names `repair`), converts the index "

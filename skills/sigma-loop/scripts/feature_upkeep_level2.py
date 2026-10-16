@@ -76,6 +76,11 @@ STAMP = "stamp-failed"
 AUTHORSHIP = "authorship-changed"
 CONTINUE = "continue-failed"
 REVIEW_BLOCKED = "reviewer-blocked"
+UNIT_DROPPED = "unit-line-dropped"
+SPEND_CEILING = "spend-ceiling"
+SWEEP_LIMIT = "max-units-per-sweep"
+SWEEP_REL = "state/upkeep/level2-sweep.json"
+MAX_ATTEMPT_TEXT = 1500
 
 STORE_REL = "state/upkeep/level2"
 SCHEMA_ID = "upkeep-level2/1"
@@ -240,12 +245,85 @@ def settle_attempt(sdlc_dir, unit, run_id, outcome, charged):
 
 
 def attempts_used(sdlc_dir, unit):
-    """Attempts that count against the limit: every one that did not end `resolved` (a started one counts: a crash)."""
-    return sum(1 for i in read_attempts(sdlc_dir, unit) if i.get("outcome") != "resolved")
+    """Attempts that count against the limit: every one that did not end `resolved` (a started one counts: a crash). A run
+    the launcher refused before anything was spawned (a reached spend ceiling, a placeholder model) cost nothing and does not count."""
+    return sum(1 for i in read_attempts(sdlc_dir, unit) if i.get("outcome") not in ("resolved", "refused"))
 
 
 def total_charged(sdlc_dir, unit):
     return round(sum(float(i.get("charged_usd") or 0.0) for i in read_attempts(sdlc_dir, unit)), 6)
+
+
+# ------------------------------------------------------------------------------------------ the sweep counter and the attempt
+
+def _sweep_path(sdlc_dir):
+    return pathlib.Path(sdlc_dir).joinpath(*SWEEP_REL.split("/"))
+
+
+def _sweep_write(sdlc_dir, doc):
+    path = _sweep_path(sdlc_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name("." + path.name + ".tmp")
+    tmp.write_text(json.dumps(doc, sort_keys=True), encoding="utf-8")
+    os.replace(str(tmp), str(path))
+
+
+def sweep_begin(sdlc_dir, run_id):
+    """A sweep starts: from now each distinct unit that reaches the resolver is counted (units run one after another)."""
+    _sweep_write(sdlc_dir, {"active": True, "run_id": str(run_id)[:80], "units": []})
+
+
+def sweep_end(sdlc_dir):
+    _sweep_write(sdlc_dir, {"active": False, "run_id": "", "units": []})
+
+
+def sweep_take(sdlc_dir, unit, limit):
+    """-> True when `unit` may use the resolver in the active sweep. No counter file, or one that says `active: false`, means no
+    sweep is running (the pick-time single-unit pass): allowed. A counter that is PRESENT but unreadable, malformed or not
+    updatable fails CLOSED (False): a sweep whose cap cannot be counted must not run unbounded. `limit` None cannot be enforced,
+    so it is allowed only with no active sweep. A unit already counted stays allowed."""
+    try:
+        doc = json.loads(_sweep_path(sdlc_dir).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    try:
+        if not isinstance(doc, dict):
+            return False
+        if doc.get("active") is False:
+            return True
+        if doc.get("active") is not True or not isinstance(doc.get("units"), list):
+            return False
+        if unit in doc["units"]:
+            return True
+        if limit is None or len(doc["units"]) >= int(limit):
+            return False
+        doc["units"].append(str(unit)[:200])
+        _sweep_write(sdlc_dir, doc)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def dropped_unit_lines(base, theirs, resolved):
+    """The lines the unit added (its side against the common base, whitespace-trimmed, blanks ignored) that the resolved text
+    no longer holds, as many times as the unit added them."""
+    def lines(text):
+        return collections.Counter(l.strip() for l in str(text).splitlines() if l.strip())
+    have, added = lines(resolved), lines(theirs) - lines(base)
+    return [line for line, n in sorted(added.items()) if have[line] < n]
+
+
+def attempt_text(evidence):
+    """The attempt as a bounded diff of the unit's side against what the resolver produced, for the finding."""
+    import difflib
+    out = []
+    for item in evidence:
+        label, theirs, resolved = item[0], item[3], item[4]
+        out.append("--- %s (unit side)\n+++ %s (attempt)" % (label, label))
+        out += list(difflib.unified_diff(str(theirs).splitlines(), str(resolved).splitlines(), lineterm="", n=1))[2:]
+    return "\n".join(out)[:MAX_ATTEMPT_TEXT]
 
 
 # ------------------------------------------------------------------------------------------ export and write-back
@@ -304,6 +382,8 @@ def resolve_stop(run, path, plan, evidence, stamped):
     got = eligibility(run, path, plan.get("limits"), plan.get("host", HOST_CLAUDE), plan["stops_done"], used)
     if not got.ok:
         return refusal(got.code, got.detail)
+    if not sweep_take(sdlc_dir, unit, plan.get("max_units_per_sweep")):
+        return refusal(SWEEP_LIMIT, "agent resolver: max_units_per_sweep reached (or the sweep counter is unreadable, so the cap cannot be enforced)")
     conflicted = state.conflicted_paths(run, str(path))
     original = str(run(str(path), ["git", "rev-parse", "REBASE_HEAD"]) or "").strip()
     before_stage0 = state.stage0_listing(run, str(path))
@@ -325,6 +405,8 @@ def resolve_stop(run, path, plan, evidence, stamped):
     plan["charges"].append(result.charged_usd)
     if result.outcome != launcher.OK:
         settle_attempt(sdlc_dir, unit, attempt, result.outcome, result.charged_usd)
+        if result.outcome == launcher.REFUSED and "24-hour ceiling" in (result.reason or ""):
+            return refusal(SPEND_CEILING, "spend ceiling reached")
         return refusal(RESOLVER_FAILED, "the resolver run ended %s (%s)" % (result.outcome, (result.reason or "")[:120]),
                        changed=list(result.changed))
     resolved_text = {}
@@ -338,6 +420,12 @@ def resolve_stop(run, path, plan, evidence, stamped):
             settle_attempt(sdlc_dir, unit, attempt, "markers", result.charged_usd)
             return refusal(LEFTOVER_MARKERS, "%s still holds conflict markers" % name)
         resolved_text[name] = text
+    for name in conflicted:
+        lost = dropped_unit_lines(texts[name][0], texts[name][2], resolved_text[name])
+        if lost:
+            settle_attempt(sdlc_dir, unit, attempt, "dropped", result.charged_usd)
+            return refusal(UNIT_DROPPED, "%s lost %d line(s) the unit added" % (name, len(lost)), paths=[name],
+                           attempt=attempt_text([(name, texts[name][0], texts[name][1], texts[name][2], resolved_text[name])]))
     try:
         for name, text in resolved_text.items():
             (pathlib.Path(path) / name).write_text(text, encoding="utf-8")

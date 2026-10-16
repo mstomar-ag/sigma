@@ -39,6 +39,13 @@ EXPECTED_SCHEMA = {   # key -> (kind, lo, hi, min_items)
     "backup.keep_last": ("int", 1, 1000, None),
     "conflicts.resolve": ("enum", None, None, None),
     "conflicts.mechanical_without_verify": ("bool", None, None, None),
+    "conflicts.agent.model": ("enum", None, None, None),
+    "conflicts.agent.max_budget_usd_per_unit": ("usd_null", None, None, None),
+    "conflicts.agent.spend_ceiling_usd_per_day": ("usd_null", None, None, None),
+    "conflicts.agent.timeout_minutes": ("int", 1, 240, None),
+    "conflicts.agent.max_units_per_sweep": ("int", 1, 100, None),
+    "conflicts.agent.reviewer.enabled": ("bool", None, None, None),
+    "conflicts.agent.reviewer.model": ("enum", None, None, None),
     "backup.former_prefixes": ("name_list", None, None, 0),
 }
 DEFAULT_TABLE = {
@@ -48,6 +55,10 @@ DEFAULT_TABLE = {
     "auto.target_hours": 12, "auto.floor": 3, "auto.ceiling": 40, "verify.clean_rebase": False,
     "verify.timeout_minutes": 60, "backup.keep_days": 14, "backup.keep_last": 5,
     "conflicts.resolve": "off", "conflicts.mechanical_without_verify": False,
+    "conflicts.agent.model": "sonnet", "conflicts.agent.max_budget_usd_per_unit": None,
+    "conflicts.agent.spend_ceiling_usd_per_day": None, "conflicts.agent.timeout_minutes": 30,
+    "conflicts.agent.max_units_per_sweep": 5, "conflicts.agent.reviewer.enabled": True,
+    "conflicts.agent.reviewer.model": "sonnet",
     "backup.former_prefixes": [],
 }
 #: The acceptance matrix (None, True, 0, -1, 1.5, nan, inf, "", "x", [], [1], {}, {"x": 1}) plus the values that
@@ -57,10 +68,14 @@ BAD_VALUES = [None, True, False, 0, 1, -1, 1.5, float("nan"), float("inf"), floa
 SECTIONS = ("units", "triggers", "auto", "verify", "backup", "conflicts")
 
 
-def valid_value(kind, lo, hi, min_items, v):          # the oracle, independent of the module
+def valid_value(kind, lo, hi, min_items, v, key=None):          # the oracle, independent of the module
     if kind == "bool":
         return type(v) is bool
+    if kind == "usd_null":
+        return v is None or (type(v) in (int, float) and 0 < v <= 100000)
     if kind == "enum":
+        if key is not None and key.endswith("model"):
+            return type(v) is str and v in ("haiku", "sonnet", "opus", "fable")
         return type(v) is str and v in ("off", "mechanical", "agent")
     if kind == "name_list":
         return type(v) is list and len(v) >= min_items and all(type(x) is str and x for x in v)
@@ -80,15 +95,18 @@ def block_for(key, v, flag):
     if key in ("enabled", "window_hours", "retry_minutes"):
         block[key] = v
     else:
-        head, _, tail = key.rpartition(".")
-        block[head] = {tail: v}
+        parts = key.split(".")
+        node = block
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = v
     return {"upkeep": block}
 
 
 def expected_clean(key, v):                           # value valid AND cross-checks hold
     eff = dict(DEFAULT_TABLE)
     eff[key] = v
-    return valid_value(*EXPECTED_SCHEMA[key], v) and cross_ok(eff)
+    return valid_value(*EXPECTED_SCHEMA[key], v, key=key) and cross_ok(eff)
 
 
 def matrix_failures(g):
@@ -154,7 +172,7 @@ STRICT_MUTANTS = ["return bool(value)", "return value == True or value == False"
 # ------------------------------------------------------------------------------------------ schema and defaults
 
 def test_schema_is_locked():
-    """The schema is exactly the 21 keys the gate reads, with the documented kinds and bounds."""
+    """The schema is exactly the 28 keys the gate reads, with the documented kinds and bounds."""
     g = support.gate()
     got = {k: (s["kind"], s.get("lo"), s.get("hi"), s.get("min_items")) for k, s in g.SCHEMA.items()}
     assert got == EXPECTED_SCHEMA
@@ -343,7 +361,7 @@ def test_problems_no_echo():
             reading = g.read(config)
             if any(sentinel in p for p in reading.problems):
                 leaks.append((key, repr(value)[:12]))
-            if not any(("upkeep." + key) in p for p in reading.problems) and not valid_value(*EXPECTED_SCHEMA[key], value):
+            if not any(("upkeep." + key) in p for p in reading.problems) and not valid_value(*EXPECTED_SCHEMA[key], value, key=key):
                 unnamed.append((key, repr(value)[:12]))
     assert leaks == [] and unnamed == []
     credential = "Zq7Lm2Vx9Rt4Wk8Hd1Pa"                         # identifier-shaped, 20 characters, near no known key

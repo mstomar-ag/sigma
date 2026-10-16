@@ -197,9 +197,16 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
         beat_path = sched.path_of(sdlc_dir, sched.BEAT_REL)
         _touch(beat_path)
         counts, unreached, outcome = {}, [], "failed"
+        counter_failed = False
         seen = {"units_listed": 0, "unregistered": [], "notes": []}        # #1493: what the sweep could not see
         try:
             reading = feature_upkeep.read(config)
+            agent = feature_upkeep.conflict_level(config) == "agent"
+            if agent:                                             # #1516: count the units that reach the Level 2 resolver in this sweep
+                try:
+                    _sibling("feature_upkeep_level2").sweep_begin(sdlc_dir, run_id)
+                except (OSError, ValueError):                     # no counter, no agent level: an absent counter would read as "no sweep"
+                    counter_failed = True
             if list_units:
                 listed = list(list_units(sdlc_dir))
             else:
@@ -214,7 +221,9 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
             stops = (sched.path_of(sdlc_dir, sched.STOP_REL), sched.path_of(sdlc_dir, sched.WATCH_STOP_REL))
             env = bounded.unattended_env(sched.allowed_env(os.environ if environ is None else environ,
                                                            (sched.CALL_TIMEOUT_ENV, feature_upkeep.ENV_MACHINE)))
-            for index, name in enumerate(names):
+            if counter_failed:
+                unreached = list(names)
+            for index, name in enumerate([] if counter_failed else names):
                 remaining = cap - (clk() - started)
                 if remaining <= 0 or any(os.path.exists(p) for p in stops):
                     unreached = names[index:]
@@ -228,8 +237,13 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
                 if word in ("timeout", "stopped"):                 # the cap or a stop file cut this child short: it and everything after it are left for the next trigger
                     unreached = names[index:]
                     break
-            outcome = "swept"
+            outcome = "failed" if counter_failed else "swept"
         finally:
+            if feature_upkeep.conflict_level(config) == "agent":
+                try:
+                    _sibling("feature_upkeep_level2").sweep_end(sdlc_dir)
+                except Exception:                                 # noqa: BLE001 - a counter that cannot close is bounded by the next begin
+                    pass
             summary = dict(seen, counts=counts, unreached=unreached)
             _record(sdlc_dir, dict(head, state="done", outcome=outcome, unit_tip=None, finished_at=stamp_now(), sweep=summary))
             done_units = sum(n for w, n in counts.items() if w not in ("timeout", "stopped"))

@@ -13,7 +13,7 @@ exactly as before: the unit branch is left untouched, nothing is pushed, and an 
 | --- | --- |
 | off | the default; a conflict parks, as it did before part B |
 | mechanical | Level 1: a conflict confined to the changelog is resolved by the heading-aware union, proved, stamped and pushed once through the atomic backup push; anything else parks |
-| agent | NOT AVAILABLE YET (no resolver is wired; it behaves as `off`). Level 2: a source conflict goes to a capped, headless resolver; a second, independent session reviews the result; a failed proof or a blocking verdict parks and pushes nothing |
+| agent | Level 2: a source conflict goes to a capped, headless resolver; a second, independent session reviews the result; a failed proof, a dropped unit line or a blocking verdict parks and pushes nothing. It behaves as `off` until the two spend keys below are set and the model resolves |
 
 A parked conflict is one finding. Before filing, the pass reads the open issues once and, if one already carries the same
 conflict id in its title, files nothing and comments on it at most once a day (a counter and the time; the count is kept in
@@ -35,10 +35,25 @@ Level 1 needs a verify command. With none set the pass parks, unless `upkeep.con
 boolean true. That key IS acted on by Level 1 (the config table in `docs/branching-model.md` still says it is validated
 only; this page is the correction). `upkeep.verify.clean_rebase` is validated and not acted on.
 
-Level 2 is **unreachable in the shipped engine**: its plan is supplied by a seam that is unset, because the binary, the
-credential route and the spend caps are not read from configuration. Setting `conflicts.resolve` to `agent` therefore
-changes nothing today beyond making the doctor show its resolver and reviewer rows (see
-`skills/sigma-doctor/references/resolver-readiness.md`), which fail by design until those are chosen.
+Level 2 is fed from configuration (#1516). `upkeep.conflicts.agent` holds:
+
+| Key | Meaning | Default |
+| --- | --- | --- |
+| `model` | resolver model tier: haiku, sonnet, opus or fable | sonnet |
+| `max_budget_usd_per_unit` | per-run cap for the resolver; the reviewer gets half of it | null |
+| `spend_ceiling_usd_per_day` | rolling 24 hour ceiling, per machine and per team ledger | null |
+| `timeout_minutes` | wall clock for one resolver run, 1 to 240 | 30 |
+| `max_units_per_sweep` | units that may reach the resolver in one sweep, 1 to 100; the rest park | 5 |
+| `reviewer.enabled` | validated only: the independent review is mandatory, so false is ignored | true |
+| `reviewer.model` | reviewer model tier | sonnet |
+
+With either spend key null, or a tier missing from the model catalog, or no `claude` on the path, the agent level behaves
+exactly as `off` and the doctor row `resolver configured` gives the reason. A reached ceiling parks the unit with the text
+`spend ceiling reached` and calls no model. A resolver result that no longer holds a line the unit added is refused
+(`unit-line-dropped`), parked, and the finding shows the attempt as a diff against the unit's side. PROVISIONAL: the
+reviewer share, the strict line rule and the sweep counter are defaults for the owner to ratify. The launcher's design flags
+stay unverified and its model catalog is still the placeholder, so the real CLI run is refused at run time at no cost until
+the owner-gated probe of the real flags and model id; see `skills/sigma-doctor/references/resolver-readiness.md`.
 
 A merge made outside the loop is noticed at the next watcher tick (up to the watch interval); only
 `work.py merge` starts a pass at once, and only with `SIGMA_UPKEEP_JOB=1` in that shell. A pure fast-forward push keeps no

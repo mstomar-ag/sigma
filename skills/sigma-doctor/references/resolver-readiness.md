@@ -12,8 +12,12 @@ Rows, built by `_resolver_rows` in `skills/sigma-doctor/scripts/doctor.py`:
 - resolver flags: counts the design flags still listed as unverified in `skills/sigma-loop/scripts/feature_upkeep_launcher.py`.
   Any unverified flag keeps the row failing, because the launcher refuses those flags.
 - resolver model: fails while the launcher catalog holds only the placeholder id.
-- resolver spend: fails unless the upkeep settings carry finite caps. UNVERIFIED: the settings carry no cap key yet, so
-  this row fails by design until a later slice adds one.
+- resolver configured: the model and caps read from `conflicts.agent`, or the exact reason the level behaves as off (a cap
+  unset, a model tier missing from the catalog, no `claude` on the path).
+- resolver spend: fails unless both `conflicts.agent` spend keys are set.
+- resolver spend today: the rolling 24 hour total from the launcher spend store (bounded read) against the daily ceiling.
+- last resolution: level and verdict of the newest resolution record; no row when there is none.
+- units parked on conflict: the count of park markers; no row when there are none.
 - reviewer store: the store directory in `skills/sigma-loop/scripts/feature_upkeep_review.py` is absent or a plain directory.
 - resolution age: liveness by age of the records in `skills/sigma-loop/scripts/feature_upkeep_resolution.py`. Fails when the oldest
   record is older than `backup.keep_days` (PROVISIONAL), which means the prune is not running. No row when there are no
