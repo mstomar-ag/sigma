@@ -657,7 +657,8 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         # parked" here is making exactly the decision that comment exists to record, so the
         # automatic sweep must see it in the form it already knows how to read.
         # F-02(4) / #1547: a waiting route (`WAITING_ROUTES`) posts NO opt-out marker, so the sweep
-        # still resumes the goal when its blocker closes or its quota window resets. #1549: a
+        # still resumes a dependency park when its blocker closes; a quota park has no blocker
+        # refs, so the sweep skips it and it stays parked until unparked by hand. #1549: a
         # dependency wait also posts the waiting note, which is what lets the sweep resume a park.
         declared = _declared_kind(data)
         waits = declared in WAITING_ROUTES and route_answer(declared, answers) == WAITING_ROUTES[declared]
