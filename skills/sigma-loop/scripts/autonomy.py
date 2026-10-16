@@ -196,6 +196,22 @@ def veto(sdlc_dir, rid, config=None, now=None, machine=None):
         return None
 
 
+def vetoed_since(sdlc_dir, qkind, area, since, config=None):
+    """#1555: True when a veto for the pair was recorded at or after `since` (an ISO time; unreadable
+    means True, so a rule with no readable confirmation is held). Never raises; unreadable means True."""
+    try:
+        start = _parse_time(since)
+        if start is None:
+            return True
+        for v in _facts(sdlc_dir, "veto-"):
+            t = _parse_time(v.get("time"))
+            if _pair(v, qkind, area) and (t is None or t >= start):
+                return True
+        return False
+    except Exception:
+        return True
+
+
 def _keep_n(cfg):
     """How many of a pair's newest comparisons the ladder reads and pruning keeps: the largest threshold."""
     return max(cfg["l%d_min_answers" % n] for n in (1, 2, 3, 4))

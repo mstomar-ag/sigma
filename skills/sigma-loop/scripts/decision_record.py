@@ -27,9 +27,9 @@ blocker_scan = _load("blocker_scan")
 qkind = _load("qkind")
 ledger_pointer = _load("ledger_pointer")
 
-#: gesture -> how. The sweep is the only autonomous writer.
+#: gesture -> how. The sweep and the rulebook's auto approval (#1555) are the autonomous writers.
 GESTURES = {"unpark": "human", "keep-parked": "human", "promote": "human", "demote": "human",
-            "ack": "human", "sweep": "autonomous"}
+            "ack": "human", "sweep": "autonomous", "approve": "autonomous"}
 
 
 def enabled(config):
@@ -42,8 +42,20 @@ def how_for(gesture):
     return GESTURES[gesture]
 
 
+def _scrubbed(text):
+    """Secret-shape scrub on the FULL text (#1631): before any cut, so a key straddling the cut cannot
+    survive as a fragment below a shape's minimum length. Idempotent."""
+    return decision_store.scrub_record({"v": str(text or "")})[0]["v"]
+
+
+def scrub_count(*texts):
+    """Substitutions the scrub makes over the untruncated texts (apply reports this in its summary,
+    since build now hands back an already-scrubbed record)."""
+    return sum(decision_store.scrub_record({"v": str(t or "")})[1] for t in texts)
+
+
 def _flat(text, limit=300):
-    flat = " ".join(str(text or "").split())
+    flat = " ".join(_scrubbed(text).split())
     return flat if len(flat) <= limit else flat[:limit - 1].rstrip() + "…"
 
 
@@ -120,7 +132,7 @@ def visibility(config):
 
 #: Gestures that are not an answer to a park question: they never feed a pair's answers, its
 #: majority, its draft or its level (F-10 by gesture; ack records are written as kind `unknown`).
-NOT_PARK_ANSWERS = ("promote", "demote", "ack")
+NOT_PARK_ANSWERS = ("promote", "demote", "ack", "approve")
 
 #: Keys that are never a prediction and never agreement (M-06): a non-bank answer, an unclassified kind.
 UNLEARNABLE_KEYS = ("free", "unknown")
