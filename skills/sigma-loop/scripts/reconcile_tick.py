@@ -110,6 +110,12 @@ def _write_repair_state(sdlc_dir, record):
         pass
 
 
+def always_repair_has_run(state):
+    """#1526: True for a record the always-mode repair wrote (a count, and no other mode). The smart skip
+    marker ({"mode": "smart", "rollout_reported": true}, or a legacy one with no count) is not one."""
+    return state.get("mode", "always") == "always" and "violations" in state
+
+
 def _blocker_rank_repair(sdlc_dir, config, run=None, now=None):
     """#1410: repair blockers ranked below what they block (`GitHubSource.repair_blocker_ranks`), after
     the board back-fill. Github source only; zero calls and no state file when the rule is off. Never
@@ -131,7 +137,7 @@ def _blocker_rank_repair(sdlc_dir, config, run=None, now=None):
             return ""
         now = now if now is not None else time.time()
         prior = read_repair_state(sdlc_dir)
-        if not prior.get("rollout_reported"):
+        if not (prior.get("rollout_reported") and always_repair_has_run(prior)):
             dry = src.repair_blocker_ranks(apply=False)
             print("reconcile_tick: blocker rank repair, first run: %d blocker(s) ranked below what they "
                   "block would be raised" % dry["violations"], file=sys.stderr)
