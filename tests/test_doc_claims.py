@@ -157,3 +157,10 @@ def test_coexistence_not_claimed():
         text = _flat(path)
         _check("not claimed at launch" in text and "predecessor" in text, f"{path} lacks the coexistence statement")
         _check("#616" in text, f"{path} lacks #616")
+
+
+def test_rulebook_doc_says_when_the_legacy_label_is_still_written():
+    text = _flat("docs/decision-rulebook.md")
+    _check("except the rebase upkeep's own findings" not in text, "rulebook doc says upkeep findings still get the legacy label")
+    _check("With triage on" in text and "ai_filed.triage.enabled: false" in text
+           and "rebase upkeep findings still filed with the label" in text, "rulebook doc lacks the triage-off exception")

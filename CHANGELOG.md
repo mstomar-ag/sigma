@@ -3,7 +3,11 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+<<<<<<< HEAD
 - **The upkeep confinement docs list what the macOS wall does not cover (#1712).** The profile allows everything by default, so the keychain and mach services stay reachable, reads outside the listed credential directories stay open, and writes to the temp areas stay open. The dead `SESSION_ARGV` constant is removed; the doctor flag check now reads `session_argv(True)`.
+=======
+- The Decision Rulebook doc's migration section no longer says rebase upkeep findings still get the legacy confirmation label while triage is on; it names the triage-off exception, and a docs-claim test pins it (#1709).
+>>>>>>> fork/feature/rulebook-learning
 - **The applier now says when evidence behind the default branch holds it (#1699).** A real tick and `--dry-run` print `applier: held - <reason>` instead of nothing or `would behind`, and the doctor applier row adds `HELD: <reason>` until a later tick runs; pull to clear. Output with current evidence is unchanged.
 - **`resource_lease.py admit|release|status|wait` keeps a lease table over the resource guard (#1599).** Under an `fcntl.flock` lock each admit reclaims stale leases (dead pid or past ttl), counts the unmaterialised remainder of every lease, and grants the largest fitting count or holds with a retry time (exit 10); costs are the p90 of the last 32 measured footprints per kind, outliers above 4x the median excluded and logged, and a verify gets at least one worker when one fits. State is in the XDG state folder beside `hold.json`; admission is paused, never a process. Not called by anything yet (operator-run); POSIX only.
 - **The upkeep docs say what the agent conflict level does with no spend key set (#1694).** It runs with no spend limit; set `max_budget_usd_per_unit` (and optionally `spend_ceiling_usd_per_day`) to cap it. The doctor row `resolver flags` no longer fails while the only unverified flag is `--bare`, which the resolver never requests.
