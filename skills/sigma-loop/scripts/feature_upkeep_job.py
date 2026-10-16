@@ -86,6 +86,24 @@ def _record(sdlc_dir, doc):
     return sched.write_json(sdlc_dir, sched.RECORD_REL, doc)
 
 
+PRUNE_REL = "state/upkeep/prune.json"     # #1557: the last automatic backup prune (read by the doctor)
+
+
+def _prune_pass(config, sdlc_dir, root, at, prune=None, prune_run=None):
+    """#1557: once per sweep, prune backup refs past keep_days (newest keep_last per unit kept; at most MAX_DELETES). Never
+    raises: a failure is recorded as outcome `failed` and the next sweep replans the same refs. -> the bounded record."""
+    try:
+        res = (prune or _sibling("feature_backup").prune_backups)(
+            config, sdlc_dir, remote=_sibling("feature_rebase")._remote(config), cwd=root, **({"run": prune_run} if prune_run else {}))
+        word = str(res.get("outcome") or "failed")[:20]
+        doc = {"outcome": word, "deleted": res.get("deleted") if isinstance(res.get("deleted"), int) else 0,
+               "listed": res.get("listed") if isinstance(res.get("listed"), int) else 0, "at": at}
+    except Exception:                       # noqa: BLE001 - a prune that cannot run never fails the sweep
+        doc = {"outcome": "failed", "deleted": 0, "listed": 0, "at": at}
+    sched.write_json(sdlc_dir, PRUNE_REL, doc)
+    return doc
+
+
 def _reason_of(result, bounded):
     """#1327: the child's `reason` text, kept next to the outcome in the job record; None when it said none. Never raises."""
     try:
@@ -167,7 +185,7 @@ def _engine_argv(sdlc_dir, root, unit, run_id, cap):
 
 @feature_upkeep.gated("machine")
 def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None, clock=time.monotonic, beat=None,
-              list_units=None, now=None):
+              list_units=None, now=None, prune=None, prune_run=None):
     """#1387: bring EVERY registry unit (include and exclude lists applied) up to the base in one bounded run. Takes the same
     exclusive lock as `run_job`: when it is held the answer is {"outcome": "busy"}, recorded in the window stamp as a refusal,
     never as a failure. Each unit goes, in turn, through the existing per-unit engine child (lease, backup ref, direct-commit
@@ -240,6 +258,8 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
                     unreached = names[index:]
                     break
             outcome = "failed" if counter_failed else "swept"
+            if not counter_failed and not any(os.path.exists(p) for p in stops):
+                seen["prune"] = _prune_pass(config, sdlc_dir, root, stamp_now(), prune, prune_run)      # #1557
         finally:
             if feature_upkeep.conflict_level(config) == "agent":
                 try:

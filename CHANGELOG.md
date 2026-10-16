@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- The upkeep sweep now prunes backup refs past `backup.keep_days` by itself, keeping the newest `backup.keep_last` per unit, once per sweep and bounded; a failed prune never fails the sweep and is retried next time, and `/sigma-doctor` shows the backup count and last prune (#1557).
 
 ## 1.0.15 — 2026-10-16 — the Rulebook learns and acts: declared question kinds, live comparisons, applier asks and vetoes, importance-ranked rule suggestions, upkeep union merge and agent conflict level, claim release, and ledger host privacy
 - The applier opens no ask for a park a person already answered (keep-parked, unpark or promote), so a sync after a rule is approved never turns an earlier human decision into a rule action (found by the acceptance run).

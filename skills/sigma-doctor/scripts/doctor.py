@@ -1468,6 +1468,20 @@ def _unmaintained_row(sched, base, cfg):
                 " name in upkeep.units.exclude; see docs/upkeep.md")
 
 
+def _prune_row(base, now=None):
+    """#1557: the automatic backup prune's last result, from the sweep's local file (no network)."""
+    try:
+        doc = json.loads(base.joinpath("state/upkeep/prune.json").read_text())
+        at, word = int(doc["at"]), str(doc["outcome"])[:20]
+        age = max(0, int((time.time() if now is None else now) - at))
+        ago = "%dd" % (age // 86400) if age >= 86400 else "%dh" % (age // 3600) if age >= 3600 else "%dm" % (age // 60)
+        ok = word in ("pruned", "nothing")
+        return _chk("upkeep backups: %d listed, last prune %s ago (%s)" % (int(doc.get("listed") or 0), ago, word), ok,
+                    "the last automatic backup prune did not finish; the next sweep retries it, or run `feature_rebase.py prune`")
+    except (OSError, ValueError, KeyError, TypeError):
+        return _chk("upkeep backups: last prune never", True, "")
+
+
 def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
     """The background upkeep scheduler's liveness and readiness rows (never a pass for something that did not run). Silent
     unless the opt-in block is on or invalid, decided by the gate's own reader, not by looking for the block here. The git
@@ -1479,6 +1493,7 @@ def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
         rows = [_chk(f"{label}: {detail}", ok, "see docs/branching-model.md for the opt-in and the stop file")
                 for label, ok, detail in sched.health(cfg, base, now)]
         rows.append(_unmaintained_row(sched, base, cfg))
+        rows.append(_prune_row(base, now))
         if not cheap_only:
             pf = _load_init_script("preflight")
             runner = None
