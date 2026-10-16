@@ -3803,9 +3803,23 @@ def _suggest_kind(detail):
         return found
     text = (detail or "").lower()
     for kind, words in _load("decision_import").KIND_WORDS:
-        if any(w in text for w in words):
+        if any(_suggest_word_hit(kind, w, text) for w in words):
             return kind
     return "unknown"
+
+
+# #1562: the irreversible words that name an ACTION; each counts only in action position (the clause rule
+# `file_triage._action_sentence` applies, #1519), so a park that merely mentions the word delete is not
+# suggested irreversible. The other words state the property outright and stay plain substrings.
+_ACTION_WORDS = ("delete", "drop table", "force push", "destructive")
+
+
+def _suggest_word_hit(kind, word, text):
+    if word not in text:
+        return False
+    if kind == "irreversible" and word in _ACTION_WORDS:
+        return _load("file_triage")._action_sentence(text, word) is not None
+    return True
 
 
 def _reason_class(detail):

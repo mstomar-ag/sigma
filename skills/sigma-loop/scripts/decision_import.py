@@ -741,12 +741,15 @@ def apply(sdlc_dir, config, cands, call=None):
         out["cap_refused"] = info.get("cap_refused")
         out["model"] = info
     out["folders"] = folder_counts(cands, new)
+    out["scrubbed"] = 0
     for r in new:
         record = rec.build("import", r["issue"], r["qkind"], r["choice"], r["reason"], "imported", area=r["area"],
                            origin=r.get("origin"))
         record.update(source=r["fp"], original_time=r["when"])
         if allrows[r["fp"]].get("shape"):
             record["shape"] = allrows[r["fp"]]["shape"]
+        record, n = store.scrub_record(record)
+        out["scrubbed"] += n
         if store.append(sdlc_dir, record, config):
             out["records"] += 1
     if store._visibility(config) == "public":
@@ -937,6 +940,7 @@ def main(argv=None, lister=None, comments_fn=None):
             return 1
         print("wrote %d records and %d comparisons%s" % (res["records"], res["watch"],
                                                           (" (%s)" % res["note"]) if res["note"] else ""))
+        print("scrubbed %d value(s)" % res.get("scrubbed", 0))
         _print_folders(res["folders"])
         _print_dropped(out)
         _print_partial(out)

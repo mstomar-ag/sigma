@@ -36,6 +36,7 @@ comment (prefix-stripped), and `decision_tier.classify` -- the UNGATED, pure cla
 
     python3 unpark.py list <sdlc_dir> [--assignee X] [--undeclared] [--json]
     python3 unpark.py declare <sdlc_dir> <issue> <kind>
+    python3 unpark.py declare <sdlc_dir> --from-suggestions [--kind K] [--dry-run]
     python3 unpark.py brief <sdlc_dir> <issue> [--json]
     python3 unpark.py resolve <sdlc_dir> <issue> --answers <file.json>
                               --decision keep-parked|unpark [--dry-run]
@@ -655,10 +656,11 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         # parked" here is making exactly the decision that comment exists to record, so the
         # automatic sweep must see it in the form it already knows how to read.
         # F-02(4) / #1547: a waiting route (`WAITING_ROUTES`) posts NO opt-out marker, so the sweep
-        # still resumes the goal when its blocker closes or its quota window resets.
+        # still resumes the goal when its blocker closes or its quota window resets. #1549: a
+        # dependency wait also posts the waiting note, which is what lets the sweep resume a park.
         declared = _declared_kind(data)
         waits = declared in WAITING_ROUTES and route_answer(declared, answers) == WAITING_ROUTES[declared]
-        err = _comment_decision(sdlc_dir, config, source, n, block + ("" if waits else "\n\n"
+        err = _comment_decision(sdlc_dir, config, source, n, block + (("\n\n" + auto_unpark.WAITING_NOTE if declared == "dependency" else "") if waits else "\n\n"
                                 + auto_unpark.keep_parked_comment(_one_line(
                                     PRIVATE_VALUE if _keys_only(config) else _substantive_reason(answers)))),
                                 "keep-parked", answers, data, kind, rule_id)
@@ -764,6 +766,33 @@ def declare(sdlc_dir, config, number, kind, source=None, run=None):
     return True, "declared %s on #%s" % (kind, number)
 
 
+#: #1562: kinds a bulk declare never writes: a hard stop is a human's call, never a guess.
+BULK_NEVER = ("irreversible", "unknown", "scope_hold", "owner_hold", "reviewer_down", "review_post_ambiguous")
+
+
+def declare_from_suggestions(sdlc_dir, config, only=None, apply=True, run=None):
+    """Declare every undeclared park whose suggestion is a confident kind, through `declare` (one comment
+    each). `only` restricts to parks suggesting that kind. -> (lines, failed): `[declared] #N: kind` or
+    `[skipped] #N: reason`; `apply=False` prints the same lines and writes nothing."""
+    listing = list_parked(sdlc_dir, config, run=run, undeclared=True)
+    lines, failed = [], bool(listing.get("degraded"))
+    for row in listing["issues"]:
+        number, kind = row["number"], row.get("suggested") or "unknown"
+        if kind in BULK_NEVER:
+            why = "hard-stop kind %s is never bulk-declared" % kind if kind == "irreversible" else \
+                "no confident suggestion (%s)" % kind
+            lines.append("[skipped] #%s: %s" % (number, why))
+        elif only and kind != only:
+            lines.append("[skipped] #%s: suggestion %s is not --kind %s" % (number, kind, only))
+        elif not apply:
+            lines.append("[declared] #%s: %s" % (number, kind))
+        else:
+            ok, detail = declare(sdlc_dir, config, number, kind, run=run)
+            failed = failed or not ok
+            lines.append("[declared] #%s: %s" % (number, kind) if ok else "[skipped] #%s: %s" % (number, detail))
+    return lines, failed
+
+
 def _comment(source, number, text):
     try:
         source._issue_comment(number, text)             # REST first through gh_api (#895 slice 3a)
@@ -838,6 +867,7 @@ def render_brief(b):
 
 _USAGE = ("usage: unpark.py list <sdlc_dir> [--assignee X] [--undeclared] [--json]\n"
           "       unpark.py declare <sdlc_dir> <issue> <kind>\n"
+          "       unpark.py declare <sdlc_dir> --from-suggestions [--kind K] [--dry-run]\n"
           "       unpark.py brief <sdlc_dir> <issue> [--json]\n"
           "       unpark.py resolve <sdlc_dir> <issue> --answers <file.json> "
           "--decision keep-parked|unpark [--qkind K] [--dry-run]")
@@ -873,6 +903,20 @@ def _main(argv, run=None):
                              undeclared="--undeclared" in tail)
         print(json.dumps(result, indent=2) if "--json" in tail else render_list(result))
         return 0 if result["complete"] else 1
+    if len(argv) >= 4 and argv[1] == "declare" and "--from-suggestions" in argv[3:]:
+        sdlc_dir, tail = argv[2], argv[3:]
+        only = _value(tail, "--kind")
+        if only is not None and only not in qkind.QKINDS:
+            print("unpark.py declare: unknown --kind %r (expected one of %s)" % (only, ", ".join(qkind.QKINDS)),
+                  file=sys.stderr)
+            return 2
+        blocked = triage.needs_github(triage.config_strict(sdlc_dir), "unparking", 1, run, None)
+        if blocked is not None:
+            return blocked
+        lines, failed = declare_from_suggestions(sdlc_dir, triage.config_strict(sdlc_dir), only=only,
+                                                 apply="--dry-run" not in tail, run=run)
+        print("\n".join(lines))
+        return 1 if failed else 0
     if len(argv) >= 5 and argv[1] == "declare":
         sdlc_dir, number, kind = argv[2], argv[3], argv[4]
         if kind not in qkind.QKINDS:

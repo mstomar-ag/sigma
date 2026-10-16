@@ -259,9 +259,32 @@ def _park_info(source, issue):
         return None
 
 
-def _eligible(sdlc_dir, config, qkind_, area, option):
+def _auto_rule(rules, rule_id, config):
+    """#1555: the sealed rule `rule_id` when an auto approval made it (`auto: true`) AND the gate is still on, else None."""
     try:
-        return _level(sdlc_dir, qkind_, area, config) >= 3
+        rb = _load("rulebook")
+        if not rb.auto_approve_on(config):
+            return None
+        return next((r for r in rules if r.get("id") == rule_id and rb.is_auto(r)), None)
+    except Exception:
+        return None
+
+
+def _vetoed(sdlc_dir, config, qkind, area, rule):
+    """#1555: an owner's veto recorded after the auto rule was confirmed holds it until a hand reconfirmation."""
+    return _load("autonomy").vetoed_since(sdlc_dir, qkind, area, rule.get("confirmed"), config)
+
+
+def _level_ok(sdlc_dir, config, qkind, area, auto_rule):
+    """Level 3 gate; an auto-approved rule that no veto holds is exempt (every other gate still applies)."""
+    if auto_rule is not None:
+        return not _vetoed(sdlc_dir, config, qkind, area, auto_rule)
+    return _level(sdlc_dir, qkind, area, config) >= 3
+
+
+def _eligible(sdlc_dir, config, qkind_, area, option, auto_rule=None):
+    try:
+        return _level_ok(sdlc_dir, config, qkind_, area, auto_rule)
     except Exception:
         return False
 
@@ -325,7 +348,8 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None, info=N
         gesture = option_gesture(qkind_, m.option)
         if gesture not in GESTURES:                  # None: not a bank option; 'none': recommend only
             return None
-        armed = now.isoformat() if _eligible(sdlc_dir, config, qkind_, area, m.option) else None
+        armed = now.isoformat() if _eligible(sdlc_dir, config, qkind_, area, m.option,
+                                             _auto_rule(rb.load(sdlc_dir, config), m.rule_id, config)) else None
         if qkind_ != "quota":
             reset_at = None
         elif not isinstance(reset_at, datetime.datetime):
@@ -680,13 +704,15 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
             qkind, area = ask.get("qkind"), ask.get("area") or "repo"
             if not isinstance(qkind, str) or hs.is_hardstop_kind(qkind, None, config):
                 continue
+            am0 = _load("rulebook").match(qkind, area, ask.get("options"), rules)
+            ar0 = _auto_rule(rules, am0.rule_id, config) if am0 is not None else None
             if (apply_actions and not dry_run and ask.get("armed_at") is not None
-                    and _level(sdlc_dir, qkind, area, config) < 3):
+                    and not _level_ok(sdlc_dir, config, qkind, area, ar0)):
                 ask["armed_at"] = None      # #1499: dropped below 3; a later re-arm gets a fresh window and notice
                 _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
             if "armed_at" in ask and ask.get("armed_at") is None:       # #1499 M-03: arm, never apply, this tick
-                am = _load("rulebook").match(qkind, area, ask.get("options"), rules)
-                if am is not None and _level(sdlc_dir, qkind, area, config) >= 3:
+                am = am0
+                if am is not None and _level_ok(sdlc_dir, config, qkind, area, ar0):
                     actions.append({"kind": "arm", "ask": ask["id"], "issue": ask.get("issue"), "qkind": qkind,
                                     "area": area, "rule_id": am.rule_id, "level": _level(sdlc_dir, qkind, area, config),
                                     "rule_confirmed": next((r.get("confirmed") for r in rules
@@ -696,10 +722,16 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 continue
             if window_open(ask, config, now) or used >= cap:
                 continue
-            if _level(sdlc_dir, qkind, area, config) < 3:
-                continue
-            m = _load("rulebook").match(qkind, area, ask.get("options"), rules)
+            m = am0
             if m is None:
+                continue
+            auto_rule = ar0
+            if auto_rule is not None and _vetoed(sdlc_dir, config, qkind, area, auto_rule):
+                skipped.append({"kind": "skipped", "ask": ask["id"], "issue": ask.get("issue"), "qkind": qkind,
+                                "area": area, "rule_id": m.rule_id, "result": "skipped",
+                                "skip_reason": "vetoed"})       # #1555: held until an owner reconfirms it
+                continue
+            if not _level_ok(sdlc_dir, config, qkind, area, auto_rule):
                 continue
             if m.rule_id in due_ids:    # F-04: an old rule only recommends until an owner reconfirms it
                 skipped.append({"kind": "skipped", "ask": ask["id"], "issue": ask.get("issue"), "qkind": qkind,
@@ -710,7 +742,7 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 continue
             rule = next((r for r in rules if r.get("id") == m.rule_id), None)
             level = _level(sdlc_dir, qkind, area, config)
-            if not _rule_has_own_support(sdlc_dir, qkind, area, rule, config):
+            if auto_rule is None and not _rule_has_own_support(sdlc_dir, qkind, area, rule, config):
                 continue    # #1496 M-04: a rule needs its own live comparisons, not its pair's older ones
             silent = False
             key = None
@@ -882,9 +914,12 @@ def apply(action, sdlc_dir, config, now, source=None, run=None, clock=None):
                 _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
         except Exception:
             pass  # applied stays recorded; a missing record id is accepted by the veto path
-        if action["text"]:
+        text = action["text"]
+        if action["kind"] == "keep-parked" and action["qkind"] == "dependency":
+            text = (text + "\n" if text else "") + _load("auto_unpark").WAITING_NOTE    # #1549
+        if text:
             try:
-                source.note(issue, action["text"])
+                source.note(issue, text)
             except Exception:
                 pass  # the gesture landed; an audit line is not worth reporting it as failed
         return "done"
@@ -941,6 +976,8 @@ def main(argv):
         config = _read_config(sdlc_dir)
         if dry:
             return _dry_run(sdlc_dir, config)
+        with contextlib.suppress(Exception):    # #1555: auto approval first, so a new rule's park is armed this pass
+            _load("rule_draft").auto_approve(sdlc_dir, config)
         if enabled(config):                    # #1499: existing parks get their ask before the tick plans
             try:
                 opened = sync(sdlc_dir, config, _load("sources").GitHubSource(config))

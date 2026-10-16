@@ -206,13 +206,38 @@ def _refuse(reason):
     return {"status": "refused", "reason": reason}
 
 
-def draft(sdlc_dir, qkind, area, config, now=None):
-    """Draft one PROPOSED rule for the pair, or refuse. Never approves. Never raises."""
+def _draft_auto(sdlc_dir, qkind, area, config, now):
+    """#1555: the auto-approve draft: any level, no exam, a unique majority option of the pair's human
+    answers. Same refusals otherwise (hard-stop, unknown, shape-only, a rule already there)."""
+    rb = _load("rulebook")
+    if any(r.get("qkind") == qkind and r.get("area") == area for r in rb.load(sdlc_dir, config)):
+        return _refuse("the pair already has a rule")
+    answers = _human(sdlc_dir, qkind, area, config)
+    opt, share = _majority(list(answers.values()))
+    if opt is None:
+        return _refuse("tied or no usable answers")
+    if _shape_only(qkind, opt):
+        return _refuse(SHAPE_NOTE)
+    linked = sorted(answers)[:MAX_LINKED]
+    reason = "auto-approved from %d recorded decisions (agreement %.2f): %s%s" % (
+        len(answers), share, ", ".join(linked), " ..." if len(answers) > len(linked) else "")
+    path = rb.propose(sdlc_dir, {"qkind": qkind, "area": area, "option": opt, "reason": reason}, config, now=now)
+    if path is None:
+        return _refuse("the rulebook refused the proposal")
+    return {"status": "drafted", "qkind": qkind, "area": area, "option": opt, "sources": linked, "path": path,
+            "meaning": meaning(qkind, opt)}
+
+
+def draft(sdlc_dir, qkind, area, config, now=None, auto=False):
+    """Draft one PROPOSED rule for the pair, or refuse. Never approves. Never raises. `auto` (#1555, the
+    caller checked `rulebook.rules.auto_approve`) drops the level floor and the held-out exam."""
     try:
         if not _open(config):
             return _refuse("closed: rulebook, autonomy and records parts must all be enabled")
         if not isinstance(qkind, str) or not isinstance(area, str) or _blocked(qkind, config):
             return _refuse("question kind is unknown or a hard-stop kind")
+        if auto:
+            return _draft_auto(sdlc_dir, qkind, area, config, now)
         if _level(sdlc_dir, qkind, area, config) < MIN_LEVEL:
             return _refuse("level below %d" % MIN_LEVEL)
         rb = _load("rulebook")
@@ -241,6 +266,47 @@ def draft(sdlc_dir, qkind, area, config, now=None):
                 "meaning": meaning(qkind, opt)}
     except Exception as exc:  # noqa: BLE001 - fail closed
         return _refuse("unreadable: %s" % type(exc).__name__)
+
+
+def auto_approve(sdlc_dir, config, now=None):
+    """#1555: with `rulebook.rules.auto_approve` on, draft a rule for every non-blocked pair that has a unique
+    majority option (any level, no exam) and approve it as the first configured owner with `auto: true`,
+    writing one `approve` decision record (how autonomous) per rule. Returns `[rule_id]` of the rules approved.
+    [] when closed, with no owner, or nothing to do. Best effort: never raises, never touches a hard-stop kind."""
+    try:
+        import datetime
+        rb, au = _load("rulebook"), _load("autonomy")
+        if not rb.auto_approve_on(config) or not _open(config):
+            return []
+        owners = au.owners(config)
+        if not owners:
+            return []
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        store, dr = _load("decision_store"), _load("decision_record")
+        pairs = sorted({(r.get("qkind"), r.get("area")) for r in store.list_by(sdlc_dir, config)
+                        if isinstance(r.get("qkind"), str) and isinstance(r.get("area"), str)})
+        out = []
+        for q, a in pairs:
+            try:
+                if _blocked(q, config) or a == ANY_AREA:
+                    continue
+                before = {r.get("id") for r in rb.load(sdlc_dir, config)}
+                res = draft(sdlc_dir, q, a, config, now=now, auto=True)
+                if res.get("status") != "drafted":
+                    continue
+                rid = next((r["id"] for r in rb.load(sdlc_dir, config) if r["id"] not in before), None)
+                if rid is None:
+                    continue
+                rb.approve(sdlc_dir, rid, owners[0], config, now=now, auto=True)
+                rec = dr.build("approve", None, q, res["option"], "auto-approved rule " + rid, "autonomous",
+                               rule_id=rid, area=a, answer=res["option"])
+                store.append(sdlc_dir, rec, config, now=now)
+                out.append(rid)
+            except Exception:                       # noqa: BLE001 - one pair never stops the rest
+                continue
+        return out
+    except Exception:
+        return []
 
 
 def _when(rec):
@@ -432,6 +498,20 @@ def due(sdlc_dir, config, now=None):
         return []
 
 
+ACTION_WORD = {"unpark": "unpark", "keep-parked": "keep parked", "none": "only recommends"}
+
+
+def approved_rows(sdlc_dir, config):
+    """One row per approved rule: id, kind, area, option, action (the same derivation `show` uses), confirmed."""
+    rows = []
+    for r in _load("rulebook").load(sdlc_dir, config):
+        if r.get("status") == "approved":
+            rows.append({"id": r["id"], "kind": r["qkind"], "area": r["area"], "option": r["option"],
+                         "action": ACTION_WORD.get(_load("applier").option_gesture(r["qkind"], r["option"]), "unknown"),
+                         "confirmed": r.get("confirmed")})
+    return rows
+
+
 def reconfirm(sdlc_dir, rule_id, config):
     """Re-stamp one approved rule's confirmation and seal as the invoking owner. -> (ok, line). Never raises."""
     try:
@@ -489,6 +569,8 @@ def main(argv=None):
     sg.add_argument("sdlc_dir")
     sg.add_argument("--propose", type=int, default=0, metavar="N",
                     help="draft rules (never approve) for the top N uncovered pairs")
+    sub.add_parser("rules", help="every approved rule: id, kind, area, option, action, last confirmed"
+                   ).add_argument("sdlc_dir")
     sh = sub.add_parser("show", help="print what one rule does: unpark, keep parked, or only recommends")
     sh.add_argument("sdlc_dir")
     sh.add_argument("rule_id")
@@ -507,6 +589,8 @@ def main(argv=None):
     except Exception as exc:  # noqa: BLE001
         print("rule_draft: %s" % exc, file=sys.stderr)
         return 1
+    if args.verb in ("list", "suggest"):        # #1555: a documented writer only while auto_approve is on
+        auto_approve(args.sdlc_dir, config)
     if args.verb == "show":
         rule = next((r for r in _load("rulebook").load(args.sdlc_dir, config) if r.get("id") == args.rule_id), None)
         if rule is None:
@@ -514,6 +598,14 @@ def main(argv=None):
             return 2
         print("%s: %s / %s -> %s (%s); %s" % (rule["id"], rule["qkind"], rule["area"], rule["option"],
                                               rule["status"], meaning(rule["qkind"], rule["option"])))
+        return 0
+    if args.verb == "rules":
+        rows = approved_rows(args.sdlc_dir, config)
+        for x in rows:
+            print("%s: %s / %s -> %s (%s); last confirmed %s" % (
+                x["id"], x["kind"], x["area"], x["option"], x["action"], (x["confirmed"] or "unreadable")[:10]))
+        if not rows:
+            print("no approved rules")
         return 0
     if args.verb == "list":
         print(json.dumps(list_patterns(args.sdlc_dir, config), indent=2))

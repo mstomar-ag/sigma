@@ -165,6 +165,7 @@ The agent that parks a goal declares the kind with `loop.py record <sdlc_dir> <g
 which adds one machine line (`sigma-qkind: <kind>`) to the park comment. Without the flag the park is undeclared (one
 stderr line suggests a kind; nothing is guessed from the text), and the Rulebook treats it as not learnable.
 `unpark.py list <sdlc_dir> --undeclared` lists the parks with no kind.
+`unpark.py declare <sdlc_dir> --from-suggestions [--kind K] [--dry-run]` declares every confidently suggested one at once (never `irreversible`).
 `unpark.py declare <sdlc_dir> <issue> <kind>` declares one afterwards; only Sigma's own park comments and an
 OWNER, MEMBER or COLLABORATOR declaration count. A filing the deny-list parks is declared a hard-stop kind and
 carries `sigma-hardstop: <class>`. The closed list:
@@ -255,6 +256,7 @@ python3 skills/sigma-loop/scripts/rule_draft.py list    .sdlc                 # 
 python3 skills/sigma-loop/scripts/rule_draft.py draft   .sdlc <qkind> <area>  # proposes; never approves
 python3 skills/sigma-loop/scripts/rule_draft.py suggest .sdlc [--propose N]  # ranks the pairs that matter; N drafts proposals
 python3 skills/sigma-loop/scripts/rule_draft.py approve .sdlc <rule_id>       # owner only
+python3 skills/sigma-loop/scripts/rule_draft.py rules   .sdlc                 # every approved rule: id, kind, area, option, action, last confirmed
 ```
 
 `draft` splits the pair's human answers deterministically by a hash of the record id. The majority option of one part
@@ -265,6 +267,8 @@ has a rule. It needs the rules, autonomy and records parts all open. On a public
 are stored, so drafts and comparisons work from those alone.
 
 `rule_draft.py suggest .sdlc` ranks the question kind and area pairs by importance from the repository's own records: how many parks, how many hours the goals stayed parked (until that goal's next record, else now), how many goals the parked goals block (directly or through chains, read from the open issues' own `Blocked by` text; zero when that cannot be read), and how often the answers repeat (the comparison key of `decision_record.key_of`). The score is parks plus hours divided by 24 plus blocked goals, times the agreement. Each line names the suggested option (the majority key) and whether one any-area rule (area `*`) covers the pair or the area needs its own rule because its answers differ from the kind's. Hard-stop and `unknown` kinds are never listed. `--propose N` drafts the top N uncovered rules through the same exam as `draft` (one `*` rule per kind where the areas agree) and never approves; the owner approves with `rule_draft.py approve`. When rules are on, the doctor's rulebook row lists the top three uncovered pairs.
+
+`rule_draft.py rules .sdlc` lists every approved rule with what it does (unpark, keep parked, or only recommends) and when it was last confirmed; the doctor's rulebook row counts the approved rules per action and names this verb.
 
 `rule_draft.py list --why` also prints one `skipped <kind> / <area>: <reason>` line for each pair left out (hard-stop
 or unknown kind, level below 2, or the share of the most common answer). `rule_draft.py due` prints, for each approved
@@ -286,6 +290,15 @@ closed, brief and resolve output is unchanged.
 
 `approve` refuses, with one line, for an unknown id, an already approved rule, a non-owner, an unresolved login or a
 closed gate. For a login that is not an owner it prints the line that asks an owner to approve, and the rule stays proposed.
+
+### Auto-approve (opt-in, off by default)
+
+With `rulebook.rules.auto_approve` set to the JSON boolean true (and the rules, autonomy and records parts open, and at least one name in `rulebook.autonomy.owners`), the watcher tick, `rule_draft.py list` and `rule_draft.py suggest` draft and approve a rule for every learned pair that has a unique majority option, at any level and without the held-out exam.
+The rule is approved as the first configured owner and carries `approved_by` and `auto: true`; each approval writes one decision record with gesture `approve` and how `autonomous`.
+The applier arms such a rule at once, at any level, and applies it after the window; the window, the daily cap, the re-ask age, the person-wins rule and an owner `no` all still apply.
+A `no` after an auto rule was applied reverts the goal and lowers the pair as usual, and the rule is then held until an owner reconfirms it by hand with `rule_draft.py reconfirm`.
+Hard-stop kinds, the `unknown` kind, shape-only options and pairs that already have a rule are never drafted.
+The doctor shows a warning row, `rules: auto-approve ON (rulebook.rules.auto_approve)`, while it is on. Hand-editing `auto` or `approved_by` breaks the seal and the rule stops counting.
 
 ## The applier and the veto window
 
@@ -323,6 +336,8 @@ The tick writes `applier-heartbeat.json`; the doctor reads a tick as dead when i
 pending veto are deleted after `prune_after_days` (default 30); answered and vetoed asks after two days.
 
 A `keep-parked` on a dependency park (route answer "wait for it") no longer posts the opt-out marker, even with the gates closed. This is intended; the owner is to ratify it.
+
+Instead it posts a waiting note (a person's "wait for it" answer, and a rule applied by the tick, always). The automatic sweep then resumes that dependency park when its last named blocker closes (#1549): gesture unpark, recorded as an autonomous sweep decision. A newer park comment cancels the note, and a person's keep-parked opt-out marker still wins.
 
 PROVISIONAL (owner to ratify): a `keep-parked` on a quota park (route answer "wait it out") likewise posts no opt-out marker, so the sweep may resume the goal after the quota window. Every other route still posts it.
 
@@ -378,7 +393,7 @@ which means no call. When the rolling 24-hour spend reaches the ceiling, the doc
 
 ## Importing past decisions
 
-`decision_import.py` turns decisions you already made into records, so a repository does not start at zero.
+`decision_import.py` turns decisions you already made into records, so a repository does not start at zero. Every record writer passes the free text through the leak scan's secret-shape scrub before the file is written (matches become `[REDACTED:<shape>]`), and `apply` prints how many values were scrubbed, never the values.
 
 ```
 python3 skills/sigma-loop/scripts/decision_import.py scan  .sdlc [--profile DIR ...] [--project-dir DIR ...]
@@ -552,6 +567,7 @@ flag, which closes the whole block.
 | `autonomy.applier.stale_after_intervals` | `3` | watch intervals without a tick that the doctor reads as dead |
 | `autonomy.applier.prune_after_days` | `30` | age at which an applied ask with no veto is deleted |
 | `rules.enabled` | `false` | open the rules part |
+| `rules.auto_approve` | `false` | let the watcher approve learned rules as the first owner (see Auto-approve) |
 | `rules.path` | `".sdlc/rulebook.json"` | where the rule file lives |
 | `rules.reask_days` | `90` | age at which an approved rule is due for confirmation |
 | `rules.draft.min_agreement` | `0.90` | agreement of held-out answers needed to draft |

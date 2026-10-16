@@ -5576,6 +5576,18 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
                 if due:
                     extra.append("%d approved rule(s) due for confirmation (older than reask_days): %s"
                                  % (len(due), ", ".join(str(i) for i, _ in due)))
+                if rbm.auto_approve_on(cfg):        # #1555: approval without a person is a warning, never silent
+                    extra.append("WARNING: rules: auto-approve ON (rulebook.rules.auto_approve): the watcher approves "
+                                 "learned rules on an owner's behalf and the applier acts on them at any level"
+                                 + ("" if _load_loop_script("autonomy").owners(cfg)
+                                    else "; no owner is configured, so nothing is approved"))
+                rdr = _load_loop_script("rule_draft").approved_rows(sdlc_dir, cfg)
+                if rdr:
+                    counts = {}
+                    for x in rdr:
+                        counts[x["action"]] = counts.get(x["action"], 0) + 1
+                    extra.append("actions: %s (list them: rule_draft.py rules <dir>)" % ", ".join(
+                        "%d %s" % (n, a) for a, n in counts.items()))
                 bad = rbm.invalid(sdlc_dir, cfg)
                 if bad:
                     extra.append("%d invalid rule(s) in the rulebook, never acting (retire them with "

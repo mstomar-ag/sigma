@@ -493,7 +493,7 @@ repository, and posts a comment naming the closed blocker(s). A label never chan
 naming several blockers waits for all of them, and one with no machine-detectable reference is left
 alone. The same sweep keeps `sdlc:blocking` in sync on the blocker issues themselves.
 
-**It never resumes an `sdlc:parked` issue** (#1394). The sweep decides from the text's shape alone,
+**It never resumes an `sdlc:parked` issue** (#1394) from its text, with one exception (#1549): a dependency park that carries the waiting note a "wait for it" decision posts (a person's answer or an applied Rulebook rule) is resumed when its last named blocker closes, recorded as an autonomous sweep unpark. A newer park comment cancels the note, and the keep-parked opt-out marker still wins. The sweep decides from the text's shape alone,
 so it cannot tell a stale dependency from a person's deliberate checkpoint that happens to say
 "blocked by #N". A park stays a human decision: resume it with **`/sigma-unpark`**, which answers the
 question that caused the park before it changes a label, or with `/sigma-triage`'s `enact`, the

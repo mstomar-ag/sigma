@@ -56,6 +56,8 @@ import) is described key by key in [the Decision Rulebook guide](decision-rulebo
 
 ## Rulebook rollout notes
 
+`rulebook.rules.auto_approve` (default false, only the JSON boolean true turns it on) lets the watcher draft and approve learned rules as the first configured owner; see [Auto-approve](decision-rulebook.md#auto-approve-opt-in-off-by-default).
+
 The model classifier's spend ceiling, `rulebook.import.max_budget_usd_per_run`, applies to one import run only. There is no daily or cross-run cap, so repeated runs add up; size it with that in mind. With `work.require_review: "approval"`, a host or token that cannot answer the approval query (it needs GraphQL) leaves the goal parked rather than merged. Either use an approval the REST API can see, or accept the parking. Nothing in `work.py` changes this.
 
 ## Per-category autonomy thresholds
