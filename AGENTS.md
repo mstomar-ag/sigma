@@ -92,7 +92,7 @@ up after Sigma. If a design cannot avoid writing there, the same change names
 the one command that clears the write and who runs it, as `docs/branching-model.md` §15 does for
 registry shards. It has gone wrong twice: tracked registry writes refused the next `work.py start`
 (#954), and untracked plan, research and acceptance copies stop the root fast-forwarding over the
-commit that lands them. That second case is still open (#1161).
+commit that lands them. 1.0.15 closes the second case (#1474): `work.py commit` copies the record into the goal branch, and a confirmed merge removes the byte-identical root copies.
 
 ## Before you run the loop
 

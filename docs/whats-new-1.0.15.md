@@ -187,6 +187,9 @@ What stays unchanged:
   `release`, action-log `released`). A dead session's entry does the same on the next pick or start after
   `session_release.grace_minutes` (default 15). Started and live-session goals, a mismatched generation and the
   local source are untouched.
+- **A live session can no longer sit on claimed goals it never starts (#1531).** Any pick on a GitHub source releases
+  a goal a live session has held longer than `session_release.hold_minutes` (default 30, `0` turns it off) with no
+  work record and no agent marker. A started goal is never released.
 - **Blocker repair respects state and edges (#1475).** The four blocker-priority writers drop any blocker that is not
   OPEN and never raise a pull request. Whole-body scans use only blocked by, depends on and depends upon. The dry
   pass writes nothing, and outside blockers beyond the 10-read cap are reported on stderr and in the result
@@ -247,4 +250,6 @@ What stays unchanged:
   refuse the delete and says it cannot be turned off.
 - **The Rulebook and upkeep enable steps (#1510)** say to remove a leftover `.sdlc/state/watch.stop` before starting
   the watcher.
+- **The `archive_after_days` note (#1508)** says `archive` is a library function nothing calls automatically, not a
+  command.
 - **Import docs and help (#1503)** show one folder per flag, or a quoted array.
