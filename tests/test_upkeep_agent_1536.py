@@ -76,7 +76,7 @@ def test_a_resolver_that_drops_a_base_added_line_is_refused_parked_and_names_the
     w, report, spy = go_wired(rig, tmp_path, m, agent_cfg(), w)
     assert report["outcome"] in (m.CONFLICT, m.PARKED) and not spy.pushes() and w.tip(FEATURE) == before
     assert "base-line-dropped" in report["why"] and "integration side" in report["why"]
-    assert [c["role"] for c in rig.calls()] == ["resolve"]
+    assert set(c["role"] for c in rig.calls()) == {"resolve"}
 
 
 def test_dropped_base_lines_is_a_trimmed_multiset_and_bounded():

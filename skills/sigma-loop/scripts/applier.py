@@ -558,6 +558,16 @@ def read_heartbeat(sdlc_dir):
         return None
 
 
+def read_hold(sdlc_dir):
+    """The reason the last tick was held (evidence behind the default branch), or "" (not held, or unreadable)."""
+    try:
+        with open(os.path.join(_folder(sdlc_dir), _HEARTBEAT), encoding="utf-8") as fh:
+            held = json.load(fh).get("held")
+        return held if isinstance(held, str) else ""
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
 def _level(sdlc_dir, qkind, area, config):
     fn = level_fn
     return fn(sdlc_dir, qkind, area, config) if fn else _load("autonomy").level(sdlc_dir, qkind, area, config)
@@ -712,7 +722,8 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
     if behind:
         with contextlib.suppress(Exception):
             if not dry_run:     # #1499: a dry run writes nothing, on any branch
-                _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT), {"time": now.isoformat()})
+                _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT),
+                               {"time": now.isoformat(), "held": behind})
         return [{"kind": "behind", "result": "skipped", "reason": behind}]
     started = monotonic_fn()    # #1390: each ask is stamped when its own gesture lands, not at tick start
     clock = lambda: now + datetime.timedelta(seconds=monotonic_fn() - started)  # noqa: E731
@@ -1004,6 +1015,9 @@ def _dry_run(sdlc_dir, config):
         if a.get("kind") == "error":
             print("applier dry-run: error %s" % a.get("error"))
             continue
+        if a.get("kind") == "behind":
+            print("applier dry-run: held - %s" % a.get("reason"))
+            continue
         print("applier dry-run: would %s #%s rule %s level %s window %sm" % (
             a.get("kind"), str(a.get("issue")).lstrip("#"), a.get("rule_id", a.get("rid", "-")),
             a.get("level", "-"), window))
@@ -1048,6 +1062,9 @@ def main(argv):
             print("applier: %d vetoed" % len(vetoed))
         if armed and verbose:
             print("applier: %d ask(s) armed" % len(armed))
+        for a in acts:
+            if a.get("kind") == "behind" and a.get("result") == "skipped":
+                print("applier: held - %s" % a.get("reason"))
         failed = [a for a in acts if a.get("result") == "failed"]
         if failed:                                      # #1403: a failed ask stays pending; say so
             print("applier: %d asks failed and will be retried" % len(failed), file=sys.stderr)
