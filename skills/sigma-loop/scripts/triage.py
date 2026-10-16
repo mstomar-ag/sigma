@@ -2015,7 +2015,8 @@ def _swap_detail(add, remove):
 
 
 _ACTION_VERBS = {"assign": "assign to", "add-label": "add label", "remove-label": "remove label",
-                 "append-marker": "mark blocked by", "swap-label": "swap labels"}
+                 "append-marker": "mark blocked by", "swap-label": "swap labels",
+                 "comment": "comment"}
 
 
 def _load_plan(path):
@@ -2343,6 +2344,10 @@ def _execute_action(source, action):
         source._swap_labels(issue, add=add, remove=remove)
     elif kind == "append-marker":
         source.append_to_body(issue, _MARKER_TMPL.format(n=detail))
+    elif kind == "comment":
+        # #1577: one fixed-wording comment (`label_drain.py arm` for a pulled blocker). Never reached
+        # by `compute_actions`; only a caller that builds the action itself emits it.
+        source._issue_comment(issue, detail)
     elif kind == "set-status":
         # #1391 step 4: move a board card. Until this existed, `_execute_action` had exactly four
         # kinds and NONE of them could touch the board -- so every unpark applied by this module (and
