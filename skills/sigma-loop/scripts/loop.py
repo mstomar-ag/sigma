@@ -1549,7 +1549,7 @@ def _label_pull_holds(sdlc_dir, source, config, goal, hold):
                 goal, ref, label, res.get("reason") or res["result"], goal), file=sys.stderr)
 
 
-def _label_start_refusal(sdlc_dir, source, config):
+def _label_not_ready(sdlc_dir, source, config):
     """#1579: the one line to print when a `--label` run must not start yet, else None. Runs the
     read-only `plan` once, before the run's first claim, and refuses on unarmed members or open
     questions. Fail-open on a plan that cannot run: the picker's own posture."""
@@ -2255,7 +2255,7 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
     # refreshed immediately before its one prologue sweep, so its slot calls opt out explicitly.
     if refresh_heartbeat:
         write_session_heartbeat(sdlc_dir, session_pid)
-    refusal = _label_start_refusal(sdlc_dir, source, config)       # #1579: --label only, claims nothing
+    refusal = _label_not_ready(sdlc_dir, source, config)       # #1579: --label only, claims nothing
     if refusal:
         return ("DONE", refusal)
     _reconcile_sweep(sdlc_dir, config)
