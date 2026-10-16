@@ -1890,6 +1890,14 @@
     },
     {
       "path": "skills/sigma-loop/scripts/sources.py",
+      "function": "_remember_confirmed_refs",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "discovery.source == github; reached only from the blocker-rank repair read; writes one bounded ten-minute cache file under .sdlc/state; a failed write is ignored",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/sources.py",
       "function": "_ensure_board",
       "rule": "gh-project",
       "count": 1,
