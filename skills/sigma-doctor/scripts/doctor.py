@@ -1568,9 +1568,9 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None):
             rows.append(_chk("resolver cli: " + ("answers a version probe" if res else "did not answer a bounded version probe"),
                              bool(res), "check the CLI runs by hand; the probe is limited to %gs" % RESOLVER_PROBE_SECONDS))
         unverified = list(getattr(launcher, "UNVERIFIED_FLAGS", ()))
-        rows.append(_chk("resolver flags: %d design flags UNVERIFIED (refused until probed)" % len(unverified) if unverified
-                         else "resolver flags: all design flags confirmed", not unverified,
-                         "the resolver stays closed until the launch flags are probed against the real CLI"))
+        rows.append(_chk("resolver flags: %d design flag%s still UNVERIFIED (refused by name)" % (len(unverified), "" if len(unverified) == 1 else "s")
+                         if unverified else "resolver flags: all design flags confirmed", not unverified,
+                         "a flag that did not pass the probe stays refused; the resolver does not use it"))
         placeholder = launcher.PLACEHOLDER_MODEL
         models = set(launcher.CATALOG.values())
         rows.append(_chk("resolver model: " + ("catalog holds only the placeholder id" if models <= {placeholder}
@@ -1583,12 +1583,15 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None):
         on_placeholder = why_off is None and launcher.CATALOG.get(settings["conflicts.agent.model"], placeholder) == placeholder
         rows.append(_chk("resolver configured: " + ("model %s resolves to the placeholder id, so every launch is refused" % settings["conflicts.agent.model"]
                                                     if on_placeholder else
-                                                    "model %s, up to $%g per unit, $%g per day" % (settings["conflicts.agent.model"], budget, ceiling)
+                                                    "model %s, %s" % (settings["conflicts.agent.model"], (
+                                                        "no spend limit" if not (budget is not None or ceiling is not None) else
+                                                        "%s, %s" % ("up to $%g per unit" % budget if budget is not None else "no per-unit limit",
+                                                                    "$%g per day" % ceiling if ceiling is not None else "no daily limit")))
                                                     if why_off is None else "behaves as off (%s)" % why_off), why_off is None and not on_placeholder,
                          "supply a validated model id override" if on_placeholder else
-                         "set conflicts.agent.max_budget_usd_per_unit and conflicts.agent.spend_ceiling_usd_per_day in .sdlc/config.json"))
-        rows.append(_chk("resolver spend: " + ("finite caps configured" if finite else "no finite spend cap in the upkeep settings"),
-                         finite, "the launcher refuses a launch without finite per-run, per-machine and team caps"))
+                         "check conflicts.agent in .sdlc/config.json"))
+        rows.append(_chk("resolver spend: " + ("finite caps configured" if finite else "no spend limit configured (each run bounded by timeout_minutes only)"),
+                         True, "optional: set conflicts.agent.max_budget_usd_per_unit and spend_ceiling_usd_per_day to cap spend"))
         spent = _resolver_spend_today(pathlib.Path(base).joinpath(*rebase.LEVEL2_SPEND_REL.split("/")), launcher, now)
         if spent is None:
             rows.append(_chk("resolver spend today: unreadable", False, "check the spend store under .sdlc/state/upkeep/spend; the launcher stays closed on it"))

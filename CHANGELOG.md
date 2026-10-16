@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **Upkeep's agent level can launch (#1554, slice 1).** The probed resolver flags are confirmed (only `--bare` stays refused), the model catalog holds real ids, and `conflicts.agent.max_budget_usd_per_unit` / `spend_ceiling_usd_per_day` are optional: null means no limit (no `--max-budget-usd`, no ceiling check; a set cap or ceiling is enforced as before). The doctor names the mode. Tested against a stand-in command only; the live run with a real model is owner-gated and not done.
 
 - **The land verb measures the sibling half of a pair itself (#1552).** `feature_land` used to pass no landed measurement, so any unit with a second repository was always refused as "nothing was supplied to measure". It now reads the sibling's pull requests and proceeds only when one merged; an unmerged or unreadable answer still refuses, and the refusal names the goal recorded for that repository and the remedy.
 

@@ -75,22 +75,34 @@ CLOSED, REFUSED, OK, DISCARDED, KILLED, FAILED = "closed", "refused", "ok", "dis
 OUTCOMES = (CLOSED, REFUSED, OK, DISCARDED, KILLED, FAILED)
 Result = collections.namedtuple("Result", "outcome charged_usd changed reason", defaults=(0.0, (), ""))
 
-#: Flags the tree already uses. "In use in the tree, not probed here": nothing in this change ran the real CLI.
+#: Flags confirmed. The first three are in use in the tree; the rest were each used in one real headless call by the
+#: probe in docs/launch/evidence/resolver-cli-probe.md (tool 2.1.296) and re-checked against the installed help in
+#: docs/launch/evidence/resolver-flags-confirmation-2026-10-16.md. Neither covers Windows or Linux.
+_PROBED = "probed in resolver-cli-probe.md (tool 2.1.296)"
 CONFIRMED_FLAGS = {
     "-p": "headless print mode; in use in the tree, not probed here",
     "--output-format": "output shape; in use in the tree, not probed here",
-    "--model": "model choice, as an alias only; in use in the tree, not probed here",
+    "--model": "model choice, as an alias or a full id; " + _PROBED,
+    "--max-budget-usd": "runaway guard checked between turns, not a hard ceiling; " + _PROBED,
+    "--permission-mode": "permission mode; " + _PROBED,
+    "--allowedTools": "tool allow list; " + _PROBED,
+    "--disallowedTools": "tool deny list; " + _PROBED,
+    "--tools": "tool set, empty turns all off; " + _PROBED,
+    "--settings": "settings as a JSON string; " + _PROBED,
+    "--setting-sources": "empty stops hooks and instruction files; " + _PROBED,
+    "--strict-mcp-config": "only the given MCP config; " + _PROBED,
+    "--no-session-persistence": "no transcript written; " + _PROBED,
+    "--add-dir": "extra directory; " + _PROBED,
+    "--append-system-prompt": "appended system prompt; " + _PROBED,
 }
-#: Design flags no one has probed. UNVERIFIED: each is refused by name until a probe (B7) confirms it.
-UNVERIFIED_FLAGS = ("--max-budget-usd", "--permission-mode", "--allowedTools", "--disallowedTools", "--tools",
-                    "--settings", "--setting-sources", "--strict-mcp-config", "--no-session-persistence", "--add-dir",
-                    "--bare", "--append-system-prompt")
+#: Design flags still UNVERIFIED, refused by name: `--bare` did not authenticate with the subscription login in the probe.
+UNVERIFIED_FLAGS = ("--bare",)
 #: The argument list the launcher itself builds: only confirmed flags.
 BASE_ARGV = ("-p", "--output-format", "json")
 
-#: Shipped placeholder: keeps the resolver closed until the model id is settled (D-16).
+#: A value an override may never take. The shipped catalog no longer holds it.
 PLACEHOLDER_MODEL = "UNSET-PLACEHOLDER-MODEL-ID"
-CATALOG = {"haiku": PLACEHOLDER_MODEL, "sonnet": PLACEHOLDER_MODEL, "opus": PLACEHOLDER_MODEL, "fable": PLACEHOLDER_MODEL}
+CATALOG = {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5", "fable": "claude-fable-5-1"}
 _MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 
 INSTRUCTION_FILES = _sibling("judge_isolation").INSTRUCTION_FILES   # #1472: one list, shared with the judge path
@@ -484,34 +496,39 @@ def launch(request, environ=None, clock=time.time):
         why = "the chosen credential variable is not set; no credential route is configured"
     if not why and not req.scratch_parent:
         why = "no scratch root was given"
-    if not why and (req.cap_usd is None or req.cap_usd <= 0 or req.ceiling_machine_usd is None or req.ceiling_team_usd is None):
-        why = "the per-run cap and both ceilings must be set"
+    if not why and ((req.cap_usd is not None and req.cap_usd <= 0) or (req.ceiling_machine_usd is not None and req.ceiling_machine_usd <= 0)
+                    or (req.ceiling_team_usd is not None and req.ceiling_team_usd <= 0)):
+        why = "a cap or ceiling that is set must be a positive amount"
     if why:
         return Result(REFUSED, 0.0, (), why)
 
     now = clock()
     run_id = secrets.token_hex(6)
-    ok, why = reserve_machine(req.state_dir, req.ceiling_machine_usd, req.cap_usd, run_id, now)
+    # an unset cap reserves nothing and an unset ceiling is not checked; the run is still recorded for what it metered
+    ok, why = reserve_machine(req.state_dir, float("inf") if req.ceiling_machine_usd is None else req.ceiling_machine_usd,
+                              req.cap_usd or 0.0, run_id, now)
     if not ok:
         return Result(REFUSED, 0.0, (), why)
     budget = req.budget_seconds if req.budget_seconds else DEFAULT_BUDGET_SECONDS
-    total, why = team_spent(req.sdlc_dir, req.ceiling_team_usd, budget, now)
-    if total is None or total + req.cap_usd > req.ceiling_team_usd:
-        settle_machine(req.state_dir, run_id, 0.0, clock())      # nothing ran: release the reservation
-        return Result(REFUSED, 0.0, (), why or "the team 24-hour ceiling would be passed by this run")
+    if req.ceiling_team_usd is not None:
+        total, why = team_spent(req.sdlc_dir, req.ceiling_team_usd, budget, now)
+        if total is None or total + (req.cap_usd or 0.0) > req.ceiling_team_usd:
+            settle_machine(req.state_dir, run_id, 0.0, clock())      # nothing ran: release the reservation
+            return Result(REFUSED, 0.0, (), why or "the team 24-hour ceiling would be passed by this run")
     return _run(req, model, binary, environ, run_id, clock)
 
 
 def _run(req, model, binary, environ, run_id, clock):
     bounded = _sibling("bounded_run")
     secret = environ.get(req.credential_var) if req.credential_var else None
-    cap = float(req.cap_usd)
+    cap = None if req.cap_usd is None else float(req.cap_usd)
+    killed_charge = cap or 0.0            # a killed run with no cap is charged what was metered, or nothing when unmetered
     scratch = None
-    charge, outcome, changed, reason = cap, KILLED, (), ""
+    charge, outcome, changed, reason = killed_charge, KILLED, (), ""
     try:
         text = build_prompt(req.prompt, req.blocks, secrets.token_hex(8))
         scratch, prompt_path = make_scratch(req.scratch_parent, text)
-        argv = [binary] + list(BASE_ARGV) + ["--model", model]
+        argv = [binary] + list(BASE_ARGV) + (["--max-budget-usd", "%g" % cap] if cap is not None else []) + ["--model", model]
         for item in req.flags or ():
             argv.extend(item if isinstance(item, (tuple, list)) else (item,))
         before = snapshot(req.directory)
@@ -522,17 +539,18 @@ def _run(req, model, binary, environ, run_id, clock):
         reason = _scrub(done.out, secret)
         killed = done.outcome in (bounded.TIMEOUT, bounded.STOPPED, bounded.ERROR, bounded.REFUSED) or (done.code or 0) < 0
         if killed:
-            outcome, charge = KILLED, cap
+            cost = None if cap is not None else metered_cost(scratch / "config", req.rates)
+            outcome, charge = KILLED, (cap if cap is not None else (cost or 0.0))
         else:
             cost = metered_cost(scratch / "config", req.rates)
-            charge = cap if cost is None else cost
+            charge = (cap or 0.0) if cost is None else cost
             outcome = OK if done.outcome == bounded.OK else FAILED
-            if cost is not None and cost > cap:
+            if cost is not None and cap is not None and cost > cap:
                 outcome = DISCARDED
         if changed:
             outcome = DISCARDED
     except Exception as exc:                                # noqa: BLE001 - a run that broke is charged the cap
-        outcome, charge, reason = KILLED, cap, "the run broke (%s)" % type(exc).__name__
+        outcome, charge, reason = KILLED, killed_charge, "the run broke (%s)" % type(exc).__name__
     finally:
         if scratch is not None:
             remove_scratch(scratch, req.scratch_parent)

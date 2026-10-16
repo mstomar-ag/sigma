@@ -173,14 +173,13 @@ def test_a_reached_spend_ceiling_parks_the_unit_with_the_text_and_calls_no_model
 
 @pytest.mark.parametrize("agent", [{"max_budget_usd_per_unit": None}, {"spend_ceiling_usd_per_day": None},
                                    {"max_budget_usd_per_unit": None, "spend_ceiling_usd_per_day": None}])
-def test_agent_without_a_cap_behaves_exactly_as_off(rig, tmp_path, wired, agent):
+def test_an_unset_cap_no_longer_makes_the_level_behave_as_off(rig, tmp_path, wired, agent):
+    """#1554: the caps are optional; null means no limit (the old refusal of an unset cap is gone)."""
     m = wired
-    config = agent_cfg(**agent)
-    assert m._level1_options(config)["level2"] is None
-    w, report, spy = go_wired(rig, tmp_path, m, config)
-    w2, off, spy2 = go_wired(rig, tmp_path / "off", m, l1.cfg(resolve="off"))
-    assert report["outcome"] == off["outcome"] and "level 2" not in report["why"] and "level 2" not in str(report["park"])
-    assert rig.calls() == [] and not spy.pushes() and "resolved" not in report and "level2_charged" not in report
+    plan = m._level1_options(agent_cfg(**agent), str(tmp_path), str(tmp_path))["level2"]
+    assert plan is not None
+    for key, name in (("cap_usd", "max_budget_usd_per_unit"), ("ceiling_machine_usd", "spend_ceiling_usd_per_day")):
+        assert (plan["launch"][key] is None) == (agent.get(name, 1) is None)
 
 
 def test_agent_whose_model_does_not_resolve_behaves_as_off(rig, tmp_path, wired, monkeypatch):
@@ -326,7 +325,9 @@ def test_doctor_says_why_an_unconfigured_agent_behaves_as_off(tmp_path):
     cfg = _agent_doctor_cfg()
     found = D.rows(d, D.project(tmp_path, cfg), cfg)
     row = next(c for c in found if c["name"].startswith("resolver configured"))
-    assert row["ok"] is False and "behaves as off" in row["name"] and "max_budget_usd_per_unit" in row["name"] and row["fix"]
+    assert row["ok"] is True and "no spend limit" in row["name"]       # #1554: the caps are optional
+    spend = next(c for c in found if c["name"].startswith("resolver spend:"))
+    assert spend["ok"] is True and "no spend limit configured" in spend["name"]
     assert not any("no effect in this release" in c["fix"] for c in found)
 
 

@@ -201,7 +201,7 @@ def test_a_missing_transcript_charges_the_cap(rig):
 
 # ------------------------------------------------------------------------------------------ control 3: confirmed flags only
 
-@pytest.mark.parametrize("flag", ["--max-budget-usd", "--permission-mode", "--not-a-real-flag"])
+@pytest.mark.parametrize("flag", ["--bare", "--not-a-real-flag"])
 def test_an_unverified_flag_is_refused_before_the_spawn(rig, flag):
     result = rig.launcher.launch(rig.request(flags=((flag, "1"),)))
     assert result.outcome == "refused" and flag in result.reason and "UNVERIFIED" in result.reason
@@ -213,7 +213,7 @@ def test_a_confirmed_flag_passes_and_the_table_is_labelled(rig):
     assert result.outcome == "ok" or result.outcome == "failed" or result.outcome == "discarded"
     assert rig.marker() is not None
     src = PATH.read_text(encoding="utf-8")
-    assert "UNVERIFIED" in src and all(f in rig.launcher.UNVERIFIED_FLAGS for f in ("--max-budget-usd", "--allowedTools"))
+    assert "UNVERIFIED" in src and rig.launcher.UNVERIFIED_FLAGS == ("--bare",)
     assert not set(rig.launcher.CONFIRMED_FLAGS) & set(rig.launcher.UNVERIFIED_FLAGS)
 
 
@@ -324,9 +324,62 @@ def test_the_ancestor_list_equals_the_bench_launchers():
     assert tuple(load().INSTRUCTION_FILES) == tuple(bench.INSTRUCTION_FILES)
 
 
-def test_the_catalog_ships_closed():
+def test_the_catalog_ships_real_ids_and_validates_overrides():
     module = load()
-    assert set(module.CATALOG.values()) == {module.PLACEHOLDER_MODEL}
-    assert module.resolve_model({}, None)[0] is None
+    assert module.PLACEHOLDER_MODEL not in module.CATALOG.values()
+    assert module.resolve_model({}, None)[0] is not None
     assert module.resolve_model({}, "bad id!")[0] is None
     assert module.resolve_model({}, MODEL) == (MODEL, None)
+
+
+# ------------------------------------------------------------------------------------------ #1554: probed flags, real catalog, optional caps
+
+PROBED = ("--max-budget-usd", "--permission-mode", "--allowedTools", "--disallowedTools", "--tools", "--settings",
+          "--setting-sources", "--strict-mcp-config", "--no-session-persistence", "--add-dir", "--append-system-prompt")
+
+
+@pytest.mark.parametrize("flag", PROBED)
+def test_a_probed_flag_is_confirmed_and_names_its_evidence(rig, flag):
+    assert flag in rig.launcher.CONFIRMED_FLAGS and "resolver-cli-probe.md" in rig.launcher.CONFIRMED_FLAGS[flag]
+    assert rig.launcher.check_flags(((flag, "x"),)) is None
+
+
+def test_the_bare_flag_is_refused_by_name(rig):
+    assert "--bare" in rig.launcher.check_flags(("--bare",))
+
+
+def test_the_catalog_holds_real_ids_and_an_override_is_still_validated(rig):
+    launcher = rig.launcher
+    assert launcher.PLACEHOLDER_MODEL not in launcher.CATALOG.values()
+    assert launcher.CATALOG["sonnet"] == "claude-sonnet-5-5"
+    assert launcher.resolve_model({}, "my-valid-id")[0] == "my-valid-id"
+    assert launcher.resolve_model({}, launcher.PLACEHOLDER_MODEL)[0] is None
+    assert launcher.resolve_model({}, "bad id!")[0] is None
+
+
+def test_a_set_cap_adds_the_budget_flag_and_the_ceilings_still_bind(rig):
+    result = rig.launcher.launch(rig.request())
+    assert result.outcome == "ok"
+    argv = rig.marker()["argv"]
+    assert argv[argv.index("--max-budget-usd") + 1] == "2"
+    (rig.tmp / "m2").mkdir()
+    refused = rig.launcher.launch(rig.request(state_dir=str(rig.tmp / "m2"), ceiling_machine_usd=1.0))
+    assert refused.outcome == "refused" and "per-machine" in refused.reason
+
+
+def test_no_cap_and_no_ceilings_runs_with_no_spend_flag_and_charges_what_was_metered(rig):
+    result = rig.launcher.launch(rig.request(cap_usd=None, ceiling_machine_usd=None, ceiling_team_usd=None))
+    assert result.outcome == "ok", result
+    assert "--max-budget-usd" not in rig.marker()["argv"]
+    assert result.charged_usd == pytest.approx(METERED)
+
+
+def test_a_killed_run_with_no_cap_is_charged_zero_when_unmetered(rig):
+    rig.mode({"sleep": True, "no_transcript": True})
+    result = rig.launcher.launch(rig.request(cap_usd=None, ceiling_machine_usd=None, ceiling_team_usd=None, timeout=1))
+    assert result.outcome == "killed" and result.charged_usd == 0.0
+
+
+def test_a_cap_or_ceiling_that_is_set_must_be_positive(rig):
+    assert rig.launcher.launch(rig.request(cap_usd=0)).outcome == "refused"
+    assert rig.launcher.launch(rig.request(ceiling_team_usd=-1.0)).outcome == "refused"
