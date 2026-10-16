@@ -1458,12 +1458,14 @@ def _unmaintained_row(sched, base, cfg):
         registered = sched.list_units(base)
         remote = _load_loop_script("feature_rebase")._remote(cfg)
         loose = sched.unregistered_heads(base, remote, base.parent, registered=registered)
+        loose = sched.selected(loose, ["*"], _load_loop_script("feature_upkeep").read(cfg).settings["units.exclude"])    # #1535
     except Exception:                       # noqa: BLE001 - an unanswered read is no finding
         return _chk("upkeep units: could not be read", False, "run /sigma-doctor again")
     names = ", ".join(_UNIT_BRANCH_PREFIX + n for n in loose[:5])
     return _chk("upkeep units: %d registered, %d remote feature branch(es) not maintained%s"
                 % (len(registered), len(loose), (" (" + names + ")") if loose else ""), not loose,
-                "register the unit (open it with /sigma-define) or it is never kept current; see docs/upkeep.md")
+                "register the unit (open it with /sigma-define) or it is never kept current; a branch that is not a unit: list its"
+                " name in upkeep.units.exclude; see docs/upkeep.md")
 
 
 def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
