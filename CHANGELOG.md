@@ -58,6 +58,7 @@ All notable changes to Sigma are recorded here, newest first.
 - Switching `discovery.blocker_promotion.mode` from `"smart"` to `"always"` no longer lets the smart skip marker swallow the one-time first-run preview, and the doctor row reads "first repair has not run" until the first always tick runs instead of a zero count; always-from-fresh and smart are unchanged (#1526).
 - `gh auth` no longer reads "not logged in" when both `gh auth status` attempts and the REST fallback fail on the network (timeout, connection error); the doctor row now says cannot verify, names the network failure and offers no interactive login (#1527).
 - `board_migrate.py --apply` no longer raises when a seeded card is deleted before the final snapshot: it prints a failure, asks the operator to run the migration again and exits 1, and cards with null content are counted as `other` so the board breakdown adds up (#1525).
+- The per-unit upkeep record is now written even when the base tip cannot be read (the base tip is stored as null), and a `current` pass whose report has no usable tip refreshes the stored unit tip from the checkout; the landed-unit skip is documented as the only writer on its path (#1532).
 
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 

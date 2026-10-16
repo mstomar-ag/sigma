@@ -377,6 +377,8 @@ def upkeep_pass(config, sdlc_dir, unit, unit_ref, base_ref, base_name, now, *, r
         report["result"] = UNREADABLE
     elif verdict in (LANDED_CONTAINED, LANDED_PR):
         report["result"] = "skipped"
+        # #1532: the only writer on this path. A landed unit never enters the engine below, and the pass is reached
+        # only after the older engine pass has ended; this record carries the tips read here, so it is kept, not doubled.
         state = _sibling("feature_upkeep_state").record_outcome(sdlc_dir, unit, now, "current", unit_tip, base_tip)
         report["recorded"] = bool(getattr(state, "ok", False))
     elif rewrite is not None:
