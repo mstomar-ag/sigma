@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Draft a proposed rule from a learned pattern, tested on held-back decisions (rulebook, goal 1138 of story 988).
 
-Verbs: `list <sdlc_dir>` prints the question kind and area pairs whose derived autonomy level is at
+Verbs: `suggest <sdlc_dir> [--propose N]` ranks the pairs that matter on this repository (#1513) and drafts the top N
+as PROPOSED; `list <sdlc_dir>` prints the question kind and area pairs whose derived autonomy level is at
 least 2 and whose human answers agree on one option at or above the agreement threshold. `draft
 <sdlc_dir> <qkind> <area>` builds a rule from that pair and hands it to `rulebook.propose`, so it
 lands as PROPOSED only: approval stays with the owner through `rulebook.approve`. `approve <sdlc_dir> <rule_id>` hands one
@@ -35,6 +36,7 @@ _HERE = pathlib.Path(__file__).resolve().parent
 DEFAULTS = {"min_agreement": 0.90, "min_held_out": 5}
 MIN_LEVEL = 2
 MAX_LINKED = 50
+ANY_AREA = "*"      # the rule area from #1497: one rule covering every area of a kind
 
 
 def _load(name):
@@ -90,7 +92,7 @@ def split(ids):
 
 def _human(sdlc_dir, qkind, area, config):
     dr = _load("decision_record")
-    recs = _load("decision_store").list_by(sdlc_dir, config, qkind=qkind, area=area)
+    recs = _load("decision_store").list_by(sdlc_dir, config, qkind=qkind, area=None if area == ANY_AREA else area)
     # An imported record of kind unknown has no real kind behind it (#1239): it never feeds a draft.
     # The key is the one comparison key (#1495), so a draft reads exactly as a hand-written rule would;
     # 'free' answers and promote/demote/ack gestures never feed one.
@@ -190,6 +192,16 @@ def due_lines(sdlc_dir, config, now=None):
         return []
 
 
+def _level(sdlc_dir, qkind, area, config):
+    """The derived level of a pair; for the any-area `*` the LOWEST level among the kind's recorded areas."""
+    au = _load("autonomy")
+    if area != ANY_AREA:
+        return au.level(sdlc_dir, qkind, area, config)
+    areas = {r.get("area") for r in _load("decision_store").list_by(sdlc_dir, config, qkind=qkind)
+             if isinstance(r.get("area"), str)}
+    return min([au.level(sdlc_dir, qkind, a, config) for a in areas] or [0])
+
+
 def _refuse(reason):
     return {"status": "refused", "reason": reason}
 
@@ -201,7 +213,7 @@ def draft(sdlc_dir, qkind, area, config, now=None):
             return _refuse("closed: rulebook, autonomy and records parts must all be enabled")
         if not isinstance(qkind, str) or not isinstance(area, str) or _blocked(qkind, config):
             return _refuse("question kind is unknown or a hard-stop kind")
-        if _load("autonomy").level(sdlc_dir, qkind, area, config) < MIN_LEVEL:
+        if _level(sdlc_dir, qkind, area, config) < MIN_LEVEL:
             return _refuse("level below %d" % MIN_LEVEL)
         rb = _load("rulebook")
         if any(r.get("qkind") == qkind and r.get("area") == area for r in rb.load(sdlc_dir, config)):
@@ -229,6 +241,132 @@ def draft(sdlc_dir, qkind, area, config, now=None):
                 "meaning": meaning(qkind, opt)}
     except Exception as exc:  # noqa: BLE001 - fail closed
         return _refuse("unreadable: %s" % type(exc).__name__)
+
+
+def _when(rec):
+    import datetime
+    try:
+        t = datetime.datetime.fromisoformat(str(rec.get("time")))
+        return t if t.tzinfo else t.replace(tzinfo=datetime.timezone.utc)
+    except Exception:
+        return None
+
+
+def blocked_counts(edges):
+    """`{blocker: goals blocked, directly or through chains}` from `{goal: [blockers]}`. Cycle-safe."""
+    below = collections.defaultdict(set)
+    for goal, blockers in (edges or {}).items():
+        for b in blockers:
+            below[str(b)].add(str(goal))
+    out = {}
+    for b in list(below):
+        seen, todo = set(), [b]
+        while todo:
+            for g in below.get(todo.pop(), ()):
+                if g not in seen and g != b:
+                    seen.add(g)
+                    todo.append(g)
+        out[b] = len(seen)
+    return out
+
+
+def _top(keys):
+    """The most common key (ties broken by name, so the order never depends on record order), or None."""
+    return sorted(collections.Counter(keys).items(), key=lambda kv: (-kv[1], kv[0]))[0] if keys else None
+
+
+def suggest(sdlc_dir, config, edges=None, now=None):
+    """Rank (kind, area) pairs by importance from the repository's own records (#1513). [] when closed.
+
+    Per pair: `parked` (park answers), `hours` (parked until the goal's next record, else `now`),
+    `blocked` (goals blocked by the parked goals, from `edges` = `{goal: [blocker goals]}`), `agreement`
+    (share of the majority comparison key, `decision_record.key_of`), `score` = (parked + hours/24 +
+    blocked) * agreement. Hard-stop kinds and `unknown` never appear. `coverage` is `any-area` when the
+    pair follows the kind-wide majority (one rule with area `*` covers it) or `own-rule` when its
+    answers differ; `covered` says an existing rule already names the pair (or the kind's `*`).
+    Never raises."""
+    try:
+        import datetime
+        if not _open(config):
+            return []
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        dr, recs = _load("decision_record"), _load("decision_store").list_by(sdlc_dir, config)
+        recs = [r for r in recs if isinstance(r, dict) and isinstance(r.get("qkind"), str)
+                and isinstance(r.get("area"), str) and not _blocked(r["qkind"], config)]
+        by_goal = collections.defaultdict(list)
+        for r in recs:
+            if r.get("issue") not in (None, "") and _when(r):
+                by_goal[str(r["issue"])].append(_when(r))
+        blocked = blocked_counts(edges)
+        pairs = collections.defaultdict(list)
+        for r in recs:
+            pairs[(r["qkind"], r["area"])].append(r)
+        rules = _load("rulebook").load(sdlc_dir, config)
+        kind_top = {q: _top(list(_human(sdlc_dir, q, ANY_AREA, config).values())) for q in {q for q, _ in pairs}}
+        rows = []
+        for (q, a), rs in pairs.items():
+            parks = [r for r in rs if dr.is_park_answer(r)]
+            top, ktop = _top(list(_human(sdlc_dir, q, a, config).values())), kind_top[q]
+            if not parks or top is None:
+                continue
+            hours, goals = 0.0, set()
+            for r in parks:
+                t, g = _when(r), str(r.get("issue"))
+                if r.get("issue") not in (None, ""):
+                    goals.add(g)
+                if t is not None and g in by_goal:
+                    later = [x for x in by_goal[g] if x > t]
+                    hours += ((min(later) if later else now) - t).total_seconds() / 3600.0
+            n_keys = len(_human(sdlc_dir, q, a, config))
+            agreement, nblocked = round(top[1] / n_keys, 2), sum(blocked.get(g, 0) for g in goals)
+            same = top[0] == ktop[0]
+            row = {"qkind": q, "area": a, "parked": len(parks), "hours": round(hours, 1), "blocked": nblocked,
+                   "agreement": agreement, "option": ktop[0] if same else top[0],
+                   "coverage": "any-area" if same else "own-rule",
+                   "score": round((len(parks) + hours / 24.0 + nblocked) * agreement, 2),
+                   "covered": any(r.get("qkind") == q and r.get("area") in (a, ANY_AREA) for r in rules)}
+            if _shape_only(q, row["option"]):
+                row["note"] = SHAPE_NOTE
+            rows.append(row)
+        rows.sort(key=lambda r: (-r["score"], r["qkind"], r["area"]))
+        return rows
+    except Exception:
+        return []
+
+
+def proposals(rows):
+    """The rules to draft for ranked `rows`: one per kind for the any-area pairs, one per differing pair.
+    -> `[(qkind, area)]` in rank order; covered pairs and shape-only options are left out."""
+    out = []
+    for r in rows:
+        if r["covered"] or r.get("note"):
+            continue
+        pair = (r["qkind"], ANY_AREA if r["coverage"] == "any-area" else r["area"])
+        if pair not in out:
+            out.append(pair)
+    return out
+
+
+def _dependency_edges(sdlc_dir, config):
+    """`{goal: [blocker goals]}` from the open issues' own `Blocked by` text. {} when unreadable (fail open)."""
+    try:
+        src = _load("sources").get_source(sdlc_dir, config)
+        scan = _load("blocker_scan")
+        edges = {}
+        for it in src._list_issues(["number", "body"], state="open"):
+            refs = [x["ref"] for x in scan.extract_refs(it.get("body") or "", self_ref=str(it["number"]))]
+            if refs:
+                edges[str(it["number"])] = refs
+        return edges
+    except Exception:
+        return {}
+
+
+def suggest_line(row):
+    cover = "one any-area rule (*)" if row["coverage"] == "any-area" else "needs its own rule"
+    return ("%s / %s: score %.2f (parked %d, %.1f h, blocks %d, agreement %.2f) -> %s; %s%s" % (
+        row["qkind"], row["area"], row["score"], row["parked"], row["hours"], row["blocked"],
+        row["agreement"], row["option"], cover, "; already has a rule" if row["covered"] else ""))
 
 
 def _identity(config):
@@ -347,6 +485,10 @@ def main(argv=None):
     d.add_argument("sdlc_dir")
     d.add_argument("qkind")
     d.add_argument("area")
+    sg = sub.add_parser("suggest", help="rank question kind and area pairs by importance; --propose N drafts the top N")
+    sg.add_argument("sdlc_dir")
+    sg.add_argument("--propose", type=int, default=0, metavar="N",
+                    help="draft rules (never approve) for the top N uncovered pairs")
     sh = sub.add_parser("show", help="print what one rule does: unpark, keep parked, or only recommends")
     sh.add_argument("sdlc_dir")
     sh.add_argument("rule_id")
@@ -378,6 +520,15 @@ def main(argv=None):
         if args.why:
             for row in skipped(args.sdlc_dir, config):
                 print("skipped %s / %s: %s" % (row["qkind"], row["area"], row["why"]))
+        return 0
+    if args.verb == "suggest":
+        rows = suggest(args.sdlc_dir, config, edges=_dependency_edges(args.sdlc_dir, config))
+        for row in rows:
+            print(suggest_line(row) + ("; " + row["note"] if row.get("note") else ""))
+        for q, a in proposals(rows)[:max(args.propose, 0)]:
+            out = draft(args.sdlc_dir, q, a, config)
+            print("propose %s / %s: %s" % (q, a, "drafted (proposed, not approved)"
+                                           if out["status"] == "drafted" else out["reason"]))
         return 0
     if args.verb == "due":
         lines = {ln.split(":", 1)[0]: ln for ln in due_lines(args.sdlc_dir, config)}

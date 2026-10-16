@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **`rule_draft.py suggest` ranks which question kind and area pairs deserve a rule (#1513).** It scores each pair from parks, hours parked, goals blocked and answer agreement, names the majority option and whether one any-area rule covers it, never lists hard-stop or unknown kinds, and `--propose N` drafts the top N as proposals (never approved); the doctor's rulebook row lists the top uncovered pairs when rules are on.
 - The source-error downgrade-to-park declares `quota` for a quota or budget failure and `needs_decision` otherwise, and the stale-worktree escalation park declares `needs_decision` (#1524).
 - **Upkeep's mechanical level resolves two append-only shapes (#1515).** A dated `## YYYY-MM` log and a bullet-list file that both sides only added to are unioned (per section in date order; base order then the unit's new items); an edit or removal on either side still parks.
 - A config that sets `discovery.blocker_promotion.mode` to `"smart"` now gets a one-time skip line from the reconcile tick and a not-OK "blocker priority rule inactive" doctor row naming the one-word fix to `"always"`; what smart, always and off do is unchanged (#1489).

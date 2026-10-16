@@ -5439,6 +5439,10 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
                                      % (ar["id"], ar["option"]))
                     if ar["answers"]:
                         extra.append(rbk.acceptance_line(ar))
+                rows = [r for r in _load_loop_script("rule_draft").suggest(sdlc_dir, cfg) if not r["covered"]][:3]
+                if rows:
+                    extra.append("top uncovered rule pairs (rule_draft.py suggest): " + "; ".join(
+                        "%s / %s (score %.1f)" % (r["qkind"], r["area"], r["score"]) for r in rows))
             ptr = _load_loop_script("ledger_pointer")
             if ptr.is_open(cfg):
                 extra.append("ledger pointer on: %d ledger entry files, %d ids queued"
