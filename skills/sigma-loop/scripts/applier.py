@@ -245,14 +245,16 @@ def _park_info(source, issue):
         comments = [c for c in (data.get("comments") or []) if isinstance(c, dict)]
         u = _load("unpark")
         prefixes = u.sources.OFFBOARD_COMMENT_PREFIXES
-        park_at, declared = None, None
+        park_at, declared, last_body = None, None, ""
         for c in comments:
             body = c.get("body") or ""
             if any(body.startswith(p) for p in prefixes):
                 park_at = _parse(c.get("createdAt") or c.get("created_at")) or park_at
                 declared = _load("qkind").parse_line(body) or declared
+                last_body = body
+        reset = _load("qkind").parse_reset_line(last_body) if declared == "quota" else None
         return {"labels": data.get("labels"), "qkind": declared, "park": u.park_stamp(comments),
-                "park_at": park_at}
+                "park_at": park_at, "reset_at": reset}
     except Exception:
         return None
 
@@ -296,7 +298,7 @@ def _arm_notice(source, issue, rule_id, at, config):
         pass
 
 
-def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None, info=None):
+def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None, info=None, reset_at=None):
     """Open the ask for a park that declared `qkind_`, when an approved rule matches its area.
     Returns the ask id (an existing pending ask for the same park is reused) or None. Never raises.
     Closed gate: None before any read. The area is read best-effort from the issue's `area:*` label
@@ -348,8 +350,12 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None, info=N
             return None
         armed = now.isoformat() if _eligible(sdlc_dir, config, qkind_, area, m.option,
                                              _auto_rule(rb.load(sdlc_dir, config), m.rule_id, config)) else None
+        if qkind_ != "quota":
+            reset_at = None
+        elif not isinstance(reset_at, datetime.datetime):
+            reset_at = info.get("reset_at")      # a park recorded earlier (the sync path)
         aid = open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now, gesture=gesture, park=park,
-                       armed_at=armed)
+                       armed_at=armed, reset_at=reset_at)
         if aid and armed is not None and source is not None:    # M-03: one notice when an ask becomes armed
             _arm_notice(source, issue, m.rule_id, _parse(armed), config)
         return aid
@@ -461,20 +467,14 @@ def close_for_issue(sdlc_dir, config, issue, text, now=None, refuse=False):
     return None
 
 
-_QUOTA_RESET_MINUTES = 1440
-
-
 def _quota_wait_pending(ask, m, now):
-    """#1522: a quota ask matched to "wait it out" is applied only once the quota has reset: its recorded
-    `reset_at`, else a day after it was opened. An unreadable time counts as still in the future.
-    Every other kind and option is untouched."""
-    if ask.get("qkind") != "quota" or m.option != "wait it out":
+    """#1522, #1563: a quota ask matched to "wait it out" is held until its recorded `reset_at`. With no
+    `reset_at` nothing is held here: the ask waits the ordinary window (`window_minutes`) and no longer.
+    An unreadable recorded time counts as still in the future. Every other kind and option is untouched."""
+    if ask.get("qkind") != "quota" or m.option != "wait it out" or not ask.get("reset_at"):
         return False
     try:
-        if ask.get("reset_at"):
-            reset = datetime.datetime.fromisoformat(str(ask.get("reset_at")))
-        else:
-            reset = datetime.datetime.fromisoformat(str(ask.get("opened"))) + datetime.timedelta(minutes=_QUOTA_RESET_MINUTES)
+        reset = datetime.datetime.fromisoformat(str(ask.get("reset_at")))
         if reset.tzinfo is None:
             reset = reset.replace(tzinfo=datetime.timezone.utc)
         return now < reset
