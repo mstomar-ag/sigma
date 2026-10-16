@@ -75,3 +75,32 @@ def test_waiting_note_only_for_the_dependency_keep_parked_gesture(tmp_path):
     src = T.Src()
     AP.tick(sd, cfg, T0 + 61 * MIN, source=src)
     assert src.notes and all(_mod("auto_unpark").WAITING_MARKER not in t for _i, t in src.notes)
+
+
+def _comments_of_resolve(tmp_path, kind, route):
+    """The documented gesture: unpark.py resolve ... --decision keep-parked, on a temp repo with a fake gh."""
+    import json as _json
+    import subprocess
+    import test_unpark as tu
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    u, q = tu._mod("unpark"), tu._mod("qkind")
+    (tmp_path / "config.json").write_text(_json.dumps(tu._config()))
+    answers = tmp_path / "a.json"
+    answers.write_text(_json.dumps({"answers": {"route": route}}))
+    run = tu._runner(views={"5": tu._view(comments=[tu._park("waiting on #7\n" + q.render_line(kind))])})
+    assert u.main(["unpark.py", "resolve", str(tmp_path), "5", "--answers", str(answers),
+                   "--decision", "keep-parked"], run=run) == 0
+    return [c[c.index("--body") + 1] for c in run.calls if c[:2] == ["issue", "comment"]]
+
+
+def test_a_persons_wait_for_it_answer_posts_the_note_and_the_sweep_resumes_it(tmp_path):
+    posted = _comments_of_resolve(tmp_path, "dependency", "wait for it")
+    assert any(_mod("auto_unpark").WAITING_MARKER in c for c in posted)
+    actions, resolved = _sweep([PARK] + posted, {"7": "CLOSED"})
+    assert [a["action"] for a in actions] == ["swap-label"] and resolved == {"42": ["7"]}
+
+
+def test_a_persons_other_route_posts_no_waiting_note(tmp_path):
+    au = _mod("auto_unpark")
+    posted = _comments_of_resolve(tmp_path, "dependency", "drop this")
+    assert not any(au.WAITING_MARKER in c for c in posted)
