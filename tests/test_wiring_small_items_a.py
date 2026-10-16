@@ -57,14 +57,14 @@ def test_item2_failed_asks_are_named_once_on_stderr(monkeypatch, capsys):
     cap = capsys.readouterr()
     assert rc == 0
     assert "applier: 2 asks failed and will be retried" in cap.err
-    assert "1 answer(s) applied or vetoed" in cap.out
+    assert "applier: 1 applied" in cap.out
 
 
 def test_item2_no_failures_prints_nothing_extra(monkeypatch, capsys):
     _applier_main(monkeypatch, [{"result": "done"}])
     cap = capsys.readouterr()
     assert cap.err == ""
-    assert cap.out == "applier: 1 answer(s) applied or vetoed\n"
+    assert cap.out == "applier: 1 applied\n"
 
 
 def test_item3_comment_scan_stops_at_the_time_budget(tmp_path):
