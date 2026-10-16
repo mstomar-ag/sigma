@@ -111,9 +111,10 @@ closed.
 Then set `work.base` to your default branch. With `work.base` empty every pass ends `no-base` and does
 nothing; the doctor says so.
 
-Before you rely on it, run one pass by hand on a unit you can afford to rewrite:
+Run `preview` first (add `--fetch` to refresh the remote-tracking refs; without it the answer is as of the last fetch; a conflict is a merge-probe prediction, a rebase may differ). Before you rely on it, run one pass by hand on a unit you can afford to rewrite:
 
 ```
+python3 skills/sigma-loop/scripts/feature_rebase.py preview .sdlc          # every unit the sweep would take, predicted outcome; moves nothing, works with the gate closed
 python3 skills/sigma-loop/scripts/feature_rebase.py show .sdlc <unit>      # reports, moves nothing
 python3 skills/sigma-loop/scripts/feature_rebase.py upkeep .sdlc <unit>    # one pass
 ```
