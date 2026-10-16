@@ -30,6 +30,7 @@ repository.
 NOT HERE, ON PURPOSE. No child process, no signal, no gate that stops anything: this module reports facts and
 decisions; a caller acts on them.
 """
+import contextlib
 import ctypes
 import json
 import math
@@ -485,6 +486,74 @@ def decide(history, limits, unit_cost, prior="open", resume_samples=RESUME_SAMPL
     if reason:
         return Decision("hold", reason, resource, since, now + sample_gap * resume_samples, rate)
     return Decision("open", "ok", None, now, None, rate)
+
+
+# ------------------------------------------------------------------------------------------ session gate (#1603)
+_LEASE = {}
+
+
+def _lease():
+    """The lease module, loaded on first use (resource_lease imports this module, so not at import time)."""
+    if "m" not in _LEASE:
+        import importlib.util
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location("resource_lease", os.path.join(here, "resource_lease.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _LEASE["m"] = module
+    return _LEASE["m"]
+
+
+def session_mode(config=None, env=None):
+    """enforce | observe | off for a model-session spawn: the config block, else SIGMA_RESOURCE_MODE, else off.
+
+    Off by default on purpose: no config route reaches every spawn site yet, so the gate is the operator's opt-in
+    (SAFETY: nothing consumes or records anything unasked). off means no lease, no state, no sample.
+    """
+    env = os.environ if env is None else env
+    mode = config.get("mode") if isinstance(config, dict) else None
+    if mode not in _MODES:
+        mode = env.get("SIGMA_RESOURCE_MODE")
+    return mode if mode in _MODES else "off"
+
+
+@contextlib.contextmanager
+def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None):
+    """Hold one "session" lease around a model-session spawn. Yields None (mode off), a Grant, or a Hold.
+
+    The caller treats a Hold as its own existing "could not start now" outcome. The lease is released in `finally`,
+    so an exception or a timeout in the child never leaves one behind. Never raises for pressure, a busy lock or a
+    table error. On a platform that cannot take a lease (or a table error): observe proceeds unguarded, enforce yields a
+    Hold that says so (refuse loudly rather than a silent half-guarantee).
+    """
+    mode = session_mode(config, env)
+    if mode == "off":
+        yield None
+        return
+    lease = _lease()
+    cfg = dict(config) if isinstance(config, dict) else {}
+    cfg["mode"] = mode
+    try:
+        got = lease.admit("session", 1, repo if repo is not None else os.getcwd(), "%s:%s" % (kind, goal),
+                          ttl=ttl, config=cfg, env=env)
+    except Exception as exc:  # noqa: BLE001 - never a crash; resource_lease holds its own Unsupported class
+        why = ("unsupported: %s" % getattr(exc, "reason", exc)) if type(exc).__name__ == "Unsupported" \
+            else "lease table error (%s)" % type(exc).__name__
+        yield None if mode == "observe" else _Held(why)
+        return
+    try:
+        yield got
+    finally:
+        if hasattr(got, "id"):
+            try:
+                lease.release(got.id, env=env)
+            except Exception:  # noqa: BLE001 - release is best effort; the ttl and the pid check reclaim it
+                pass
+
+
+class _Held:
+    def __init__(self, reason, retry_after=60.0):
+        self.reason, self.retry_after = reason, retry_after
 
 
 # --------------------------------------------------------------------------------------------- hold.json
