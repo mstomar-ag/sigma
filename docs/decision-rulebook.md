@@ -313,6 +313,7 @@ What the tick does, in order:
 1. Reads owner comments. An owner's exact `no` on a **pending** ask cancels it. An owner's `no` on an **applied** ask,
    posted after it was applied and inside the window, records a veto. The veto is judged by the comment's own time, so
    a late tick still honours it, up to `stale_after_intervals` watch intervals past the window.
+   A pending ask stuck past twice its window is read at most once per window (`veto_read_at` on the ask), so its `no` can land up to one window late.
 2. Plans actions. An ask is applied only when all hold: nobody answered, the window (`window_minutes`, default 1440)
    has passed, the kind is not a hard-stop kind, the derived level is at least 3, exactly one sealed approved rule
    matches, and fewer than `max_auto_applied_per_day` (default 3, 0 stops it) were applied in the last 24 hours.
