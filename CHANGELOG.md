@@ -3,9 +3,11 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- A `keep-parked` on a quota park answered "wait it out" no longer posts the sweep opt-out marker, like a dependency "wait for it"; every other route still does (provisional, owner to ratify) (#1547).
 - The upkeep sweep now prunes backup refs past `backup.keep_days` by itself, keeping the newest `backup.keep_last` per unit, once per sweep and bounded; a failed prune never fails the sweep and is retried next time, and `/sigma-doctor` shows the backup count and last prune (#1557).
 - **The rulebook can approve its own learned rules (#1555).** `rulebook.rules.auto_approve` (default false) lets the watcher tick, `rule_draft.py list` and `suggest` draft and approve a rule for every learned pair with a majority option, as the first configured owner, at any level; the applier applies it after the window, an owner `no` holds it until reconfirmed, hard-stop kinds are never touched, and the doctor warns while it is on.
 
+- **`applier.py --dry-run` says when the applier is off (#1545).** With `rulebook.autonomy.applier.enabled` not true it prints one line saying the applier is off and exits 0, instead of printing nothing; output with the applier on is unchanged.
 - **The land verb measures the sibling half of a pair itself (#1552).** `feature_land` used to pass no landed measurement, so any unit with a second repository was always refused as "nothing was supplied to measure". It now reads the sibling's pull requests and proceeds only when one merged; an unmerged or unreadable answer still refuses, and the refusal names the goal recorded for that repository and the remedy.
 - An AI-filed issue whose requested priority (`--priority`) is P0 or P1 is armed (at its bucket priority) past a reached per-goal `ai_filed` cap while the counter is readable (key `ai_filed.cap_bypass_priority`, default P1, invalid reads as P1); lower requested priorities and the per-run cap still park, with a reason naming `ai_filed.max_per_goal` / `max_per_run` (#1553).
 

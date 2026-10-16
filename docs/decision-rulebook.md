@@ -333,6 +333,8 @@ pending veto are deleted after `prune_after_days` (default 30); answered and vet
 
 A `keep-parked` on a dependency park (route answer "wait for it") no longer posts the opt-out marker, even with the gates closed. This is intended; the owner is to ratify it.
 
+PROVISIONAL (owner to ratify): a `keep-parked` on a quota park (route answer "wait it out") likewise posts no opt-out marker, so the sweep may resume the goal after the quota window. Every other route still posts it.
+
 A quota ask matched to the "wait it out" rule is applied only after the reset time the ask records (`reset_at`). A reset time that is missing or unreadable counts as not yet reached, so the ask stays with the person. Other kinds are not affected.
 
 ## Hard stops and the record-done net
