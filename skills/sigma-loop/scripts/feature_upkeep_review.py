@@ -334,7 +334,8 @@ def review(request, environ=None):
         store_dir(req.launch["sdlc_dir"], req.unit)
     except ValueError as exc:
         return Review(REFUSED, (str(exc),), VERIFIED)
-    if req.cap_usd is None or req.resolver_cap_usd is None or not 0 < req.cap_usd < req.resolver_cap_usd:
+    unlimited = req.cap_usd is None and req.resolver_cap_usd is None       # no spend limit configured: no cap on either side
+    if not unlimited and (req.cap_usd is None or req.resolver_cap_usd is None or not 0 < req.cap_usd < req.resolver_cap_usd):
         return Review(REFUSED, ("the reviewer needs its own per-run cap, smaller than the resolver's",), VERIFIED)
     launcher = _sibling("feature_upkeep_launcher")
     model = pick_model(req.catalog, req.resolver_model, req.model)

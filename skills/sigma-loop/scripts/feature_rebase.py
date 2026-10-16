@@ -1669,10 +1669,8 @@ def level2_off_reason(config, which=None):
         if not reading.enabled or reading.settings["conflicts.resolve"] != "agent":
             return "conflicts.resolve is not agent"
         s = reading.settings
-        if s["conflicts.agent.max_budget_usd_per_unit"] is None:
-            return "conflicts.agent.max_budget_usd_per_unit is not set"
-        if s["conflicts.agent.spend_ceiling_usd_per_day"] is None:
-            return "conflicts.agent.spend_ceiling_usd_per_day is not set"
+        if s["conflicts.agent.max_budget_usd_per_unit"] is None and s["conflicts.agent.spend_ceiling_usd_per_day"] is not None:
+            return "conflicts.agent.spend_ceiling_usd_per_day is set without conflicts.agent.max_budget_usd_per_unit"
         catalog = _launcher().CATALOG
         for key in ("conflicts.agent.model", "conflicts.agent.reviewer.model"):
             if not catalog.get(s[key]):
@@ -1695,16 +1693,19 @@ def _default_level2_plan(config, sdlc_dir=None, cwd=None):
     root = os.path.join(tempfile.gettempdir(), LEVEL2_ROOT_PREFIX + hashlib.sha256(str(sdlc_dir).encode()).hexdigest()[:10])
     for name in ("resolver", "scratch", "review"):
         os.makedirs(os.path.join(root, name), exist_ok=True)
-    budget = float(s["conflicts.agent.max_budget_usd_per_unit"])
-    ceiling = float(s["conflicts.agent.spend_ceiling_usd_per_day"])
+    # unset (null) means no limit: None passes through, and the launcher then adds no spend flag and checks no ceiling
+    raw_budget, raw_ceiling = s["conflicts.agent.max_budget_usd_per_unit"], s["conflicts.agent.spend_ceiling_usd_per_day"]
+    budget = None if raw_budget is None else float(raw_budget)
+    ceiling = None if raw_ceiling is None else float(raw_ceiling)
+    review_cap = None if budget is None else budget * 0.5
     common = dict(state_dir=os.path.join(str(sdlc_dir), *LEVEL2_SPEND_REL.split("/")), repo_root=str(cwd) if cwd else None,
                   binary=shutil.which("claude"), flags=(), credential_var=None, scratch_parent=os.path.join(root, "scratch"), rates=None,
                   ceiling_machine_usd=ceiling, ceiling_team_usd=ceiling, budget_seconds=5.0, home=os.path.expanduser("~"),
                   timeout=int(s["conflicts.agent.timeout_minutes"]) * 60, cap_usd=budget, sdlc_dir=str(sdlc_dir))
-    # the reviewer gets half the per-unit budget: the launcher requires its cap to be smaller than the resolver's
+    # the reviewer gets half the per-unit budget when one is set: its cap must be smaller than the resolver's
     review_model = launcher.CATALOG[s["conflicts.agent.reviewer.model"]]      # reviewer.enabled is validated, never honoured: a push needs a review
     return {"sdlc_dir": str(sdlc_dir), "launch": dict(common, model=launcher.CATALOG[s["conflicts.agent.model"]]),
-            "review_launch": dict(common, model=review_model, directory=os.path.join(root, "review"), cap_usd=budget * 0.5), "review_cap_usd": budget * 0.5,
+            "review_launch": dict(common, model=review_model, directory=os.path.join(root, "review"), cap_usd=review_cap), "review_cap_usd": review_cap,
             "review_model": review_model, "resolver_root": os.path.join(root, "resolver"), "limits": None, "host": "claude",
             "environ": None, "config": config, "max_units_per_sweep": int(s["conflicts.agent.max_units_per_sweep"])}
 

@@ -58,12 +58,13 @@ def test_open_and_agent_gives_every_readiness_row(tmp_path):
 
 
 def test_the_shipped_defaults_are_not_ready(tmp_path):
-    """Placeholder model, unverified flags and no cap key in the gate schema: three failing rows, each with a fix."""
+    """#1554: the model catalog holds real ids and the caps are optional, so only the still-unverified flag fails."""
     d, cfg = doctor(), config()
     by = {c["name"].lower(): c for c in rows(d, project(tmp_path, cfg), cfg)}
-    for word in ("resolver model", "resolver flags", "resolver spend"):
-        row = next(c for k, c in by.items() if word in k)
-        assert row["ok"] is False and row["fix"], word
+    flags = next(c for k, c in by.items() if "resolver flags" in k)
+    assert flags["ok"] is False and flags["fix"] and "1 design flag still unverified" in flags["name"].lower()
+    for word in ("resolver model", "resolver spend"):
+        assert next(c for k, c in by.items() if word in k)["ok"] is True, word
 
 
 def test_a_missing_cli_is_a_failing_row(tmp_path):

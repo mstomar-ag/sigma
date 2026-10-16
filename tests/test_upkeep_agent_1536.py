@@ -86,8 +86,16 @@ def test_dropped_base_lines_is_a_trimmed_multiset_and_bounded():
     assert level2.dropped_base_lines("a\n", "a\n" + "".join("l%d\n" % i for i in range(20)), "a\n") == sorted("l%d" % i for i in range(20))
 
 
-def test_doctor_fails_the_configured_row_on_the_placeholder_model(tmp_path):
+def test_doctor_fails_the_configured_row_on_the_placeholder_model(tmp_path, monkeypatch):
     D, d = A._doctor()
+    real_load = d._load_loop_script
+
+    def load(name):                                  # the doctor loads a fresh copy of the launcher each time
+        mod = real_load(name)
+        if name == "feature_upkeep_launcher":
+            mod.CATALOG["sonnet"] = mod.PLACEHOLDER_MODEL
+        return mod
+    monkeypatch.setattr(d, "_load_loop_script", load)
     cfg = A._agent_doctor_cfg(max_budget_usd_per_unit=2, spend_ceiling_usd_per_day=5)
     found = D.rows(d, D.project(tmp_path, cfg), cfg, which=lambda name: "/bin/" + name)
     row = next(c for c in found if c["name"].startswith("resolver configured"))

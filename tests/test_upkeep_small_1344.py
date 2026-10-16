@@ -51,11 +51,11 @@ def test_the_pass_reports_a_refused_lease_as_its_reason(monkeypatch):
     assert report["result"] == "failed" and report["reason"] == "lease-refused", report
 
 
-def test_doctor_says_an_unconfigured_agent_level_behaves_as_off(tmp_path):
-    """#1516: the level is reachable now; with no spend keys set the doctor says it behaves as off, and why."""
+def test_doctor_says_an_unconfigured_agent_level_has_no_spend_limit(tmp_path):
+    """#1554: with no spend keys set the level runs, and the doctor says there is no spend limit."""
     d, cfg = DR.doctor(), DR.config()
     found = DR.rows(d, DR.project(tmp_path, cfg), cfg)
-    assert any("behaves as off" in c["name"].lower() for c in found), DR.names(found)
+    assert any("no spend limit" in c["name"].lower() for c in found), DR.names(found)
     assert not any("not available yet" in (c["name"] + c.get("fix", "")).lower() for c in found)
 
 

@@ -260,14 +260,14 @@ def test_caps_and_models(rig):
     launcher = rig.mod._sibling("feature_upkeep_launcher")
     assert rig.mod.pick_model(cat, RESOLVER_MODEL) == REVIEWER_MODEL
     assert rig.mod.pick_model({"a": RESOLVER_MODEL}, RESOLVER_MODEL) == launcher.PLACEHOLDER_MODEL
-    assert rig.mod.pick_model(None, RESOLVER_MODEL) == launcher.PLACEHOLDER_MODEL
-    result = rig.mod.review(rig.request(model=None))          # the shipped catalog is all placeholder: closed
-    assert result.outcome == "refused" and rig.marker() is None
+    assert rig.mod.pick_model(None, RESOLVER_MODEL) != RESOLVER_MODEL        # the shipped catalog has real ids (#1554)
+    nolimit = dict(rig.request().launch, ceiling_machine_usd=None, ceiling_team_usd=None)
+    assert rig.mod.review(rig.request(cap_usd=None, resolver_cap_usd=None, launch=nolimit)).outcome != "refused"   # no spend limit: no caps at all
 
 
 def test_unverified_flag_is_refused_before_a_spawn(rig):
     req = rig.request()
-    req.launch["flags"] = ("--max-budget-usd",)
+    req.launch["flags"] = ("--bare",)
     result = rig.mod.review(req)
     assert result.outcome == "refused" and "UNVERIFIED" in result.reasons[0] and rig.marker() is None
 
