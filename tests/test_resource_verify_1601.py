@@ -224,23 +224,42 @@ def test_200_mb_of_output_stays_bounded(env, tmp_path):
 
 
 # ------------------------------------------------------------------------------------------ learned cost
+_FRESH_RUN = """
+import importlib.util, json, sys
+sys.path.insert(0, sys.argv[1])
+spec = importlib.util.spec_from_file_location("resource_verify", sys.argv[1] + "/resource_verify.py")
+verify = importlib.util.module_from_spec(spec); sys.modules["resource_verify"] = verify; spec.loader.exec_module(verify)
+lease = verify._sibling("resource_lease")
+G = 1024 ** 3
+lease.take_sample = lambda: lease.guard.Sample(total=16 * G, available=12 * G, swap_used=0, swap_total=0, swapouts=0,
+                                                swapouts_at=0.0, pressure=1, cpu_count=8, load1=0.0)
+out = verify.run("verify", sys.argv[2], sys.argv[3], 60, "g1", sample_gap=0.2)
+print(json.dumps({"workers": out.workers}))
+"""
+
+
 @unix_only
-def test_learned_cost_is_peak_tree_footprint_over_workers_within_20_percent(env, tmp_path):
+def test_learned_cost_is_peak_tree_footprint_over_workers_within_20_percent(tmp_path):
     """The child tree allocates and touches 300 MiB; observed.json gets about 300 MiB per worker (one worker on a
-    cold ring). Control: a meter that sums nothing records the lease-holder's own tiny footprint, far outside 20%."""
+    cold ring). The run happens in a fresh interpreter so the meter's tree holds only this test's child (inside a
+    long-lived test worker other tests' leftovers were counted: a 2 GiB reading, seen in a full run).
+    Control: a meter that sums nothing records the lease-holder's own tiny footprint, far outside 20%."""
     alloc = 300 * MIB
     cmd = sys.executable + " -c \"import time\nb=bytearray(%d)\nfor i in range(0,len(b),4096): b[i]=1\ntime.sleep(3)\"" % alloc
-    for _ in range(6):          # a loaded host can compress pages mid-run and under-read one sample
-        (env.state / "observed.json").unlink(missing_ok=True)
-        # children a previous test left under this worker are counted too: measure and subtract them
-        base = env.tree_footprint(os.getpid(), env.lease.take_footprint)
-        out = env.run("verify", cmd, str(tmp_path), 60, "g1", sample_gap=0.2)
-        ring = json.loads((env.state / "observed.json").read_text())["verify"]
-        assert out.workers == 1 and len(ring) == 1
-        if abs(ring[-1] - base - alloc) <= 0.2 * alloc:
+    state = tmp_path / "state"
+    envv = {k: v for k, v in os.environ.items() if not k.startswith("SIGMA_")}
+    envv["SIGMA_RESOURCE_DIR"] = str(state)
+    for _ in range(3):          # a loaded host can compress pages mid-run and under-read one sample
+        (state / "observed.json").unlink(missing_ok=True)
+        done = subprocess.run([sys.executable, "-c", _FRESH_RUN, str(SCRIPTS), cmd, str(tmp_path)],
+                              env=envv, capture_output=True, text=True, timeout=120)
+        assert json.loads(done.stdout.strip().splitlines()[-1])["workers"] == 1, done.stdout + done.stderr
+        ring = json.loads((state / "observed.json").read_text())["verify"]
+        assert len(ring) == 1
+        if abs(ring[-1] - alloc) <= 0.2 * alloc:
             break
-    assert abs(ring[-1] - base - alloc) <= 0.2 * alloc, (ring, base, alloc)
-    assert not list((env.state / "leases").glob("*.json"))      # released in finally
+    assert abs(ring[-1] - alloc) <= 0.2 * alloc, (ring, alloc)
+    assert not list((state / "leases").glob("*.json"))      # released in finally
 
 
 # ------------------------------------------------------------------------------------------ loop.py end to end
