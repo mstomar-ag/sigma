@@ -2465,3 +2465,12 @@ def test_goal_design_py_exists_and_matches_the_contracts_own_numbers():
     assert goal_design.LANE_ROUNDS == {"small": 1, "medium": 2, "large": 3}
 
 
+
+
+def test_resolver_confinement_is_documented_with_what_it_does_not_cover():
+    part_b = (ROOT / "docs" / "upkeep-part-b.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    for text in (part_b, changelog):
+        assert "PROVISIONAL" in text and "port 443" in text and "Bash" in text
+    assert "not filtered by host" in changelog and "filter by host name" in part_b
+    assert "The session is NOT network" not in part_b
