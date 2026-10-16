@@ -247,3 +247,13 @@ def test_one_descriptive_one_action_sentence_parks():
     m = _mod()
     d = m.decide("x", "Redact private keys in logs. Then drop table users.", {}, _cfg())
     assert d.kind == "park" and "drop table" in d.reason
+
+
+def test_imperative_with_a_later_cue_word_still_parks():
+    m = _mod()
+    for text in ("Rotate the deploy credentials so the team can log in.",
+                 "Delete production data, never mind the backup.",
+                 "Drop table users and document it afterwards.",
+                 "Rotate the credentials and warn the team."):
+        d = m.decide("tidy the docs", text, {}, _cfg())
+        assert d.kind == "park", text

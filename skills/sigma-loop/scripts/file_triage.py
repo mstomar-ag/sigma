@@ -101,23 +101,31 @@ def _load(name):
     return mod
 
 
-#: A sentence that describes detection, redaction, gating or documentation of a class of action is not an
-#: action (#1519): a deny word inside it does not hold the filing. Anything else holds (the safe side).
-_DESCRIPTIVE = re.compile(
+#: A clause that describes detection, redaction, gating or documentation of a class of action is not an
+#: action (#1519): a deny word it governs does not hold the filing. The cue must come BEFORE the deny word in
+#: the same clause (or the clause must be passive: "are read by"); a cue after it ("rotate the credentials so
+#: the team can log in") leaves an imperative, which holds. Anything unrecognised holds (the safe side).
+_CUE = re.compile(
     r"\b(?:redact\w*|detect\w*|gates?|gated|gating|scrub\w*|mask\w*|prevent\w*|refus\w*|"
-    r"document\w*|describ\w*|classif\w*|warn\w*|guard\w*|protect\w*|"
-    r"never|so that|so the|uninstall\w*|are read|is read)\b", re.IGNORECASE)
-_SENTENCES = re.compile(r"(?<=[.!?;])\s+|\n+")
+    r"document\w*|describ\w*|classif\w*|warn\w*|guard\w*|protect\w*|never|so that|so the)\b",
+    re.IGNORECASE)
+_PASSIVE = re.compile(r"\b(?:are|is) (?:read|listed|reported|detected|logged)\b", re.IGNORECASE)
+_CLAUSES = re.compile(r"(?<=[.!?;,:])\s+|\n+")
 
 
 def _action_sentence(text, word):
-    """-> the (trimmed) first sentence holding `word` that is not descriptive, else None."""
+    """-> the (trimmed) first clause holding `word` that is not descriptive, else None."""
     w = word.lower()
     if not w:
         return None
-    for sent in _SENTENCES.split(text):
-        if w in sent.lower() and not _DESCRIPTIVE.search(sent):
-            return " ".join(sent.split())[:100]
+    for clause in _CLAUSES.split(text):
+        low = clause.lower()
+        at = low.find(w)
+        if at < 0:
+            continue
+        if _CUE.search(low[:at]) or _PASSIVE.search(low):
+            continue
+        return " ".join(clause.split())[:100]
     return None
 
 
