@@ -277,12 +277,20 @@ def with_actor(config):
     return cfg
 
 
+def _units_run(record):
+    """#1535: a sweep record's count of units that ran (0 for a zero-unit sweep); None for any other record."""
+    if not record.get("sweep_job"):
+        return None
+    counts = (record.get("sweep") or {}).get("counts")
+    return sum(n for n in counts.values() if type(n) is int) if isinstance(counts, dict) else 0
+
+
 def write_outcome_note(config, sdlc_dir, record, append=None):
     """The job's outcome as one UNADDRESSED note, written by THIS process. A filing the job made is not echoed as a note to
     anyone: the job files with no goal, so the ledger row it leaves carries no addressee either. -> bool."""
     tip = str(record.get("unit_tip") or "")[:12] or "none"
     done = _sibling("feature_upkeep_pass").ledger_note(with_actor(config), sdlc_dir, str(record.get("unit") or ""),
-                                                       str(record.get("outcome") or "unknown"), tip, append=append)
+                                                       str(record.get("outcome") or "unknown"), tip, append=append, units=_units_run(record))
     return bool(done.get("ok"))
 
 

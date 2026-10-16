@@ -87,3 +87,45 @@ def test_a_closed_gate_adds_no_doctor_row(tmp_path):
     root, sdlc = repo(tmp_path)
     doctor = T._doctor()
     assert doctor._upkeep_rows(pathlib.Path(sdlc), S.template_cfg(), lambda argv: "", lambda _n: "/bin/git", True, True) == []
+
+
+# ---- #1535 follow-ups
+
+def _note_ref(units_run):
+    seen = []
+    record = {"unit": "window", "outcome": "swept", "sweep_job": True,
+              "sweep": {"units_listed": 3, "counts": {"rebased": units_run} if units_run else {}}}
+    ok = T.sched().write_outcome_note(T.open_config(), "/nonexistent", record, append=lambda *a, **k: seen.append(k) or {"ok": 1})
+    assert ok
+    return seen[0]["ref"]
+
+
+def test_the_sweep_note_carries_the_number_of_units_swept(tmp_path):
+    assert _note_ref(0).endswith(":units=0")
+    assert _note_ref(2).endswith(":units=2")
+    assert _note_ref(0) != _note_ref(2)
+
+
+def test_a_unit_note_has_no_units_suffix():
+    seen = []
+    T.sched().write_outcome_note(T.open_config(), "/nonexistent", {"unit": "x", "outcome": "rebased", "unit_tip": "a" * 12},
+                                 append=lambda *a, **k: seen.append(k) or {"ok": 1})
+    assert "units=" not in seen[0]["ref"]
+
+
+def test_a_unit_whose_name_differs_from_its_branch_only_in_case_is_registered(tmp_path):
+    root, sdlc = repo(tmp_path, ("feature/foo", "feature/BAR"))
+    _, record = run(tmp_path, sdlc, root, units=["Foo", "bar"])
+    assert record["sweep"]["unregistered"] == [] and record["sweep"]["units_listed"] == 2, record
+
+
+def test_the_doctor_remedy_names_the_exclude_list_and_an_excluded_branch_is_not_counted(tmp_path):
+    root, sdlc = repo(tmp_path)
+    doctor = T._doctor()
+    args = (lambda argv: "", lambda _n: "/bin/git", True, True)
+    row = [r for r in doctor._upkeep_rows(pathlib.Path(sdlc), T.open_config(), *args) if r["name"].startswith("upkeep units:")][0]
+    assert "upkeep.units.exclude" in row["fix"], row
+    cfg = T.open_config()
+    cfg["upkeep"]["units"] = {"exclude": ["x"]}
+    row = [r for r in doctor._upkeep_rows(pathlib.Path(sdlc), cfg, *args) if r["name"].startswith("upkeep units:")][0]
+    assert row["ok"] and "0 remote feature" in row["name"], row
