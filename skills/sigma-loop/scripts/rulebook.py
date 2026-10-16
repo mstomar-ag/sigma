@@ -39,6 +39,7 @@ FIELDS = ("id", "qkind", "area", "option", "reason", "status", "created", "confi
 _REQUIRED = ("id", "qkind", "area", "option", "status")
 _SEALED = ("id", "qkind", "area", "option", "reason", "created", "confirmed")
 STATUSES = ("proposed", "approved")
+ANY_AREA = "*"      # a rule with this area covers every area, 'repo' included; an exact-area rule wins
 
 
 class Match:
@@ -164,6 +165,33 @@ def load(sdlc_dir, config):
     return [_effective(r) for r in _read_raw(_file(sdlc_dir, config)) if validate(r)[0]]
 
 
+def invalid(sdlc_dir, config):
+    """`[(id, reason)]` for every rule in the file that fails the schema, so the doctor can report what
+    `load` leaves out (M-11). [] when closed."""
+    if not enabled(config):
+        return []
+    return [(str(r.get("id")), validate(r)[1]) for r in _read_raw(_file(sdlc_dir, config)) if not validate(r)[0]]
+
+
+def retire(sdlc_dir, rule_id, actor, config, only_proposed=False):
+    """Remove one rule (any status, an invalid one included) from the file. PermissionError unless the
+    gate is open and `actor` is an owner; KeyError for an unknown id; ValueError when `only_proposed`
+    and the rule is approved. The remover is not recorded."""
+    if not enabled(config) or not _load("autonomy").is_owner(actor, config):
+        raise PermissionError("rule removal is refused")
+    path = _file(sdlc_dir, config)
+    rules = _read_raw(path)
+    keep = [r for r in rules if r.get("id") != rule_id]
+    if len(keep) == len(rules):
+        raise KeyError(rule_id)
+    gone = next(r for r in rules if r.get("id") == rule_id)
+    if only_proposed and gone.get("status") == "approved":
+        raise ValueError(rule_id)
+    _write(path, keep)
+    with contextlib.suppress(Exception):
+        _load("decision_store").publish(sdlc_dir, config)
+
+
 def _write(path, rules):
     folder = os.path.dirname(path)
     if os.path.islink(folder):
@@ -250,8 +278,10 @@ def match(qkind, area, option, rules, config=None):
         if _load("hard_stop").is_hardstop_kind(qkind, None, config if isinstance(config, dict) else {}):
             return None
         hits = [r for r in rules if _acts(r)
-                and r.get("qkind") == qkind and r.get("area") == area
+                and r.get("qkind") == qkind and r.get("area") in (area, ANY_AREA)
                 and (option is None or r.get("option") in option)]
+        exact = [r for r in hits if r.get("area") == area]      # F-16: an exact-area rule wins over '*'
+        hits = exact or hits
         return Match(hits[0]["id"], hits[0]["option"]) if len(hits) == 1 else None
     except Exception:
         return None
@@ -273,6 +303,11 @@ def _parse(text):
 
 def due_for_reask(rules, now, config):
     """Ids of approved rules confirmed more than `rulebook.reask_days` ago (an unreadable time counts as due)."""
+    return [i for i, _ in due_ages(rules, now, config)]
+
+
+def due_ages(rules, now, config):
+    """`[(id, age_in_days or None)]` for the rules `due_for_reask` names (None: unreadable time)."""
     if not enabled(config):
         return []
     limit = datetime.timedelta(days=settings(config)["reask_days"])
@@ -281,7 +316,7 @@ def due_for_reask(rules, now, config):
         if isinstance(r, dict) and r.get("status") == "approved":
             t = _parse(r.get("confirmed"))
             if t is None or now - t > limit:
-                out.append(r.get("id"))
+                out.append((r.get("id"), None if t is None else (now - t).days))
     return out
 
 

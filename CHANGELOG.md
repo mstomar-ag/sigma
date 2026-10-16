@@ -5,6 +5,7 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 - The ledger docs now say that changing `ledger.host_alias` or `ledger.salt_host_token` re-roots this machine (one-time; shared aliases unsupported), and doctor warns when `salt_host_token` is true but `discovery.github.repo` is unset (#1528).
+- The source-error downgrade-to-park declares `quota` for a quota or budget failure and `needs_decision` otherwise, and the stale-worktree escalation park declares `needs_decision` (#1524).
 - **Upkeep's mechanical level resolves two append-only shapes (#1515).** A dated `## YYYY-MM` log and a bullet-list file that both sides only added to are unioned (per section in date order; base order then the unit's new items); an edit or removal on either side still parks.
 - A config that sets `discovery.blocker_promotion.mode` to `"smart"` now gets a one-time skip line from the reconcile tick and a not-OK "blocker priority rule inactive" doctor row naming the one-word fix to `"always"`; what smart, always and off do is unchanged (#1489).
 - `board_migrate.py --apply` now snapshots every card by project item id (issues, pull requests, drafts), fails if any card's Status changed during the option write, and prints counts that add up to the board (moved cards shown as a subset); an existing lane prints no kept-their-Status claim (#1491).
