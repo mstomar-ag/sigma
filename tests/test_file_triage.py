@@ -293,3 +293,56 @@ def test_imperative_with_a_later_cue_word_still_parks():
                  "Rotate the credentials and warn the team."):
         d = m.decide("tidy the docs", text, {}, _cfg())
         assert d.kind == "park", text
+
+
+# ---- #1703: a question for a person parks, it does not arm
+
+def test_default_question_titles_park_needs_decision():
+    m = _mod()
+    for t in ("Question: should X follow Y?", "Decide whether A needs B", "Should we rename the flag", "is it ok to drop a column?"):
+        d = m.decide(t, "", {}, _cfg())
+        assert (d.kind, d.qkind) == ("park", "needs_decision"), t
+        assert d.matched is None
+    assert m.decide("tidy a comment", "cleanup", {}, _cfg()).kind == "arm"
+
+
+def test_question_patterns_empty_disables_and_is_byte_identical_to_before():
+    m = _mod()
+    cfg = _cfg(triage={"enabled": True, "question_patterns": []})
+    d = m.decide("Question: should X follow Y?", "", {}, cfg)
+    assert d == m.Decision("arm", "P4", "bucket unclear")
+    assert d.qkind is None
+    assert m.decide("tidy a comment", "cleanup", {}, _cfg()) == m.Decision("arm", "P3", "bucket routine")
+
+
+def test_custom_question_pattern_and_wrong_type_reads_default():
+    m = _mod()
+    cfg = _cfg(triage={"enabled": True, "question_patterns": [r"^ask:"]})
+    assert m.decide("Ask: which one", "", {}, cfg).kind == "park"
+    assert m.decide("Should we rename", "", {}, cfg).kind == "arm"
+    for bad in ("Question:", 7, [1], ["(unclosed"]):
+        c = _cfg(triage={"enabled": True, "question_patterns": bad})
+        assert m.decide("Question: x", "", {}, c).kind == "park", bad
+
+
+def test_question_matches_title_only():
+    m = _mod()
+    assert m.decide("tidy a comment", "Question: should we? Decide now?", {}, _cfg()).kind == "arm"
+
+
+def test_declared_park_flag_parks_with_its_kind_and_deny_list_wins():
+    m = _mod()
+    d = m.decide("tidy a comment", "cleanup", {"park": "failing_check"}, _cfg())
+    assert (d.kind, d.qkind, d.reason) == ("park", "failing_check", "declared question")
+    for bad in ("unknown", "nonsense", 3):
+        assert m.decide("tidy a comment", "cleanup", {"park": bad}, _cfg()).kind == "arm", bad
+    d = m.decide("cleanup", "this is irreversible", {"park": "needs_decision"}, _cfg())
+    assert d.kind == "park" and d.matched and d.qkind is None
+
+
+def test_question_parks_a_human_confirmed_filing_and_triage_off_is_unchanged():
+    m = _mod()
+    flags = {"human_confirmed": True, "priority": "P3"}
+    assert m.decide("Question: x?", "", flags, _cfg()).kind == "park"
+    off = {"ai_filed": {"triage": {"enabled": False}}}
+    assert m.decide("Question: x?", "", {"park": "needs_decision"}, off).kind == "queue"

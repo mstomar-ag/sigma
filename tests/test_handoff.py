@@ -2810,3 +2810,49 @@ def test_sixth_p2_filing_is_parked_naming_the_cap_key_1553(tmp_path):
     _r, src = _file(tmp_path, None, priority="P2", priority_requested=True)
     assert len(src.parked) == 1
     assert "ai_filed.max_per_goal" in src.parked[0][1] and "cap" in src.parked[0][1]
+
+
+# ---- #1703: a filing can declare a question for a person
+
+def test_track_needs_person_files_a_parked_issue_with_the_declared_kind_1703(tmp_path, monkeypatch):
+    sdlc = _project(tmp_path)
+    src = TriageSource()
+    monkeypatch.setattr(handoff.sources, "get_source", lambda *a, **k: src)
+    argv = ["handoff.py", "track", str(sdlc), "g.md", "--area", "engine", "--why", "tidy a stale helper",
+            "--queue", "actionable", "--assignee", "same-area", "--blocks", "no"]
+    assert handoff.main(argv + ["--needs-person", "failing_check"]) == 0
+    assert src.created["goal_label"] is False and len(src.parked) == 1
+    assert "sigma-qkind: failing_check" in src.parked[0][1]
+
+
+def test_track_needs_person_with_an_unknown_kind_exits_2_and_files_nothing_1703(tmp_path, monkeypatch, capsys):
+    sdlc = _project(tmp_path)
+    src = TriageSource()
+    monkeypatch.setattr(handoff.sources, "get_source", lambda *a, **k: src)
+    argv = ["handoff.py", "track", str(sdlc), "g.md", "--area", "engine", "--why", "tidy a stale helper",
+            "--queue", "actionable", "--assignee", "same-area", "--blocks", "no"]
+    for bad in ("bogus", "unknown"):
+        assert handoff.main(argv + ["--needs-person", bad]) == 2
+    assert src.created is None and src.parked == []
+    assert "--needs-person" in capsys.readouterr().err
+
+
+def test_track_without_needs_person_is_unchanged_1703(tmp_path, monkeypatch):
+    sdlc = _project(tmp_path)
+    src = TriageSource()
+    monkeypatch.setattr(handoff.sources, "get_source", lambda *a, **k: src)
+    assert handoff.main(["handoff.py", "track", str(sdlc), "g.md", "--area", "engine",
+                         "--why", "tidy a stale helper", "--queue", "actionable", "--assignee", "same-area",
+                         "--blocks", "no"]) == 0
+    assert src.created["goal_label"] is True and src.parked == []
+
+
+def test_create_tracked_issue_needs_person_ignored_when_triage_is_off_1703(tmp_path, capsys):
+    report, src = _file(tmp_path, _off(), needs_person="needs_decision")
+    assert src.parked == []
+    assert "needs-person" in " ".join(report["warnings"]) or "needs-person" in capsys.readouterr().err
+
+
+def test_deny_list_still_wins_over_needs_person_1703(tmp_path):
+    _r, src = _file(tmp_path, why="this change is irreversible once merged", needs_person="needs_decision")
+    assert "sigma-qkind: irreversible" in src.parked[0][1]

@@ -2433,7 +2433,7 @@ def _cell(text):
 #: Over-inclusion is the SAFE direction: a name here only ever means "consume the next token", and
 #: every verb still validates what it actually received.
 _VALUE_FLAGS = frozenset(OPTIONAL_FIELDS) | {"actor", "goal", "title", "label", "body-file",
-                                             "queue", "assignee", "blocks"}
+                                             "queue", "assignee", "blocks", "needs-person"}
 
 
 def _flags(argv):
