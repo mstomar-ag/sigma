@@ -173,7 +173,9 @@ OWNER, MEMBER or COLLABORATOR declaration count. A filing the deny-list parks is
 carries `sigma-hardstop: <class>`. The closed list:
 
 `irreversible`, `needs_decision`, `merge_conflict`, `failing_check`, `no_evidence`, `dependency`, `review_cap`,
-`quota`, `unknown`, `scope_hold`, `owner_hold`, `reviewer_down`, `review_post_ambiguous`.
+`quota`, `unknown`, `scope_hold`, `owner_hold`, `reviewer_down`, `review_post_ambiguous`, `label_set`.
+
+`label_set` is never declared on a park: it is the one route question `label_drain.py plan` asks per run label (arm the unarmed issues, arm only the ones that can start, or leave them), listed with the other up-front questions and the `ready` field.
 
 `scope_hold` and `owner_hold` are written by the two pick gates (scope expansion and ownership). With AI-filed
 triage on (`ai_filed.triage.enabled`, default true) those gates park a held goal with that kind instead of writing the

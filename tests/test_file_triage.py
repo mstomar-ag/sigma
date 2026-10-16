@@ -205,6 +205,22 @@ def test_money_amount_near_misses_still_arm():
         assert m.decide("cleanup", text, {}, _cfg()).kind == "arm", text
 
 
+def test_euro_and_pound_amounts_for_compute_park_as_spend():
+    m = _mod()
+    for text in ("pay 100 euros for compute", "Spend about 50 EUR on cloud credits",
+                 "Budget: \u00a340 of GPU time for the benchmark", "use 40 pounds of GPU credits",
+                 "rent a node for \u20ac30", "twenty pounds sterling of compute"):
+        d = m.decide("tidy docs", text, {}, _cfg())
+        assert d.kind == "park" and "spend phrase" in d.reason, (text, d)
+
+
+def test_euro_and_pound_near_misses_still_arm():
+    m = _mod()
+    for text in ("The recipe needs 40 pounds of flour.", "Show a euro sign in the docs.",
+                 "see log:\n```\ncost \u00a340 gpu run\n```\ntidy the docs", "The price is \u20ac40 in the invoice template."):
+        assert m.decide("tidy docs", text, {}, _cfg()).kind == "arm", text
+
+
 DESCRIPTIVE = (
     "Redact SSH private keys at runtime so they never reach the log.",
     "Wire the check so the gate gets production data only through the reader.",
