@@ -138,7 +138,8 @@ def inert_failures(tmp):
     callers = [p.relative_to(S.ROOT).as_posix() for p in shipped_python() if p.resolve() not in own
                and any(stem in p.read_text(encoding="utf-8") for stem in (S.DRIFT, S.STATE))]
     S.expect(bad, "callers of the new modules (the pass and the scheduler add theirs here, in the slices that write them)", callers,
-             ["skills/sigma-loop/scripts/feature_upkeep_job.py",           # #923: the detached job
+             ["skills/sigma-loop/scripts/feature_rebase.py",               # #1492: the engine's single exit records the unit
+              "skills/sigma-loop/scripts/feature_upkeep_job.py",           # #923: the detached job
               "skills/sigma-loop/scripts/feature_upkeep_pass.py",          # #922: the pass, the first live caller
               "skills/sigma-loop/scripts/feature_upkeep_sched.py"])        # #923: the scheduler
     support = importlib.import_module("upkeep_support")

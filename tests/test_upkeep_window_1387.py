@@ -177,8 +177,8 @@ def test_sweep_rebases_the_three_behind_leaves_the_current_one_and_stamps_the_wi
     out = sweep(j, sdlc, tmp_path, ["a", "b", "c", "d"], engine(log, {"a": "rebased", "b": "rebased", "d": "rebased"}))
     assert out["outcome"] == "swept" and out["sweep"]["counts"] == {"rebased": 3, "current": 1}, out
     assert log == ["a", "b", "c", "d"] and out["sweep"]["unreached"] == []
-    unit = lambda n: json.loads(pathlib.Path(sdlc, "state/upkeep/units/%s.json" % n).read_text())   # noqa: E731
-    assert [unit(n)["outcome"] for n in "abcd"] == ["rebased", "rebased", "current", "rebased"]
+    # #1492: the per-unit record is the engine's to write at its exit (tests/test_upkeep_engine_record_1492.py); the sweep no longer records it
+    assert not pathlib.Path(sdlc, "state/upkeep/units").exists()
     stamp = window().read(sdlc)
     assert stamp["outcome"] == "swept" and stamp["last_at"] == NOW and stamp["unreached"] == []
     record = json.loads(pathlib.Path(sdlc, "state/upkeep/job.json").read_text())
