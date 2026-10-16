@@ -10,6 +10,7 @@ stop a run."""
 import os, sys, pathlib, importlib.util, time, subprocess, inspect, json, re, tempfile, hashlib, uuid
 import contextlib, calendar
 import errno
+import datetime as _datetime
 
 try:
     import fcntl                    # POSIX only — see _try_acquire_claim_lock's docstring
@@ -4480,6 +4481,14 @@ def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transit
         # one line up -- ask what the source can actually do before calling it that way, the same
         # discipline this function already applies to `fail()`.
         park_text = detail or result
+        reset_at = None
+        if qkind == "quota" and config is not None and _load("applier").enabled(config):
+            try:                                   # #1563: a quota park that names its reset records it
+                reset_at = _load("qkind").parse_reset(park_text, _datetime.datetime.now(_datetime.timezone.utc))
+            except Exception:                      # noqa: BLE001 - never block the park
+                reset_at = None
+        if reset_at is not None:
+            park_text = park_text + "\n" + _load("qkind").render_reset_line(reset_at)
         if qkind is not None:                      # #994: the declared kind rides inside the text
             park_text = park_text + "\n" + _load("qkind").render_line(qkind)
         if tier is not None and "tier" in inspect.signature(source.park).parameters:
@@ -4490,7 +4499,7 @@ def _record(sdlc_dir, source, goal, result, detail="", retro_grade=None, transit
             park_failed.append(goal)
         if qkind is not None and config is not None:   # #1178: the ask opens after the park landed
             try:
-                _load("applier").open_for_park(sdlc_dir, config, goal, qkind, source=source)
+                _load("applier").open_for_park(sdlc_dir, config, goal, qkind, source=source, reset_at=reset_at)
             except Exception:                          # noqa: BLE001 - never block the park
                 pass
             try:                                       # #1229: drift judge, shadow only

@@ -52,12 +52,12 @@ def _quota(tmp_path, kind="quota", option="wait it out", reset_at=None, others=(
     return sd, cfg
 
 
-def test_quota_wait_it_out_without_reset_time_waits_a_day(tmp_path):
-    sd, cfg = _quota(tmp_path)
+def test_quota_wait_it_out_without_reset_time_waits_the_window(tmp_path):
+    sd, cfg = _quota(tmp_path)                     # #1563: unknown reset = the window (60 minutes here)
     src = ta.Src()
-    assert AP.tick(sd, cfg, T0 + 61 * MIN, source=src) == []
+    assert AP.tick(sd, cfg, T0 + 59 * MIN, source=src) == []
     assert src.swaps == [] and src.notes == []
-    acts = AP.tick(sd, cfg, T0 + 1441 * MIN, source=src)
+    acts = AP.tick(sd, cfg, T0 + 61 * MIN, source=src)
     assert [a["result"] for a in acts] == ["done"]
 
 
