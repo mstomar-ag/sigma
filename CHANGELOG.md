@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- The upkeep sweep now prunes backup refs past `backup.keep_days` by itself, keeping the newest `backup.keep_last` per unit, once per sweep and bounded; a failed prune never fails the sweep and is retried next time, and `/sigma-doctor` shows the backup count and last prune (#1557).
 
 - **`applier.py --dry-run` says when the applier is off (#1545).** With `rulebook.autonomy.applier.enabled` not true it prints one line saying the applier is off and exits 0, instead of printing nothing; output with the applier on is unchanged.
 - **The land verb measures the sibling half of a pair itself (#1552).** `feature_land` used to pass no landed measurement, so any unit with a second repository was always refused as "nothing was supplied to measure". It now reads the sibling's pull requests and proceeds only when one merged; an unmerged or unreadable answer still refuses, and the refusal names the goal recorded for that repository and the remedy.
