@@ -914,9 +914,12 @@ def apply(action, sdlc_dir, config, now, source=None, run=None, clock=None):
                 _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
         except Exception:
             pass  # applied stays recorded; a missing record id is accepted by the veto path
-        if action["text"]:
+        text = action["text"]
+        if action["kind"] == "keep-parked" and action["qkind"] == "dependency":
+            text = (text + "\n" if text else "") + _load("auto_unpark").WAITING_NOTE    # #1549
+        if text:
             try:
-                source.note(issue, action["text"])
+                source.note(issue, text)
             except Exception:
                 pass  # the gesture landed; an audit line is not worth reporting it as failed
         return "done"

@@ -255,6 +255,7 @@ python3 skills/sigma-loop/scripts/rule_draft.py list    .sdlc                 # 
 python3 skills/sigma-loop/scripts/rule_draft.py draft   .sdlc <qkind> <area>  # proposes; never approves
 python3 skills/sigma-loop/scripts/rule_draft.py suggest .sdlc [--propose N]  # ranks the pairs that matter; N drafts proposals
 python3 skills/sigma-loop/scripts/rule_draft.py approve .sdlc <rule_id>       # owner only
+python3 skills/sigma-loop/scripts/rule_draft.py rules   .sdlc                 # every approved rule: id, kind, area, option, action, last confirmed
 ```
 
 `draft` splits the pair's human answers deterministically by a hash of the record id. The majority option of one part
@@ -265,6 +266,8 @@ has a rule. It needs the rules, autonomy and records parts all open. On a public
 are stored, so drafts and comparisons work from those alone.
 
 `rule_draft.py suggest .sdlc` ranks the question kind and area pairs by importance from the repository's own records: how many parks, how many hours the goals stayed parked (until that goal's next record, else now), how many goals the parked goals block (directly or through chains, read from the open issues' own `Blocked by` text; zero when that cannot be read), and how often the answers repeat (the comparison key of `decision_record.key_of`). The score is parks plus hours divided by 24 plus blocked goals, times the agreement. Each line names the suggested option (the majority key) and whether one any-area rule (area `*`) covers the pair or the area needs its own rule because its answers differ from the kind's. Hard-stop and `unknown` kinds are never listed. `--propose N` drafts the top N uncovered rules through the same exam as `draft` (one `*` rule per kind where the areas agree) and never approves; the owner approves with `rule_draft.py approve`. When rules are on, the doctor's rulebook row lists the top three uncovered pairs.
+
+`rule_draft.py rules .sdlc` lists every approved rule with what it does (unpark, keep parked, or only recommends) and when it was last confirmed; the doctor's rulebook row counts the approved rules per action and names this verb.
 
 `rule_draft.py list --why` also prints one `skipped <kind> / <area>: <reason>` line for each pair left out (hard-stop
 or unknown kind, level below 2, or the share of the most common answer). `rule_draft.py due` prints, for each approved
@@ -333,6 +336,8 @@ pending veto are deleted after `prune_after_days` (default 30); answered and vet
 
 A `keep-parked` on a dependency park (route answer "wait for it") no longer posts the opt-out marker, even with the gates closed. This is intended; the owner is to ratify it.
 
+Instead it posts a waiting note (a person's "wait for it" answer, and a rule applied by the tick, always). The automatic sweep then resumes that dependency park when its last named blocker closes (#1549): gesture unpark, recorded as an autonomous sweep decision. A newer park comment cancels the note, and a person's keep-parked opt-out marker still wins.
+
 PROVISIONAL (owner to ratify): a `keep-parked` on a quota park (route answer "wait it out") likewise posts no opt-out marker, so the sweep may resume the goal after the quota window. Every other route still posts it.
 
 A quota ask matched to the "wait it out" rule is applied only after the reset time the ask records (`reset_at`). A reset time that is missing or unreadable counts as not yet reached, so the ask stays with the person. Other kinds are not affected.
@@ -387,7 +392,7 @@ which means no call. When the rolling 24-hour spend reaches the ceiling, the doc
 
 ## Importing past decisions
 
-`decision_import.py` turns decisions you already made into records, so a repository does not start at zero.
+`decision_import.py` turns decisions you already made into records, so a repository does not start at zero. Every record writer passes the free text through the leak scan's secret-shape scrub before the file is written (matches become `[REDACTED:<shape>]`), and `apply` prints how many values were scrubbed, never the values.
 
 ```
 python3 skills/sigma-loop/scripts/decision_import.py scan  .sdlc [--profile DIR ...] [--project-dir DIR ...]

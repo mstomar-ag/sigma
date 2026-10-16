@@ -118,6 +118,42 @@ def redact(record, visibility):
     return out
 
 
+def _scrub_mod():
+    spec = importlib.util.spec_from_file_location(
+        "scrub", os.path.join(os.path.dirname(os.path.abspath(__file__)), "scrub.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+#: Structural ids/timestamps/enums never carry free text; everything else string-valued is scrubbed.
+_SCRUB_SKIP = frozenset({"id", "time", "gesture", "qkind", "how", "source", "original_time", "issue", "fp"})
+
+
+def scrub_record(record):
+    """Secret-shape scrub (the leak scan's SHAPE_RULES only, so ordinary prose is untouched) over every
+    string value of the record, recursively through dicts and lists, except the structural keys in
+    `_SCRUB_SKIP`. -> (new record, number of substitutions); a clean record comes back equal."""
+    sc, n = _scrub_mod(), 0
+
+    def one(text):
+        nonlocal n
+        new = sc.scrub_shapes(text)
+        n += max(0, new.count("[REDACTED") - text.count("[REDACTED"))
+        return new
+
+    def walk(v):
+        if isinstance(v, str):
+            return one(v)
+        if isinstance(v, dict):
+            return {k: (x if k in _SCRUB_SKIP else walk(x)) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return v
+
+    return walk(record), n
+
+
 def append(sdlc_dir, record, config, now=None):
     """Create the record's own file exclusively; returns its id, or None when the part is closed."""
     if not enabled(config):
@@ -126,6 +162,7 @@ def append(sdlc_dir, record, config, now=None):
     if problems:
         raise ValueError("; ".join(problems))
     rid = record.get("id") or new_id(now)
+    record, _n = scrub_record(record)
     body = redact(dict(record, id=rid, time=(now or datetime.datetime.now(datetime.timezone.utc)).isoformat()),
                   _visibility(config))
     store = _store(sdlc_dir, config)
