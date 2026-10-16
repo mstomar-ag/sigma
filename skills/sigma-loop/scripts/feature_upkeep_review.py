@@ -85,8 +85,8 @@ MAX_REASON_CHARS = 300
 Request = collections.namedtuple(
     "Request",
     "config unit base_sha head_sha tree_sha files pr_descriptions reread launch cap_usd resolver_cap_usd "
-    "resolver_model model catalog mechanism timeout now",
-    defaults=(None,) * 17)
+    "resolver_model model catalog mechanism timeout now dropped",
+    defaults=(None,) * 18)
 
 
 # ------------------------------------------------------------------------------------------ the verdict
@@ -160,7 +160,7 @@ def _cap(text, limit):
     return text if len(text) <= limit else text[:limit] + "\n[truncated]"
 
 
-def build_brief(files, pr_descriptions):
+def build_brief(files, pr_descriptions, dropped=None):
     """-> (prompt, blocks). `files` is a list of (path, base, ours, theirs, resolved). The resolver's transcript is not an
     input: nothing in the request could carry it."""
     prompt = ("You are an independent reviewer of a merge conflict resolution. For each file you are given the common base, "
@@ -178,6 +178,11 @@ def build_brief(files, pr_descriptions):
             blocks.append(("file%d-%s-%s" % (index, label, _label_safe(path)), body))
     for index, text in enumerate(list(pr_descriptions or ())[:MAX_PR_COUNT]):
         blocks.append(("pr%d" % index, _cap(text, MAX_PR_CHARS)))
+    if dropped:
+        prompt += (" Some files were deleted on purpose and the lines listed in the dropped-by-delete block are lost with them. "
+                   "Approve ONLY if you explicitly accept losing every listed line; otherwise block.")
+        body = "\n".join("dropped by delete: %s\n%s" % (name, "\n".join("  " + str(l) for l in lines)) for name, lines in sorted(dropped.items()))
+        blocks.append(("dropped-by-delete", _cap(body, MAX_FILE_CHARS)))
     return prompt, blocks
 
 
@@ -342,7 +347,7 @@ def review(request, environ=None):
     cut = truncation(req.files, req.pr_descriptions)
     if cut:
         return _blocked(cut)
-    prompt, blocks = build_brief(req.files, req.pr_descriptions)
+    prompt, blocks = build_brief(req.files, req.pr_descriptions, req.dropped)
     ok, findings = _sibling("reviewer")._check_brief_text(brief_text(prompt, blocks), ())
     if not ok:
         return _blocked(["the brief failed the leak gate: " + "; ".join(findings)])
