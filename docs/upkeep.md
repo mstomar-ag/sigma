@@ -150,7 +150,7 @@ python3 skills/sigma-loop/scripts/feature_rebase.py prune .sdlc
   `upkeep.backup.keep_last` (default 5) of each unit whatever their age. Age comes from the stamp in the name,
   so it follows the clock of the machine that made the backup. At most 200 are removed per run. It selects by
   the exact prefix and skips any candidate that has a lookalike ref, reported as `skipped_ambiguous`.
-- **Nothing prunes by itself.** Each rewrite adds one ref, so run the prune now and then while upkeep is on.
+- **The sweep prunes by itself.** Each rewrite adds one ref; once per sweep the job runs this prune (at most 200 deletes, a failure is retried next sweep, never fails the sweep), and `/sigma-doctor` shows the backup count and last prune. The manual verb stays.
 - Without the gate, or on a plain clone, restore by hand with plain git; the steps are in
   [branching-model.md](branching-model.md#13c-backups-of-a-rewritten-unit-tip-off-by-default).
 
