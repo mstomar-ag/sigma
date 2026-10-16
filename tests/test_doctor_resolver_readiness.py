@@ -57,14 +57,34 @@ def test_open_and_agent_gives_every_readiness_row(tmp_path):
         assert word in text, (word, text)
 
 
-def test_the_shipped_defaults_are_not_ready(tmp_path):
-    """#1554: the model catalog holds real ids and the caps are optional, so only the still-unverified flag fails."""
+def test_the_shipped_defaults_are_ready(tmp_path):
+    """#1694: the catalog holds real ids, the caps are optional and the only unverified flag (`--bare`) is one the
+    resolver never requests, so a valid default agent configuration shows no failing row (the cli row is fed `which`)."""
     d, cfg = doctor(), config()
     by = {c["name"].lower(): c for c in rows(d, project(tmp_path, cfg), cfg)}
     flags = next(c for k, c in by.items() if "resolver flags" in k)
-    assert flags["ok"] is False and flags["fix"] and "1 design flag still unverified" in flags["name"].lower()
-    for word in ("resolver model", "resolver spend"):
+    assert flags["ok"] is True and "not requested" in flags["name"].lower(), flags
+    for word in ("resolver cli", "resolver flags", "resolver model", "resolver configured", "resolver spend"):
         assert next(c for k, c in by.items() if word in k)["ok"] is True, word
+
+
+def test_a_requested_unverified_flag_still_fails_the_flags_row(tmp_path):
+    """Control: an unverified flag the resolver does request keeps the row failing, so the row is not decoration."""
+    d, cfg = doctor(), config()
+    launcher = d._load_loop_script("feature_upkeep_launcher")
+    real = d._load_loop_script
+
+    class Patched:
+        def __getattr__(self, name):
+            return ("--model",) if name == "UNVERIFIED_FLAGS" else getattr(launcher, name)
+
+    d._load_loop_script = lambda n: Patched() if n == "feature_upkeep_launcher" else real(n)
+    try:
+        found = rows(d, project(tmp_path, cfg), cfg)
+    finally:
+        d._load_loop_script = real
+    flags = next(c for c in found if "resolver flags" in c["name"].lower())
+    assert flags["ok"] is False and "unverified" in flags["name"].lower(), flags
 
 
 def test_a_missing_cli_is_a_failing_row(tmp_path):

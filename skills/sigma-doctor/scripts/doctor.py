@@ -1583,9 +1583,16 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None):
             rows.append(_chk("resolver cli: " + ("answers a version probe" if res else "did not answer a bounded version probe"),
                              bool(res), "check the CLI runs by hand; the probe is limited to %gs" % RESOLVER_PROBE_SECONDS))
         unverified = list(getattr(launcher, "UNVERIFIED_FLAGS", ()))
-        rows.append(_chk("resolver flags: %d design flag%s still UNVERIFIED (refused by name)" % (len(unverified), "" if len(unverified) == 1 else "s")
-                         if unverified else "resolver flags: all design flags confirmed", not unverified,
-                         "a flag that did not pass the probe stays refused; the resolver does not use it"))
+        # The flags the launcher itself puts on the command line; the resolver passes no extra flag (#1694).
+        requested = set(getattr(launcher, "BASE_ARGV", ())) | set(getattr(launcher, "SESSION_ARGV", ())) | {"--model", "--max-budget-usd"}
+        blocking = [f for f in unverified if f in requested]
+        if blocking:
+            flags_name = "resolver flags: %d requested design flag%s still UNVERIFIED (refused by name)" % (len(blocking), "" if len(blocking) == 1 else "s")
+        elif unverified:
+            flags_name = "resolver flags: %d unverified design flag%s not requested by the resolver (refused by name)" % (len(unverified), "" if len(unverified) == 1 else "s")
+        else:
+            flags_name = "resolver flags: all design flags confirmed"
+        rows.append(_chk(flags_name, not blocking, "a flag that did not pass the probe stays refused; do not request it"))
         placeholder = launcher.PLACEHOLDER_MODEL
         models = set(launcher.CATALOG.values())
         rows.append(_chk("resolver model: " + ("catalog holds only the placeholder id" if models <= {placeholder}
