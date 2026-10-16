@@ -1721,14 +1721,14 @@
       "risk": "medium"
     },
     {
-<<<<<<< HEAD
       "path": "skills/sigma-loop/scripts/resource_guard.py",
       "function": "write_hold",
       "rule": "fs-remove",
       "count": 1,
       "gate": "removes only its own per-process temp file (hold.json.<pid>.tmp) when the write fails; same state folder as the write",
       "risk": "low"
-=======
+    },
+    {
       "path": "skills/sigma-loop/scripts/resource_lease.py",
       "function": "_atomic_write",
       "rule": "fs-remove",
@@ -1775,7 +1775,6 @@
       "count": 1,
       "gate": "operator-run lease table only; appends one line to events.jsonl under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; nothing calls it yet",
       "risk": "medium"
->>>>>>> fork/feature/rulebook-learning
     },
     {
       "path": "skills/sigma-loop/scripts/retention.py",
