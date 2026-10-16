@@ -872,7 +872,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         labels = [f"priority:{priority}", f"area:{area}", *extra_labels]
         if triage is not None and (triage["kind"] == "arm" or triage.get("report")):
             labels[0] = f"priority:{triage['priority']}"
-        elif upkeep_finding or triage is not None:      # #1484: a finding or a park never keeps the human default
+        elif triage is not None:      # #1484: a triage park never keeps the human default (triage off: unchanged)
             labels[0] = f"priority:{_bucket_floor(config)}"
         if blocks_goal and goal and hasattr(source, "blocker_filing_priority"):    # #1408: never below the blocked goal
             labels[0] = f"priority:{source.blocker_filing_priority(str(goal), labels[0]) or labels[0][9:]}"
