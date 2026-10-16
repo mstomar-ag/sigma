@@ -2767,20 +2767,25 @@ def _release_unstarted(sdlc_dir, goals, why):
     """#1529: release each claimed-but-never-started goal in `goals` through the SAME `_release`
     the over-capacity path uses (label off, "claimed but not started" comment, ledger `release`,
     action-log `released` with actor and reason). Only a GitHub source releases; the local path
-    does nothing here. Best-effort: never raises, so a stop or a prune is never blocked."""
+    does nothing here. Best-effort: never raises, so a stop or a prune is never blocked.
+    #1530: returns True iff nothing failed (a later pick retries a dead session's entry on False)."""
+    ok = True
     try:
         config = state.load_config(sdlc_dir)
         if ((config.get("discovery") or {}).get("source")) != "github":
-            return
+            return True
         source = sources.get_source(sdlc_dir, config)
         for goal in dict.fromkeys(str(g) for g in goals):
             try:
                 if not _goal_started(sdlc_dir, goal):
                     _release(sdlc_dir, source, goal, reason=why)
             except Exception as exc:                     # noqa: BLE001
+                ok = False
                 print(f"loop: unstarted release of {goal} skipped ({exc})", file=sys.stderr)
     except Exception as exc:                             # noqa: BLE001
+        ok = False
         print(f"loop: unstarted release skipped ({exc})", file=sys.stderr)
+    return ok
 
 
 def session_active(sdlc_dir, config):
@@ -2850,21 +2855,33 @@ def _prune_dead_session_entries(sdlc_dir, config):
                 continue
             if quiet_for < session_release_grace_seconds(config):
                 continue
-        released_goals = []
-        def _prune(path=path, pid=pid, released_goals=released_goals):
+        # #1530: release BEFORE the entry goes, so a failed release (host unreachable) keeps the
+        # entry and a later pick retries. Release is idempotent (a goal already released is a
+        # no-op on the source), so a retry or a concurrent pass never posts a second comment.
+        if ((config.get("discovery") or {}).get("source")) == "github":
+            def _peek(path=path, pid=pid):
+                if _session_pid_live(pid, path, config):
+                    return None
+                return list(_session_read(path)["in_flight"])
+            try:
+                pending = _session_locked(sdlc_dir, pid, _peek, path=path, require_lock=True)
+            except (OSError, RuntimeError):
+                continue
+            if pending is None:
+                continue
+            if pending and not _release_unstarted(sdlc_dir, pending, "session ended"):
+                continue
+        def _prune(path=path, pid=pid):
             # Re-check under this entry's own lock: a session may have re-announced itself after
             # the outer scan. Lock the enumerated path, not this pruner's Codex thread identity.
             if _session_pid_live(pid, path, config):
                 return False
-            released_goals.extend(_session_read(path)["in_flight"])
             path.unlink(missing_ok=True)
             return True
         try:
             _session_locked(sdlc_dir, pid, _prune, path=path, require_lock=True)
         except (OSError, RuntimeError):
             continue
-        if released_goals:
-            _release_unstarted(sdlc_dir, released_goals, "session ended")
 
 
 def _session_in_flight_goals(sdlc_dir, config):
