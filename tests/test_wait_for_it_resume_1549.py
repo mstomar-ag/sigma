@@ -158,3 +158,39 @@ def test_no_readable_label_event_leaves_the_behaviour_unchanged(tmp_path):
     for events in ([], RuntimeError("events unreadable")):
         (actions, resolved), _run = _sweep_with_events(comments, {"7": "CLOSED"}, events)
         assert [a["action"] for a in actions] == ["swap-label"] and resolved == {"42": ["7"]}
+
+
+def _paged_runner(base, events):
+    """Fake gh answering the events read by `page=` (100 per page) from one flat `events` list."""
+    def run(args):
+        for a in args:
+            if "issues/42/events?" in str(a):
+                run.pages.append(str(a))
+                page = int(str(a).split("&page=")[1])
+                return json.dumps(events[(page - 1) * 100:page * 100])
+        return base(args)
+    run.pages = []
+    return run
+
+
+def _long_timeline(repark_at, n=130):
+    return [{"event": "commented", "created_at": "2025-01-01T00:00:00Z"} for _ in range(n - 1)] + [
+        _labeled(repark_at)]
+
+
+def test_label_only_repark_on_a_100_plus_event_timeline_is_not_resumed(tmp_path):
+    comments = [PARK] + _applied_note(tmp_path)
+    au = _mod("auto_unpark")
+    issue = TA._parked_issue(42, body="blocked by #7")
+    run = _paged_runner(TA._sweep_runner(states={"7": "CLOSED"}, comments={"42": comments}),
+                        _long_timeline("2026-02-01T00:00:00Z"))
+    src = au.sources.GitHubSource(TA._config(), run=run)
+    actions, resolved = au.compute_unpark_actions(".sdlc", TA._config(), src, [issue], run=run)
+    assert len(run.pages) == 2 and actions == [] and resolved == {}
+
+
+def test_event_pages_are_bounded():
+    gh = _mod("gh_api")
+    run = _paged_runner(lambda a: "[]", [{"event": "commented", "created_at": "x"}] * 100 * 50)
+    assert gh.newest_label_event(run, 42, "sdlc:parked") is None
+    assert len(run.pages) == gh.EVENT_PAGES_CAP
