@@ -5679,7 +5679,9 @@ def _applier_state(cfg, sdlc_dir=None, now=None):
             return ("on, WARNING: the applier tick looks dead (%s); parked questions stay parked until the "
                     "watcher runs again" % ("never ran" if beat is None else "last tick " + beat.isoformat())
                     + _no_owners_clause(cfg))
-        return "on: last tick " + beat.isoformat() + _no_owners_clause(cfg)
+        held = mod.read_hold(sdlc_dir if sdlc_dir is not None else ".sdlc")
+        return ("on: last tick " + beat.isoformat() + (", HELD: " + held if held else "")
+                + _no_owners_clause(cfg))
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
 

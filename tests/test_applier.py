@@ -304,3 +304,17 @@ def test_closed_gate_leaves_old_applied_ask(tmp_path):
     closed = _cfg(enabled=False)
     assert AP.tick(sd, closed, T0 + datetime.timedelta(days=90), source=Src()) == []
     assert _exists(sd, aid)
+
+
+def test_doctor_applier_row_shows_the_hold_only_when_held(tmp_path):
+    cfg = _cfg({"stale_after_intervals": 3})
+    doctor = _mod("doctor", ROOT / "skills" / "sigma-doctor" / "scripts" / "doctor.py")
+    sd = _sd(tmp_path)
+    os.makedirs(sd + "/autonomy")
+    hb = sd + "/autonomy/applier-heartbeat.json"
+    open(hb, "w").write(json.dumps({"time": T0.isoformat()}))
+    plain = doctor._applier_state(cfg, sd, now=T0 + datetime.timedelta(seconds=60))
+    assert plain.startswith("on: last tick") and "HELD" not in plain
+    open(hb, "w").write(json.dumps({"time": T0.isoformat(), "held": "evidence behind (3 commits); pull"}))
+    held = doctor._applier_state(cfg, sd, now=T0 + datetime.timedelta(seconds=60))
+    assert held.startswith("on: last tick") and ", HELD: evidence behind (3 commits); pull" in held

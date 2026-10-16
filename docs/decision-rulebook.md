@@ -327,6 +327,10 @@ What the tick does, in order:
 4. Handles vetoes. A vetoed unpark is parked again (labels, and the board card on a board-active repository), a
    comment says so, and the kind drops a level.
 
+If another machine's evidence commits are ahead of this checkout, the tick acts on nothing: it prints
+`applier: held - <reason>` (and `--dry-run` prints the same), and the doctor's applier row adds `HELD: <reason>`.
+Pull the default branch to clear it; the next tick drops the hold.
+
 Level 3 comments every time. Level 4 is silent only for a kind in `allow_silent` on an owner-approved rule, and every
 `spot_check_one_in`-th silent-eligible apply per kind and area (default 5) still comments. That counter advances only
 for applies that landed, and it is decided per action at apply time.
