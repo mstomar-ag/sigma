@@ -215,7 +215,7 @@ DESCRIPTIVE = (
 ACTIONS = (
     "drop table users in production",
     "rotate the deploy credentials now",
-    "push --force to main, a force push after the rebase",
+    "force push to main after the rebase",
     "Delete all the old branches.",
 )
 
@@ -247,6 +247,17 @@ def test_one_descriptive_one_action_sentence_parks():
     m = _mod()
     d = m.decide("x", "Redact private keys in logs. Then drop table users.", {}, _cfg())
     assert d.kind == "park" and "drop table" in d.reason
+
+
+def test_chained_imperatives_and_quotes_follow_the_structural_rule():
+    m = _mod()
+    for text in ("Scrub the logs then force push.", "Redact the private key, then delete all backups.",
+                 "Prevent drift by running a force push to main.", "Please drop table users",
+                 "We should rotate the credentials", "The agent should delete all caches"):
+        assert m.decide("x", text, {}, _cfg()).kind == "park", text
+    for text in ("Add a detector for private key shapes.", "Make `force push` a refused word.",
+                 'The word "force push" is in the list.', "- Redact credentials in the report"):
+        assert m.decide("x", text, {}, _cfg()).kind == "arm", text
 
 
 def test_imperative_with_a_later_cue_word_still_parks():

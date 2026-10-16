@@ -101,29 +101,68 @@ def _load(name):
     return mod
 
 
-#: A clause that describes detection, redaction, gating or documentation of a class of action is not an
-#: action (#1519): a deny word it governs does not hold the filing. The cue must come BEFORE the deny word in
-#: the same clause (or the clause must be passive: "are read by"); a cue after it ("rotate the credentials so
-#: the team can log in") leaves an imperative, which holds. Anything unrecognised holds (the safe side).
-_CUE = re.compile(
-    r"\b(?:redact\w*|detect\w*|gates?|gated|gating|scrub\w*|mask\w*|prevent\w*|refus\w*|"
-    r"document\w*|describ\w*|classif\w*|warn\w*|guard\w*|protect\w*|never|so that|so the)\b",
-    re.IGNORECASE)
-_PASSIVE = re.compile(r"\b(?:are|is) (?:read|listed|reported|detected|logged)\b", re.IGNORECASE)
-_CLAUSES = re.compile(r"(?<=[.!?;,:])\s+|\n+")
+#: A deny word counts only in action position (#1519, structural rule, fail closed). The text is split into
+#: clauses; a clause holding the word is descriptive only when its deny word sits in backticks or quotes, follows
+#: a noun-phrase marker ("detector for"), the clause is passive ("are read by"), or it opens with a protective
+#: verb ("redact") or a determiner with no action verb before the word. A clause opening with an action verb, or
+#: with anything unrecognised, holds.
+_CLAUSES = re.compile(r"(?<=[.!?;,:])\s+|\n+|\s+(?:and then|then|and|after that|so that|so|by|via|using|-+)\s+",
+                      re.IGNORECASE)
+_QUOTED = re.compile(r"`[^`\n]*`|\"[^\"\n]*\"|(?<!\w)'[^'\n]*'(?!\w)")
+_BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+_LEAD = re.compile(r"^(?:please\s+)?(?:(?:we|i|you)\s+(?:should|will|must|can|could|need to|have to)\s+)?",
+                   re.IGNORECASE)
+_ACTION = frozenset((
+    "delete drop remove wipe purge erase destroy truncate overwrite rotate revoke reset force push run deploy "
+    "publish release migrate rename rebase merge send print dump leak expose share commit upload copy use spend "
+    "rent buy pay disable enable execute apply perform do make take start launch kill terminate scrub "
+    "deleting dropping removing wiping purging erasing destroying truncating overwriting rotating revoking "
+    "resetting forcing pushing running deploying publishing releasing migrating sending printing dumping "
+    "exposing sharing committing uploading copying using spending executing applying performing").split())
+_PROTECT = frozenset(("redact redacts mask masks detect detects document documents describe describes gate "
+                      "gates prevent prevents refuse refuses warn warns guard guards protect protects classify "
+                      "classifies flag flags report reports list lists explain explains mention mentions note "
+                      "log logs test tests check checks verify verifies assert asserts").split())
+_COPULA = frozenset("is are be was were being should must will can could".split())
+_DETERMINER = frozenset(("the a an this that these those it its they their which what when where if how why all "
+                         "any each every some no one there").split())
+_NP_HEAD = re.compile(r"\b(?:detector|detection|detecting|redaction|redacting|mentions?|rule|rules|check|checks|"
+                      r"handling|scan|scanner|filter|docs?|documentation|tests?|gate|warning|guard)\s+"
+                      r"(?:for|of|about)\s+(?:\w+\s+){0,2}$", re.IGNORECASE)
+_PASSIVE = re.compile(r"\b(?:are|is) (?:read|listed|reported|detected|logged|redacted|masked|documented)\b",
+                      re.IGNORECASE)
+_WORD = re.compile(r"[a-z']+")
+
+
+def _descriptive(clause, at, deny):
+    """True when the deny word at `at` in this clause is described rather than done."""
+    prefix = clause[:at]
+    if _NP_HEAD.search(prefix) or _PASSIVE.search(clause):
+        return True
+    words = _WORD.findall(_LEAD.sub("", _BULLET.sub("", clause)).lower())
+    if not words:
+        return False
+    first = words[0]
+    if first in _ACTION:
+        return False
+    if first in _PROTECT:
+        return True
+    if first in _DETERMINER:
+        return not any(w in _ACTION or w in _COPULA for w in _WORD.findall(clause[:at + len(deny)].lower()))
+    return False
 
 
 def _action_sentence(text, word):
-    """-> the (trimmed) first clause holding `word` that is not descriptive, else None."""
+    """-> the (trimmed) first clause holding `word` in action position, else None."""
     w = word.lower()
     if not w:
         return None
     for clause in _CLAUSES.split(text):
-        low = clause.lower()
+        low = _QUOTED.sub(" ", clause).lower()
         at = low.find(w)
         if at < 0:
             continue
-        if _CUE.search(low[:at]) or _PASSIVE.search(low):
+        if _descriptive(low, at, w):
             continue
         return " ".join(clause.split())[:100]
     return None
