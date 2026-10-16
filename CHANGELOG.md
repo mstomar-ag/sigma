@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- With triage on, a rebase-upkeep finding (goal-branch conflict, parked conflict, direct commits, would-drop refusal) is now filed parked with a declared question kind (`merge_conflict` or `needs_decision`), a park event and the lowest triage priority instead of P1, and no longer carries the legacy confirmation label, so the doctor no longer reports it as a leftover; with triage off nothing changes (#1490).
 - **`rule_draft.py suggest` ranks which question kind and area pairs deserve a rule (#1513).** It scores each pair from parks, hours parked, goals blocked and answer agreement, names the majority option and whether one any-area rule covers it, never lists hard-stop or unknown kinds, and `--propose N` drafts the top N as proposals (never approved); the doctor's rulebook row lists the top uncovered pairs when rules are on.
 - The source-error downgrade-to-park declares `quota` for a quota or budget failure and `needs_decision` otherwise, and the stale-worktree escalation park declares `needs_decision` (#1524).
 - **Upkeep's mechanical level resolves two append-only shapes (#1515).** A dated `## YYYY-MM` log and a bullet-list file that both sides only added to are unioned (per section in date order; base order then the unit's new items); an edit or removal on either side still parks.
@@ -52,6 +53,7 @@ All notable changes to Sigma are recorded here, newest first.
 - **Every park declares a kind, and deny-list filings are hard stops (#1498).** Sigma's own park sites pass an explicit kind and `loop.py record parked` without `--qkind` stays undeclared (one stderr line suggests a kind; it never guesses from free text). One resolver, `qkind.resolve`, reads the newest kind line from a Sigma park comment or a later OWNER/MEMBER/COLLABORATOR declaration and ignores the rest; new `unpark.py declare`, `list --undeclared` and `resolve --qkind`. Filing triage declares the first hard-stop kind for deny-word, spend, secret and class matches and writes `sigma-hardstop: <class>` on the park, which the decision record copies into `hardstop_class`.
 - **Docs state that a merged goal branch is deleted on the remote (#1512).** The branch-shape section of the branching model now names the delete after `work.py merge`, the guards that refuse it, and that it cannot be turned off.
 - The Rulebook and upkeep enable steps now say to remove a leftover `.sdlc/state/watch.stop` before starting the watcher, and doctor adds a "no leftover watcher stop file" row only when that file exists and no watcher is running; with the file absent doctor output is unchanged (#1510).
+- Switching `discovery.blocker_promotion.mode` from `"smart"` to `"always"` no longer lets the smart skip marker swallow the one-time first-run preview, and the doctor row reads "first repair has not run" until the first always tick runs instead of a zero count; always-from-fresh and smart are unchanged (#1526).
 
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
