@@ -269,7 +269,8 @@ def test_there_is_one_predicate_and_the_callers_share_it():
 
 
 def test_no_script_gains_a_private_ancestry_check_without_review():
-    known = {"merge_observation.py", "sync.py", "worktree_prune.py", "feature_landed.py", "work.py", "feature_backup.py"}
+    known = {"merge_observation.py", "sync.py", "worktree_prune.py", "feature_landed.py", "work.py", "feature_backup.py",
+             "feature_rebase.py"}   # #1559: the read-only preview only classifies current / fast-forward, it decides no landing
     found = {p.name for p in S.glob("*.py") if "--is-ancestor" in p.read_text()}
     assert found <= known, "a new ancestry check must route through feature_landed.landed: %s" % sorted(found - known)
 

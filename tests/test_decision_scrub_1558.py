@@ -151,3 +151,34 @@ def test_ordinary_words_byte_identical():
         rec = _rec(choice=text, reason=text, answer=text)
         out, n = DS.scrub_record(rec)
         assert out == rec and n == 0
+
+
+# ---- #1631: scrub BEFORE the 300-character cut --------------------------------------------------
+def _cut_text():
+    key = "sk-" + "ant-" + TAIL
+    return "x" * (300 - 1 - 12) + " " + key + " tail", key
+
+
+def test_1631_key_across_the_cut_leaves_no_fragment():
+    DR = _mod("decision_record")
+    text, key = _cut_text()
+    for field in ("choice", "reason"):
+        args = {"choice": "c", "reason": "r"}
+        args[field] = text
+        rec = DR.build("import", 1, "scope", args["choice"], args["reason"], "imported")
+        out = rec[field]
+        assert len(out) <= 300
+        assert "sk-" + "ant-" not in out and TAIL[:6] not in out, out[-40:]
+
+
+def test_1631_apply_scrub_count_still_counts_cut_secret():
+    DR = _mod("decision_record")
+    text, _key = _cut_text()
+    assert DR.scrub_count(text, "clean") == 1
+    assert DR.scrub_count("clean", "clean") == 0
+
+
+def test_1631_short_records_byte_identical():
+    DR = _mod("decision_record")
+    rec = DR.build("import", 7, "scope", "option  a", "because\nreason", "imported")
+    assert rec["choice"] == "option a" and rec["reason"] == "because reason"
