@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 - **`resource_guard.py sample [--json]` reads the machine's memory, swap, pressure and CPU (#1597).** New stdlib-only readers (ctypes on macOS; /proc and cgroup v2 on Linux) return a typed `Sample` plus a per-process `footprint(pid)`; any other platform or an unreadable total raises `Unsupported` and the command exits 3. Nothing calls it yet; no process is spawned and no file written.
+- The newest-parked-label-event read now follows event pages (at most 10 pages of 100) instead of giving up on a full first page, so a label-only re-park on an issue with 100 or more events is no longer resumed by the sweep; a timeline longer than the cap still reads as no signal (#1639).
 - **The applier tick prints only actions taken on issues (#1564).** It reports `applier: N applied` and `applier: N vetoed` on separate lines, each only when N is above zero; ask bookkeeping (opened, armed) no longer counts as applied and prints only with the new `--verbose` flag (the `sync` verb still prints its opened count).
 - The upkeep sweep skips its backup prune when the sweep cap is already spent, and touches the sweep beat before every git call during the prune, so a slow remote can no longer hold the sweep past its cap or make it look dead; the cap-not-spent path is unchanged (#1632).
 - A quota reset time read back from a park comment is now bounded like the parser's (#1641): one more than 7 days after the park counts as unknown, so the ordinary window applies.
