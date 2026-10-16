@@ -4,12 +4,13 @@
     label_drain.py plan   <sdlc_dir> <label> [--json]
     label_drain.py status <sdlc_dir> <label> [--json]
     label_drain.py arm    <sdlc_dir> <label> [--apply]
+    label_drain.py answer <sdlc_dir> <label> --answers <file.json> [--dry-run]
 
 Draining a label is more than filtering. Members that carry the label but are not goals are invisible
 to the picker; a member held by an open blocker outside the label stalls the run silently; a parked
 member is a question nobody has seen. This module shows the whole set, with its transitive open
-blockers, before anything is written. `plan` and `status` NEVER WRITE (`arm`, #1577, is the one verb
-that can, and only with --apply, see `arm()`): not to GitHub, the mirror, the ledger or any
+blockers, before anything is written. `plan` and `status` NEVER WRITE (`arm`, #1577, and `answer`,
+#1580, are the verbs that can; `arm` only with --apply, `answer` unless --dry-run, see `answer()`): not to GitHub, the mirror, the ledger or any
 issue, and it never deletes or removes a label (a person does that). The guarantee is structural, not
 a habit: every call goes through `_ReadOnly`, which raises on anything that is not a GET, a GraphQL
 query, or a read-only `gh` view/list.
@@ -59,9 +60,12 @@ def _load(name):
 
 USAGE = ("usage: label_drain.py plan|status <sdlc_dir> <label> [--json]\n"
          "       label_drain.py arm <sdlc_dir> <label> [--apply]\n"
+         "       label_drain.py answer <sdlc_dir> <label> --answers <file.json> [--dry-run]\n"
          "  plan/status are read-only: they list the open issues carrying <label>, their open blockers,\n"
          "  and a verdict for each. arm is a dry run unless --apply: it arms what plan calls unarmed.\n"
-         "  Nothing here ever removes the label or edits an issue body.")
+         "  answer applies a person's answers to the questions plan printed ({\"<question id>\": \"<option>\"}):\n"
+         "  effect first, then one decision record; --dry-run prints every write and makes none.\n"
+         "  Nothing here ever removes the label; the one body edit is the spend-approval marker line.")
 
 MAX_MEMBERS = 200
 MAX_PULLED = 50
@@ -628,13 +632,14 @@ def arm_settings(config):
     return {"default_priority": pr.strip(), "arm_pulled_blockers": pulled if isinstance(pulled, bool) else True}
 
 
-def arm(sdlc_dir, label, apply=False, config=None, run=None):
+def arm(sdlc_dir, label, apply=False, config=None, run=None, only=None):
     """Arm what `plan()` calls unarmed, reusing `triage.compute_actions` / `triage.apply_actions`.
 
     -> {"label", "apply", "actions": [triage action dicts], "refused": [{"issue", "verdict",
     "reason"}], "notes": [str]}. Dry-run (the default) hands the source a read-only runner, so a write
     call is impossible rather than merely skipped. Never edits a body, creates or removes a label, or
-    deletes. Raises what `plan()` raises."""
+    deletes. `only` (a set of issue numbers, `answer` #1580) restricts the arming to those issues.
+    Raises what `plan()` raises."""
     sources, triage = _load("sources"), _load("triage")
     gh_api = _load("gh_api")
     config = config if config is not None else _load("state").load_config(sdlc_dir)
@@ -660,6 +665,8 @@ def arm(sdlc_dir, label, apply=False, config=None, run=None):
             else:
                 notes.append("#%d is an open blocker outside the label; arm_pulled_blockers is off, left alone"
                              % r["number"])
+    if only is not None:
+        todo = [t for t in todo if t[0] in only]
     me = source._assignee_login()
     prefix = source.priority_prefix
     label_ok = {}
@@ -734,11 +741,280 @@ def render_arm(res):
     return "\n".join(out) + "\n"
 
 
+# --- answer (#1580) ------------------------------------------------------------------------------
+
+def _token(label):
+    """The spend marker token derived from a run label: letters, digits, dot, dash, underscore; starts
+    with a letter or digit; at most 64."""
+    tok = re.sub(r"[^A-Za-z0-9._-]", "-", str(label)).lstrip("._-")[:64]
+    return tok or "approved"
+
+
+def _bank_match(options, text):
+    want = _load("unpark").normalise_answer(text)
+    for o in options:
+        if o.lower() == want:
+            return o
+    return None
+
+
+def _lookup(qid, p, label):
+    """-> the question `qid` names, or None. A question `plan` no longer asks (its effect already
+    stands, or it was answered before) is still accepted when its id is well formed for this label and
+    its options come from the bank, so a repeat or a crash recovery is not refused."""
+    unpark = _load("unpark")
+    for q in p["questions"]:
+        if q["id"] == qid:
+            return dict(q, target=qid.split(":", 1)[1])
+    kind, _, target = str(qid).partition(":")
+    rows = {r["number"]: r for r in p["members"] + p["outside"]}
+    if kind == "label_set":
+        if target != label:
+            return None
+        slot = unpark.route_slot("label_set")
+        return {"id": qid, "kind": kind, "options": list(slot["options"]), "unblocks": [], "target": target,
+                "area": "repo"}
+    if not target.isdigit() or int(target) not in rows:
+        return None
+    r, n = rows[int(target)], int(target)
+    area = unpark.decision_record.area_of(r.get("labels"))
+    if kind == "kind":
+        opts = [k for k in _load("qkind").QKINDS if k != "label_set"]
+    elif kind == "dependency" and r["verdict"] == "outside" and r.get("own_verdict") in (
+            "assigned-elsewhere", "upper-tier"):
+        slot_id = "taken" if r["own_verdict"] == "assigned-elsewhere" else "upper"
+        opts = list(next(s for s in unpark.QUESTIONS["label_set"] if s["id"] == slot_id)["options"])
+    elif kind in unpark.QUESTIONS:
+        opts = unpark.valid_options(kind)
+    else:
+        return None
+    return {"id": qid, "kind": kind, "options": opts, "unblocks": [n], "target": target, "area": area}
+
+
+def _validate_answers(answers, p, label):
+    """-> (errors, {qid: (question, choice)}). The whole file is judged before any write."""
+    errors, good = [], {}
+    if not isinstance(answers, dict) or not answers:
+        return ["the answers file must be a JSON object mapping question ids to answers"], good
+    for qid, raw in answers.items():
+        q = _lookup(qid, p, label)
+        if q is None:
+            errors.append("unknown question id %r (run `plan` to list the ids)" % (qid,))
+        elif not isinstance(raw, str) or not raw.strip():
+            errors.append("%s: the answer must be non-empty text" % qid)
+        elif q["options"]:
+            hit = _bank_match(q["options"], raw)
+            if hit is None:
+                errors.append("%s: %r is not one of: %s" % (qid, raw, " / ".join(q["options"])))
+            else:
+                good[qid] = (q, hit)
+        else:
+            good[qid] = (q, " ".join(raw.split()))      # no option list: the bank allows free text
+    return errors, good
+
+
+def _recorded(sdlc_dir, config, label):
+    """-> {question id: {choice}} already recorded under this label's scope (empty when records are off)."""
+    out = {}
+    try:
+        for r in _load("decision_store").list_by(sdlc_dir, config):
+            if r.get("scope") == "label:" + label and r.get("qid"):
+                out.setdefault(r["qid"], set()).update(x for x in (r.get("choice"), r.get("answer")) if x)
+    except Exception:                                   # noqa: BLE001 - an unreadable store only loses dedupe
+        pass
+    return out
+
+
+def _spend_effect(n, q_ids, p, source, config, token, dry_run):
+    """The marker write for one `go ahead`. -> (ok, [lines]). Only an approver-authored paid member
+    gets the marker; every other case is named and left as it is."""
+    sa = _load("spend_approval")
+    if n not in set(p["warnings"]["paid_step"]):
+        return True, ["#%d: no declared paid step, no marker written" % n]
+    approvers, enabled = sa._approvers(config)
+    try:
+        issue = source.fetch_issue_for_approval(n)
+    except Exception as exc:                            # noqa: BLE001 - unreadable == not approved
+        return False, ["#%d: could not read the issue: %s" % (n, _load("sources")._fx(exc))]
+    author = (issue.get("author") or "").strip().lower()
+    trusted = _load("sources").TRUSTED_ASSOCIATIONS
+    if not (enabled and approvers and author in approvers and issue.get("author_association") in trusted):
+        return True, ["#%d: not marked, its author is not a trusted spend approver "
+                      "(spend_approval.approvers); a person must write the marker" % n]
+    status, found, _line = sa.parse_marker(issue["body"])
+    if status == "ok" and found == token:
+        return True, ["#%d: marker already present" % n]
+    if status != "none":
+        return True, ["#%d: not marked, its first line already holds a different spend marker" % n]
+    if dry_run:
+        return True, ["would write marker %s%s on #%d" % (sa.MARKER, token, n)]
+    new_body = "%s%s\n\n%s" % (sa.MARKER, token, issue["body"])
+    try:
+        source._issue_edit_body(n, new_body)
+    except Exception as exc:                            # noqa: BLE001
+        return False, ["#%d: the marker write failed: %s" % (n, _load("sources")._fx(exc))]
+    return True, ["wrote marker %s%s on #%d" % (sa.MARKER, token, n)]
+
+
+def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
+    """Apply a person's answers to the questions `plan` asked, one at a time.
+
+    ORDER inside one answer (the rulebook's rule): the effect first, then the decision record and its
+    one comment; an effect that fails writes no record. The effects are the existing verbs, never
+    copies: `arm` for the arming route, `unpark.resolve` / `unpark.declare` for a parked member, the
+    `spend_approval` marker line for `go ahead`. Nothing is defaulted: a question left out stays open.
+    -> {"label", "dry_run", "errors": [str], "results": [{"id", "choice", "outcome", "lines"}],
+        "open": [question], "ready": bool}. Raises what `plan()` raises."""
+    sources, unpark = _load("sources"), _load("unpark")
+    dr = unpark.decision_record
+    config = config if config is not None else _load("state").load_config(sdlc_dir)
+    base = run or sources._run_gh
+    p = plan(sdlc_dir, label, config=config, run=base)
+    errors, good = _validate_answers(answers, p, label)
+    out = {"label": label, "dry_run": bool(dry_run), "errors": errors, "results": [], "open": [], "ready": False}
+    if errors:
+        return out                                      # refused whole, nothing written
+    source = sources.GitHubSource(config, run=base)
+    rows = {r["number"]: r for r in p["members"] + p["outside"]}
+    order = [q["id"] for q in p["questions"]]
+    done_before = _recorded(sdlc_dir, config, label)
+    answered = set()
+    scope = "label:" + label
+
+    def record(q, kind, choice, gesture="ack"):
+        """The one record + comment, through the shared writer. -> list of lines."""
+        ids = q.get("unblocks") or []
+        goal = int(q["target"]) if str(q["target"]).isdigit() else (min(ids) if ids else None)
+        if not dr.enabled(config):
+            return []
+        if dry_run:
+            return ["would record the decision (%s: %s) and post one comment on #%s" % (q["id"], choice, goal)]
+        rec = dr.build(gesture, goal, kind, choice, "answer to %s" % q["id"], dr.how_for(gesture),
+                       area=q.get("area"), answer=choice)
+        rec["scope"], rec["qid"] = scope, q["id"]
+        res = dr.write_all(sdlc_dir, rec, config, source,
+                           text="Run label %s: answered %r." % (label, choice))
+        return ["recorded decision %s" % (res["id"] or "(not stored)")] + (
+            [res["error"]] if res["error"] else [])
+
+    for qid in sorted(good, key=lambda x: (order.index(x) if x in order else len(order), x)):
+        q, choice = good[qid]
+        kind, n = q["kind"], (int(q["target"]) if q["target"].isdigit() else None)
+        row = rows.get(n) if n is not None else None
+        res = {"id": qid, "choice": choice, "outcome": "applied", "lines": []}
+        out["results"].append(res)
+        if choice in done_before.get(qid, ()):
+            res["outcome"], res["lines"] = "already-recorded", ["already answered, nothing written"]
+            answered.add(qid)
+            continue
+        ok, lines, recorded_by_effect = True, [], False
+        if kind == "label_set":
+            if choice == "leave them":
+                lines = ["left the set unarmed"]
+            else:
+                only = None
+                if choice.startswith("arm only"):
+                    only = {r["number"] for r in p["members"]
+                            if r["verdict"] == "unarmed" and not r["waiting_on"] and not r["unresolved"]}
+                armed = arm(sdlc_dir, label, apply=not dry_run, config=config, run=base, only=only)
+                lines = [l.strip() for l in render_arm(armed).splitlines()[1:]]
+                ok = not any(a["result"] == "failed" for a in armed["actions"])
+        elif kind == "irreversible":
+            if choice == "go ahead":
+                ok, lines = _spend_effect(n, q.get("unblocks"), p, source, config, _token(label), dry_run)
+            else:
+                lines = ["no marker written"]
+        elif kind == "kind":
+            if row is not None and row.get("kind") == "undeclared":
+                if dry_run:
+                    lines = ["would declare kind %s on #%d" % (choice, n)]
+                else:
+                    ok, detail = unpark.declare(sdlc_dir, config, n, choice, source=source)
+                    lines = [detail]
+            else:
+                lines = ["#%s already has a declared kind, nothing to declare" % n]
+        elif kind in unpark.QUESTIONS and row is not None and row["verdict"] == "parked" \
+                and unpark.option_gestures(kind).get(choice) in ("unpark", "keep-parked"):
+            slot = unpark.route_slot(kind) or unpark.CLOSING_QUESTION
+            r = unpark.resolve(sdlc_dir, config, n, {slot["id"]: choice}, unpark.option_gestures(kind)[choice],
+                               source=source, apply=not dry_run, extra={"scope": scope, "qid": qid})
+            ok, recorded_by_effect = r["outcome"] != "failed", True
+            lines = ["[%s] %s" % (r["outcome"], r["detail"])]
+        else:
+            lines = ["answer recorded only: Sigma does not reassign, close or re-register for you"
+                     if kind in ("dependency", "scope_hold") else "answer recorded; the issue is left as it is"]
+        if not ok:
+            res["outcome"] = "failed"
+            res["lines"] = lines + ["no decision record written"]
+            continue
+        if not recorded_by_effect:
+            lines += record(q, kind if kind != "kind" else choice, choice)
+        res["lines"] = lines
+        answered.add(qid)
+    after = p if dry_run else plan(sdlc_dir, label, config=config, run=base)
+    skip = answered | {i for i, cs in _recorded(sdlc_dir, config, label).items() if i in order and cs}
+    out["open"] = [q for q in after["questions"] if q["id"] not in skip]
+    unread = [r for r in after["members"] + after["outside"] if r.get("kind") in ("not-read", "unreadable")]
+    out["ready"] = not out["open"] and not unread
+    return out
+
+
+def render_answer(res):
+    out = ["answer %s (%s): %d answer(s)" % (res["label"], "DRY-RUN" if res["dry_run"] else "APPLIED",
+                                           len(res["results"]))]
+    for r in res["results"]:
+        out.append("  [%s] %s -> %s" % (r["outcome"], r["id"], r["choice"]))
+        out += ["      " + l for l in r["lines"]]
+    out.append("questions: %d still open, ready: %s" % (len(res["open"]), "true" if res["ready"] else "false"))
+    for q in res["open"]:
+        out.append("  - [%s] %s" % (q["id"], q["ask"]))
+        if q["options"]:
+            out.append("     options: " + " / ".join(q["options"]))
+    if res["dry_run"]:
+        out.append("dry run: nothing was written")
+    return "\n".join(out) + "\n"
+
+
+def _main_answer(args, run):
+    rest = args[1:]
+    dry = "--dry-run" in rest
+    rest = [a for a in rest if a != "--dry-run"]
+    path = None
+    if "--answers" in rest:
+        i = rest.index("--answers")
+        path = rest[i + 1] if i + 1 < len(rest) else None
+        rest = rest[:i] + rest[i + 2:]
+    if len(rest) != 2 or not path:
+        print(USAGE, file=sys.stderr)
+        return 2
+    sdlc_dir, label = rest
+    try:
+        payload = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    except Exception as exc:                            # noqa: BLE001
+        print("label_drain.py answer: could not read --answers %r: %s" % (path, exc), file=sys.stderr)
+        return 2
+    sources = _load("sources")
+    try:
+        res = answer(sdlc_dir, label, payload, dry_run=dry, run=run)
+    except (sources.LabelScopeError, ValueError) as exc:
+        print("label_drain.py: %s" % exc, file=sys.stderr)
+        return 2
+    if res["errors"]:
+        for e in res["errors"]:
+            print("label_drain.py answer: " + e, file=sys.stderr)
+        print("nothing was written", file=sys.stderr)
+        return 2
+    print(render_answer(res), end="")
+    return 1 if any(r["outcome"] == "failed" for r in res["results"]) else 0
+
+
 def main(argv, run=None):
     args = list(argv[1:])
     if args in ([], ["-h"], ["--help"]):
         print(USAGE)
         return 0 if args else 2
+    if args[:1] == ["answer"]:
+        return _main_answer(args, run)
     as_json = "--json" in args
     do_apply = "--apply" in args
     args = [a for a in args if a not in ("--json", "--apply")]
