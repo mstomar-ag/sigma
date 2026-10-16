@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- The newest-parked-label-event read now follows event pages (at most 10 pages of 100) instead of giving up on a full first page, so a label-only re-park on an issue with 100 or more events is no longer resumed by the sweep; a timeline longer than the cap still reads as no signal (#1639).
 - The upkeep sweep skips its backup prune when the sweep cap is already spent, and touches the sweep beat before every git call during the prune, so a slow remote can no longer hold the sweep past its cap or make it look dead; the cap-not-spent path is unchanged (#1632).
 - A quota reset time read back from a park comment is now bounded like the parser's (#1641): one more than 7 days after the park counts as unknown, so the ordinary window applies.
 - A park re-applied by label only (no Sigma park comment) after a waiting note is no longer resumed by the sweep when its blocker closes; the signal is the newest `sdlc:parked` label event, and an unreadable event keeps the old behaviour (provisional, owner to ratify) (#1630).
