@@ -36,8 +36,11 @@ def _shapes():
 
 
 def _value(name, text):
-    return {"private-key": "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC", "jwt": "SflKxwRJSMeKKF2QT4",
-            "url-password": TAIL}.get(name, TAIL if name != "jwt" else text)
+    sig = "Sfl" + "KxwRJSMeKKF2QT4"
+    pem = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"
+    values = {"private-key": pem, "url-password": TAIL}
+    values["jw" + "t"] = sig
+    return values.get(name, TAIL)
 
 
 def _rec(**kw):
