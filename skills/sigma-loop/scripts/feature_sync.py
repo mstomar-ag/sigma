@@ -253,14 +253,21 @@ def _note(message):
         pass
 
 
-def _run(cwd, argv):
+class RunTimeout(RuntimeError):
+    """#1700: a runner call outlived its `timeout`; still a RuntimeError, so every caller reads it as "unanswered"."""
+
+
+def _run(cwd, argv, timeout=None):
     """The default runner, matching `work._run`'s `(cwd, argv) -> stdout` contract exactly: raise on
     a non-zero exit, because every caller here reads an exception as "the question went unanswered"
     and a silent empty string as "the answer is nothing". Collapsing those two is what turns an
     unreachable remote into "every branch was deleted"."""
     import subprocess                     # local: the injected runner is the real path; this is the
-    proc = subprocess.run([str(a) for a in argv], cwd=str(cwd),   # fallback for a direct CLI caller
-                          capture_output=True, text=True)
+    try:
+        proc = subprocess.run([str(a) for a in argv], cwd=str(cwd),   # fallback for a direct CLI caller
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:     # #1700: the optional bound; no timeout = unchanged behaviour
+        raise RunTimeout("%s timed out after %ss" % (argv[0], timeout))
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout or "").strip() or
                            "%s exited %s" % (argv[0], proc.returncode))
