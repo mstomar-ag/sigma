@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **`unpark.py report <sdlc_dir>` shows what the applier would do (#1561).** Read-only: every parked or blocked issue with its declared or suggested kind, area, matching rule and gesture, the pair's level, and whether the applier would act now, later (window) or never (and why), then one total per outcome; `--json` for tools.
 - **Upkeep's agent level can launch (#1554, slice 1).** The probed resolver flags are confirmed (only `--bare` stays refused), the model catalog holds real ids, and `conflicts.agent.max_budget_usd_per_unit` / `spend_ceiling_usd_per_day` are optional: null means no limit (no `--max-budget-usd`, no ceiling check; a set cap or ceiling is enforced as before). The doctor names the mode. Tested against a stand-in command only; the live run with a real model is owner-gated and not done.
 - A `keep-parked` on a quota park answered "wait it out" no longer posts the sweep opt-out marker, like a dependency "wait for it"; every other route still does (provisional, owner to ratify) (#1547).
 - The upkeep sweep now prunes backup refs past `backup.keep_days` by itself, keeping the newest `backup.keep_last` per unit, once per sweep and bounded; a failed prune never fails the sweep and is retried next time, and `/sigma-doctor` shows the backup count and last prune (#1557).

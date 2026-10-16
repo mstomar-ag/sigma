@@ -35,6 +35,7 @@ comment (prefix-stripped), and `decision_tier.classify` -- the UNGATED, pure cla
 `resolve`. The ledger, when a repo has it on, is optional enrichment and nothing more.
 
     python3 unpark.py list <sdlc_dir> [--assignee X] [--undeclared] [--json]
+    python3 unpark.py report <sdlc_dir> [--json]
     python3 unpark.py declare <sdlc_dir> <issue> <kind>
     python3 unpark.py brief <sdlc_dir> <issue> [--json]
     python3 unpark.py resolve <sdlc_dir> <issue> --answers <file.json>
@@ -788,6 +789,104 @@ def _append_block(source, number, body, block):
         return False
 
 
+def _applier_verdict(sdlc_dir, config, ap, number, kind, declared, area, comments, now, asks, used):
+    """(rule, option, gesture, verdict, why) for one park, in the order `applier.open_for_park` and
+    `applier.tick` decide: what would stop the applier first is named. Nothing is written."""
+    hs, rb = _load("hard_stop"), _load("rulebook")
+    if not ap.enabled(config):
+        return None, None, None, "never", "the applier is off"
+    if not declared:
+        return None, None, None, "never", "kind not declared (a suggested kind never acts)"
+    if hs.is_hardstop_kind(kind, None, config):
+        return None, None, None, "never", "hard-stop kind"
+    if kind in ("unknown", "scope_hold", "owner_hold"):
+        return None, None, None, "never", "kind %s is never applied automatically" % kind
+    rules = rb.load(sdlc_dir, config)
+    m = rb.match(kind, area, None, rules, config)
+    if m is None:
+        return None, None, None, "never", "no approved rule for %s / %s" % (kind, area)
+    gesture = ap.option_gesture(kind, m.option)
+    if gesture not in ap.GESTURES:
+        return m.rule_id, m.option, gesture or "none", "never", "the rule only recommends"
+    out = (m.rule_id, m.option, gesture)
+    park = park_stamp(comments)
+    if park and decision_record.answered_park(sdlc_dir, config, number, park):
+        return (*out, "never", "a person already answered this park")
+    level = ap._level(sdlc_dir, kind, area, config)
+    if level < 3:
+        return (*out, "never", "the pair is at level %s, below 3" % level)
+    if m.rule_id in set(rb.due_for_reask(rules, now, config)):
+        return (*out, "never", "the rule is due to be reconfirmed by an owner")
+    rule = next((r for r in rules if r.get("id") == m.rule_id), None)
+    if not ap._rule_has_own_support(sdlc_dir, kind, area, rule, config):
+        return (*out, "never", "the rule lacks its own live comparisons")
+    ask = next((a for a in asks if ap._issue_key(a.get("issue")) == ap._issue_key(number)
+                and a.get("state") == "pending" and a.get("answer") is None), None)
+    if ask is None:
+        return (*out, "later", "no ask yet: it opens at the next sync, then waits its window")
+    if "armed_at" in ask and ask.get("armed_at") is None:
+        return (*out, "later", "arms at the next tick, then waits its window")
+    if ap.window_open(ask, config, now):
+        return (*out, "later", "inside the window, an answer or no still wins")
+    if ap._quota_wait_pending(ask, m, now):
+        return (*out, "later", "waiting for the quota to reset")
+    if used >= ap.settings(config)["max_auto_applied_per_day"]:
+        return (*out, "later", "the daily cap is used up")
+    return (*out, "now", "window passed")
+
+
+def report(sdlc_dir, config, source=None, run=None, assignee=None, now=None):
+    """Every parked or blocked issue and what the applier would do with it. READ-ONLY: the same two
+    label queries as `list`, then one REST read per park (as `list --undeclared` does); no gesture,
+    comment, label or file is written. `totals` counts the outcomes now, later and never."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    source = source or sources.GitHubSource(config, run=run)
+    listed = list_parked(sdlc_dir, config, source=source, assignee=assignee)
+    ap = _load("applier")
+    asks = ap._asks(sdlc_dir) if ap.enabled(config) else []
+    used = ap._applied_in_last_day(asks, now) if asks else 0
+    au = _load("autonomy")
+    rows = []
+    for it in listed["issues"]:
+        number = it["number"]
+        row = {"number": number, "title": it["title"], "state": it["state"]}
+        try:
+            data = _fetch_issue(source, number)
+            raw = data.get("comments") or []
+            declared = qkind.resolve(raw, goal=number)
+            reason, _ = _park_reason([sources.defuse_body(c.get("body") or "", c.get("authorAssociation"),
+                                                          (c.get("author") or {}).get("login"), number)
+                                      for c in raw])
+            kind = declared or loop._suggest_kind(qkind.strip_line(reason) or it["title"])
+            area = decision_record.area_of(data.get("labels"))
+            rule, option, gesture, verdict, why = _applier_verdict(
+                sdlc_dir, config, ap, number, kind, bool(declared), area, raw, now, asks, used)
+            row.update(kind=kind, declared=bool(declared), area=area, rule=rule, option=option,
+                       gesture=gesture, level=au.level(sdlc_dir, kind, area, config), verdict=verdict, why=why)
+        except Exception as exc:                        # noqa: BLE001 - one unreadable park never hides the rest
+            row.update(kind=None, declared=False, area=None, rule=None, option=None, gesture=None,
+                       level=None, verdict="never", why="could not be read: %s" % sources._fx(exc))
+        rows.append(row)
+    totals = {k: sum(1 for r in rows if r["verdict"] == k) for k in ("now", "later", "never")}
+    return {"issues": rows, "totals": totals, "complete": listed["complete"], "degraded": listed["degraded"]}
+
+
+def render_report(result):
+    lines = []
+    for r in result["issues"]:
+        kind = "%s" % r["kind"] if r["declared"] else "not declared (suggested: %s)" % r["kind"]
+        rule = ("rule %s -> %s" % (r["rule"], r["gesture"])) if r["rule"] else "no rule"
+        lines.append("#%s [%s] %s" % (r["number"], r["state"], r["title"]))
+        lines.append("  kind: %s; area: %s; %s; level %s" % (kind, r["area"], rule, r["level"]))
+        lines.append("  applier: %s -- %s" % (r["verdict"], r["why"]))
+    if not result["issues"]:
+        lines.append("none parked")
+    for note in result.get("degraded") or []:
+        lines.append("NOTE: %s" % note)
+    lines += ["%s: %d" % (k, result["totals"][k]) for k in ("now", "later", "never")]
+    return "\n".join(lines)
+
+
 def render_list(result):
     scope = result.get("assignee")
     lines = ["parked work: %s" % ("scoped to @%s" % scope if scope
@@ -837,6 +936,7 @@ def render_brief(b):
 
 
 _USAGE = ("usage: unpark.py list <sdlc_dir> [--assignee X] [--undeclared] [--json]\n"
+          "       unpark.py report <sdlc_dir> [--json]\n"
           "       unpark.py declare <sdlc_dir> <issue> <kind>\n"
           "       unpark.py brief <sdlc_dir> <issue> [--json]\n"
           "       unpark.py resolve <sdlc_dir> <issue> --answers <file.json> "
@@ -872,6 +972,14 @@ def _main(argv, run=None):
                              assignee=_value(tail, "--assignee"),
                              undeclared="--undeclared" in tail)
         print(json.dumps(result, indent=2) if "--json" in tail else render_list(result))
+        return 0 if result["complete"] else 1
+    if len(argv) >= 3 and argv[1] == "report":
+        sdlc_dir, tail = argv[2], argv[3:]
+        blocked = triage.needs_github(triage.config_strict(sdlc_dir), "unparking", 1, run, None)
+        if blocked is not None:
+            return blocked
+        result = report(sdlc_dir, triage.config_strict(sdlc_dir), run=run)
+        print(json.dumps(result, indent=2) if "--json" in tail else render_report(result))
         return 0 if result["complete"] else 1
     if len(argv) >= 5 and argv[1] == "declare":
         sdlc_dir, number, kind = argv[2], argv[3], argv[4]
