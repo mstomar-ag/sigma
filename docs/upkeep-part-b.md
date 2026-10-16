@@ -65,6 +65,29 @@ backup ref (nothing is replaced); the lease still applies.
 Every resolution leaves a record under `.sdlc/state/upkeep/resolutions`, and the rewritten commits carry a
 `sigma-resolution:` trailer naming the level and the run.
 
+## The agent level as one scratch session (#1573)
+
+With the shipped configuration the agent level keeps ONE session directory per unit, under the resolver root, and
+re-enters it at every conflicted commit of the replay. It is a `git init` with no history, no remote and no credentials,
+so it shares no objects with the real repository; the stopped tree is copied over it at each stop, and
+`.sigma-context/stopN/` holds, for each conflicted file, the base, ours and theirs versions and the recent integration
+commit subjects, plus the replayed commit's message, the files resolved at earlier stops, and PR texts when supplied.
+The model may edit, build and run tests there (`acceptEdits` with Read, Edit, Write, Glob, Grep and Bash), so the
+before/after discard of the plain export does not apply; the copy is thrown away. The session is NOT network
+isolated: a wall around the model command would cut its own API access, so the shipped plan sets none and the doctor row
+`resolver session network` says "not isolated on this platform" (informational, never failing). Its protection is the
+credential-free copy: no token, no agent socket, no credential helper, a temporary home and no remote. The launcher can
+still prefix a wall when a plan supplies one (`network_prefix` builds the macOS and Linux forms); that wiring is UNVERIFIED
+against a real model run.
+
+What does not change: Sigma alone writes a file back, and only a conflicted file that is a regular, non-link file inside
+the session directory with no marker left; the dropped-unit-line and dropped-integration-line proofs, the stamp, the
+authorship check, the proof gate, the independent review and the single atomic backup push all run as before. The
+whole session shares one wall clock (`timeout_minutes`): each stop gets what is left, and none left parks as
+`session-timeout`. Session limits are PROVISIONAL (30 files, 100 hunks, 4000 conflict lines, 50 stops). A plan without
+the `session` key runs the plain export exactly as before. Files a later stop's tree no longer holds are not removed
+from the session copy; the whole directory is removed when the pass ends.
+
 ## Landing a unit
 
 A guarded landing of a whole unit, behind the same gate, is run by the landing engine

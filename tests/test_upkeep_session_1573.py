@@ -1,0 +1,254 @@
+"""#1573: the agent conflict level as ONE per-unit scratch session. Driven only by a FAKE `claude` (a python script written
+into tmp_path) through the harness of tests/test_upkeep_level2.py (Rig, conflict_world) and the shipped factory of
+tests/test_upkeep_agent_1516.py (`wired`). No real model, no network; the network wall is only checked as argv text.
+Controls (each broken once, seen red, then restored): the symlink read-back check (`test_a_link_...`), the `session` flag
+(`test_a_multi_commit_replay_...`), the dropped-line proof (`test_a_dropped_unit_line_...`), the deadline
+(`test_the_whole_session_...`). Gesture: `python -m pytest tests/test_upkeep_session_1573.py -q`."""
+import json
+import os
+import pathlib
+import sys
+import time
+
+import pytest
+
+import test_feature_rebase as base
+import test_upkeep_level1 as l1
+from test_upkeep_agent_1516 import agent_cfg, wired  # noqa: F401  (wired is a fixture)
+from test_upkeep_level2 import APP, FEATURE, UNIT, mk, rig  # noqa: F401  (rig is a fixture)
+
+STUB = '''#!%(python)s
+import json, os, pathlib, subprocess, sys
+here = pathlib.Path(%(dir)r)
+mode = json.loads((here / "mode.json").read_text())
+stdin = sys.stdin.read()
+reviewer = "independent reviewer" in stdin
+calls = json.loads((here / "calls.json").read_text()) if (here / "calls.json").exists() else []
+cwd = pathlib.Path(os.getcwd())
+ctx = {}
+for p in sorted((cwd / ".sigma-context").rglob("*")) if (cwd / ".sigma-context").exists() else []:
+    if p.is_file():
+        ctx[p.relative_to(cwd).as_posix()] = p.read_text()
+remote = subprocess.run(["git", "remote"], capture_output=True, text=True).stdout if not reviewer else ""
+call = {"role": "review" if reviewer else "resolve", "cwd": str(cwd), "argv": sys.argv[1:], "stdin": stdin, "ctx": ctx,
+        "env": dict(os.environ), "remote": remote, "had_build": (cwd / "build" / "out.bin").exists()}
+calls.append(call)
+(here / "calls.json").write_text(json.dumps(calls))
+if reviewer:
+    print(json.dumps({"verdict": "approve", "reasons": ["keeps both sides"]}))
+    raise SystemExit(0)
+how = mode.get("resolve", "both")
+for p in sorted(cwd.rglob("*")):
+    if ".git" in p.parts or ".sigma-context" in p.parts or not p.is_file() or p.is_symlink():
+        continue
+    if "<<<<<<<" not in p.read_text():
+        continue
+    keep = [l for l in p.read_text().splitlines(True) if l[:7] not in ("<<<<<<<", "=======", ">>>>>>>")]
+    if how == "drop":
+        keep = [l for l in keep if "feature side" not in l and "feature two" not in l] + ["resolver extra line\\n"]
+    if how == "link":
+        outside = pathlib.Path(mode["outside"])
+        outside.write_text("".join(keep))
+        p.unlink()
+        p.symlink_to(outside)
+        continue
+    p.write_text("".join(keep))
+if how == "build":
+    (cwd / "build").mkdir(exist_ok=True)
+    (cwd / "build" / "out.bin").write_text("artifact")
+    (cwd / "ran.txt").write_text(subprocess.run(["echo", "ran"], capture_output=True, text=True).stdout)
+print("done")
+'''
+
+LINES = "l1\nshared2\nl3\nl4\nl5\nshared6\nl7\n"
+
+
+def two_commit_world(tmp):
+    """Two feature commits, each conflicting with the ONE integration commit in the same code file."""
+    files = {"CHANGELOG.md": l1.LOG % "", APP: LINES}
+    w = l1.world(tmp, feat={APP: LINES.replace("shared2", "feature side")},
+                 integ={APP: LINES.replace("shared2", "integration side").replace("shared6", "integration two")}, base_files=files)
+    base._git(w.local, "checkout", "-q", FEATURE)
+    base._write(w.local / APP, LINES.replace("shared2", "feature side").replace("shared6", "feature two"))
+    base._git(w.local, "add", APP)
+    l1._commit(w.local, "feat: second step (#12)")
+    base._git(w.local, "push", "-q", "origin", FEATURE)
+    base._git(w.local, "checkout", "-q", l1.MAIN)
+    return w
+
+
+@pytest.fixture
+def srig(rig):  # noqa: F811
+    rig.binary.write_text(STUB % {"python": sys.executable, "dir": str(rig.fake)})
+    return rig
+
+
+def install_session(rig, m, w, session=True, net_prefix=None, **extra):
+    plan = lambda config: dict(rig.plan(w), config=config, **extra, **({"session": True, "net_prefix": net_prefix} if session else {}))  # noqa: E731
+    rig.mp.setattr(m, "LEVEL2_PLAN_FACTORY", plan)
+
+
+def run_session(rig, tmp_path, world=None, session=True, net_prefix=None, spy=None, extra=None):
+    m = l1.mod()
+    w = world or two_commit_world(mk(tmp_path / "w"))
+    install_session(rig, m, w, session, net_prefix, **(extra or {}))
+    l1.verify_ok(m, rig.mp)
+    report, spy = l1.run_pass(m, w, l1.cfg(resolve="agent"), spy)
+    return m, w, report, spy
+
+
+@pytest.fixture
+def wired_s(wired, monkeypatch):  # noqa: F811
+    """The shipped factory, with the host's real network wall switched off so the run is the same on every platform."""
+    monkeypatch.setattr(wired._launcher(), "network_prefix", lambda platform, which: (None, None))
+    return wired
+
+
+def resolves(rig):
+    return [c for c in rig.calls() if c["role"] == "resolve"]
+
+
+# --------------------------------------------------------------------------- 1: one session across the replay
+
+
+def test_a_multi_commit_replay_is_resolved_in_one_session_dir_with_context_and_pushed_once(srig, tmp_path, wired_s):
+    rig, m = srig, wired_s
+    w = two_commit_world(mk(tmp_path / "w"))
+    report, spy = l1.run_pass(m, w, agent_cfg())
+    assert report["outcome"] == m.REBASED and report["resolved"]["level"] == 2, report.get("why")
+    assert len(spy.pushes()) == 1 and report["backup"]
+    first, second = resolves(rig)
+    assert first["cwd"] == second["cwd"] and first["cwd"].endswith(os.sep + "session")
+    assert not os.path.exists(first["cwd"])                                  # removed when the pass ended
+    assert second["argv"][-4:] == ["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash"]
+    assert ".sigma-context/stop0" in first["stdin"] and ".sigma-context/stop1" in second["stdin"]
+    ctx = second["ctx"]
+    assert ctx[".sigma-context/stop1/message.txt"].startswith("feat: second step")
+    for kind in ("base", "ours", "theirs", "history"):
+        assert ".sigma-context/stop1/src__app.txt.%s" % kind in ctx
+    assert "integration side" in ctx[".sigma-context/stop0/src__app.txt.ours"] or "integration" in ctx[".sigma-context/stop0/src__app.txt.ours"]
+    assert "src/app.txt" in ctx[".sigma-context/stop1/earlier.txt"] and "stop0" in ctx[".sigma-context/stop1/earlier.txt"]
+    assert "integration moves" in ctx[".sigma-context/stop0/src__app.txt.history"]
+    text = base._git(w.local, "show", "origin/%s:%s" % (FEATURE, APP))
+    assert "feature side" in text and "feature two" in text and "integration side" in text and "integration two" in text
+    assert "<<<<" not in text
+
+
+# --------------------------------------------------------------------------- 2: build output is kept in the session, not the tree
+
+
+def test_a_build_artifact_in_the_session_is_not_discarded_and_never_reaches_the_repo(srig, tmp_path):
+    srig.mode({"resolve": "build"})
+    m, w, report, spy = run_session(srig, tmp_path)
+    assert report["outcome"] == m.REBASED, report.get("why")
+    first, second = resolves(srig)
+    assert first["had_build"] is False and second["had_build"] is True       # kept across stops of the one session
+    assert len(spy.pushes()) == 1
+    tree = base._git(w.local, "ls-tree", "-r", "--name-only", "origin/" + FEATURE)
+    assert "build/out.bin" not in tree and "ran.txt" not in tree
+
+
+# --------------------------------------------------------------------------- 3: no credentials, no remote
+
+
+def test_the_session_has_no_credentials_no_remote_and_a_throwaway_home(srig, tmp_path, monkeypatch):
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK", "ANTHROPIC_API_KEY"):
+        monkeypatch.setenv(name, "secret-value")
+    m, w, report, spy = run_session(srig, tmp_path)
+    assert report["outcome"] == m.REBASED, report.get("why")
+    env = resolves(srig)[0]["env"]
+    assert not {"GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK", "ANTHROPIC_API_KEY"} & set(env)
+    assert "secret-value" not in json.dumps(env)
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1" and env["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert env["HOME"].startswith(str(srig.tmp / "scratch")) and resolves(srig)[0]["remote"].strip() == ""
+
+
+# --------------------------------------------------------------------------- 4: a link is refused
+
+
+def test_a_link_in_place_of_a_conflicted_file_is_refused_and_nothing_is_written(srig, tmp_path):
+    outside = tmp_path / "outside.txt"
+    srig.mode({"resolve": "link", "outside": str(outside)})
+    w = two_commit_world(mk(tmp_path / "w"))
+    before = w.tip(FEATURE)
+    m, w, report, spy = run_session(srig, tmp_path, world=w)
+    assert w.tip(FEATURE) == before and not spy.pushes()
+    assert "write-back-failed" in report["why"] and "symbolic link" in report["why"]
+    assert [c["role"] for c in srig.calls()] == ["resolve"]
+
+
+# --------------------------------------------------------------------------- 5: the proofs still hold
+
+
+def test_a_dropped_unit_line_in_a_session_is_parked_with_the_attempted_diff(srig, tmp_path):
+    srig.mode({"resolve": "drop"})
+    w = two_commit_world(mk(tmp_path / "w"))
+    before = w.tip(FEATURE)
+    m, w, report, spy = run_session(srig, tmp_path, world=w)
+    assert report["outcome"] in (m.CONFLICT, m.PARKED) and not spy.pushes() and w.tip(FEATURE) == before
+    assert "unit-line-dropped" in report["why"]
+    brief = report["park"]["brief"]
+    assert "attempted resolution" in brief and "-feature side" in brief
+    assert [c["role"] for c in srig.calls()] == ["resolve"]
+
+
+# --------------------------------------------------------------------------- 6: the whole-session clock
+
+
+def test_the_whole_session_shares_one_deadline_and_none_left_parks_as_session_timeout(srig, tmp_path, monkeypatch):
+    offset = [0.0]
+    real = time.monotonic
+    monkeypatch.setattr(time, "monotonic", lambda: real() + offset[0])      # read when the level 2 module is loaded
+
+    def jump(argv):
+        if "--continue" in argv:
+            offset[0] += 10 ** 5
+    m = l1.mod()
+    spy = l1.Spy(m, before=jump)
+    w = two_commit_world(mk(tmp_path / "w"))
+    before = w.tip(FEATURE)
+    m, w, report, spy = run_session(srig, tmp_path, world=w, spy=spy)
+    assert "session-timeout" in report["why"] and not spy.pushes() and w.tip(FEATURE) == before
+    assert len(resolves(srig)) == 1                                           # stop 1 was never spawned
+
+
+# --------------------------------------------------------------------------- 7: classic path unchanged / network prefix
+
+
+def test_a_plan_without_the_session_key_runs_the_plain_export_as_before(srig, tmp_path):
+    w = l1.world(mk(tmp_path / "w"), feat={APP: "line1\nfeature side\nline3\n"}, integ={APP: "line1\nintegration side\nline3\n"},
+                 base_files={"CHANGELOG.md": l1.LOG % "", APP: "line1\nshared\nline3\n"})
+    m, w, report, spy = run_session(srig, tmp_path, world=w, session=False)
+    assert report["outcome"] == m.REBASED, report.get("why")
+    call = resolves(srig)[0]
+    assert call["cwd"].endswith(os.sep + "stop0") and "--permission-mode" not in call["argv"] and call["ctx"] == {}
+    assert "GIT_CONFIG_NOSYSTEM" not in call["env"]
+
+
+def test_the_network_prefix_is_put_in_front_of_the_command(srig, tmp_path):
+    marker = tmp_path / "wall-ran"
+    wall = tmp_path / "wall.py"
+    wall.write_text("#!%s\nimport os, sys\nopen(%r, 'w').write('x')\nos.execv(sys.argv[1], sys.argv[1:])\n" % (sys.executable, str(marker)))
+    wall.chmod(0o755)
+    m, w, report, spy = run_session(srig, tmp_path, net_prefix=[str(wall)])
+    assert report["outcome"] == m.REBASED, report.get("why")
+    assert marker.exists()
+
+
+def test_network_prefix_per_platform_and_the_doctor_row(tmp_path):
+    launcher = base._load("feature_upkeep_launcher")
+    have = lambda name: "/usr/bin/" + name  # noqa: E731
+    none = lambda name: None  # noqa: E731
+    got, label = launcher.network_prefix("darwin", have)
+    assert label == "sandbox-exec" and got[:2] == ["/usr/bin/sandbox-exec", "-p"] and "(deny network*)" in got[2]
+    got, label = launcher.network_prefix("linux", have)
+    assert label == "unshare" and got == ["/usr/bin/unshare", "--net", "--map-root-user"]
+    assert launcher.network_prefix("darwin", none) == (None, None) == launcher.network_prefix("linux", none)
+    assert launcher.network_prefix("win32", have) == (None, None)
+    import test_doctor_resolver_readiness as dr
+    d, config = dr.doctor(), dr.config()
+    sdlc = dr.project(tmp_path, config)
+    plat = sys.platform
+    rows = [c for c in dr.rows(d, sdlc, config, which=have) if c["name"].startswith("resolver session network")]
+    assert len(rows) == 1 and rows[0]["ok"] is True
+    assert rows[0]["name"].endswith("not isolated on this platform")

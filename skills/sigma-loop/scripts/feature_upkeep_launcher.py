@@ -123,8 +123,8 @@ OUT_KEEP = 4096
 Request = collections.namedtuple(
     "Request",
     "config sdlc_dir state_dir repo_root directory conflicted binary prompt blocks timeout cap_usd "
-    "model flags credential_var scratch_parent rates ceiling_machine_usd ceiling_team_usd budget_seconds home",
-    defaults=(None,) * 20)
+    "model flags credential_var scratch_parent rates ceiling_machine_usd ceiling_team_usd budget_seconds home session net_prefix",
+    defaults=(None,) * 22)
 
 
 # ------------------------------------------------------------------------------------------ small helpers
@@ -175,6 +175,27 @@ def resolve_model(config, override):
     if not isinstance(model, str) or not _MODEL_ID.match(model):
         return None, "the model id is not a valid catalog id"
     return model, None
+
+
+# ------------------------------------------------------------------------------------------ the session network wall (#1573)
+
+#: macOS: a profile that allows everything except the network. `sandbox-exec` is deprecated but present.
+NET_PROFILE = "(version 1)(allow default)(deny network*)"
+SESSION_ARGV = ("--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash")
+
+
+def network_prefix(platform, which):
+    """-> (argv prefix, label) that runs a command with no network, or (None, None) when this platform has no such wall.
+    UNVERIFIED beyond the check that the program exists: a host that forbids the sandbox makes the launch fail, which parks."""
+    if platform == "darwin":
+        exe = which("sandbox-exec")
+        if exe:
+            return [exe, "-p", NET_PROFILE], "sandbox-exec"
+    elif str(platform).startswith("linux"):
+        exe = which("unshare")
+        if exe:
+            return [exe, "--net", "--map-root-user"], "unshare"
+    return None, None
 
 
 # ------------------------------------------------------------------------------------------ the scratch tree
@@ -531,13 +552,18 @@ def _run(req, model, binary, environ, run_id, clock):
         text = build_prompt(req.prompt, req.blocks, secrets.token_hex(8))
         scratch, prompt_path = make_scratch(req.scratch_parent, text)
         argv = [binary] + list(BASE_ARGV) + (["--max-budget-usd", "%g" % cap] if cap is not None else []) + ["--model", model]
+        env = build_env(scratch, req.credential_var, environ)
+        if req.session:
+            argv.extend(SESSION_ARGV)
+            env["GIT_CONFIG_NOSYSTEM"], env["GIT_CONFIG_GLOBAL"] = "1", os.devnull
         for item in req.flags or ():
             argv.extend(item if isinstance(item, (tuple, list)) else (item,))
-        before = snapshot(req.directory)
-        done = bounded.run_group(argv, req.directory, req.timeout, env=build_env(scratch, req.credential_var, environ),
-                                 stdin_path=str(prompt_path))
-        after = snapshot(req.directory)
-        changed = tuple(violations(before, after, req.conflicted))
+        if req.net_prefix:
+            argv = [str(a) for a in req.net_prefix] + argv
+        # session mode (#1573): the directory is a throwaway copy the model may edit freely, so no before/after discard
+        before = None if req.session else snapshot(req.directory)
+        done = bounded.run_group(argv, req.directory, req.timeout, env=env, stdin_path=str(prompt_path))
+        changed = () if req.session else tuple(violations(before, snapshot(req.directory), req.conflicted))
         reason = _scrub(done.out, secret)
         killed = done.outcome in (bounded.TIMEOUT, bounded.STOPPED, bounded.ERROR, bounded.REFUSED) or (done.code or 0) < 0
         if killed:
