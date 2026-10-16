@@ -1733,7 +1733,7 @@
       "function": "_atomic_write",
       "rule": "fs-remove",
       "count": 1,
-      "gate": "operator-run lease table only; atomic rename of a .tmp onto leases/<id>.json, last.json, observed.json or waiting.json under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; nothing calls it yet",
+      "gate": "operator-run lease table only; atomic rename of a .tmp onto leases/<id>.json, last.json, observed.json or waiting.json under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; called only by resource_verify.py, which admits a verify when resource.mode is set (#1601)",
       "risk": "high"
     },
     {
@@ -1741,7 +1741,7 @@
       "function": "_atomic_write",
       "rule": "fs-write",
       "count": 1,
-      "gate": "operator-run lease table only; writes a .tmp then renames it onto leases/<id>.json, last.json, observed.json or waiting.json under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; nothing calls it yet",
+      "gate": "operator-run lease table only; writes a .tmp then renames it onto leases/<id>.json, last.json, observed.json or waiting.json under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; called only by resource_verify.py, which admits a verify when resource.mode is set (#1601)",
       "risk": "medium"
     },
     {
@@ -1749,7 +1749,7 @@
       "function": "_finish",
       "rule": "fs-remove",
       "count": 1,
-      "gate": "operator-run lease table only; unlinks one lease file of a released, dead or expired unit under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; nothing calls it yet",
+      "gate": "operator-run lease table only; unlinks one lease file of a released, dead or expired unit under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; called only by resource_verify.py, which admits a verify when resource.mode is set (#1601)",
       "risk": "high"
     },
     {
@@ -1757,7 +1757,7 @@
       "function": "_locked",
       "rule": "fs-write",
       "count": 1,
-      "gate": "operator-run lease table only; opens admit.lock for append to flock it (no content written) under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; nothing calls it yet",
+      "gate": "operator-run lease table only; opens admit.lock for append to flock it (no content written) under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; called only by resource_verify.py, which admits a verify when resource.mode is set (#1601)",
       "risk": "medium"
     },
     {
@@ -1765,7 +1765,7 @@
       "function": "log_event",
       "rule": "fs-remove",
       "count": 1,
-      "gate": "operator-run lease table only; rotates events.jsonl to events.jsonl.1 past its size bound (one generation kept) under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; nothing calls it yet",
+      "gate": "operator-run lease table only; rotates events.jsonl to events.jsonl.1 past its size bound (one generation kept) under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; called only by resource_verify.py, which admits a verify when resource.mode is set (#1601)",
       "risk": "high"
     },
     {
@@ -1773,7 +1773,7 @@
       "function": "log_event",
       "rule": "fs-write",
       "count": 1,
-      "gate": "operator-run lease table only; appends one line to events.jsonl under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; nothing calls it yet",
+      "gate": "operator-run lease table only; appends one line to events.jsonl under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository, serialised by admit.lock (flock); removes only its own files, never a directory; called only by resource_verify.py, which admits a verify when resource.mode is set (#1601)",
       "risk": "medium"
     },
     {

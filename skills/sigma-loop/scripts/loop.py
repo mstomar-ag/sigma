@@ -5626,6 +5626,18 @@ _VERIFY_SET_HINT = state.verify_set_hint()
 _declared_verify_command = state.declared_verify_command
 
 
+def _resource_verify_on(config):
+    """#1601: verify goes through admission only when `resource.mode` is set and is not `off`."""
+    block = config.get("resource")
+    return isinstance(block, dict) and block.get("mode") in ("enforce", "observe")
+
+
+def _verify_timeout_seconds(config):
+    minutes = (config.get("verify") or {}).get("timeout_minutes")
+    ok = isinstance(minutes, int) and not isinstance(minutes, bool) and 1 <= minutes <= 1440
+    return (minutes if ok else 60) * 60
+
+
 def verify_goal(sdlc_dir, goal):
     """Run the goal's proving command and persist MACHINE evidence (sigma-verify's
     prose gate, made checkable). With an acceptance record, run the repository command then
@@ -5724,11 +5736,26 @@ def verify_goal(sdlc_dir, goal):
     content_before = state.content_fingerprint(root, _base_ref, pathlib.Path(sdlc_dir).name)
     start = time.perf_counter()
     outputs = []
-    for command in commands:
-        proc = subprocess.run(command, shell=True, capture_output=True, text=True, cwd=root)
-        outputs.append(proc.stdout + proc.stderr)
-        if proc.returncode != 0:
-            break
+    if _resource_verify_on(config):
+        # #1601: admitted, in its own process group, with a derived worker count; exit 5 RESOURCE-HOLD
+        # runs nothing and writes no evidence, so `record done` still refuses.
+        guarded = _load("resource_guard").run(
+            "verify", list(commands), root, _verify_timeout_seconds(config), goal,
+            config=config.get("resource"), repo=root)
+        if guarded.hold is not None:
+            print(f"RESOURCE-HOLD exit=5 -- {guarded.hold.reason}; retry_after={guarded.hold.retry_after:g}s "
+                  "(the proving command was not run; nothing was killed)", file=sys.stderr)
+            ledger.safe_append(sdlc_dir, "verify", goal, config=config, stream=ledger.EVENTS, exit=5)
+            actionlog.safe_append(sdlc_dir, goal, "verify_run", exit=5)
+            return 5
+        outputs.extend(guarded.outputs)
+        proc = subprocess.CompletedProcess(commands, guarded.returncode, "\n".join(guarded.outputs), "")
+    else:
+        for command in commands:
+            proc = subprocess.run(command, shell=True, capture_output=True, text=True, cwd=root)
+            outputs.append(proc.stdout + proc.stderr)
+            if proc.returncode != 0:
+                break
     # #267: an explicit per-node run proves planned tests actually executed, even when the
     # configured shell command only prints success. Missing scope remains advisory at verify;
     # work.pr fails closed unless the operator supplies the published exception reason.
