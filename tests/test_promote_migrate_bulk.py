@@ -96,6 +96,9 @@ def _assert_matrix(src, rep, spec, before):
         assert (GOAL in now) != (PARKED in now), (n, now)          # exactly one membership label
         assert (GOAL in now) == (want == "armed"), n
         keep = {l for l in before[n] if l not in (PROPOSED, GOAL, PARKED)}      # priority labels included
+        if want == "armed" and "sdlc:followup" in before[n]:    # #1484: an armed followup carries ONE bucket priority
+            keep = {l for l in keep if not l.startswith("priority:")}
+            assert len([l for l in now if l.startswith("priority:")]) == 1, n
         assert keep <= now, (n, keep - now)                         # unit and every other label kept
 
 

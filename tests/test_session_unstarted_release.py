@@ -148,6 +148,8 @@ def test_dead_session_past_grace_is_released_by_the_next_prune():
         _age(lp._session_marker_path(base, pid), 20)
         lp._prune_dead_session_entries(base, lp.state.load_config(base))
         assert len(_released_log(lp, base, "51")) == 1
+        assert "claimed but not started: session ended" in " ".join(_comments(calls))   # #1530
+        assert "session ended" in (_released_log(lp, base, "51")[0].get("reason") or "")
         assert _released_log(lp, base, "52") == []          # started: untouched
         assert not lp._session_marker_path(base, pid).exists()
 
@@ -207,3 +209,46 @@ def test_cli_next_batch_then_session_end_releases_the_unworked_picks():
         assert held, "next-batch registered nothing; scenario is vacuous"
         lp.main(["loop.py", "session-end", base, "--session-pid", pid, "--session-generation", "g9"])
         assert all(len(_released_log(lp, base, g)) == 1 for g in held)
+
+
+def test_failed_release_of_a_dead_session_keeps_the_entry_and_a_later_pick_retries():
+    """#1530: host unreachable -> entry kept; the next pass releases once, then removes it."""
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d); calls = []; real = _wire(lp, base, calls)
+        pid = _dead_pid(); _register(lp, base, pid, ["71", "72"])
+        _age(lp._session_marker_path(base, pid), 20)
+        class Down:
+            def release(self, *a, **k): raise RuntimeError("host unreachable")
+        lp.sources.get_source = lambda *a, **k: Down()
+        lp._prune_dead_session_entries(base, lp.state.load_config(base))
+        assert lp._session_marker_path(base, pid).exists()
+        assert _released_log(lp, base, "71") == [] and _comments(calls) == []
+        lp.sources.get_source = lambda *a, **k: real
+        lp._prune_dead_session_entries(base, lp.state.load_config(base))
+        assert not lp._session_marker_path(base, pid).exists()
+        assert len(_released_log(lp, base, "71")) == 1 and len(_released_log(lp, base, "72")) == 1
+        n = len(_comments(calls))
+        lp._prune_dead_session_entries(base, lp.state.load_config(base))
+        assert len(_comments(calls)) == n == 2               # no double comment
+
+
+def test_release_that_only_records_warnings_also_keeps_the_entry():
+    """#1530 review: the real source swallows gh failures into release_warnings() and returns True."""
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d); calls = []; real = _wire(lp, base, calls)
+        pid = _dead_pid(); _register(lp, base, pid, ["81"])
+        _age(lp._session_marker_path(base, pid), 20)
+
+        class Quiet:
+            def __getattr__(self, name): return getattr(real, name)
+            def release(self, *a, **k): return True
+            def release_warnings(self): return ["label removal failed: host unreachable"]
+        lp.sources.get_source = lambda *a, **k: Quiet()
+        lp._prune_dead_session_entries(base, lp.state.load_config(base))
+        assert lp._session_marker_path(base, pid).exists()
+        lp.sources.get_source = lambda *a, **k: real
+        _age(lp._session_marker_path(base, pid), 20)
+        lp._prune_dead_session_entries(base, lp.state.load_config(base))
+        assert not lp._session_marker_path(base, pid).exists()
