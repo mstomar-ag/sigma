@@ -5205,11 +5205,12 @@ class GitHubSource:
             edges = edges[:self._REPAIR_EDGE_CAP]
             ext, proposed = {}, {}
             known_closed = self._closed_refs_known()
+            confirmed = self._confirmed_refs_known()      # #1706: read lately and found at the right rank
             newly_closed = []
             # Newest ref first, and never a read for a ref already seen closed: the cap must not spend
             # every pass on the same ten old closed issues (string order did, so a newer blocker outside
             # the corpus was never reached).
-            outside = sorted(({b for b, _ in edges} - set(corpus)) - set(known_closed),
+            outside = sorted((({b for b, _ in edges} - set(corpus)) - set(known_closed)) - set(confirmed),
                              key=lambda r: (-int(r), r) if str(r).isdigit() else (0, r))
             for ref in outside[:self._BLOCKER_READ_CAP]:
                 try:
@@ -5242,6 +5243,8 @@ class GitHubSource:
             if cyc:
                 self._warn_blocking_cycle(set(cyc))
             out["violations"] = len(required)
+            if apply:       # #1706: an outside blocker read at or above its required rank is not read again soon
+                self._remember_confirmed_refs(confirmed, [r for r in ext if r not in required])
             self._warn_unwritable_blockers(cross_repo)
             out["unwritable"] = sorted(set(cross_repo))
             if preview:
@@ -5268,6 +5271,7 @@ class GitHubSource:
                     out["raised"].append(ref)
             finally:
                 self._no_field_writes = False
+            self._remember_confirmed_refs(self._confirmed_refs_known(), [r for r in out["raised"] if r in ext])
             for ref, data in sorted(proposed.items()):
                 if budget[0] <= 0:
                     break
@@ -5283,6 +5287,9 @@ class GitHubSource:
             out["skipped"] = out["skipped"] or "failed"
         return out
 
+    _CONFIRMED_CACHE = "blocker-confirmed.json"
+    _CONFIRMED_TTL = 600        # #1706 (PROVISIONAL): seconds a read-and-fine outside blocker is not read again
+    _CONFIRMED_MAX = 500
     _CLOSED_CACHE = "blocker-closed.json"
     _CLOSED_TTL = 7 * 86400
     _CLOSED_MAX = 2000
@@ -5300,6 +5307,35 @@ class GitHubSource:
                     if isinstance(t, (int, float)) and not isinstance(t, bool) and 0 <= now - t < self._CLOSED_TTL}
         except Exception:                       # noqa: BLE001
             return {}
+
+    def _confirmed_refs_known(self):
+        """#1706: {ref: epoch} of outside blockers a recent pass read and found at or above their required
+        rank (short expiry). Empty without a state folder or on any read problem: every ref is read as before."""
+        try:
+            data = json.loads((pathlib.Path(self.sdlc_dir) / "state" / self._CONFIRMED_CACHE).read_text(encoding="utf-8"))
+            now = time.time()
+            return {str(r): t for r, t in data.items()
+                    if isinstance(t, (int, float)) and not isinstance(t, bool) and 0 <= now - t < self._CONFIRMED_TTL}
+        except Exception:                       # noqa: BLE001
+            return {}
+
+    def _remember_confirmed_refs(self, known, new):
+        """Record refs just confirmed. Bounded (newest kept); a write failure costs one extra read later."""
+        if not self.sdlc_dir or not new:
+            return
+        try:
+            now = time.time()
+            merged = dict(known)
+            merged.update({str(r): now for r in new})
+            if len(merged) > self._CONFIRMED_MAX:
+                merged = dict(sorted(merged.items(), key=lambda kv: kv[1])[-self._CONFIRMED_MAX:])
+            path = pathlib.Path(self.sdlc_dir) / "state" / self._CONFIRMED_CACHE
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".%d.tmp" % __import__("os").getpid())
+            tmp.write_text(json.dumps(merged, sort_keys=True), encoding="utf-8")
+            __import__("os").replace(str(tmp), str(path))
+        except Exception:                       # noqa: BLE001
+            pass
 
     def _remember_closed_refs(self, known, new):
         """Record refs just seen closed. Bounded (newest kept); a write failure costs one extra read later."""
