@@ -1135,7 +1135,8 @@ def render_sweep(result):
 
 
 _USAGE = ("usage: reconcile.py census|sweep|propose <sdlc_dir> [--apply]\n"
-          "       reconcile.py apply <sdlc_dir> --plan <path> [--apply]")
+          "       reconcile.py apply <sdlc_dir> --plan <path> [--apply]\n"
+          "       reconcile.py blockers <sdlc_dir>   (read-only preview of the blocker priority repair)")
 
 
 def census_cmd(sdlc_dir, config, run=None):
@@ -1201,7 +1202,29 @@ def sweep_cmd(sdlc_dir, config, argv_tail, run=None):
     return 1 if any(a.get("result") == "failed" for a in result["actions"]) else 0
 
 
-def main(argv):
+def blockers_cmd(sdlc_dir, config, run=None):
+    """#1560: preview, read-only, every blocker the priority repair would raise. Writes nothing."""
+    if (config.get("discovery") or {}).get("source") != "github":
+        print("blockers: needs discovery.source github", file=sys.stderr)
+        return 2
+    src = sources.GitHubSource(config, run=run, sdlc_dir=sdlc_dir)
+    res = src.repair_blocker_ranks(preview=True)
+    print("blockers: blocker_promotion mode: %s (preview ignores it; nothing is written)" % src.blocker_promotion_mode)
+    if res.get("skipped"):
+        print("blockers: preview not available (%s)" % res["skipped"])
+        return 1
+    for p in res.get("plan", []):
+        print("  #%s  %s -> %s  (blocks #%s)" % (p["blocker"], p["current"], p["new"], p["cause"]))
+    if not res.get("plan"):
+        print("  no blocker ranks below what it blocks")
+    outside = len(res.get("unwritable", [])) + int(res.get("unread", 0))
+    print("blockers: %d to raise, cycles: %d%s, outside or unreadable blockers: %d"
+          % (len(res.get("plan", [])), len(res.get("cycles", [])),
+             (" (#%s)" % ", #".join(res["cycles"])) if res.get("cycles") else "", outside))
+    return 0
+
+
+def main(argv, run=None):
     if argv[1:] in (["-h"], ["--help"]):
         print(_USAGE)
         return 0
@@ -1217,6 +1240,9 @@ def main(argv):
     if len(argv) >= 3 and argv[1] == "apply":
         triage = _load("triage")
         return apply_cmd(argv[2], triage._config(argv[2]), argv[3:])
+    if len(argv) >= 3 and argv[1] == "blockers":
+        triage = _load("triage")
+        return blockers_cmd(argv[2], triage._config(argv[2]), run=run)
     print(_USAGE, file=sys.stderr)
     return 2
 

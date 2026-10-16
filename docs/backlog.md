@@ -470,6 +470,8 @@ there.
 
 Config: `discovery.blocker_promotion.mode` (`always` default | `off`) is the only key this feature reads.
 
+**Preview before enabling.** `python3 <installed-sigma>/skills/sigma-loop/scripts/reconcile.py blockers .sdlc` lists, read-only, every blocker the repair would raise (blocker, current priority, new priority, the goal it blocks), the blocking cycles, and the count of outside or unreadable blockers. It runs in any mode, `off` included, and writes nothing: run it before changing the mode to `always`.
+
 **A goal BLOCKED on another issue resumes by itself once that blocker is resolved (a closed issue or a merged pull request). A goal a human
 PARKED never does.** That split is why this sweep ships on. When work on a goal finds a genuine
 dependency, the loop gives it the `sdlc:blocked` overlay: it keeps `sdlc:goal`, and nothing picks it
