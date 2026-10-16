@@ -26,6 +26,7 @@ than a day are pruned by embedded time. The apply loop is serial and bounded by 
 No model call, no network except the two gestures through the injected source.
 """
 import contextlib
+import copy
 import datetime
 import importlib.util
 import json
@@ -980,10 +981,15 @@ DRY_RUN_OFF = ("applier dry-run: the applier is off (rulebook.autonomy.applier.e
 
 def _dry_run(sdlc_dir, config):
     """Print each action the next pass would take, with its rule, level and effective window; write nothing.
-    With the applier off it prints one line saying so (#1545)."""
+    With the applier off it prints one line saying so (#1545), then plans with that one gate treated as
+    open (#1695), so the dry run the upgrade steps prescribe can show a plan before the applier is enabled."""
     if not enabled(config):
         print(DRY_RUN_OFF)
-        return 0
+        config = copy.deepcopy(config)
+        try:
+            config.setdefault("rulebook", {}).setdefault("autonomy", {}).setdefault("applier", {})["enabled"] = True
+        except AttributeError:
+            return 0
     window = settings(config)["window_minutes"]
     acts = tick(sdlc_dir, config, datetime.datetime.now(datetime.timezone.utc), apply_actions=False, dry_run=True)
     for a in acts:

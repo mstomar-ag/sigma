@@ -25,6 +25,8 @@ FAKE = '''#!%(python)s
 import json, os, pathlib, sys, subprocess, time
 here = pathlib.Path(%(dir)r)
 mode = json.loads((here / "mode.json").read_text())
+if sys.argv[1:3] == ["auth", "status"]:
+    raise SystemExit(0)
 stdin = sys.stdin.read()
 (here / "marker.json").write_text(json.dumps({"argv": sys.argv[1:], "stdin": stdin, "cwd": os.getcwd()}))
 d = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "x"
