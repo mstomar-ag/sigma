@@ -129,6 +129,7 @@ skills/sigma-loop/scripts/feature_owner.py
 skills/sigma-loop/scripts/feature_propagate.py
 skills/sigma-loop/scripts/gate_hold.py
 skills/sigma-loop/scripts/handoff.py
+skills/sigma-loop/scripts/label_drain.py
 skills/sigma-loop/scripts/loop.py
 skills/sigma-loop/scripts/mirror.py
 skills/sigma-loop/scripts/park_mix.py
