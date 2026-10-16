@@ -137,3 +137,57 @@ def test_the_beat_is_touched_during_the_prune_1632(tmp_path):
     out = sweep(sdlc, root, prune_run=watching)
     assert out["sweep"]["prune"]["outcome"] == "pruned" and len(seen) >= 2, seen
     assert all(m > 1 for m in seen), seen
+
+
+def slow_git_on_path(tmp_path, monkeypatch):
+    """A stand-in `git` whose remote calls sleep 6 seconds and exit 1, first on PATH (the #1700 reproduction)."""
+    import os
+    fake = tmp_path / "fakebin"
+    fake.mkdir()
+    exe = fake / "git"
+    import shutil
+    real = shutil.which("git")                # only the remote calls stall; everything else reaches the real git
+    exe.write_text('#!/bin/sh\ncase "$1" in ls-remote|push|fetch) sleep 6; exit 1;; esac\nexec %s "$@"\n' % real)
+    exe.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake) + os.pathsep + os.environ["PATH"])
+
+
+def test_a_blocking_git_call_is_cut_at_the_deadline_1700(tmp_path, monkeypatch):
+    import time
+    root, sdlc = seeded(tmp_path)
+    slow_git_on_path(tmp_path, monkeypatch)
+    started = time.monotonic()
+    doc = T.job()._prune_pass(T.open_config(), sdlc, str(root), "now", deadline_s=1.0)
+    assert time.monotonic() - started < 3.5 and doc["outcome"] == "timeout", doc
+    assert prune_doc(sdlc)["outcome"] == "timeout"
+
+
+def test_the_sweep_stays_swept_when_the_prune_times_out_1700(tmp_path, monkeypatch):
+    import time
+    root, sdlc = seeded(tmp_path)
+    slow_git_on_path(tmp_path, monkeypatch)
+    started = time.monotonic()
+    out = T.job().run_sweep(T.open_config(), sdlc, str(root), "r1", 3, environ=T.ENV, command=cmd,
+                            list_units=lambda _s: [], now=2_000_000)
+    assert time.monotonic() - started < 5.5, time.monotonic() - started
+    assert out["outcome"] == "swept" and out["sweep"]["prune"]["outcome"] == "timeout", out
+
+
+def test_no_new_git_call_starts_once_the_deadline_is_spent_1700(tmp_path):
+    import time
+    root, sdlc = seeded(tmp_path)
+    B = T.job()._sibling("feature_backup")
+    calls = []
+
+    def slow(cwd, argv, *a, **k):
+        calls.append(1)
+        time.sleep(0.4)
+        return B.sync._run(cwd, argv, *a, **k)
+    doc = T.job()._prune_pass(T.open_config(), sdlc, str(root), "now", prune_run=slow, deadline_s=0.5)
+    assert doc["outcome"] == "timeout" and len(calls) <= 2, (doc, calls)
+
+
+def test_an_ample_deadline_prunes_as_before_1700(tmp_path):
+    root, sdlc = seeded(tmp_path)
+    doc = T.job()._prune_pass(T.open_config(), sdlc, str(root), "now", deadline_s=600)
+    assert doc["outcome"] == "pruned" and len(bare_refs(tmp_path)) == 5, doc
