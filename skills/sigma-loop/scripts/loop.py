@@ -2779,6 +2779,10 @@ def _release_unstarted(sdlc_dir, goals, why):
             try:
                 if not _goal_started(sdlc_dir, goal):
                     _release(sdlc_dir, source, goal, reason=why)
+                    warnings = source.release_warnings() if hasattr(source, "release_warnings") else []
+                    if warnings:                         # the source swallows gh failures into warnings
+                        ok = False
+                        print(f"loop: unstarted release of {goal} incomplete ({warnings[0]})", file=sys.stderr)
             except Exception as exc:                     # noqa: BLE001
                 ok = False
                 print(f"loop: unstarted release of {goal} skipped ({exc})", file=sys.stderr)

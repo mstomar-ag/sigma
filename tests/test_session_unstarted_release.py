@@ -231,3 +231,24 @@ def test_failed_release_of_a_dead_session_keeps_the_entry_and_a_later_pick_retri
         n = len(_comments(calls))
         lp._prune_dead_session_entries(base, lp.state.load_config(base))
         assert len(_comments(calls)) == n == 2               # no double comment
+
+
+def test_release_that_only_records_warnings_also_keeps_the_entry():
+    """#1530 review: the real source swallows gh failures into release_warnings() and returns True."""
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d); calls = []; real = _wire(lp, base, calls)
+        pid = _dead_pid(); _register(lp, base, pid, ["81"])
+        _age(lp._session_marker_path(base, pid), 20)
+
+        class Quiet:
+            def __getattr__(self, name): return getattr(real, name)
+            def release(self, *a, **k): return True
+            def release_warnings(self): return ["label removal failed: host unreachable"]
+        lp.sources.get_source = lambda *a, **k: Quiet()
+        lp._prune_dead_session_entries(base, lp.state.load_config(base))
+        assert lp._session_marker_path(base, pid).exists()
+        lp.sources.get_source = lambda *a, **k: real
+        _age(lp._session_marker_path(base, pid), 20)
+        lp._prune_dead_session_entries(base, lp.state.load_config(base))
+        assert not lp._session_marker_path(base, pid).exists()
