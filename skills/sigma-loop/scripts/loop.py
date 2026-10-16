@@ -1502,6 +1502,119 @@ def _feature_drained_note(source, skip):
               "backlog is drained, not merely out of scope" % wanted, file=sys.stderr)
 
 
+#: #1579: the most outside prerequisites one `--label` run pulls into its label, and what it has already
+#: looked at, keyed (sdlc_dir, label) -> {ref: pull result}. One process is one run for `run_loop`; a
+#: CLI `next` is a fresh process, where a ref pulled earlier carries the label and reads as `already`.
+_LABEL_PULL_CAP = 50
+_LABEL_PULLED = {}
+_LABEL_CAP_SAID = set()
+
+
+def _label_drain():
+    return _load("label_drain")
+
+
+def _label_pull_holds(sdlc_dir, source, config, goal, hold):
+    """#1579: under a `--label` scope only, pull each open prerequisite named in `hold` that is outside
+    the label, once per ref per run, at most `_LABEL_PULL_CAP` per run. Zero calls when nothing is held
+    or no label scope is in force. Fail-open: a pull that breaks leaves the goal held, as before."""
+    label = getattr(source, "label_scope", None)
+    if not label or not hold:
+        return
+    key = (str(sdlc_dir), label)
+    memo = _LABEL_PULLED.setdefault(key, {})
+    for prefix, num in re.findall(r"([\w.\-/]*)#(\d+)", hold):
+        ref = "%s#%s" % (prefix, num) if prefix else num
+        if ref in memo:
+            continue
+        if len(memo) >= _LABEL_PULL_CAP:
+            if key not in _LABEL_CAP_SAID:
+                _LABEL_CAP_SAID.add(key)
+                print("loop.py: label %r: pull cap of %d outside prerequisites reached; #%s and any "
+                      "further ones stay held and are not pulled" % (label, _LABEL_PULL_CAP, num),
+                      file=sys.stderr)
+            break
+        try:
+            res = _label_drain().pull(sdlc_dir, label, ref, goal, config=config,
+                                      run=getattr(source, "_run", None))
+        except Exception as exc:                # noqa: BLE001 - a pull never costs a pick
+            res = {"ref": ref, "result": "unreadable", "reason": str(exc)}
+        memo[ref] = res
+        if res["result"] in ("pulled", "already"):
+            print("loop.py: #%s holds #%s; %s into label %r" % (
+                goal, num, "pulled it" if res["result"] == "pulled" else "it is already", label),
+                file=sys.stderr)
+        elif res["result"] != "closed":
+            print("loop.py: #%s holds #%s, which stays out of label %r (%s); #%s stays held" % (
+                goal, ref, label, res.get("reason") or res["result"], goal), file=sys.stderr)
+
+
+def _label_start_refusal(sdlc_dir, source, config):
+    """#1579: the one line to print when a `--label` run must not start yet, else None. Runs the
+    read-only `plan` once, before the run's first claim, and refuses on unarmed members or open
+    questions. Fail-open on a plan that cannot run: the picker's own posture."""
+    label = getattr(source, "label_scope", None)
+    if not label or state.load_cursor(sdlc_dir).get("run_iteration"):
+        return None
+    try:
+        p = _label_drain().plan(sdlc_dir, label, config=config, run=getattr(source, "_run", None))
+    except Exception as exc:                    # noqa: BLE001
+        print("loop.py: label %r start check did not run (%s); continuing" % (label, exc),
+              file=sys.stderr)
+        return None
+    unarmed = sum(1 for r in p["members"] if r["verdict"] == "unarmed")
+    asks = sum(1 for r in p["members"] if r["verdict"] == "parked")
+    if not unarmed and not asks:
+        return None
+    verb = ("run `label_drain.py arm %s %s --apply`" % (sdlc_dir, label) if unarmed
+            else "run `label_drain.py plan %s %s` and answer the open questions with /sigma-unpark"
+                 % (sdlc_dir, label))
+    return ("label %s is not ready: %d unarmed member(s), %d open question(s); nothing was claimed or "
+            "written. First %s, then start again" % (label, unarmed, asks, verb))
+
+
+def _label_drained_note(sdlc_dir, source, config, skip):
+    """#1579: counterpart of `_feature_drained_note` for a `--label` run -> the run-stop class,
+    `label-held` when open members remain that were not picked, else `backlog-empty`. Prints the
+    per-member reason list, the outside prerequisites left out, and what was filed during the drain
+    without the label. Costs one plan plus one list, on the terminal path only; fail-open."""
+    label = getattr(source, "label_scope", None)
+    if not label:
+        return "backlog-empty"
+    try:
+        p = _label_drain().plan(sdlc_dir, label, config=config, run=getattr(source, "_run", None))
+    except Exception as exc:                    # noqa: BLE001
+        print("loop.py: label %r has nothing pickable (the check for open members did not run: %s)"
+              % (label, exc), file=sys.stderr)
+        return "backlog-empty"
+    if not p["members"]:
+        print("loop.py: label %r is drained: no open members. The label can be deleted by a person"
+              % label, file=sys.stderr)
+        return "backlog-empty"
+    print("loop.py: label %r has %d open member(s) that were not picked:" % (label, len(p["members"])),
+          file=sys.stderr)
+    for r in p["members"]:
+        print("  #%d %s" % (r["number"], r["reason"] or "not picked this run (skipped or claimed elsewhere)"),
+              file=sys.stderr)
+    for ref, res in sorted(_LABEL_PULLED.get((str(sdlc_dir), label), {}).items()):
+        if res["result"] == "refused":
+            print("  prerequisite #%s left out of the label: %s" % (ref.lstrip("#"), res["reason"]),
+                  file=sys.stderr)
+    try:
+        since = state.load_cursor(sdlc_dir).get("run_started_at") or 0
+        filed = []
+        for i in sources.fetch_issues_rest(getattr(source, "_run"), source.repo, [source.goal_label], 200):
+            made = calendar.timegm(time.strptime(i.get("created_at") or "", "%Y-%m-%dT%H:%M:%SZ"))
+            if made >= since and label not in {(l.get("name") if isinstance(l, dict) else l)
+                                               for l in i.get("labels") or []}:
+                filed.append("#%s" % i["number"])
+        if filed:
+            print("  filed during the drain, not in the label: %s" % ", ".join(filed), file=sys.stderr)
+    except Exception:                           # noqa: BLE001 - a diagnostic never breaks a stop
+        pass
+    return "label-held"
+
+
 #: `.sdlc` dirs whose board mirror THIS PROCESS has already force-refreshed because a goal it was
 #: about to claim was missing from it. One process, one forced refresh: a goal that is absent for a
 #: reason a refetch cannot fix (past `mirror._OPEN_LIMIT`, or simply not carrying the goal label any
@@ -2142,6 +2255,9 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
     # refreshed immediately before its one prologue sweep, so its slot calls opt out explicitly.
     if refresh_heartbeat:
         write_session_heartbeat(sdlc_dir, session_pid)
+    refusal = _label_start_refusal(sdlc_dir, source, config)       # #1579: --label only, claims nothing
+    if refusal:
+        return ("DONE", refusal)
     _reconcile_sweep(sdlc_dir, config)
     just_unparked = _auto_unpark_sweep(sdlc_dir, config)
     just_reclaimed = _auto_reclaim_stale_claims(sdlc_dir, source, config)
@@ -2197,9 +2313,11 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
             # `_emit_run_stop_once` only because `pending_outside_feature` puts the degraded-read
             # flag back where it found it; see its docstring.
             _feature_drained_note(source, skip)
+            stop_class = ("backlog-empty" if degraded or not getattr(source, "label_scope", None)
+                          else _label_drained_note(sdlc_dir, source, config, skip))   # #1579
             # #905: the real production chokepoint for the budget-exhaustion run_stop -- both the CLI `next`
             # verb and `run_loop` pass through here, so wiring it once covers both drivers.
-            _emit_run_stop_once(sdlc_dir, config, source, "backlog-empty", session_pid=session_pid)
+            _emit_run_stop_once(sdlc_dir, config, source, stop_class, session_pid=session_pid)
             return ("DONE", "degraded read — backlog state unknown" if degraded else None)
         # #1499: FIRST, ahead of the lease read and the claim lock below, because the whole defect
         # was ordering -- a goal with an unsatisfied prerequisite used to be claimed and only then
@@ -2212,6 +2330,7 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
                   "sdlc:goal, no claim); taking the next candidate" % (goal, hold), file=sys.stderr)
             held.append((goal, hold))
             skip.add(goal)
+            _label_pull_holds(sdlc_dir, source, config, goal, hold)   # #1579: --label only
             continue
         holder_actor, holder_writer = lease.get(str(goal), (None, None))
         # #1197 (corrected post-#1237-review): `live_worker_check` is lazy — `claim_belongs_to_me`

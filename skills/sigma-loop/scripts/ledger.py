@@ -495,7 +495,10 @@ REASON_CLASSES = ("irreversible", "needs_decision", "merge_conflict", "failing_c
                    # _handoff_reason and a downstream reader's budget metric for why this is
                    # deliberately EXCLUDED from budget-exhaustion counting despite sharing the
                    # vocabulary.
-                   "handoff")
+                   "handoff",
+                   # #1579: a run_stop reason -- a `--label` drain that stopped with open members
+                   # it cannot pick; never a park reason_class and never `backlog-empty`.
+                   "label-held")
 
 #: #140: spec §A.3's `retro.grade` vocabulary, mirrored from `sigma-retro/SKILL.md` §3's
 #: achieved/partial/diverged bullets — it had no Python home before this. Like
