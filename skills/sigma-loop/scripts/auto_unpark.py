@@ -280,6 +280,24 @@ def _waits_on_dependency(raw_comments):
     return any(legacy.has_marker(str(t), WAITING_MARKER) for t in (raw_comments or [])[last_park + 1:])
 
 
+def _reparked_by_label_after_note(source, number):
+    """#1630 (PROVISIONAL signal, owner to ratify): True when the newest `parked_label` label event on
+    the issue is later than its newest waiting note, i.e. a person re-parked by label only (no Sigma
+    park comment) after the note, which then no longer counts. Anything unreadable -> False, so the
+    behaviour is exactly the #1549 one when no label event can be read."""
+    try:
+        event_at = sources.gh_api.newest_label_event(source._run, number, source.parked_label,
+                                                     source.repo or None)
+        if not event_at:
+            return False
+        comments = source._read_issue(number, ["comments"]).get("comments") or []
+        notes = [str(c.get("createdAt") or "") for c in comments
+                 if legacy.has_marker(str(c.get("body") or ""), WAITING_MARKER)]
+        return bool(notes) and event_at > max(notes)
+    except Exception:
+        return False
+
+
 def _is_exempt(raw_comments):
     """True when ANY of `raw_comments` (the RAW, unfiltered, uncapped per-comment text -- see
     `backlog_check._fetch_scrubbed_comments`) carries `KEEP_PARKED_MARKER`. Deliberately the raw
@@ -368,6 +386,8 @@ def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cach
         # blocker, and that blocker genuinely blocks something. Only RESUMING narrows.
         if source.parked_label in names and not _waits_on_dependency(raw_comments):
             continue                                    # #1549: only a "wait for it" decision may resume a park
+        if source.parked_label in names and _reparked_by_label_after_note(source, n):
+            continue                                    # #1630: a label-only re-park outranks the older note
         # #1392: ONE atomic `swap-label` action, replacing the add/remove PAIR this used to emit.
         # The stakes are highest exactly here: this is the automatic sweep, running unattended, and
         # a half-applied unpark left `sdlc:goal` added with `sdlc:parked` never removed -- which
