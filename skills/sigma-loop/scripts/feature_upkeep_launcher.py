@@ -181,7 +181,6 @@ def resolve_model(config, override):
 #: Directories under the account home that hold credentials; the macOS wall denies reads of them.
 CREDENTIAL_DIRS = (".ssh", ".config/gh", ".git-credentials", ".gitconfig", ".netrc", "Library/Keychains", ".aws")
 SESSION_TOOLS = "Read,Edit,Write,Glob,Grep"
-SESSION_ARGV = ("--permission-mode", "acceptEdits", "--allowedTools", SESSION_TOOLS + ",Bash")
 
 
 def session_argv(walled):

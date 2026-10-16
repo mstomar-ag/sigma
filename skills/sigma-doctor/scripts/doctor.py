@@ -1643,7 +1643,7 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None, auth_runner=None):
             rows.append(_resolver_auth_row(launcher, binary, settings.get("conflicts.agent.credential_var"), auth_runner))
         unverified = list(getattr(launcher, "UNVERIFIED_FLAGS", ()))
         # The flags the launcher itself puts on the command line; the resolver passes no extra flag (#1694).
-        requested = set(getattr(launcher, "BASE_ARGV", ())) | set(getattr(launcher, "SESSION_ARGV", ())) | {"--model", "--max-budget-usd"}
+        requested = set(getattr(launcher, "BASE_ARGV", ())) | set(launcher.session_argv(True)) | {"--model", "--max-budget-usd"}
         blocking = [f for f in unverified if f in requested]
         if blocking:
             flags_name = "resolver flags: %d requested design flag%s still UNVERIFIED (refused by name)" % (len(blocking), "" if len(blocking) == 1 else "s")

@@ -77,7 +77,7 @@ The model may edit, build and run tests there (`acceptEdits` with Read, Edit, Wr
 before/after discard of the plain export does not apply; the copy is thrown away. Confinement (#1693, PROVISIONAL: the live run is owner-gated). Where a wall helper exists
 (macOS `sandbox-exec`), the launch argv starts with it: reads of the account's credential directories are denied,
 writes outside the session and scratch directories are denied, and outbound network is limited to port 443. It cannot
-filter by host name, so any host on port 443 stays reachable; it is not a proof against a determined session. Where no
+filter by host name, so any host on port 443 stays reachable; it is not a proof against a determined session. What the wall does not cover: the profile allows everything by default and denies only the listed items, so the keychain and mach services stay reachable (only reads of the credential directories are denied, not a lookup through a system service); reads outside the listed credential directories stay open; and writes to the temp areas (`/private/tmp` and `/private/var/folders`, besides the device files) stay open. Where no
 wall exists (Linux, or the helper missing) the session runs WITHOUT the Bash tool, with Read, Edit, Write, Glob and Grep
 only, so it cannot run commands, read credentials or open connections. The doctor row `resolver session confinement`
 says which applies. Besides this, the copy is credential-free: no token, no agent socket, no credential helper, a
