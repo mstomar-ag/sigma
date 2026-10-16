@@ -48,3 +48,9 @@ def test_doctor_row_names_the_mode_in_both_cases(tmp_path):
         found = D.rows(d, D.project(tmp_path / str(len(kwargs)), cfg), cfg, which=which)
         row = next(c for c in found if c["name"].startswith("resolver configured"))
         assert row["ok"] is True and all(w in row["name"] for w in words), row["name"]
+
+
+def test_a_daily_ceiling_without_a_per_unit_budget_behaves_as_off(wired):
+    which = lambda name: "/bin/" + name  # noqa: E731
+    reason = wired.level2_off_reason(agent_cfg(budget=None, ceiling=5), which)
+    assert reason and "max_budget_usd_per_unit" in reason

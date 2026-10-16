@@ -499,6 +499,8 @@ def launch(request, environ=None, clock=time.time):
     if not why and ((req.cap_usd is not None and req.cap_usd <= 0) or (req.ceiling_machine_usd is not None and req.ceiling_machine_usd <= 0)
                     or (req.ceiling_team_usd is not None and req.ceiling_team_usd <= 0)):
         why = "a cap or ceiling that is set must be a positive amount"
+    if not why and req.cap_usd is None and (req.ceiling_machine_usd is not None or req.ceiling_team_usd is not None):
+        why = "a daily ceiling needs a per-run cap: without one an unmetered run would charge nothing against it"
     if why:
         return Result(REFUSED, 0.0, (), why)
 

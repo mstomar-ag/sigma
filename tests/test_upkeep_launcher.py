@@ -383,3 +383,9 @@ def test_a_killed_run_with_no_cap_is_charged_zero_when_unmetered(rig):
 def test_a_cap_or_ceiling_that_is_set_must_be_positive(rig):
     assert rig.launcher.launch(rig.request(cap_usd=0)).outcome == "refused"
     assert rig.launcher.launch(rig.request(ceiling_team_usd=-1.0)).outcome == "refused"
+
+
+def test_a_ceiling_without_a_per_run_cap_is_refused_before_the_spawn(rig):
+    for kw in ({"ceiling_machine_usd": 10.0, "ceiling_team_usd": None}, {"ceiling_machine_usd": None, "ceiling_team_usd": 10.0}):
+        result = rig.launcher.launch(rig.request(cap_usd=None, **kw))
+        assert result.outcome == "refused" and "per-run cap" in result.reason, result

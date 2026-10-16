@@ -171,7 +171,7 @@ def test_a_reached_spend_ceiling_parks_the_unit_with_the_text_and_calls_no_model
 # --------------------------------------------------------------------------- acceptance 5
 
 
-@pytest.mark.parametrize("agent", [{"max_budget_usd_per_unit": None}, {"spend_ceiling_usd_per_day": None},
+@pytest.mark.parametrize("agent", [{"spend_ceiling_usd_per_day": None},
                                    {"max_budget_usd_per_unit": None, "spend_ceiling_usd_per_day": None}])
 def test_an_unset_cap_no_longer_makes_the_level_behave_as_off(rig, tmp_path, wired, agent):
     """#1554: the caps are optional; null means no limit (the old refusal of an unset cap is gone)."""

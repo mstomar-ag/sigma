@@ -1669,6 +1669,8 @@ def level2_off_reason(config, which=None):
         if not reading.enabled or reading.settings["conflicts.resolve"] != "agent":
             return "conflicts.resolve is not agent"
         s = reading.settings
+        if s["conflicts.agent.max_budget_usd_per_unit"] is None and s["conflicts.agent.spend_ceiling_usd_per_day"] is not None:
+            return "conflicts.agent.spend_ceiling_usd_per_day is set without conflicts.agent.max_budget_usd_per_unit"
         catalog = _launcher().CATALOG
         for key in ("conflicts.agent.model", "conflicts.agent.reviewer.model"):
             if not catalog.get(s[key]):
