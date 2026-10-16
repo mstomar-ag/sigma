@@ -436,7 +436,7 @@ python3 skills/sigma-loop/scripts/decision_import.py remove .sdlc --project-dir 
 - **Bounds.** `max_file_bytes` (500 MB, streaming), `time_budget_s` (60, a total per scan; a file cut short is reported
   as partial), `max_candidates` (500). A dash-leading folder name takes two words: `--project-dir -srv-demo-work-repo`.
 - **Classifier.** `rulebook.import.classifier` is `"table"` (default: a fixed keyword table in code) or `"model"`. With
-  `"model"` and the records gate open, `apply` sends the clipped question and option labels to the named small model
+  `"model"` and the records gate open, `apply` sends the question and option labels, scrubbed for secret shapes and then clipped (#1698), to the named small model
   (`model`, default `haiku`) and nothing from the project: each call runs in a fresh empty temporary directory (refused if an
   instruction file sits above it), without `CLAUDE_PROJECT_DIR`, and with project settings, hooks, skills and MCP config
   skipped when the installed CLI lists those flags. User-level instructions still load. It accepts only a listed kind and area (else `unknown`), caches by fingerprint so a second run
