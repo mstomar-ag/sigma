@@ -342,6 +342,8 @@ A `keep-parked` on a dependency park (route answer "wait for it") no longer post
 
 Instead it posts a waiting note (a person's "wait for it" answer, and a rule applied by the tick, always). The automatic sweep then resumes that dependency park when its last named blocker closes (#1549): gesture unpark, recorded as an autonomous sweep decision. A newer park comment cancels the note, and a person's keep-parked opt-out marker still wins.
 
+PROVISIONAL (owner to ratify): a park applied by label only, with no Sigma park comment, also outranks an older waiting note. When the newest `sdlc:parked` label event on the issue is later than the newest waiting note, the sweep does not resume it. If no label event can be read, the #1549 behaviour is unchanged (#1630).
+
 PROVISIONAL (owner to ratify): a `keep-parked` on a quota park (route answer "wait it out") likewise posts no opt-out marker, so the sweep may resume the goal after the quota window. Every other route still posts it.
 
 A quota ask matched to the "wait it out" rule is held until the reset time the ask records (`reset_at`). A quota park whose reason names a reset (`Retry-After: N` seconds, `resets in N minutes|hours`, `resets at` an ISO time or epoch, `x-ratelimit-reset`) records it on the park (a `sigma-reset-at:` line) and on the ask; a time not in the future or over 7 days away is ignored. When no reset is named there is one behaviour: the ask waits the ordinary window (`window_minutes`) and no longer, with no separate fixed wait. Other kinds are not affected.

@@ -974,6 +974,23 @@ def label_exists(run, name, repo=None):
     return True
 
 
+def newest_label_event(run, number, label, repo=None):
+    """#1630: the `created_at` of the newest `labeled` event for `label` on issue `number` (one REST GET
+    of the first 100 issue events, a read: no fallback, no log), else None. None also when the page is
+    full (the newest event may be on a later page), the payload is not a list, or the read fails --
+    callers treat None as "no readable signal" and keep their current behaviour."""
+    try:
+        events = _json(run, ["api", _endpoint(repo, "issues/%d/events?per_page=100" % int(number)),
+                             "--method", "GET"])
+    except GhApiError:
+        return None
+    if not isinstance(events, list) or len(events) >= 100:
+        return None
+    times = [str(e.get("created_at") or "") for e in events if isinstance(e, dict)
+             and e.get("event") == "labeled" and (e.get("label") or {}).get("name") == label]
+    return max(times) if any(times) else None
+
+
 def remove_label(run, number, label, repo=None, *, fallback_run=None, env=None, sdlc_dir=None, now=None):
     """DELETE one label. A 404 is a no-op, matched on the STRUCTURED status (gh's stderr), never on
     `"404" in str(exc)` (argv/body would match). KNOWN BLIND SPOT, documented rather than fixed: exact
