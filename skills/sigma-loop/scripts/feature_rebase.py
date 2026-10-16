@@ -1699,7 +1699,7 @@ def _default_level2_plan(config, sdlc_dir=None, cwd=None):
     ceiling = None if raw_ceiling is None else float(raw_ceiling)
     review_cap = None if budget is None else budget * 0.5
     common = dict(state_dir=os.path.join(str(sdlc_dir), *LEVEL2_SPEND_REL.split("/")), repo_root=str(cwd) if cwd else None,
-                  binary=shutil.which("claude"), flags=(), credential_var=None, scratch_parent=os.path.join(root, "scratch"), rates=None,
+                  binary=shutil.which("claude"), flags=(), credential_var=s["conflicts.agent.credential_var"], scratch_parent=os.path.join(root, "scratch"), rates=None,
                   ceiling_machine_usd=ceiling, ceiling_team_usd=ceiling, budget_seconds=5.0, home=os.path.expanduser("~"),
                   timeout=int(s["conflicts.agent.timeout_minutes"]) * 60, cap_usd=budget, sdlc_dir=str(sdlc_dir))
     # the reviewer gets half the per-unit budget when one is set: its cap must be smaller than the resolver's

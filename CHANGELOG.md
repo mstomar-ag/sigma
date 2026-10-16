@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **The resolver and reviewer can now authenticate (#1691).** New key `upkeep.conflicts.agent.credential_var` (default null) names one environment variable holding the model login; it is the only credential forwarded (never `GH_TOKEN`, `GITHUB_TOKEN`, `SSH_AUTH_SOCK` or `GIT_*`). A launch runs a bounded `claude auth status` in the scrubbed environment first and parks with "resolver cli is not logged in in the scrubbed environment" when logged out; the doctor gains a `resolver auth` row. Not run against a real CLI: the live run is owner-gated (Awaiting).
 - **The applier no longer applies silently when the ask's gesture does not match the rule option's gesture (#1362).** At level 4 such an apply now comments (and is not counted by the spot check); matching applies and a closed gate are unchanged.
 - The newest-parked-label-event read now follows event pages (at most 10 pages of 100) instead of giving up on a full first page, so a label-only re-park on an issue with 100 or more events is no longer resumed by the sweep; a timeline longer than the cap still reads as no signal (#1639).
 - **The applier tick prints only actions taken on issues (#1564).** It reports `applier: N applied` and `applier: N vetoed` on separate lines, each only when N is above zero; ask bookkeeping (opened, armed) no longer counts as applied and prints only with the new `--verbose` flag (the `sync` verb still prints its opened count).

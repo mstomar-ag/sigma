@@ -62,6 +62,7 @@ MAX_NEAR_EDITS = 2
 
 MODELS = ("haiku", "sonnet", "opus", "fable")
 MAX_USD = 100000.0
+REFUSED_CREDENTIAL_VARS = ("GH_TOKEN", "GITHUB_TOKEN", "SSH_AUTH_SOCK")
 SCHEMA = {   # dotted key -> spec; the lo/hi are guard rails against typos, not tuning advice
     "enabled": {"kind": "bool"},
     "window_hours": {"kind": "int", "lo": 1, "hi": 8760},
@@ -91,6 +92,7 @@ SCHEMA = {   # dotted key -> spec; the lo/hi are guard rails against typos, not 
     "conflicts.agent.max_units_per_sweep": {"kind": "int", "lo": 1, "hi": 100},
     "conflicts.agent.reviewer.enabled": {"kind": "bool"},
     "conflicts.agent.reviewer.model": {"kind": "enum", "values": MODELS},
+    "conflicts.agent.credential_var": {"kind": "env_name_null"},
     "backup.former_prefixes": {"kind": "name_list", "min_items": 0},
 }
 DEFAULTS = {   # the one place the defaults live; the shipped template must equal this
@@ -103,7 +105,7 @@ DEFAULTS = {   # the one place the defaults live; the shipped template must equa
     "conflicts.agent.model": "sonnet", "conflicts.agent.max_budget_usd_per_unit": None,
     "conflicts.agent.spend_ceiling_usd_per_day": None, "conflicts.agent.timeout_minutes": 30,
     "conflicts.agent.max_units_per_sweep": 5, "conflicts.agent.reviewer.enabled": True,
-    "conflicts.agent.reviewer.model": "sonnet",
+    "conflicts.agent.reviewer.model": "sonnet", "conflicts.agent.credential_var": None,
     "backup.former_prefixes": [],
 }
 CROSS_CHECKS = (   # run only after every per-key check, and only when the keys involved passed theirs
@@ -160,6 +162,10 @@ def _is_int(value, lo, hi):
     return type(value) is int and lo <= value <= hi
 
 
+def _env_name(text):
+    return 0 < len(text) <= 64 and text.isascii() and not text[0].isdigit() and all(c.isalnum() or c == "_" for c in text)
+
+
 def check(key, value):
     """None when `value` is acceptable for the dotted `key`, else a short reason. Never raises; never echoes the value."""
     spec = SCHEMA.get(key) if isinstance(key, str) else None
@@ -183,6 +189,11 @@ def check(key, value):
         if value is None or (type(value) in (int, float) and 0 < value <= MAX_USD):
             return None
         return "expected a positive number of dollars up to %d, or null, got %s" % (MAX_USD, _tname(value))
+    if kind == "env_name_null":      # #1691: a variable NAME, never a value; git, gh and ssh credentials are refused by name
+        if value is None or (type(value) is str and _env_name(value) and value not in REFUSED_CREDENTIAL_VARS
+                             and not value.startswith("GIT_")):
+            return None
+        return "expected an environment variable name (not a git, gh or ssh credential), or null, got %s" % _tname(value)
     extra = ""
     if kind == "auto_int_null":
         if value is None or (type(value) is str and value == "auto"):

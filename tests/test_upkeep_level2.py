@@ -33,6 +33,8 @@ FAKE = '''#!%(python)s
 import json, os, pathlib, sys
 here = pathlib.Path(%(dir)r)
 mode = json.loads((here / "mode.json").read_text())
+if sys.argv[1:3] == ["auth", "status"]:
+    raise SystemExit(0)
 stdin = sys.stdin.read()
 reviewer = "independent reviewer" in stdin
 calls = json.loads((here / "calls.json").read_text()) if (here / "calls.json").exists() else []
