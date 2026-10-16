@@ -70,6 +70,11 @@ def _sibling(name):
     return _LOADED[name]
 
 
+def _guard():
+    """resource_guard (#1603): the one place a model session asks for admission."""
+    return _sibling("resource_guard")
+
+
 CLOSED, REFUSED, OK, DISCARDED, KILLED, FAILED = "closed", "refused", "ok", "discarded", "killed", "failed"
 OUTCOMES = (CLOSED, REFUSED, OK, DISCARDED, KILLED, FAILED)
 Result = collections.namedtuple("Result", "outcome charged_usd changed reason", defaults=(0.0, (), ""))
@@ -570,6 +575,14 @@ def launch(request, environ=None, clock=time.time):
     if why:
         return Result(REFUSED, 0.0, (), why)
 
+    with _guard().session_lease("resolver", "launcher", repo=req.repo_root, ttl=(req.timeout or 600) * 2 + 60,
+                                config=(req.config or {}).get("resource")) as lease:        # #1603
+        if lease is not None and hasattr(lease, "reason"):
+            return Result(REFUSED, 0.0, (), "deferred: a model session is held (%s)" % lease.reason)
+        return _reserve_and_run(req, model, binary, environ, clock)
+
+
+def _reserve_and_run(req, model, binary, environ, clock):
     now = clock()
     run_id = secrets.token_hex(6)
     # an unset cap reserves nothing and an unset ceiling is not checked; the run is still recorded for what it metered
