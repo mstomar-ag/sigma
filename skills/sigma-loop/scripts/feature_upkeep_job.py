@@ -151,9 +151,7 @@ def run_job(config, sdlc_dir, root, unit, run_id, cap, *, environ=None, command=
         finally:
             _record(sdlc_dir, dict(head, state="done", outcome=outcome, unit_tip=tip, finished_at=int(time.time()),
                                    **({"reason": reason} if reason else {})))
-            if outcome in state.OUTCOMES:
-                state.record_outcome(sdlc_dir, unit, int(time.time()), outcome, tip if tip and len(tip) in (40, 64) else None)
-            elif outcome == "timeout":
+            if outcome == "timeout":              # the engine records its own outcomes (#1492); a killed child never reached it
                 state.record_outcome(sdlc_dir, unit, int(time.time()), "failed")
     return {"outcome": outcome, "unit_tip": tip}
 
@@ -219,9 +217,7 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
                 result = bounded.run_group(argv, root, remaining, env=env, stop_path=EitherStop(*stops), merge=False, clock=clk)
                 word, tip = _outcome_of(result, bounded)
                 counts[word] = counts.get(word, 0) + 1
-                if word in state.OUTCOMES:
-                    state.record_outcome(sdlc_dir, name, int(time.time()), word, tip if tip and len(tip) in (40, 64) else None)
-                elif word == "timeout":
+                if word == "timeout":             # the engine records its own outcomes (#1492); a killed child never reached it
                     state.record_outcome(sdlc_dir, name, int(time.time()), "failed")
                 if word in ("timeout", "stopped"):                 # the cap or a stop file cut this child short: it and everything after it are left for the next trigger
                     unreached = names[index:]

@@ -54,6 +54,10 @@ The scheduler no longer polls each unit. It works on a window, `upkeep.window_ho
   - a merge made through `work.py merge` on the machine that merged, which asks the same question once.
 - **What a closed window costs.** One small file read (`.sdlc/state/upkeep/window.json`) and some arithmetic.
   No git call, no GitHub call, no unit listing.
+- **The per-unit record.** `.sdlc/state/upkeep/units/<unit>.json` holds the last attempt and last success times, the unit
+  and base tips after the last success, the last outcome, why the pass started, and the consecutive-failure count. The
+  engine writes it at its single exit, under the unit's lock, on every pass (pick, CLI verb, job, sweep); a closed gate
+  writes nothing. Delete the file and the unit reads as never attempted.
 - **What the sweep does.** It takes the job lock, lists the units admitted by `upkeep.units.include` and
   `upkeep.units.exclude` (an exclude always wins), and then runs the per-unit engine for each unit, one at a
   time. A unit already at its base costs one bounded read and nothing else, which is how a user whose window
