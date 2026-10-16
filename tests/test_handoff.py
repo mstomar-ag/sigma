@@ -2709,3 +2709,48 @@ def test_upkeep_finding_body_carries_the_marker_once_and_other_filings_do_not(tm
     assert on.created["body"].count("<!-- sigma:upkeep-finding -->") == 1
     _r, off = _file(tmp_path)
     assert "sigma:upkeep-finding" not in off.created["body"]
+
+
+# --- #1484: an upkeep finding and a triage park never keep the human default priority ---------------
+
+def _prio(src):
+    return [l for l in src.created["labels"] if l.startswith("priority:")]
+
+
+def test_upkeep_finding_is_filed_at_the_lowest_bucket_priority_1484(tmp_path):
+    _r, src = _file(tmp_path, upkeep_finding=True)
+    assert _prio(src) == ["priority:P4"]
+
+
+def test_upkeep_finding_follows_a_configured_unclear_bucket_1484(tmp_path):
+    cfg = {"ai_filed": {"buckets": {"unclear": "P3"}}}
+    _r, src = _file(tmp_path, config=cfg, upkeep_finding=True)
+    assert _prio(src) == ["priority:P3"]
+
+
+def test_triage_park_writes_the_bucket_priority_not_the_caller_default_1484(tmp_path):
+    _r, src = _file(tmp_path, why="needs a force push to the shared branch")
+    assert len(src.parked) == 1 and _prio(src) == ["priority:P4"]
+
+
+def test_ownership_park_writes_the_bucket_priority_1484(tmp_path, monkeypatch):
+    class Verdict:
+        allowed = False
+        owner = None
+        repo = None
+    owner_mod = handoff._feature_owner()
+    monkeypatch.setattr(handoff, "_ownership_verdict", lambda *a, **k: (Verdict(), "billing"))
+    monkeypatch.setattr(owner_mod, "tell_at_filing", lambda *a, **k: None)
+    monkeypatch.setattr(owner_mod, "refusal_clause", lambda *a, **k: "not the owner")
+    monkeypatch.setattr(owner_mod, "whoami", lambda *a, **k: "amy")
+    _r, src = _file(tmp_path)
+    assert _prio(src) == ["priority:P4"]
+
+
+def test_non_upkeep_filings_and_triage_off_keep_their_priority_1484(tmp_path):
+    _r, src = _file(tmp_path)
+    assert _prio(src) == ["priority:P3"]
+    _r, off = _file(tmp_path, config=_off())
+    assert _prio(off) == ["priority:P1"]
+    _r, human = _file(tmp_path, config=_off(), priority="P1")
+    assert _prio(human) == ["priority:P1"]

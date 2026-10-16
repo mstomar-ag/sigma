@@ -709,7 +709,7 @@ _UPKEEP_BODY_LINE = "Filed by Sigma's rebase upkeep for unit"
 #: Override with `ai_filed.migration.max_issues`.
 MIGRATE_FETCH_CAP = 10000
 
-Arm = collections.namedtuple("Arm", "reason qkind held", defaults=((),))   # #1518: held = open blockers
+Arm = collections.namedtuple("Arm", "reason qkind held priority", defaults=((), None))   # #1518: held = open blockers
 Park = collections.namedtuple("Park", "reason qkind hardstop", defaults=(None,))
 
 
@@ -768,7 +768,9 @@ def plan_for(issue, config, unresolved=(), hold=None):
             return Park(d.reason, _feature("hard_stop").first_hardstop_kind(config), d.matched)
         return Park(d.reason, "needs_decision")
     why = "human-confirmed filing" if pop == "human" else d.reason
-    return Arm("armed (held by %s)" % ", ".join(held) if held else why, None, tuple(held))
+    # #1484: an AI-filed followup is armed at the bucket priority triage chose, never the P1 it may have been filed at.
+    return Arm("armed (held by %s)" % ", ".join(held) if held else why, None, tuple(held),
+               d.priority if pop == "followup" else None)
 
 
 def _migrate_comment(plan, pop):
@@ -883,6 +885,10 @@ def _migrate_one(source, config, sdlc_dir, item, apply, rep_item, writes=None):
         remove.append(source.goal_label)                # a half-promoted pair is repaired by the park
     if arm and plan.held and getattr(source, "goal_blocked_label", None):
         add.append(source.goal_blocked_label)           # #1518: label-model "Blocked" row; auto-unpark clears it
+    if arm and plan.priority:                           # #1484: the same single swap carries the priority change
+        want = "priority:" + plan.priority
+        remove += [l for l in sorted(names) if l.startswith("priority:") and l != want]
+        add.append(want)
     add = [l for l in add if l not in names]
     detail = "%s (%s; %s)" % ("arm" if arm else "park", pop, plan.reason)
     if not apply:
