@@ -73,3 +73,26 @@ def test_closed_gate_text_identical(tmp_path):
     run = _Run("false\n")
     assert d._rulebook_state(cfg, tmp_path, run=run) == d._rulebook_state(cfg, tmp_path)
     assert run.calls == []
+
+
+def _heuristic_cfg(vis="private"):
+    """Ledger and auto-merge off: the public-profile heuristic fires without any real read."""
+    cfg = _cfg(vis)
+    cfg["ledger"] = {"enabled": False}
+    cfg["work"] = {"auto_merge": "off"}
+    return cfg
+
+
+LOOKS_PUBLIC = "looks public"
+
+
+def test_real_private_repo_with_heuristic_profile_does_not_warn(tmp_path):
+    out = _doctor()._rulebook_state(_heuristic_cfg(), tmp_path, run=_Run("true\n"))
+    assert LOOKS_PUBLIC not in out and WARN not in out
+
+
+def test_heuristic_still_warns_without_a_real_read(tmp_path):
+    d = _doctor()
+    assert LOOKS_PUBLIC in d._rulebook_state(_heuristic_cfg(), tmp_path)
+    assert LOOKS_PUBLIC in d._rulebook_state(_heuristic_cfg(), tmp_path, run=_Run(""))
+    assert LOOKS_PUBLIC in d._rulebook_state(_heuristic_cfg(), tmp_path, run=_Run("false\n"))
