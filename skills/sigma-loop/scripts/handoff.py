@@ -474,6 +474,14 @@ def _upstream_runner(upstream_run, run):
     return None
 
 
+def _bucket_floor(config):
+    """#1484: the lowest configured AI bucket priority (the `unclear` bucket, P4 by default), which is always
+    below `ai_filed.human_default_priority`. An upkeep finding and a triage park carry it, never the caller's P1."""
+    v = file_triage.validate_buckets(config)
+    buckets = v["buckets"] if v.get("ok") else {}
+    return buckets.get("unclear") or max(buckets.values(), default="P4")
+
+
 def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, actionable):
     """#1003: the triage outcome for one AI-filed issue, or None when triage is off (`ai_filed.triage.enabled`
     exactly false), in which case NOTHING here runs and the filing is as it was. -> a dict with `kind`
@@ -864,6 +872,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         labels = [f"priority:{priority}", f"area:{area}", *extra_labels]
         if triage is not None and (triage["kind"] == "arm" or triage.get("report")):
             labels[0] = f"priority:{triage['priority']}"
+        elif triage is not None:      # #1484: a triage park never keeps the human default (triage off: unchanged)
+            labels[0] = f"priority:{_bucket_floor(config)}"
         if blocks_goal and goal and hasattr(source, "blocker_filing_priority"):    # #1408: never below the blocked goal
             labels[0] = f"priority:{source.blocker_filing_priority(str(goal), labels[0]) or labels[0][9:]}"
         # #1347: guaranteed, not a caller-supplied extra — dedup against a caller that already
@@ -899,6 +909,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         if triage is not None:
             # #1003: triage never arms an ownership-refused filing; it parks with kind owner_hold.
             if ownership is not None:
+                if triage["kind"] == "arm":             # #1484: the arm priority was already written
+                    labels[0] = f"priority:{_bucket_floor(config)}"
                 triage.update(kind="park", priority=None, qkind="owner_hold",
                               reason="a non-owner filing under a unit it does not own")
             immediately_actionable = triage["kind"] == "arm"

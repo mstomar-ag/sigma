@@ -110,7 +110,7 @@ ledger.py append .sdlc note 0007-cache.md --why "spike looks viable"
 
 A `release` is also written for you, on a GitHub source, when a loop session ends or dies holding goals it
 claimed but never started (no work record, no agent marker): the comment reads `claimed but not started: session
-ended`. A dead session waits `session_release.grace_minutes` (default `15`, in `config.json`) first; started
+ended`. A dead session waits `session_release.grace_minutes` (default `15`, in `config.json`) first, measured from the last write to its registry entry (its last announce or claim, so quiet means no write for that long); if the release fails (host unreachable) the entry is kept and a later pick retries; started
 goals and live sessions are never released.
 
 An entry with a `to` is **addressed** to that person: it lands in the team view and in their

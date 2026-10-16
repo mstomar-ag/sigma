@@ -99,7 +99,7 @@ closed.
 
 1. In `.sdlc/config.json`, set `upkeep.enabled` to the JSON boolean `true`. The scaffold writes the block with
    `enabled` false; a repository adopted earlier copies the block in from the config template.
-2. Set `ledger.enabled` to exactly `true`. The watcher that runs the tick is the ledger watcher.
+2. Set `ledger.enabled` to exactly `true`. The watcher that runs the tick is the ledger watcher. Remove a leftover `.sdlc/state/watch.stop` first, or the watcher exits at once.
 3. Set the environment variable `SIGMA_UPKEEP_JOB` to exactly `1` in the environment of the process that
    starts the sweep, on **one** machine. Opt in one machine for any given set of units: two opted-in machines
    would both start passes. The lease makes the second push refuse, but each wastes a fetch and a replay. To
@@ -184,7 +184,7 @@ protection on `feature/*` blocks upkeep's own force push, so grant upkeep's acto
 Level `mechanical` needs a verify command unless `upkeep.conflicts.mechanical_without_verify` is `true`.
 A parked conflict is one finding: before filing, the pass looks for an open issue with the same conflict id and
 comments on it at most once a day instead of filing again. Upkeep findings are filed parked with a declared
-question kind and the lowest triage priority, never armed as goals (with triage off they keep the legacy
+question kind and the lowest AI bucket priority (the `unclear` bucket, P4 by default), never armed as goals (with triage off they keep the legacy
 confirmation label instead). More detail is in [upkeep-part-b.md](upkeep-part-b.md).
 
 A refused replay that would delete content the branch has (a `would-drop`) is a blocked pass, not a clean one.

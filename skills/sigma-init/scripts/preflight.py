@@ -497,6 +497,9 @@ def _active_logged_in(text):
 
 
 _AUTH_RETRY_PAUSE = 2.0
+_NETWORK_MARKERS = ("timed out", "timeout", "error connecting", "connection refused", "connection reset",
+                    "no such host", "could not resolve", "network is unreachable", "dial tcp", "tls handshake")
+_LOGIN_REQUIRED_MARKERS = ("not logged in", "not logged into", "gh auth login", "to get started with github cli")
 _RATE_LIMIT_MARKERS = ("rate limit", "secondary rate", "abuse detection", "too many requests")
 
 
@@ -545,6 +548,16 @@ def check_gh_auth(host, runner, timeout, sleep=time.sleep):
         return _chk("gh-auth", "gh auth", None,
                     f"could not confirm the gh login: `gh auth status` failed but {who} (often the "
                     "GraphQL rate limit); re-run /sigma-doctor after the reset",
+                    meanwhile="Re-run /sigma-doctor to check it; nothing here needs an interactive "
+                              "login."), None
+    seen = f"{out} {out2}".lower()
+    if (rrc == 124 or any(m in (rout or "").lower() for m in _NETWORK_MARKERS)) \
+            and "401" not in (rout or "") \
+            and not any(m in seen or m in (rout or "").lower() for m in _LOGIN_REQUIRED_MARKERS):
+        first = printable(redact((rout or "").strip().splitlines()[0] if (rout or "").strip() else "no output"))
+        return _chk("gh-auth", "gh auth", None,
+                    f"cannot verify: `gh auth status` failed and the REST read failed on the network "
+                    f"({first}); re-run /sigma-doctor when the network is up",
                     meanwhile="Re-run /sigma-doctor to check it; nothing here needs an interactive "
                               "login."), None
     return _chk("gh-auth", "gh auth", False, f"gh is not logged in to {printable(host)} (or its "

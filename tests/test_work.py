@@ -5490,7 +5490,7 @@ def test_review_gate_approval_parks_without_graphql_and_never_makes_the_decision
         assert "review decision" not in why
     run = _runner(_review(decision="APPROVED"))
     ok, why = work.review_gate(d, _APPROVAL, g, run=run)
-    assert ok is False and "review decision" in why and "GraphQL" in why
+    assert ok is False and "not approved" in why and "GraphQL" not in why  # #1506
 
 
 def test_review_gate_changes_mode_in_cloud_still_reads_reviews_over_rest_and_passes(tmp_path, monkeypatch):
