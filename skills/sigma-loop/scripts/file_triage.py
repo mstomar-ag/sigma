@@ -106,7 +106,7 @@ def _load(name):
 #: a noun-phrase marker ("detector for"), the clause is passive ("are read by"), or it opens with a protective
 #: verb ("redact") or a determiner with no action verb before the word. A clause opening with an action verb, or
 #: with anything unrecognised, holds.
-_CLAUSES = re.compile(r"(?<=[.!?;,:])\s+|\n+|\s+(?:and then|then|and|after that|so that|so|by|via|using|-+)\s+",
+_CLAUSES = re.compile(r"(?<=[.!?;,:])\s+|\n+|\s+(?:and then|then|and|or|but|&|after that|so that|so|by|via|using|-+)\s+",
                       re.IGNORECASE)
 _QUOTED = re.compile(r"`[^`\n]*`|\"[^\"\n]*\"|(?<!\w)'[^'\n]*'(?!\w)")
 _BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
@@ -123,6 +123,7 @@ _PROTECT = frozenset(("redact redacts mask masks detect detects document documen
                       "gates prevent prevents refuse refuses warn warns guard guards protect protects classify "
                       "classifies flag flags report reports list lists explain explains mention mentions note "
                       "log logs test tests check checks verify verifies assert asserts").split())
+_HANDOFF = frozenset("to we you i when before while if until once after".split())
 _COPULA = frozenset("is are be was were being should must will can could".split())
 _DETERMINER = frozenset(("the a an this that these those it its they their which what when where if how why all "
                          "any each every some no one there").split())
@@ -137,6 +138,9 @@ _WORD = re.compile(r"[a-z']+")
 def _descriptive(clause, at, deny):
     """True when the deny word at `at` in this clause is described rather than done."""
     prefix = clause[:at]
+    before = _WORD.findall(prefix.lower())
+    if any(w in _ACTION for w in before) or (before and before[-1] in _HANDOFF):
+        return False
     if _NP_HEAD.search(prefix) or _PASSIVE.search(clause):
         return True
     words = _WORD.findall(_LEAD.sub("", _BULLET.sub("", clause)).lower())

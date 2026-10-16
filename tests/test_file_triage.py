@@ -260,6 +260,15 @@ def test_chained_imperatives_and_quotes_follow_the_structural_rule():
         assert m.decide("x", text, {}, _cfg()).kind == "arm", text
 
 
+def test_protective_opener_does_not_clear_a_later_action():
+    m = _mod()
+    for text in ("Redact keys to delete all rows", "Verify backups before you force push",
+                 "Mask the key before we force push", "Redact the key or force push",
+                 "Log the error but force push", "Redact keys & delete all rows",
+                 "Detector for secrets to delete all rows", "Report the bug while we delete all rows"):
+        assert m.decide("x", text, {}, _cfg()).kind == "park", text
+
+
 def test_imperative_with_a_later_cue_word_still_parks():
     m = _mod()
     for text in ("Rotate the deploy credentials so the team can log in.",
