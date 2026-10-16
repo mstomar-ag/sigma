@@ -36,8 +36,9 @@ def _all_four():
     return [goal_only, label_only, neither, both]       # the one that qualifies is LAST by order
 
 
-def test_only_a_goal_carrying_both_labels_is_ever_picked():
+def test_only_a_goal_carrying_both_labels_is_ever_picked(monkeypatch):
     lp = _mod("loop")
+    monkeypatch.setattr(lp, "_label_not_ready", lambda *a, **k: None)   # #1579: this fixture has an unarmed member
     with tempfile.TemporaryDirectory() as d:
         base = _base(d)
         cfg, src = _source(lp, base, _all_four())
@@ -225,6 +226,7 @@ def test_a_local_goals_backlog_is_refused_on_the_cli(capsys):
 @pytest.mark.parametrize("verb", ["next", "next-batch"])
 def test_the_cli_scopes_both_verbs(verb, monkeypatch, capsys):
     lp = _mod("loop")
+    monkeypatch.setattr(lp, "_label_not_ready", lambda *a, **k: None)   # #1579: unarmed member in the fixture
     inner = _gh(_all_four())
     monkeypatch.setattr(lp.sources, "_run_gh", lambda a, binary="gh": inner(a))
     monkeypatch.setattr(lp.sources.GitHubSource, "_BACKLOG_READ_RETRY_BASE", 0)
