@@ -6090,17 +6090,23 @@ def review_gate(sdlc_dir, config, goal, run=None, mode=None):
     # Skipped when GraphQL is unavailable (cloud, SIGMA_GH_GRAPHQL=off). Approval mode: unknown is not met,
     # so it parks unless a trusted `sigma:approve` comment is present (#1398). Changes mode: unknown -> go on.
     decision = None
+    read_failed = False
     if gh_api.graphql_available()["available"]:
         try:
             decision = json.loads(run(rec["worktree"], ["gh", "pr", "view", str(rec["pr"]),
                                                         "--json", "reviewDecision"])).get("reviewDecision")
         except Exception:                       # noqa: BLE001 - open for `changes`, CLOSED for `approval`
-            decision, unreadable = None, True
+            decision, unreadable, read_failed = None, True, True
         else:
             unreadable = False
     else:
         unreadable = True
     # #1398 (provisional): a `sigma:approve` directive satisfies approval when the decision is unreadable.
+    if unreadable and not read_failed and mode == REVIEW_APPROVAL and directive != "approve":
+        # #1506: GraphQL is simply not offered here (not a failed read), so what the operator must act on
+        # is the missing approval, not an API budget.
+        return False, (f"PR #{rec['pr']} is not approved yet — approve it, or comment `sigma:approve` "
+                       "(GitHub blocks self-approval), then re-queue")
     if unreadable and mode == REVIEW_APPROVAL and directive != "approve":  # #635: an approval is a positive requirement; unknown is not met
         return False, (f"could not read PR #{rec['pr']}'s review decision (it needs GraphQL, which is "
                        "unavailable or failed), so `require_review: approval` cannot be satisfied — "

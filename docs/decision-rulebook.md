@@ -99,7 +99,8 @@ Nothing below is needed for the rest of Sigma. Do the steps in order and stop wh
    (see [Hard stops](#hard-stops-and-the-record-done-net)). This only adds stops.
 9. **Optional: drift judge.** Needs a model name and a daily ceiling. Shadow only.
 10. **Last, and only if you want it: the applier.** Set `rulebook.autonomy.applier.enabled` to `true`, with the
-    conservative defaults. It needs the ledger watcher running, because the watcher runs its tick.
+    conservative defaults. It needs the ledger watcher running, because the watcher runs its tick. Before starting the watcher, check for a leftover `.sdlc/state/watch.stop`
+    and remove it: while that file exists the watcher exits at once and the applier never runs.
 
 ## What it will never do
 

@@ -18,6 +18,7 @@ Stdlib only.
 import importlib.util
 import json
 import pathlib
+import time
 
 _HERE = pathlib.Path(__file__).resolve().parent
 _LOADED = {}
@@ -71,16 +72,22 @@ def is_open(settings, sdlc_dir, now):
     """True when no usable stamp exists, the stamp is dated beyond the skew margin, or a whole window has passed since the last
     COMPLETED sweep; an attempt newer than `retry_minutes` holds it closed even when `last_at` is future-dated (such a stamp
     counts as no completed sweep; a future-dated attempt is ignored)."""
+    return decide(settings, sdlc_dir, now)[0]
+
+
+def decide(settings, sdlc_dir, now):
+    """The ONE decision the trigger (`is_open`) and the session line (`describe`) share (#1507).
+    -> (open, held_until): `held_until` is the epoch a recent attempt holds an otherwise-open window to, else None."""
     doc = read(sdlc_dir)
     if doc is None:
-        return True
+        return True, None
     age = int(now) - doc["last_at"]
     if age >= -FUTURE_SKEW_SECONDS and age < hours_of(settings) * 3600:
-        return False
+        return False, None
     tried = doc["attempt_at"]
     if tried is not None and 0 <= int(now) - tried < retry_minutes_of(settings) * 60:
-        return False
-    return True
+        return False, tried + retry_minutes_of(settings) * 60
+    return True, None
 
 
 def stamp(sdlc_dir, now, outcome, unreached=()):
@@ -121,6 +128,10 @@ def _span(seconds):
 def describe(settings, sdlc_dir, now):
     """-> one reporting line: when the last sweep was and when the next window opens. Reads one file; nothing else."""
     doc = read(sdlc_dir)
+    is_now_open, held_until = decide(settings, sdlc_dir, now)
+    if held_until is not None:
+        clock = lambda t: time.strftime("%H:%M", time.localtime(t))
+        return "upkeep: window open, retry after %s (last attempt %s)" % (clock(held_until), clock(doc["attempt_at"]))
     if doc is None:
         return "upkeep: no sweep yet on this machine; the window is open"
     if doc["last_at"] == 0:

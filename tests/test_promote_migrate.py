@@ -228,11 +228,11 @@ def test_classify_population():
     assert c({"labels": ["x"], "comments": []}) == "human"
 
 
-def test_plan_for_arms_without_a_priority_and_never_carries_one():
+def test_plan_for_arms_a_human_proposal_without_a_priority_and_a_followup_with_the_bucket_one():
     p = promote.plan_for({"title": "x", "body": "", "labels": [], "comments": []}, CFG)
-    assert isinstance(p, promote.Arm) and not hasattr(p, "priority")
+    assert isinstance(p, promote.Arm) and p.priority is None
     f = promote.plan_for({"title": "x", "body": "", "labels": ["sdlc:followup", "priority:P0"], "comments": []}, CFG)
-    assert isinstance(f, promote.Arm) and not hasattr(f, "priority")
+    assert isinstance(f, promote.Arm) and f.priority in ("P2", "P3", "P4")      # #1484
 
 
 def test_apply_keeps_p1_p3_and_missing_priority_exactly(tmp_path):
@@ -340,3 +340,28 @@ def test_cli_migrate_confirmation_parks_an_upkeep_finding_on_a_temp_repo(tmp_pat
     assert PARKED in src.store[7]["labels"] and GOAL not in src.store[7]["labels"]
     assert "upkeep_finding" in out and "parked" in out
     assert GOAL in src.store[8]["labels"]
+
+
+# --- #1484: arming a followup swaps its priority label for the bucket priority ------------------------
+
+def test_migrate_arm_of_a_followup_swaps_p1_for_the_bucket_priority_1484(tmp_path):
+    src = FakeSource()
+    src.add(8, PROPOSED, "sdlc:followup", "priority:P1", title="tidy the docs", body="cleanup of old text")
+    _run(src, apply=True, tmp=tmp_path)
+    labels = src.store[8]["labels"]
+    assert GOAL in labels and "priority:P1" not in labels and "priority:P3" in labels
+    assert len(src.swaps) == 1, "priority change rides the one swap"
+
+
+def test_migrate_arm_leaves_a_human_proposal_priority_alone_1484(tmp_path):
+    src = FakeSource()
+    src.add(9, PROPOSED, "priority:P1", title="human idea", body="please add a flag")
+    _run(src, apply=True, tmp=tmp_path)
+    assert "priority:P1" in src.store[9]["labels"] and GOAL in src.store[9]["labels"]
+
+
+def test_migrate_arm_of_a_followup_with_no_priority_label_gains_one_1484(tmp_path):
+    src = FakeSource()
+    src.add(10, PROPOSED, "sdlc:followup", title="tidy the docs", body="cleanup of old text")
+    _run(src, apply=True, tmp=tmp_path)
+    assert [l for l in src.store[10]["labels"] if l.startswith("priority:")] == ["priority:P3"]

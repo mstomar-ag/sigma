@@ -2696,6 +2696,7 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
             return report
     else:
         report["serialised"] = False
+    _record_unit_attempt(sdlc_dir, config, unit)
     try:
         stale = worktree_path(sdlc_dir, unit)
         if stale.exists():
@@ -2737,7 +2738,59 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
             return report
         return _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, report)
     finally:
+        _record_unit_outcome(sdlc_dir, config, unit, run, cwd, remote, base, report)
         _release(lock)
+
+
+def _record_unit_attempt(sdlc_dir, config, unit):
+    """#1492: before the work, under the unit lock, stamp the attempt in the per-unit upkeep record. Gate closed writes nothing.
+    Best effort: any failure is swallowed and never changes the pass. Keeps the reason a scheduler claim already recorded."""
+    try:
+        if not gate.enabled(config):
+            return
+        state = _load("feature_upkeep_state")
+        now = int(time.time())
+        read = state.read_state(sdlc_dir, unit, now)
+        reason = read.doc.get("due_reason") if read.kind == "ok" else None
+        state.record_attempt(sdlc_dir, unit, now, reason if reason in state.DUE_REASONS else "backstop")
+    except Exception:                     # noqa: BLE001 - recording never costs the pass
+        pass
+
+
+def _record_unit_outcome(sdlc_dir, config, unit, run, cwd, remote, base, report):
+    """#1492: the engine's one exit, still under the unit lock: record the outcome with the post-rewrite unit tip and the base
+    tip (full hex only). Gate closed writes nothing; best effort, never changes the report."""
+    try:
+        if not gate.enabled(config):
+            return
+        state = _load("feature_upkeep_state")
+        outcome = report.get("outcome")
+        if outcome not in state.OUTCOMES:
+            return
+        hexed = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+        unit_tip = base_tip = None
+        if outcome in state.SUCCESS:
+            for key in ("tip", "after", "before"):
+                got = report.get(key)
+                if isinstance(got, str) and hexed.fullmatch(got):
+                    unit_tip = got
+                    break
+            if outcome == CURRENT and unit_tip is None and cwd:
+                # #1532: a current pass whose report carries no usable tip must not leave the stored one stale
+                try:
+                    got = _git_read(cwd, ["rev-parse", "%s/%s%s" % (remote, features.BRANCH_PREFIX, unit)]).strip()
+                    unit_tip = got if hexed.fullmatch(got) else None
+                except Exception:         # noqa: BLE001 - no tip is recorded as none, the outcome still is
+                    unit_tip = None
+            if base and cwd:              # a bounded read of its own, not `run`: the pass's command sequence stays as it was
+                try:
+                    got = _git_read(cwd, ["rev-parse", "%s/%s" % (remote, base)]).strip()
+                    base_tip = got if hexed.fullmatch(got) else None
+                except Exception:         # noqa: BLE001 - #1532: an unreadable base tip is a null, never a dropped record
+                    base_tip = None
+        state.record_outcome(sdlc_dir, unit, int(time.time()), outcome, unit_tip, base_tip)
+    except Exception:                     # noqa: BLE001 - recording never costs the pass
+        pass
 
 
 def _level1_options(config):

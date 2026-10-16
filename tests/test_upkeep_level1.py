@@ -102,6 +102,13 @@ def remote_log(w, ref=FEATURE):
     return base._git(w.local, "log", "-1", "--format=%an|%ae|%at|%B", "origin/" + ref)
 
 
+def _only_the_unit_record(w):
+    """#1492: the engine now writes the per-unit record (`state/upkeep/units/`) at its exit under an open gate; "nothing was
+    written" means nothing else under `state/upkeep` (no resolutions, acks or runtime files)."""
+    root = w.sdlc / "state" / "upkeep"
+    return all("units" in f.relative_to(root).parts[:1] for f in root.rglob("*") if f.is_file()) if root.exists() else True
+
+
 # --------------------------------------------------------------------------- the gate closed and the level off
 
 
@@ -113,7 +120,7 @@ def test_a_closed_gate_or_level_off_parks_or_conflicts_exactly_as_before(tmp_pat
     report, spy = run_pass(m, w, config)
     assert report["outcome"] in (m.CONFLICT, m.PARKED) and w.tip(FEATURE) == before
     assert not any("commit" in c[:3] or "core.hooksPath" in " ".join(c) for c in spy.calls)
-    assert not (w.sdlc / "state" / "rebase-acks").exists() and not (w.sdlc / "state" / "upkeep").exists()
+    assert not (w.sdlc / "state" / "rebase-acks").exists() and _only_the_unit_record(w)
     assert "resolved" not in report and not m.worktree_path(str(w.sdlc), UNIT).exists()
 
 
@@ -191,7 +198,7 @@ def test_each_refused_check_parks_with_its_code_and_nothing_is_pushed(tmp_path, 
     _refusing(monkeypatch, m, name, result)
     report, spy = run_pass(m, w, cfg())
     assert report["outcome"] == m.PARKED and code in report["why"], report["why"]
-    assert w.tip(FEATURE) == before and not spy.pushes() and not (w.sdlc / "state" / "upkeep").exists()
+    assert w.tip(FEATURE) == before and not spy.pushes() and _only_the_unit_record(w)
 
 
 def test_a_failed_verify_parks(tmp_path, monkeypatch):
@@ -266,7 +273,7 @@ def test_a_stale_lease_a_taken_backup_name_and_a_failed_push_write_nothing(tmp_p
     before = w.tip(FEATURE)
     report, spy = run_pass(m, w, cfg())
     assert report["outcome"] == m.FAILED and w.tip(FEATURE) == before
-    assert "resolved" not in report and not (w.sdlc / "state" / "upkeep").exists()
+    assert "resolved" not in report and _only_the_unit_record(w)
     assert not (w.sdlc / "state" / "rebase-acks").exists()
 
     def other_writer(argv):
@@ -280,7 +287,7 @@ def test_a_stale_lease_a_taken_backup_name_and_a_failed_push_write_nothing(tmp_p
     monkeypatch.setattr(m, "_WALL", None)
     report, _ = run_pass(m, w, cfg(), Spy(m, before=other_writer))
     assert report["outcome"] == m.LEASE_REFUSED and "resolved" not in report
-    assert not (w.sdlc / "state" / "upkeep").exists()
+    assert _only_the_unit_record(w)
 
 
 # --------------------------------------------------------------------------- acks and the pull-request rule

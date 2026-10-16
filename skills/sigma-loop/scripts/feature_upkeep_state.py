@@ -1,7 +1,7 @@
 """Per-unit upkeep state and the due rule: when is a long-lived feature branch due for a maintenance pass?
 
-LIBRARY ONLY, AND NOTHING CALLS IT YET. A later slice (the pass, then the scheduler) calls it behind the upkeep gate in
-`feature_upkeep.py`; with that gate closed nothing here runs. It never reads the gate's block: the caller hands it the FLAT settings
+WRITTEN AT THE ENGINE'S SINGLE EXIT (#1492). `feature_rebase.upkeep()` records the attempt before the work and the outcome after it,
+under the unit lock, behind the upkeep gate in `feature_upkeep.py`; with that gate closed nothing here runs. It never reads the gate's block: the caller hands it the FLAT settings
 of `feature_upkeep.read(config)` and `schedule` checks the three keys it uses with the gate's own `check`.
 
 THE FILE. One small JSON document per unit, at the path `unit_state_path` returns (below the project's `.sdlc/state/` directory),

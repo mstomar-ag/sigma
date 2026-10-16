@@ -206,7 +206,8 @@ def test_the_job_records_how_the_pass_ended_and_frees_its_lock(tmp_path):
     assert result["outcome"] == "rebased" and record["state"] == "done" and record["outcome"] == "rebased", record
     assert record["noted"] is False and pathlib.Path(sdlc, "state/upkeep/job.heartbeat").is_file()
     assert j.sched.job_alive(sdlc, 10 ** 10) == "idle"
-    assert json.loads(pathlib.Path(sdlc, "state/upkeep/units/voice.json").read_text())["unit_tip"] == H40
+    # #1492: the engine (the child) records the unit outcome at its exit; the job no longer records it a second time
+    assert not pathlib.Path(sdlc, "state/upkeep/units/voice.json").exists()
 
 
 def test_a_crashed_pass_is_a_recorded_failure_not_silence(tmp_path):

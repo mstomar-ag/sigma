@@ -1230,6 +1230,10 @@ def _blocker_rank_row(cfg, sdlc_dir, now=None):
         if not st:
             return _chk("blockers ranked below what they block: not yet checked (the reconcile tick has not run)",
                         True, "")
+        if not tick.always_repair_has_run(st):
+            # #1526: only the smart skip marker is on file; the first always repair has not run yet.
+            return _chk("blockers ranked below what they block: first repair has not run (the reconcile "
+                        "tick has not run since the mode changed)", True, "")
         now = now if now is not None else time.time()
         n = int(st.get("violations") or 0)
         last = st.get("last_repair")
@@ -1447,6 +1451,21 @@ def _unit_record_rows(base, run, cheap_only):
                  " a modified one: " + _REGISTRY_COMMIT_CMD)]
 
 
+def _unmaintained_row(sched, base, cfg):
+    """#1493: upkeep maintains the units the registry lists; a remote `feature/*` branch with no record is not maintained.
+    One local ref read (no network), shown whenever upkeep is on, also when no `.sdlc/features/` exists."""
+    try:
+        registered = sched.list_units(base)
+        remote = _load_loop_script("feature_rebase")._remote(cfg)
+        loose = sched.unregistered_heads(base, remote, base.parent, registered=registered)
+    except Exception:                       # noqa: BLE001 - an unanswered read is no finding
+        return _chk("upkeep units: could not be read", False, "run /sigma-doctor again")
+    names = ", ".join(_UNIT_BRANCH_PREFIX + n for n in loose[:5])
+    return _chk("upkeep units: %d registered, %d remote feature branch(es) not maintained%s"
+                % (len(registered), len(loose), (" (" + names + ")") if loose else ""), not loose,
+                "register the unit (open it with /sigma-define) or it is never kept current; see docs/upkeep.md")
+
+
 def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
     """The background upkeep scheduler's liveness and readiness rows (never a pass for something that did not run). Silent
     unless the opt-in block is on or invalid, decided by the gate's own reader, not by looking for the block here. The git
@@ -1457,6 +1476,7 @@ def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
             return []
         rows = [_chk(f"{label}: {detail}", ok, "see docs/branching-model.md for the opt-in and the stop file")
                 for label, ok, detail in sched.health(cfg, base, now)]
+        rows.append(_unmaintained_row(sched, base, cfg))
         if not cheap_only:
             pf = _load_init_script("preflight")
             runner = None
@@ -2789,6 +2809,25 @@ def _watcher_build_rows(base, cfg):
         return []
 
 
+def _stale_watch_stop_rows(base, cfg):
+    """#1510: warn when a leftover state/watch.stop exists and no watcher is live (it would exit at once). Silent otherwise. Read-only."""
+    try:
+        st = pathlib.Path(base) / "state"
+        if not (st / "watch.stop").is_file():
+            return []
+        try:
+            os.kill(int((st / "watch.pid").read_text(encoding="utf-8").strip()), 0)
+            if _load_loop_script("sync").watcher_liveness(base, cfg)[0] == "live":
+                return []
+        except Exception:                    # noqa: BLE001 - no readable live pid means no live watcher
+            pass
+        return [_chk("no leftover watcher stop file", False,
+                     "state/watch.stop exists and no watcher is running, so a watcher started now exits at once; "
+                     "remove it with `rm .sdlc/state/watch.stop`, then start the watcher.")]
+    except Exception:                        # noqa: BLE001 - a detector that cannot run says nothing
+        return []
+
+
 _PROGRESS_ON = False
 
 
@@ -2960,6 +2999,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
             out.extend(_landing_rows(base, cfg, run, which))        # #974: branch-creation rulesets
     out.extend(_origin_mismatch_rows(base, disc, run))      # #1314
     out.extend(_watcher_build_rows(base, cfg))                # #1315
+    out.extend(_stale_watch_stop_rows(base, cfg))             # #1510
     _progress("unit branch readiness")
     out.extend(_upkeep_rows(base, cfg, run, which, injected, cheap_only))
     _progress("resolvers")
