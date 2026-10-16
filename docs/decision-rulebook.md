@@ -101,6 +101,8 @@ Nothing below is needed for the rest of Sigma. Do the steps in order and stop wh
 10. **Last, and only if you want it: the applier.** Set `rulebook.autonomy.applier.enabled` to `true`, with the
     conservative defaults. It needs the ledger watcher running, because the watcher runs its tick. Before starting the watcher, check for a leftover `.sdlc/state/watch.stop`
     and remove it: while that file exists the watcher exits at once and the applier never runs.
+    Before turning it on, run `unpark.py report <sdlc_dir>`: it lists every parked or blocked issue with its kind, area,
+    matching rule, level and whether the applier would act now, later or never, and writes nothing.
 
 ## What it will never do
 

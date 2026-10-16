@@ -1607,6 +1607,8 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None):
                          "check conflicts.agent in .sdlc/config.json"))
         rows.append(_chk("resolver spend: " + ("finite caps configured" if finite else "no spend limit configured (each run bounded by timeout_minutes only)"),
                          True, "optional: set conflicts.agent.max_budget_usd_per_unit and spend_ceiling_usd_per_day to cap spend"))
+        rows.append(_chk("resolver session network: not isolated on this platform", True,
+                         "informational: the session is a credential-free copy with no remote; a wall around the model CLI would cut its own API access"))       # #1573
         spent = _resolver_spend_today(pathlib.Path(base).joinpath(*rebase.LEVEL2_SPEND_REL.split("/")), launcher, now)
         if spent is None:
             rows.append(_chk("resolver spend today: unreadable", False, "check the spend store under .sdlc/state/upkeep/spend; the launcher stays closed on it"))
