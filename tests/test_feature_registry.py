@@ -1442,6 +1442,7 @@ _NO_UNIT_NAME = {
     ("feature_park", "_load"),                # #946: the sibling importer
     ("feature_upkeep_prove", "_sibling"),
     ("feature_upkeep_prove", "_one_stop"),
+    ("feature_upkeep_prove", "_union_appended"),   # #1515: joins the worktree path and a conflicted file; no unit name
     ("feature_upkeep_prove", "resolve_stops"),
     ("feature_registry", "_load"),
     ("feature_stamp", "_load"),

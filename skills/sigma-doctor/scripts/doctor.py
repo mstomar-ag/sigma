@@ -5431,6 +5431,18 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
                 extra.append("%d local commit%s touching %s %s not on the default branch; push or merge %s"
                              % (n, "" if n == 1 else "s", ", ".join(names), "is" if n == 1 else "are",
                                 "it" if n == 1 else "them"))
+        if sdlc_dir is not None and rub.part_enabled("rules"):
+            rbm = _load_loop_script("rulebook")
+            if rbm.enabled(cfg):
+                import datetime as _dt
+                due = rbm.due_ages(rbm.load(sdlc_dir, cfg), _dt.datetime.now(_dt.timezone.utc), cfg)
+                if due:
+                    extra.append("%d approved rule(s) due for confirmation (older than reask_days): %s"
+                                 % (len(due), ", ".join(str(i) for i, _ in due)))
+                bad = rbm.invalid(sdlc_dir, cfg)
+                if bad:
+                    extra.append("%d invalid rule(s) in the rulebook, never acting (retire them with "
+                                 "rule_draft.py retire): %s" % (len(bad), "; ".join("%s (%s)" % b for b in bad)))
         if sdlc_dir is not None:
             at = _load_loop_script("drift_judge").ceiling_paused_at(cfg, time.time(), sdlc_dir)
             if at is not None:
@@ -5481,6 +5493,7 @@ def _autonomy_state(cfg, sdlc_dir=None):
                 if r.get("comparisons", 0) < need and recent < need:
                     lines.append("%s / %s: level %d unreachable: needs %d comparisons, %d recorded in the last %d days"
                                  % (r["qkind"], r["area"] or "-", r["next_level"], need, recent, days))
+        lines += _load_loop_script("autonomy").category_notes(sdlc_dir if sdlc_dir is not None else ".sdlc", cfg)
         return head + "".join("\n      " + l for l in lines)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
