@@ -1682,6 +1682,12 @@ def level2_off_reason(config, which=None):
         return "the settings could not be read (%s)" % type(exc).__name__
 
 
+def _session_wall_prefix(launcher, root, scratch_parent):
+    """#1693: the confinement for the resolver session, or None where the platform has none (the session then has no Bash)."""
+    session = os.path.join(root, "resolver", "session")
+    return launcher.session_wall(sys.platform, shutil.which, os.path.expanduser("~"), session, [scratch_parent])[0]
+
+
 def _default_level2_plan(config, sdlc_dir=None, cwd=None):
     """The Level 2 plan from configuration, or None (off) for any missing piece. No model is called here."""
     if sdlc_dir is None or level2_off_reason(config) is not None:
@@ -1708,7 +1714,7 @@ def _default_level2_plan(config, sdlc_dir=None, cwd=None):
             "review_launch": dict(common, model=review_model, directory=os.path.join(root, "review"), cap_usd=review_cap), "review_cap_usd": review_cap,
             "review_model": review_model, "resolver_root": os.path.join(root, "resolver"), "limits": None, "host": "claude",
             "environ": None, "config": config, "max_units_per_sweep": int(s["conflicts.agent.max_units_per_sweep"]),
-            "session": True, "net_prefix": None}      # #1573: a wall around the model CLI itself would cut its own API access
+            "session": True, "net_prefix": _session_wall_prefix(launcher, root, common["scratch_parent"])}
 
 
 LEVEL2_PLAN_FACTORY = _default_level2_plan

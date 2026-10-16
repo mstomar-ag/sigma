@@ -1630,8 +1630,12 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None, auth_runner=None):
                          "check conflicts.agent in .sdlc/config.json"))
         rows.append(_chk("resolver spend: " + ("finite caps configured" if finite else "no spend limit configured (each run bounded by timeout_minutes only)"),
                          True, "optional: set conflicts.agent.max_budget_usd_per_unit and spend_ceiling_usd_per_day to cap spend"))
-        rows.append(_chk("resolver session network: not isolated on this platform", True,
-                         "informational: the session is a credential-free copy with no remote; a wall around the model CLI would cut its own API access"))       # #1573
+        wall_label = launcher.session_wall(sys.platform, which, os.path.expanduser("~"), "session")[1]       # #1693
+        rows.append(_chk("resolver session confinement: " + (
+            "%s (reads of credential directories denied, writes only in the session, network only to port 443 and not filtered by host; PROVISIONAL, live run owner-gated)" % wall_label
+            if wall_label else
+            "none on this platform, so the session runs WITHOUT the Bash tool (edit tools only; nothing else can reach credentials or the network)"),
+            True, "informational"))
         spent = _resolver_spend_today(pathlib.Path(base).joinpath(*rebase.LEVEL2_SPEND_REL.split("/")), launcher, now)
         if spent is None:
             rows.append(_chk("resolver spend today: unreadable", False, "check the spend store under .sdlc/state/upkeep/spend; the launcher stays closed on it"))

@@ -179,23 +179,45 @@ def resolve_model(config, override):
 
 # ------------------------------------------------------------------------------------------ the session network wall (#1573)
 
-#: macOS: a profile that allows everything except the network. `sandbox-exec` is deprecated but present.
-NET_PROFILE = "(version 1)(allow default)(deny network*)"
-SESSION_ARGV = ("--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash")
+#: Directories under the account home that hold credentials; the macOS wall denies reads of them.
+CREDENTIAL_DIRS = (".ssh", ".config/gh", ".git-credentials", ".gitconfig", ".netrc", "Library/Keychains", ".aws")
+SESSION_TOOLS = "Read,Edit,Write,Glob,Grep"
+SESSION_ARGV = ("--permission-mode", "acceptEdits", "--allowedTools", SESSION_TOOLS + ",Bash")
 
 
-def network_prefix(platform, which):
-    """-> (argv prefix, label) that runs a command with no network, or (None, None) when this platform has no such wall.
-    UNVERIFIED beyond the check that the program exists: a host that forbids the sandbox makes the launch fail, which parks."""
+def session_argv(walled):
+    """The session permission flags: Bash only when a wall confines it; without one the tool is removed (#1693)."""
+    return ("--permission-mode", "acceptEdits", "--allowedTools", SESSION_TOOLS + (",Bash" if walled else ""))
+
+
+def _quote(text):
+    return '"%s"' % str(text).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def wall_profile(home, writable):
+    """macOS sandbox profile text: no reads of credential dirs, writes only under `writable` (and the device files),
+    network out only to port 443. The profile cannot filter by host name, so any host on 443 stays reachable."""
+    home = str(home).rstrip("/")
+    reads = " ".join("(subpath %s)" % _quote(home + "/" + d) for d in CREDENTIAL_DIRS)
+    allowed = " ".join("(subpath %s)" % _quote(w) for w in list(writable) + ["/dev", "/private/tmp", "/private/var/folders"])
+    return ("(version 1)(allow default)(deny file-read* %s)(deny file-write* (require-not (require-any %s)))"
+            "(deny network*)(allow network-outbound (remote tcp \"*:443\") (literal \"/private/var/run/mDNSResponder\"))"
+            % (reads, allowed))
+
+
+def session_wall(platform, which, home, session_dir, extra_writable=()):
+    """-> (argv prefix, label) confining the session, or (None, None) when this platform has no verified wall.
+    macOS only (`sandbox-exec`, UNVERIFIED against a live session: owner-gated). Linux has none, so no Bash there."""
     if platform == "darwin":
         exe = which("sandbox-exec")
-        if exe:
-            return [exe, "-p", NET_PROFILE], "sandbox-exec"
-    elif str(platform).startswith("linux"):
-        exe = which("unshare")
-        if exe:
-            return [exe, "--net", "--map-root-user"], "unshare"
+        if exe and home and session_dir:
+            return [exe, "-p", wall_profile(home, [str(session_dir)] + [str(w) for w in extra_writable])], "sandbox-exec"
     return None, None
+
+
+def network_prefix(platform, which, home=None, session_dir=None):
+    """Kept name: the wall for this platform, see session_wall."""
+    return session_wall(platform, which, home, session_dir)
 
 
 # ------------------------------------------------------------------------------------------ the scratch tree
@@ -591,7 +613,7 @@ def _run(req, model, binary, environ, run_id, clock):
         argv = [binary] + list(BASE_ARGV) + (["--max-budget-usd", "%g" % cap] if cap is not None else []) + ["--model", model]
         env = build_env(scratch, req.credential_var, environ)
         if req.session:
-            argv.extend(SESSION_ARGV)
+            argv.extend(session_argv(bool(req.net_prefix)))
             env["GIT_CONFIG_NOSYSTEM"], env["GIT_CONFIG_GLOBAL"] = "1", os.devnull
         for item in req.flags or ():
             argv.extend(item if isinstance(item, (tuple, list)) else (item,))

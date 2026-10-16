@@ -102,7 +102,7 @@ def run_session(rig, tmp_path, world=None, session=True, net_prefix=None, spy=No
 @pytest.fixture
 def wired_s(wired, monkeypatch):  # noqa: F811
     """The shipped factory, with the host's real network wall switched off so the run is the same on every platform."""
-    monkeypatch.setattr(wired._launcher(), "network_prefix", lambda platform, which: (None, None))
+    monkeypatch.setattr(wired._launcher(), "session_wall", lambda platform, which, home, session_dir, extra=(): (None, None))
     return wired
 
 
@@ -122,7 +122,7 @@ def test_a_multi_commit_replay_is_resolved_in_one_session_dir_with_context_and_p
     first, second = resolves(rig)
     assert first["cwd"] == second["cwd"] and first["cwd"].endswith(os.sep + "session")
     assert not os.path.exists(first["cwd"])                                  # removed when the pass ended
-    assert second["argv"][-4:] == ["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,Glob,Grep,Bash"]
+    assert second["argv"][-4:] == ["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,Glob,Grep"]
     assert ".sigma-context/stop0" in first["stdin"] and ".sigma-context/stop1" in second["stdin"]
     ctx = second["ctx"]
     assert ctx[".sigma-context/stop1/message.txt"].startswith("feat: second step")
@@ -237,20 +237,39 @@ def test_the_network_prefix_is_put_in_front_of_the_command(srig, tmp_path):
     assert marker.exists()
 
 
-def test_network_prefix_per_platform_and_the_doctor_row(tmp_path):
+def test_wall_per_platform_and_profile_text(tmp_path):
     launcher = base._load("feature_upkeep_launcher")
     have = lambda name: "/usr/bin/" + name  # noqa: E731
     none = lambda name: None  # noqa: E731
-    got, label = launcher.network_prefix("darwin", have)
-    assert label == "sandbox-exec" and got[:2] == ["/usr/bin/sandbox-exec", "-p"] and "(deny network*)" in got[2]
-    got, label = launcher.network_prefix("linux", have)
-    assert label == "unshare" and got == ["/usr/bin/unshare", "--net", "--map-root-user"]
-    assert launcher.network_prefix("darwin", none) == (None, None) == launcher.network_prefix("linux", none)
-    assert launcher.network_prefix("win32", have) == (None, None)
-    import test_doctor_resolver_readiness as dr
-    d, config = dr.doctor(), dr.config()
-    sdlc = dr.project(tmp_path, config)
-    plat = sys.platform
-    rows = [c for c in dr.rows(d, sdlc, config, which=have) if c["name"].startswith("resolver session network")]
-    assert len(rows) == 1 and rows[0]["ok"] is True
-    assert rows[0]["name"].endswith("not isolated on this platform")
+    got, label = launcher.session_wall("darwin", have, "/fakehome", "/tmp/s", ["/tmp/scr"])
+    assert label == "sandbox-exec" and got[:2] == ["/usr/bin/sandbox-exec", "-p"]
+    prof = got[2]
+    for d in (".ssh", ".config/gh", ".git-credentials", ".netrc", "Library/Keychains", ".aws"):
+        assert '(subpath "/fakehome/%s")' % d in prof
+    assert "(deny file-read*" in prof and '(subpath "/tmp/s")' in prof and '(subpath "/tmp/scr")' in prof
+    assert '(remote tcp "*:443")' in prof and "(deny network*)" in prof
+    assert launcher.session_wall("darwin", none, "/fakehome", "/tmp/s") == (None, None)
+    assert launcher.session_wall("linux", have, "/home/x", "/tmp/s") == (None, None)
+    assert launcher.session_wall("win32", have, "/home/x", "/tmp/s") == (None, None)
+
+
+def test_without_a_wall_the_session_has_no_bash_with_one_it_does(srig, tmp_path):
+    m, w, report, spy = run_session(srig, tmp_path)
+    assert report["outcome"] == m.REBASED, report.get("why")
+    argv = resolves(srig)[0]["argv"]
+    assert "Read,Edit,Write,Glob,Grep" in argv and not any("Bash" in a for a in argv)
+    wall = tmp_path / "wall.py"
+    wall.write_text("#!%s\nimport os, sys\nos.execv(sys.argv[1], sys.argv[1:])\n" % sys.executable)
+    wall.chmod(0o755)
+    m, w, report, spy = run_session(srig, tmp_path / "b", net_prefix=[str(wall)])
+    assert report["outcome"] == m.REBASED, report.get("why")
+    argv = resolves(srig)[-1]["argv"]
+    assert "Read,Edit,Write,Glob,Grep,Bash" in argv
+
+
+def test_the_shipped_plan_takes_its_prefix_from_the_wall(wired, monkeypatch, tmp_path):
+    launcher = wired._launcher()
+    monkeypatch.setattr(launcher, "session_wall", lambda platform, which, home, session_dir, extra=(): (["/w/wrap", "-p", "x"], "sandbox-exec"))
+    assert wired._level1_options(agent_cfg(), str(tmp_path), str(tmp_path))["level2"]["net_prefix"] == ["/w/wrap", "-p", "x"]
+    monkeypatch.setattr(launcher, "session_wall", lambda platform, which, home, session_dir, extra=(): (None, None))
+    assert wired._level1_options(agent_cfg(), str(tmp_path), str(tmp_path))["level2"]["net_prefix"] is None
