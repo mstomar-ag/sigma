@@ -54,6 +54,10 @@ The scheduler no longer polls each unit. It works on a window, `upkeep.window_ho
   - a merge made through `work.py merge` on the machine that merged, which asks the same question once.
 - **What a closed window costs.** One small file read (`.sdlc/state/upkeep/window.json`) and some arithmetic.
   No git call, no GitHub call, no unit listing.
+- **The per-unit record.** `.sdlc/state/upkeep/units/<unit>.json` holds the last attempt and last success times, the unit
+  and base tips after the last success, the last outcome, why the pass started, and the consecutive-failure count. The
+  engine writes it at its single exit, under the unit's lock, on every pass (pick, CLI verb, job, sweep); a closed gate
+  writes nothing. Delete the file and the unit reads as never attempted.
 - **What the sweep does.** It takes the job lock, lists the units admitted by `upkeep.units.include` and
   `upkeep.units.exclude` (an exclude always wins), and then runs the per-unit engine for each unit, one at a
   time. A unit already at its base costs one bounded read and nothing else, which is how a user whose window
@@ -179,8 +183,9 @@ protection on `feature/*` blocks upkeep's own force push, so grant upkeep's acto
 
 Level `mechanical` needs a verify command unless `upkeep.conflicts.mechanical_without_verify` is `true`.
 A parked conflict is one finding: before filing, the pass looks for an open issue with the same conflict id and
-comments on it at most once a day instead of filing again. Upkeep findings are filed as proposals that need
-confirmation, never armed as goals. More detail is in [upkeep-part-b.md](upkeep-part-b.md).
+comments on it at most once a day instead of filing again. Upkeep findings are filed parked with a declared
+question kind and the lowest triage priority, never armed as goals (with triage off they keep the legacy
+confirmation label instead). More detail is in [upkeep-part-b.md](upkeep-part-b.md).
 
 A refused replay that would delete content the branch has (a `would-drop`) is a blocked pass, not a clean one.
 Details are in branching-model.md section 3b.

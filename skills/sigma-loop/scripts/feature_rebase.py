@@ -1873,7 +1873,7 @@ def _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd,
                     slot="goal-conflict:%s" % goal_branch,
                     key="%s@%s" % (goal_branch, before or "?"),
                     title="Rebase conflict: %s onto %s" % (goal_branch, branch),
-                    why="%s could not be replayed onto %s" % (goal_branch, branch),
+                    why="%s could not be replayed onto %s" % (goal_branch, branch), qkind="merge_conflict",
                     body=_goal_conflict_body(unit, goal_branch, branch, outcome,
                                              _goal_state(run, path, goal_branch, cwd, remote,
                                                          before)))
@@ -2027,7 +2027,7 @@ DIRECT_SLOT = "direct:"
 DIRECT_ISSUE_SLOT = "directissue:"
 
 
-def _file_issue(sdlc_dir, config, goal, report, title, why, body, slot="", key=""):
+def _file_issue(sdlc_dir, config, goal, report, title, why, body, slot="", key="", qkind="needs_decision"):
     """File the finding as tracked work. Never raises, and never blocks the goal that found it.
 
     `handoff.create_tracked_issue` is the one place the kit opens an issue on its own behalf, so
@@ -2059,7 +2059,7 @@ def _file_issue(sdlc_dir, config, goal, report, title, why, body, slot="", key="
         result = _handoff().create_tracked_issue(
             sdlc_dir, config, goal, AREA, why,
             same_area=True, immediately_actionable=False, blocks_goal=False,
-            title=title, body=body, upkeep_finding=True,
+            title=title, body=body, upkeep_finding=True, upkeep_qkind=qkind,   # #1490
             # No goal to inherit a unit from: name the unit explicitly (`target_unit`), never read issue "None".
             **({"target_unit": report["unit"]} if goal is None else {}))
     except Exception as exc:              # noqa: BLE001 - a filing must never break a pick
@@ -2330,7 +2330,7 @@ def _file_park(sdlc_dir, config, report, branch, base, run=None, cwd=None, remot
         result = _handoff().create_tracked_issue(
             sdlc_dir, config, None, AREA, "%s could not be replayed onto %s (parked)" % (branch, base),
             same_area=True, immediately_actionable=False, blocks_goal=False, title=title,
-            upkeep_finding=True,
+            upkeep_finding=True, upkeep_qkind="merge_conflict",   # #1490
             body=_park_body(report["unit"], branch, base, info, report["leftovers"], report["tip"])
             + ("\nThis supersedes the earlier finding #%d, which named a different conflict for this unit; that one is "
                "left open for a person to close.\n" % supersedes["number"] if supersedes else ""),
@@ -2696,6 +2696,7 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
             return report
     else:
         report["serialised"] = False
+    _record_unit_attempt(sdlc_dir, config, unit)
     try:
         stale = worktree_path(sdlc_dir, unit)
         if stale.exists():
@@ -2737,7 +2738,49 @@ def _upkeep(sdlc_dir, config, goal, unit, run, cwd, remote, report):
             return report
         return _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, report)
     finally:
+        _record_unit_outcome(sdlc_dir, config, unit, run, cwd, remote, base, report)
         _release(lock)
+
+
+def _record_unit_attempt(sdlc_dir, config, unit):
+    """#1492: before the work, under the unit lock, stamp the attempt in the per-unit upkeep record. Gate closed writes nothing.
+    Best effort: any failure is swallowed and never changes the pass. Keeps the reason a scheduler claim already recorded."""
+    try:
+        if not gate.enabled(config):
+            return
+        state = _load("feature_upkeep_state")
+        now = int(time.time())
+        read = state.read_state(sdlc_dir, unit, now)
+        reason = read.doc.get("due_reason") if read.kind == "ok" else None
+        state.record_attempt(sdlc_dir, unit, now, reason if reason in state.DUE_REASONS else "backstop")
+    except Exception:                     # noqa: BLE001 - recording never costs the pass
+        pass
+
+
+def _record_unit_outcome(sdlc_dir, config, unit, run, cwd, remote, base, report):
+    """#1492: the engine's one exit, still under the unit lock: record the outcome with the post-rewrite unit tip and the base
+    tip (full hex only). Gate closed writes nothing; best effort, never changes the report."""
+    try:
+        if not gate.enabled(config):
+            return
+        state = _load("feature_upkeep_state")
+        outcome = report.get("outcome")
+        if outcome not in state.OUTCOMES:
+            return
+        hexed = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+        unit_tip = base_tip = None
+        if outcome in state.SUCCESS:
+            for key in ("tip", "after", "before"):
+                got = report.get(key)
+                if isinstance(got, str) and hexed.fullmatch(got):
+                    unit_tip = got
+                    break
+            if base and cwd:              # a bounded read of its own, not `run`: the pass's command sequence stays as it was
+                got = _git_read(cwd, ["rev-parse", "%s/%s" % (remote, base)]).strip()
+                base_tip = got if hexed.fullmatch(got) else None
+        state.record_outcome(sdlc_dir, unit, int(time.time()), outcome, unit_tip, base_tip)
+    except Exception:                     # noqa: BLE001 - recording never costs the pass
+        pass
 
 
 def _level1_options(config):
@@ -2933,7 +2976,7 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
         _file_issue(sdlc_dir, config, goal, report,
                     slot="feature-conflict:%s" % branch, key=before,
                     title="Rebase conflict: %s onto %s" % (branch, base),
-                    why="%s could not be replayed onto %s" % (branch, base),
+                    why="%s could not be replayed onto %s" % (branch, base), qkind="merge_conflict",
                     body=_feature_conflict_body(unit, branch, base, before, report["why"],
                                                 report["leftovers"], report["tip"]))
         return report
