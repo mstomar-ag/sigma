@@ -46,6 +46,23 @@ Defaults below are what `/sigma-init` scaffolds (`config.json.tmpl`). Not everyt
 > what makes a human-authored, comment-only dependency marker (bypassing `hand_off()`) actually
 > honored, not just silently ignored.
 
+## Resource limits
+
+The `resource` block holds the limits `resource_guard.py` derives from the machine. Every key defaults to `null`, which means derived; a bad value (negative, boolean, string, NaN, or a fraction outside 0 to 1) reads as derived with a note. The fractions are policy ratios not yet calibrated against a real exhaustion, so they are labelled uncalibrated wherever printed.
+
+| Key | Default | What it sets |
+|---|---|---|
+| `resource.mode` | derived (`enforce`; also `observe`, `off`) | `observe` computes a hold but never holds; `off` skips the check; uncalibrated |
+| `resource.reserve_fraction` | derived (0.20 of total memory) | memory kept free for the machine; uncalibrated |
+| `resource.max_share_fraction` | derived (0.60 of total memory) | most memory all sessions together may lease; uncalibrated |
+| `resource.cpu_reserve_cores` | derived (one eighth of the cores, at least 1) | cores kept free; uncalibrated |
+| `resource.load_hold_ratio` | derived (1.0 per core) | one-minute load per core above which load is reported high; uncalibrated |
+| `resource.swapout_hold_mb_per_s` | derived (shown, never holds) | when set, a swap-out rate above it holds and resumes at a quarter of it; uncalibrated |
+| `resource.shed` | derived (`verify`; also `off`) | what is shed first under pressure; uncalibrated |
+| `resource.max_goals` | derived (no extra cap) | cap on concurrent goals; uncalibrated |
+| `resource.max_verify_workers` | derived (no extra cap) | cap on concurrent verify workers; uncalibrated |
+| `resource.hold_alert_minutes` | derived (no alert) | minutes a hold may last before it is reported; uncalibrated |
+
 ## Where the optional features are documented
 
 The `rulebook` block (records, hard stops, autonomy levels, the applier, rules, the drift judge, the past-decision

@@ -1,6 +1,19 @@
 {
   "_comment": "Authoritative machine config for the loop. Mirrors project.md prose; this file wins on conflict.",
   "mode": { "default": "goal" },
+  "resource": {
+    "mode": null,
+    "reserve_fraction": null,
+    "max_share_fraction": null,
+    "cpu_reserve_cores": null,
+    "load_hold_ratio": null,
+    "swapout_hold_mb_per_s": null,
+    "shed": null,
+    "max_goals": null,
+    "max_verify_workers": null,
+    "hold_alert_minutes": null
+  },
+  "_resource": "#1598: machine resource limits. Every value null = derived from this machine (uncalibrated policy ratios); a bad value reads as derived. Keys are described in docs/configuration.md.",
   "discovery": {
     "source": "local-goals",
     "_source_options": "local-goals (files in .sdlc/goals/) | github (issues labelled sdlc:goal, needs the gh CLI)",

@@ -1697,6 +1697,14 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/resource_guard.py",
+      "function": "write_hold",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "operator-run decision caller only; writes one hold.json by atomic rename under the state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository; nothing calls it yet",
+      "risk": "medium"
+    },
+    {
       "path": "skills/sigma-loop/scripts/retention.py",
       "function": "_unlink_streams",
       "rule": "fs-remove",

@@ -19,11 +19,21 @@ THE CONTRACT.
   * Any other platform, or an unreadable total or available, raises `Unsupported(reason)`. Never a guess, never a
     shell-command fallback. The command line then prints one line to stderr, nothing to stdout, and exits 3.
 
-NOT HERE, ON PURPOSE. No child process, no file write, no signal, no configuration, no gate, no threshold: this
-module reports facts and decides nothing.
+DERIVED LIMITS (#1598). `derive(sample, config, leases, observed) -> Limits` turns a Sample into a reserve, a share cap
+and a CPU reserve as ratios of THIS machine (the fractions are policy defaults, uncalibrated against a real
+exhaustion, and `Limits.uncalibrated` says so). The `resource` config block is all-null = derived; a bad value reads as
+derived plus a note, never as zero. `decide(history, limits, unit_cost, prior)` holds on the lowest `available` of the
+last three samples and resumes on the higher of the lowest two, after `resume_samples` samples at least `sample_gap`
+seconds apart. `hold.json` (written by atomic rename; a corrupt file reads as open plus a note) lives outside every
+repository.
+
+NOT HERE, ON PURPOSE. No child process, no signal, no gate that stops anything: this module reports facts and
+decisions; a caller acts on them.
 """
 import ctypes
 import json
+import math
+import mmap
 import os
 import sys
 import time
@@ -305,6 +315,207 @@ def footprint(pid):
     except (OSError, ValueError, OverflowError):
         pass
     return None
+
+
+# ------------------------------------------------------------------------------------------ derived limits
+PAGE_SIZE = mmap.PAGESIZE
+DEFAULTS = {"mode": None, "reserve_fraction": None, "max_share_fraction": None, "cpu_reserve_cores": None,
+            "load_hold_ratio": None, "swapout_hold_mb_per_s": None, "shed": None, "max_goals": None,
+            "max_verify_workers": None, "hold_alert_minutes": None}
+# Policy defaults, ratios of the machine. Uncalibrated: not measured against a real exhaustion.
+RESERVE_FRACTION = 0.20
+SHARE_FRACTION = 0.60
+SESSION_FRACTION = 1 / 32
+LOAD_HOLD_RATIO = 1.0
+PSI_HOLD = 10.0
+RESUME_SAMPLES = 2
+SAMPLE_GAP = 2.0
+_MODES = ("enforce", "observe", "off")
+_SHEDS = ("verify", "off")
+
+
+def _number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _valid(key, value):
+    if key == "mode":
+        return value in _MODES
+    if key == "shed":
+        return value in _SHEDS
+    if key in ("reserve_fraction", "max_share_fraction"):
+        return _number(value) and 0 < value < 1
+    if key in ("load_hold_ratio", "swapout_hold_mb_per_s"):
+        return _number(value) and value > 0
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def resolve_config(cfg):
+    """(resolved, notes): every DEFAULTS key, None where absent, null or bad; a bad value adds one note."""
+    resolved, notes = dict(DEFAULTS), []
+    if cfg is None:
+        return resolved, notes
+    if not isinstance(cfg, dict):
+        return resolved, ["resource: config block is not an object; limits derived"]
+    for key, value in cfg.items():
+        if key not in DEFAULTS:
+            notes.append("resource.%s: unknown key ignored" % key)
+        elif value is None:
+            continue
+        elif _valid(key, value):
+            resolved[key] = value
+        else:
+            notes.append("resource.%s: bad value %r read as derived" % (key, value))
+    return resolved, notes
+
+
+class Limits:
+    def __init__(self, **values):
+        self.__dict__.update(values)
+
+    def headroom_for(self, available):
+        return min(available - self.reserve - self.unmaterialised, self.share_cap - self.leased)
+
+    def admits(self, kind, running=0):
+        if self.critical:
+            return False
+        if kind == "goal":
+            return not self.goal_block
+        return not self.goal_block or running < 1
+
+
+def derive(sample, config=None, leases=(), observed=None):
+    """Limits for this machine. `leases` are (cost_bytes, materialised) pairs; `observed` may hold `session_cost`."""
+    cfg, notes = resolve_config(config)
+    reserve = int(sample.total * (cfg["reserve_fraction"] or RESERVE_FRACTION))
+    share_cap = int(sample.total * (cfg["max_share_fraction"] or SHARE_FRACTION))
+    cpu_reserve = cfg["cpu_reserve_cores"] or max(1, -(-sample.cpu_count // 8))
+    load_hold = (cfg["load_hold_ratio"] or LOAD_HOLD_RATIO) * sample.cpu_count
+    session = (observed or {}).get("session_cost")
+    session_cost = int(session) if _number(session) and session > 0 else int(sample.total * SESSION_FRACTION)
+    pressure = sample.pressure
+    if isinstance(pressure, dict):
+        some = pressure.get("some")
+        level = 0
+        psi_high = _number(some) and some > PSI_HOLD
+    else:
+        level = pressure if isinstance(pressure, int) and not isinstance(pressure, bool) else 0
+        psi_high = False
+    critical = level >= 4 or sample.available < reserve / 2
+    limits = Limits(
+        mode=cfg["mode"] or "enforce", shed=cfg["shed"] or "verify", reserve=reserve, share_cap=share_cap,
+        cpu_reserve=cpu_reserve, load_hold=load_hold, session_cost=session_cost,
+        swap_hold=cfg["swapout_hold_mb_per_s"], max_goals=cfg["max_goals"],
+        max_verify_workers=cfg["max_verify_workers"], hold_alert_minutes=cfg["hold_alert_minutes"],
+        unmaterialised=sum(c for c, done in leases if not done), leased=sum(c for c, _ in leases),
+        goal_block=level >= 2 or psi_high or critical, critical=critical,
+        uncalibrated=True, notes=notes)
+    limits.headroom = limits.headroom_for(sample.available)
+    return limits
+
+
+# ------------------------------------------------------------------------------------------- hysteresis
+class Decision:
+    def __init__(self, state, reason, resource, since, retry_after, swap_rate=None):
+        self.state, self.reason, self.resource = state, reason, resource
+        self.since, self.retry_after, self.swap_rate = since, retry_after, swap_rate
+
+    def as_dict(self):
+        return {"state": self.state, "since": self.since, "reason": self.reason, "resource": self.resource,
+                "retry_after": self.retry_after}
+
+
+def _hold_level(values):
+    """Hold decisions use the lowest of the last three readings."""
+    return min(values[-3:])
+
+
+def _resume_level(values):
+    """Resume uses the higher of the lowest two of the last three readings."""
+    return sorted(values[-3:])[min(1, len(values[-3:]) - 1)]
+
+
+def _spaced_run(times, need, gap):
+    """True when the last `need` timestamps exist and each is at least `gap` seconds after the one before."""
+    run = times[-need:]
+    return len(run) >= need and all(b - a >= gap for a, b in zip(run, run[1:]))
+
+
+def swap_rate(history):
+    """MB/s of swap-out over the last three samples; None when it cannot be told."""
+    pair = history[-3:]
+    if len(pair) < 2 or pair[-1].swapouts_at <= pair[0].swapouts_at:
+        return None
+    pages = pair[-1].swapouts - pair[0].swapouts
+    return max(pages, 0) * PAGE_SIZE / 1e6 / (pair[-1].swapouts_at - pair[0].swapouts_at)
+
+
+def decide(history, limits, unit_cost, prior="open", resume_samples=RESUME_SAMPLES, sample_gap=SAMPLE_GAP,
+           now=None):
+    """Hold or open for one requested unit costing `unit_cost` bytes. `history` is oldest first."""
+    now = time.time() if now is None else now
+    rate = swap_rate(history)
+    avail = [s.available for s in history]
+    held = prior == "hold"
+    resume_line = unit_cost + limits.session_cost
+    reason = resource = None
+    if limits.critical:
+        reason, resource = "critical", "memory"
+    elif limits.swap_hold and rate is not None and rate > (limits.swap_hold / 4 if held else limits.swap_hold):
+        reason, resource = "swap", "swap"
+    elif held:
+        ok = (limits.headroom_for(_resume_level(avail)) >= resume_line
+              and all(limits.headroom_for(a) >= resume_line for a in avail[-resume_samples:])
+              and _spaced_run([s.swapouts_at for s in history], resume_samples, sample_gap))
+        if not ok:
+            reason, resource = "memory", "memory"
+    elif limits.headroom_for(_hold_level(avail)) < unit_cost:
+        reason, resource = "memory", "memory"
+    if reason and limits.mode != "enforce":
+        return Decision("open", "%s: would hold (%s)" % (limits.mode, reason), None, now, None, rate)
+    if reason:
+        return Decision("hold", reason, resource, now, now + sample_gap * resume_samples, rate)
+    return Decision("open", "ok", None, now, None, rate)
+
+
+# --------------------------------------------------------------------------------------------- hold.json
+def hold_path(env=None):
+    env = os.environ if env is None else env
+    if env.get("SIGMA_RESOURCE_DIR"):
+        return os.path.join(env["SIGMA_RESOURCE_DIR"], "hold.json")
+    base = env.get("XDG_STATE_HOME") or os.path.join(env.get("HOME") or os.path.expanduser("~"), ".local", "state")
+    return os.path.join(base, "sigma", "resource", "hold.json")
+
+
+def write_hold(path, decision, _replace=os.replace):
+    """Write the decision as hold.json by atomic rename: a reader sees the old file or the new, never half."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as handle:
+        handle.write(json.dumps(decision.as_dict(), sort_keys=True))
+        handle.flush()
+        os.fsync(handle.fileno())
+    _replace(tmp, path)
+
+
+def read_hold(path):
+    """(record, notes). Absent reads as open; truncated or corrupt reads as open plus one note."""
+    open_record = {"state": "open", "since": None, "reason": None, "resource": None, "retry_after": None}
+    try:
+        with open(path, "r") as handle:
+            text = handle.read()
+    except FileNotFoundError:
+        return open_record, []
+    except (OSError, UnicodeDecodeError):
+        return open_record, ["hold.json unreadable; read as open"]
+    try:
+        record = json.loads(text)
+        if (isinstance(record, dict) and record.get("state") in ("open", "hold")
+                and set(record) == set(open_record)):
+            return record, []
+    except ValueError:
+        pass
+    return open_record, ["hold.json corrupt; read as open"]
 
 
 USAGE = ("usage: resource_guard.py sample [--json]\n"

@@ -34,6 +34,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 - **`resource_guard.py sample [--json]` reads the machine's memory, swap, pressure and CPU (#1597).** New stdlib-only readers (ctypes on macOS; /proc and cgroup v2 on Linux) return a typed `Sample` plus a per-process `footprint(pid)`; any other platform or an unreadable total raises `Unsupported` and the command exits 3. Nothing calls it yet; no process is spawned and no file written.
 
+- **`resource_guard.py` derives limits from the machine (#1598).** `derive` and `decide` turn a reading into a memory reserve, share cap and CPU reserve as ratios of the machine, hold on the lowest of three samples and resume on the higher of the lowest two, and `hold.json` is written by atomic rename; the new `resource` config block is all-null (derived) and documented in `docs/configuration.md`.
+
 ## 1.0.15 — 2026-10-16 — the Rulebook learns and acts: declared question kinds, live comparisons, applier asks and vetoes, importance-ranked rule suggestions, upkeep union merge and agent conflict level, claim release, and ledger host privacy
 - The applier opens no ask for a park a person already answered (keep-parked, unpark or promote), so a sync after a rule is approved never turns an earlier human decision into a rule action (found by the acceptance run).
 - The goal-replay conflict cause probe now has a per-pass time budget (three guard timeouts, after which findings keep the original wording), and the rebase's reported text in the finding is sanitised and capped; a probe/replay disagreement is documented as unknown (#1537).
