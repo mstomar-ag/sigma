@@ -1180,6 +1180,85 @@ def test_a_real_conflict_is_still_reported_as_a_conflict(tmp_path):
     assert filed[0]["title"] == "Rebase conflict: %s onto %s" % (FEATURE, INTEGRATION)
 
 
+# --------------------------------------------------------------------------- #1490: findings are parked
+
+
+class _ParkSource:
+    """A recording stand-in for the issue host: what the REAL filer would send."""
+
+    def __init__(self):
+        self.created, self.parked = None, []
+
+    def create_dependency(self, title, body, assignee, labels=(), goal_label=True):
+        self.created = {"title": title, "body": body, "labels": list(labels), "goal_label": goal_label}
+        return "61"
+
+    def park(self, goal, reason, tier=None):
+        self.parked.append((str(goal), reason))
+
+    def fetch_title_body(self, goal):
+        return ("t", "")
+
+    def ensure_label(self, name):
+        pass
+
+    def note(self, goal, text):
+        pass
+
+
+def _real_filer(m, tmp_path, triage_on=True):
+    """Route feature_rebase's filing through the REAL handoff.create_tracked_issue with a fake host."""
+    real, src = _load("handoff"), _ParkSource()
+    cfg = {"ledger": {"enabled": True, "actor": "amy"}}
+    if not triage_on:
+        cfg["ai_filed"] = {"triage": {"enabled": False}}
+
+    def create(sdlc_dir, config, goal, area, why, **kw):
+        return real.create_tracked_issue(sdlc_dir, cfg, goal, area, why, source=src, dedup=False, **kw)
+
+    m._HANDOFF = types.SimpleNamespace(create_tracked_issue=create, DEFAULT_PRIORITY="P1")
+    return src
+
+
+def _assert_parked_finding(src, kind):
+    assert src.created["goal_label"] is False
+    assert "sdlc:needs-confirmation" not in src.created["labels"]
+    assert "priority:P1" not in src.created["labels"] and "priority:P4" in src.created["labels"]
+    assert len(src.parked) == 1 and "sigma-qkind: %s" % kind in src.parked[0][1]
+
+
+def test_direct_commit_finding_through_the_real_filer_is_parked_needs_decision(tmp_path):
+    m = _mod()
+    world = World(tmp_path).build(feature_commits=(
+        ("f.txt", "f", "feat: land a goal (#11)"), ("h.txt", "h", "quick fix, straight onto the branch")))
+    world.move_integration()
+    src = _real_filer(m, tmp_path)
+    _upkeep(m, world)
+    assert "Direct commits on" in src.created["title"]
+    _assert_parked_finding(src, "needs_decision")
+
+
+def test_goal_conflict_finding_through_the_real_filer_is_parked_merge_conflict(tmp_path):
+    m = _mod()
+    world = World(tmp_path).build(
+        feature_commits=(("seed.txt", "feature edit", "feat: touch the seed (#11)"),))
+    world.move_integration(name="seed.txt", body="integration edit")
+    src = _real_filer(m, tmp_path)
+    assert _upkeep(m, world)["outcome"] == m.CONFLICT
+    assert src.created["title"].startswith("Rebase conflict")
+    _assert_parked_finding(src, "merge_conflict")
+
+
+def test_finding_with_triage_off_keeps_the_legacy_label(tmp_path):
+    m = _mod()
+    world = World(tmp_path).build(
+        feature_commits=(("seed.txt", "feature edit", "feat: touch the seed (#11)"),))
+    world.move_integration(name="seed.txt", body="integration edit")
+    src = _real_filer(m, tmp_path, triage_on=False)
+    _upkeep(m, world)
+    assert "sdlc:needs-confirmation" in src.created["labels"] and src.parked == []
+
+
 # --------------------------------------------------------------------------- F4: silence and truncation
 
 
