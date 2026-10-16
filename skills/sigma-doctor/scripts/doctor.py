@@ -1230,6 +1230,10 @@ def _blocker_rank_row(cfg, sdlc_dir, now=None):
         if not st:
             return _chk("blockers ranked below what they block: not yet checked (the reconcile tick has not run)",
                         True, "")
+        if not tick.always_repair_has_run(st):
+            # #1526: only the smart skip marker is on file; the first always repair has not run yet.
+            return _chk("blockers ranked below what they block: first repair has not run (the reconcile "
+                        "tick has not run since the mode changed)", True, "")
         now = now if now is not None else time.time()
         n = int(st.get("violations") or 0)
         last = st.get("last_repair")
