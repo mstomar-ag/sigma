@@ -376,7 +376,6 @@ def test_1692_no_time_left_for_a_retry_parks_with_the_last_reason(srig, tmp_path
     m, w, report, spy = run_session(srig, tmp_path, world=w)
     assert len(resolves(srig)) == 1 and "unit-line-dropped" in report["why"] and not spy.pushes()
     assert level2.SESSION_RETRIES >= 1
-=======
     got, label = launcher.session_wall("darwin", have, "/fakehome", "/tmp/s", ["/tmp/scr"])
     assert label == "sandbox-exec" and got[:2] == ["/usr/bin/sandbox-exec", "-p"]
     prof = got[2]
@@ -409,4 +408,3 @@ def test_the_shipped_plan_takes_its_prefix_from_the_wall(wired, monkeypatch, tmp
     assert wired._level1_options(agent_cfg(), str(tmp_path), str(tmp_path))["level2"]["net_prefix"] == ["/w/wrap", "-p", "x"]
     monkeypatch.setattr(launcher, "session_wall", lambda platform, which, home, session_dir, extra=(): (None, None))
     assert wired._level1_options(agent_cfg(), str(tmp_path), str(tmp_path))["level2"]["net_prefix"] is None
->>>>>>> fork/feature/rulebook-learning
