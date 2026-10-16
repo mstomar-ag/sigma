@@ -4,7 +4,6 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-- The `archive_after_days` template note, the record-ceiling warning and the write-surface gate no longer tell a reader to run an archive verb that does not exist; they say `archive` is a library function nothing calls automatically (#1508).
 - The goal-replay conflict cause probe now has a per-pass time budget (three guard timeouts, after which findings keep the original wording), and the rebase's reported text in the finding is sanitised and capped; a probe/replay disagreement is documented as unknown (#1537).
 - **Upkeep's agent level is hardened (#1536).** A sweep child that finds its sweep counter missing, inactive or from another run now fails closed (the single-unit pass is unchanged), a resolver result that drops a line the integration side added is refused as `base-line-dropped` naming a few lines, and the doctor's `resolver configured` row fails while the model still resolves to the placeholder id.
 - The goal-replay conflict finding now says whether the upkeep pass caused it: a read-only `git merge-tree` of the goal tip against the unit's previous tip reports it as pre-existing (with the previous tip, backup ref and conflicted paths), introduced by the pass, or unknown, and only the introduced case says the pass brought the conflict forward (#1494).
@@ -68,6 +67,7 @@ All notable changes to Sigma are recorded here, newest first.
 - `gh auth` no longer reads "not logged in" when both `gh auth status` attempts and the REST fallback fail on the network (timeout, connection error); the doctor row now says cannot verify, names the network failure and offers no interactive login (#1527).
 - `board_migrate.py --apply` no longer raises when a seeded card is deleted before the final snapshot: it prints a failure, asks the operator to run the migration again and exits 1, and cards with null content are counted as `other` so the board breakdown adds up (#1525).
 - The per-unit upkeep record is now written even when the base tip cannot be read (the base tip is stored as null), and a `current` pass whose report has no usable tip refreshes the stored unit tip from the checkout; the landed-unit skip is documented as the only writer on its path (#1532).
+- The `archive_after_days` template note, the record-ceiling warning and the write-surface gate no longer tell a reader to run an archive verb that does not exist; they say `archive` is a library function nothing calls automatically (#1508).
 
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
