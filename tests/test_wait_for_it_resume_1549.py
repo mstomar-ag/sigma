@@ -104,3 +104,57 @@ def test_a_persons_other_route_posts_no_waiting_note(tmp_path):
     au = _mod("auto_unpark")
     posted = _comments_of_resolve(tmp_path, "dependency", "drop this")
     assert not any(au.WAITING_MARKER in c for c in posted)
+
+
+# --- #1630: a park applied by label only (no Sigma park comment) outranks an older waiting note.
+# PROVISIONAL signal (owner to ratify): the time of the newest `sdlc:parked` label event.
+def _sweep_with_events(comments, states, events):
+    """Like `_sweep`, but the fake gh also answers the issue-events read with `events` (a list, or an
+    exception to raise). The comments in the fake are all stamped 2026-01-01T00:00:00Z."""
+    au = _mod("auto_unpark")
+    issue = TA._parked_issue(42, body="blocked by #7")
+    base = TA._sweep_runner(states=states, comments={"42": comments})
+
+    def run(args):
+        if any(str(a).endswith("issues/42/events") or "issues/42/events?" in str(a) for a in args):
+            run.event_reads.append(list(args))
+            if isinstance(events, Exception):
+                raise events
+            return json.dumps(events)
+        return base(args)
+    run.event_reads = []
+    src = au.sources.GitHubSource(TA._config(), run=run)
+    return au.compute_unpark_actions(".sdlc", TA._config(), src, [issue], run=run), run
+
+
+def _labeled(at, name="sdlc:parked"):
+    return {"event": "labeled", "created_at": at, "label": {"name": name}}
+
+
+def test_label_only_repark_after_the_waiting_note_is_not_resumed(tmp_path):
+    comments = [PARK] + _applied_note(tmp_path)
+    (actions, resolved), run = _sweep_with_events(
+        comments, {"7": "CLOSED"}, [_labeled("2026-02-01T00:00:00Z")])
+    assert run.event_reads, "the sweep must read the label events"
+    assert actions == [] and resolved == {}
+
+
+def test_a_waiting_note_newer_than_the_label_event_still_resumes(tmp_path):
+    comments = [PARK] + _applied_note(tmp_path)
+    (actions, resolved), _run = _sweep_with_events(
+        comments, {"7": "CLOSED"}, [_labeled("2025-12-01T00:00:00Z")])
+    assert [a["action"] for a in actions] == ["swap-label"] and resolved == {"42": ["7"]}
+
+
+def test_other_labels_events_do_not_count_as_a_repark(tmp_path):
+    comments = [PARK] + _applied_note(tmp_path)
+    (actions, _r), _run = _sweep_with_events(
+        comments, {"7": "CLOSED"}, [_labeled("2026-02-01T00:00:00Z", name="sdlc:goal")])
+    assert [a["action"] for a in actions] == ["swap-label"]
+
+
+def test_no_readable_label_event_leaves_the_behaviour_unchanged(tmp_path):
+    comments = [PARK] + _applied_note(tmp_path)
+    for events in ([], RuntimeError("events unreadable")):
+        (actions, resolved), _run = _sweep_with_events(comments, {"7": "CLOSED"}, events)
+        assert [a["action"] for a in actions] == ["swap-label"] and resolved == {"42": ["7"]}

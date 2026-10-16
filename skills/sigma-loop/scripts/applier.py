@@ -253,6 +253,9 @@ def _park_info(source, issue):
                 declared = _load("qkind").parse_line(body) or declared
                 last_body = body
         reset = _load("qkind").parse_reset_line(last_body) if declared == "quota" else None
+        if reset is not None and reset - (park_at or datetime.datetime.now(datetime.timezone.utc)) \
+                > datetime.timedelta(days=_load("qkind").MAX_RESET_DAYS):
+            reset = None                     # #1641: the parser's far-future bound, applied on this read path too
         return {"labels": data.get("labels"), "qkind": declared, "park": u.park_stamp(comments),
                 "park_at": park_at, "reset_at": reset}
     except Exception:
