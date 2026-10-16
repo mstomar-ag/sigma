@@ -276,6 +276,20 @@ def test_chained_imperatives_and_quotes_follow_the_structural_rule():
         assert m.decide("x", text, {}, _cfg()).kind == "arm", text
 
 
+def test_quoted_deny_word_after_an_action_verb_holds():
+    m = _mod()
+    for text in ("Then `force push` to main", "Execute `rotate credentials` now",
+                 "We should 'rotate the credentials' tonight",
+                 'Next, "delete the production data" for tenant 5',
+                 "Redact the logs to nuke production data"):
+        d = m.decide("Cleanup", text, {}, _cfg())
+        assert d.kind == "park" and d.matched == "hard-stop word", text
+        assert text.split(",")[-1].strip()[:20].lower() in d.reason.lower() or "in:" in d.reason, text
+    for text in ("`force push` is refused", "Add a detector for `force push` shapes",
+                 "Make `force push` a refused word.", 'The word "force push" is in the list.'):
+        assert m.decide("Cleanup", text, {}, _cfg()).kind == "arm", text
+
+
 def test_protective_opener_does_not_clear_a_later_action():
     m = _mod()
     for text in ("Redact keys to delete all rows", "Verify backups before you force push",

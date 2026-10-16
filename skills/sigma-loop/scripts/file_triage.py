@@ -136,12 +136,31 @@ _PASSIVE = re.compile(r"\b(?:are|is) (?:read|listed|reported|detected|logged|red
 _WORD = re.compile(r"[a-z']+")
 
 
+_NAMING = frozenset("make call name label term mention list".split())
+_MODAL = frozenset("should must will can could then next now".split())
+
+
+def _quoted_holds(clause, at, span_at):
+    """True when a deny word inside a quoted span follows an action verb or hand-off word (#1704)."""
+    before = _WORD.findall(clause[:span_at])
+    if not before:
+        return not (_PASSIVE.search(clause) or any(w in _COPULA for w in _WORD.findall(clause[at:])))
+    last = before[-1]
+    if last in _NAMING:
+        return False
+    return last in _ACTION or last in _HANDOFF or last in _MODAL
+
+
 def _descriptive(clause, at, deny):
     """True when the deny word at `at` in this clause is described rather than done."""
     prefix = clause[:at]
     before = _WORD.findall(prefix.lower())
     if any(w in _ACTION for w in before) or (before and before[-1] in _HANDOFF):
         return False
+    if "to" in before:  # a purpose clause ("redact X to nuke Y") is action unless it names a protective verb
+        nxt = before[len(before) - before[::-1].index("to"):][:1]
+        if nxt and nxt[0] not in _PROTECT and nxt[0] not in _DETERMINER:
+            return False
     if _NP_HEAD.search(prefix) or _PASSIVE.search(clause):
         return True
     words = _WORD.findall(_LEAD.sub("", _BULLET.sub("", clause)).lower())
@@ -157,12 +176,24 @@ def _descriptive(clause, at, deny):
     return False
 
 
+def _quoted_deny(clause, w):
+    """True when a quoted span holds the deny word in action position (#1704)."""
+    low = clause.lower()
+    for m in _QUOTED.finditer(clause):
+        at = low.find(w, m.start(), m.end())
+        if at >= 0 and _quoted_holds(low, at, m.start()):
+            return True
+    return False
+
+
 def _action_sentence(text, word):
     """-> the (trimmed) first clause holding `word` in action position, else None."""
     w = word.lower()
     if not w:
         return None
     for clause in _CLAUSES.split(text):
+        if _quoted_deny(clause, w):
+            return " ".join(clause.split())[:100]
         low = _QUOTED.sub(" ", clause).lower()
         at = low.find(w)
         if at < 0:

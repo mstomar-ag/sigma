@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 - Filing triage now parks euro and pound amounts (symbol, code or word) near a compute noun as spend, like dollar amounts; fenced blocks and amounts with no compute noun still arm (#1710).
+- **A quoted or backticked deny word after an action verb now holds the filing (#1704).** A command in quotes after a verb, a hand-off word or a purpose clause (redact X to nuke Y) parks again; quoted mentions after a noun head or a naming verb still arm.
 - The Decision Rulebook doc's migration section no longer says rebase upkeep findings still get the legacy confirmation label while triage is on; it names the triage-off exception, and a docs-claim test pins it (#1709).
 - **The upkeep confinement docs list what the macOS wall does not cover (#1712).** The profile allows everything by default, so the keychain and mach services stay reachable, reads outside the listed credential directories stay open, and writes to the temp areas stay open. The dead `SESSION_ARGV` constant is removed; the doctor flag check now reads `session_argv(True)`.
 - **The applier now says when evidence behind the default branch holds it (#1699).** A real tick and `--dry-run` print `applier: held - <reason>` instead of nothing or `would behind`, and the doctor applier row adds `HELD: <reason>` until a later tick runs; pull to clear. Output with current evidence is unchanged.
