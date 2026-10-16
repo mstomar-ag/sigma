@@ -101,6 +101,8 @@ Nothing below is needed for the rest of Sigma. Do the steps in order and stop wh
 10. **Last, and only if you want it: the applier.** Set `rulebook.autonomy.applier.enabled` to `true`, with the
     conservative defaults. It needs the ledger watcher running, because the watcher runs its tick. Before starting the watcher, check for a leftover `.sdlc/state/watch.stop`
     and remove it: while that file exists the watcher exits at once and the applier never runs.
+    Before turning it on, run `unpark.py report <sdlc_dir>`: it lists every parked or blocked issue with its kind, area,
+    matching rule, level and whether the applier would act now, later or never, and writes nothing.
 
 ## What it will never do
 
@@ -313,6 +315,7 @@ What the tick does, in order:
 1. Reads owner comments. An owner's exact `no` on a **pending** ask cancels it. An owner's `no` on an **applied** ask,
    posted after it was applied and inside the window, records a veto. The veto is judged by the comment's own time, so
    a late tick still honours it, up to `stale_after_intervals` watch intervals past the window.
+   A pending ask stuck past twice its window is read at most once per window (`veto_read_at` on the ask), so its `no` can land up to one window late.
 2. Plans actions. An ask is applied only when all hold: nobody answered, the window (`window_minutes`, default 1440)
    has passed, the kind is not a hard-stop kind, the derived level is at least 3, exactly one sealed approved rule
    matches, and fewer than `max_auto_applied_per_day` (default 3, 0 stops it) were applied in the last 24 hours.
