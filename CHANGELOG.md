@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- The upkeep engine now records the per-unit state file (`.sdlc/state/upkeep/units/<unit>.json`) at its single exit on every pass, under the unit lock, and the job no longer records the same outcome a second time (#1492).
 - With triage on, a rebase-upkeep finding (goal-branch conflict, parked conflict, direct commits, would-drop refusal) is now filed parked with a declared question kind (`merge_conflict` or `needs_decision`), a park event and the lowest triage priority instead of P1, and no longer carries the legacy confirmation label, so the doctor no longer reports it as a leftover; with triage off nothing changes (#1490).
 - **`rule_draft.py suggest` ranks which question kind and area pairs deserve a rule (#1513).** It scores each pair from parks, hours parked, goals blocked and answer agreement, names the majority option and whether one any-area rule covers it, never lists hard-stop or unknown kinds, and `--propose N` drafts the top N as proposals (never approved); the doctor's rulebook row lists the top uncovered pairs when rules are on.
 - The source-error downgrade-to-park declares `quota` for a quota or budget failure and `needs_decision` otherwise, and the stale-worktree escalation park declares `needs_decision` (#1524).
@@ -22,6 +23,7 @@ All notable changes to Sigma are recorded here, newest first.
 - A needs_decision closing answer is now normalised through the bank (case, spacing, a trailing recommended marker) into the stored `answer`; other text is `free` and never learnable (#1521).
 
 - **The applier now asks for parks that already exist, never asks twice for one park, and counts its window from when a rule became eligible (#1499).** `applier.py` runs a bounded sync (20 reads per tick) before each tick, an ask in any state covers its park, a new park or an unpark supersedes or closes the old ask (superseded asks are pruned after two days), an ask opened below level 3 is armed with one notice comment and a fresh window, the applied record carries its gesture and answer, and `applier.py <dir> --dry-run` prints the plan and writes nothing. Closed, nothing changes.
+- A merge parked for a missing approval now says the PR is not approved and how to approve it, instead of blaming GraphQL; the failed-read (budget) park keeps its wording (#1506).
 
 - `promote.py migrate-confirmation` now arms an item whose only hold is an open blocker (`sdlc:goal` plus the `sdlc:blocked` overlay, reason `armed (held by #N)`) instead of parking it; the pick-time dependency hold and auto-unpark take it from there (#1518).
 
@@ -54,6 +56,7 @@ All notable changes to Sigma are recorded here, newest first.
 - **Docs state that a merged goal branch is deleted on the remote (#1512).** The branch-shape section of the branching model now names the delete after `work.py merge`, the guards that refuse it, and that it cannot be turned off.
 - Switching `discovery.blocker_promotion.mode` from `"smart"` to `"always"` no longer lets the smart skip marker swallow the one-time first-run preview, and the doctor row reads "first repair has not run" until the first always tick runs instead of a zero count; always-from-fresh and smart are unchanged (#1526).
 - `gh auth` no longer reads "not logged in" when both `gh auth status` attempts and the REST fallback fail on the network (timeout, connection error); the doctor row now says cannot verify, names the network failure and offers no interactive login (#1527).
+- `board_migrate.py --apply` no longer raises when a seeded card is deleted before the final snapshot: it prints a failure, asks the operator to run the migration again and exits 1, and cards with null content are counted as `other` so the board breakdown adds up (#1525).
 
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
