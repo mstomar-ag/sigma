@@ -291,6 +291,15 @@ closed, brief and resolve output is unchanged.
 `approve` refuses, with one line, for an unknown id, an already approved rule, a non-owner, an unresolved login or a
 closed gate. For a login that is not an owner it prints the line that asks an owner to approve, and the rule stays proposed.
 
+### Auto-approve (opt-in, off by default)
+
+With `rulebook.rules.auto_approve` set to the JSON boolean true (and the rules, autonomy and records parts open, and at least one name in `rulebook.autonomy.owners`), the watcher tick, `rule_draft.py list` and `rule_draft.py suggest` draft and approve a rule for every learned pair that has a unique majority option, at any level and without the held-out exam.
+The rule is approved as the first configured owner and carries `approved_by` and `auto: true`; each approval writes one decision record with gesture `approve` and how `autonomous`.
+The applier arms such a rule at once, at any level, and applies it after the window; the window, the daily cap, the re-ask age, the person-wins rule and an owner `no` all still apply.
+A `no` after an auto rule was applied reverts the goal and lowers the pair as usual, and the rule is then held until an owner reconfirms it by hand with `rule_draft.py reconfirm`.
+Hard-stop kinds, the `unknown` kind, shape-only options and pairs that already have a rule are never drafted.
+The doctor shows a warning row, `rules: auto-approve ON (rulebook.rules.auto_approve)`, while it is on. Hand-editing `auto` or `approved_by` breaks the seal and the rule stops counting.
+
 ## The applier and the veto window
 
 The applier is the one part that answers for a person. It is a separate gate, `rulebook.autonomy.applier.enabled`,
@@ -560,6 +569,7 @@ flag, which closes the whole block.
 | `autonomy.applier.stale_after_intervals` | `3` | watch intervals without a tick that the doctor reads as dead |
 | `autonomy.applier.prune_after_days` | `30` | age at which an applied ask with no veto is deleted |
 | `rules.enabled` | `false` | open the rules part |
+| `rules.auto_approve` | `false` | let the watcher approve learned rules as the first owner (see Auto-approve) |
 | `rules.path` | `".sdlc/rulebook.json"` | where the rule file lives |
 | `rules.reask_days` | `90` | age at which an approved rule is due for confirmation |
 | `rules.draft.min_agreement` | `0.90` | agreement of held-out answers needed to draft |
