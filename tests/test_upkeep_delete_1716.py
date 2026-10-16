@@ -140,3 +140,22 @@ def test_rule2_integration_lines_found_elsewhere_in_the_resolved_tree_let_the_de
     m, w, report, spy = run_session(drig, tmp_path, world=w)
     assert report["outcome"] == m.REBASED, report.get("why")
     assert len(spy.pushes()) == 1 and report["backup"]
+
+
+def test_rule1b_an_oversize_dropped_list_is_truncated_so_the_review_cannot_approve_it_and_nothing_is_pushed(drig, tmp_path):
+    """Each deleted file stays under the per-side cap, so only the dropped-by-delete block (both files, ~30k) is over it."""
+    second = "src/second.txt"
+    a = ["alpha line %05d %s" % (i, "x" * 40) for i in range(250)]
+    b = ["beta line %05d %s" % (i, "y" * 40) for i in range(250)]
+    feat = {APP: "line1\n" + "\n".join(a) + "\nline3\n", second: "line1\n" + "\n".join(b) + "\nline3\n",
+            "src/extra.txt": "unrelated\n"}
+    w = l1.world(mk(tmp_path / "w"), feat=feat, integ={"other.txt": "x\n"},
+                 base_files={"CHANGELOG.md": l1.LOG % "", APP: "line1\nshared\nline3\n", second: "line1\nshared\nline3\n"})
+    _delete_in_base(w, APP)
+    _delete_in_base(w, second)
+    drig.mode({"rm": [APP, second], "declare": {APP: a, second: b}})
+    before = w.tip(FEATURE)
+    m, w, report, spy = run_session(drig, tmp_path, world=w)
+    assert report["outcome"] != m.REBASED and not spy.pushes() and w.tip(FEATURE) == before
+    assert "truncated" in report["why"] and "dropped-by-delete" in report["why"], report["why"]
+    assert not [c for c in drig.calls() if c["role"] == "review"]

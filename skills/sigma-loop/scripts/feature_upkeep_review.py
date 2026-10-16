@@ -181,12 +181,15 @@ def build_brief(files, pr_descriptions, dropped=None):
     if dropped:
         prompt += (" Some files were deleted on purpose and the lines listed in the dropped-by-delete block are lost with them. "
                    "Approve ONLY if you explicitly accept losing every listed line; otherwise block.")
-        body = "\n".join("dropped by delete: %s\n%s" % (name, "\n".join("  " + str(l) for l in lines)) for name, lines in sorted(dropped.items()))
-        blocks.append(("dropped-by-delete", _cap(body, MAX_FILE_CHARS)))
+        blocks.append(("dropped-by-delete", _cap(_dropped_body(dropped), MAX_FILE_CHARS)))
     return prompt, blocks
 
 
-def truncation(files, pr_descriptions):
+def _dropped_body(dropped):
+    return "\n".join("dropped by delete: %s\n%s" % (name, "\n".join("  " + str(l) for l in lines)) for name, lines in sorted(dropped.items()))
+
+
+def truncation(files, pr_descriptions, dropped=None):
     """-> reasons the brief would be incomplete: a cap that cuts or drops input. A reviewer shown part of the material cannot
     approve the whole, so the entry point blocks on any reason here rather than launching on a partial brief."""
     files, prs, why, used = list(files or ()), list(pr_descriptions or ()), [], 0
@@ -204,6 +207,8 @@ def truncation(files, pr_descriptions):
         why.append("the brief was truncated: %d PR descriptions exceed the %d cap" % (len(prs), MAX_PR_COUNT))
     if any(len("" if t is None else str(t)) > MAX_PR_CHARS for t in prs[:MAX_PR_COUNT]):
         why.append("the brief was truncated: a PR description exceeds %d characters" % MAX_PR_CHARS)
+    if dropped and len(_dropped_body(dropped)) > MAX_FILE_CHARS:
+        why.append("the brief was truncated: the dropped-by-delete list exceeds %d characters" % MAX_FILE_CHARS)
     return list(dict.fromkeys(why))
 
 
@@ -344,7 +349,7 @@ def review(request, environ=None):
         return Review(REFUSED, ("the reviewer needs its own per-run cap, smaller than the resolver's",), VERIFIED)
     launcher = _sibling("feature_upkeep_launcher")
     model = pick_model(req.catalog, req.resolver_model, req.model)
-    cut = truncation(req.files, req.pr_descriptions)
+    cut = truncation(req.files, req.pr_descriptions, req.dropped)
     if cut:
         return _blocked(cut)
     prompt, blocks = build_brief(req.files, req.pr_descriptions, req.dropped)
