@@ -143,10 +143,32 @@ def selected(names, include, exclude):
     return sorted(n for n in names if hit(n, include or ["*"]) and not hit(n, exclude or []))
 
 
-def list_units(sdlc_dir):
+def list_units_notes(sdlc_dir):
+    """-> (sorted unit names, the registry reader's stderr notes as a list of lines). #1493: the notes are kept, not dropped."""
     registry = _sibling("feature_registry")
-    with contextlib.redirect_stderr(io.StringIO()):          # one stderr note per unreadable shard, every call
-        return sorted(registry.read(registry.registry_dir(sdlc_dir)))
+    sink = io.StringIO()
+    with contextlib.redirect_stderr(sink):                   # one stderr note per unreadable shard, every call
+        names = sorted(registry.read(registry.registry_dir(sdlc_dir)))
+    return names, [line.strip() for line in sink.getvalue().splitlines() if line.strip()]
+
+
+def list_units(sdlc_dir):
+    return list_units_notes(sdlc_dir)[0]
+
+
+def unregistered_heads(sdlc_dir, remote, cwd=None, registered=None):
+    """#1493: the remote-tracking `feature/*` branches (one local git read, no network) whose unit is not in the registry:
+    the sweep cannot see them, so nothing maintains them. Sorted unit names; [] on any error, never an exception."""
+    try:
+        if not (isinstance(remote, str) and remote and not remote.startswith("-")):
+            return []
+        known = {n.lower() for n in (list_units(sdlc_dir) if registered is None else registered)}
+        prefix = "refs/remotes/%s/%s" % (remote, _sibling("features").BRANCH_PREFIX)
+        out = _drift_runner(cwd or pathlib.Path(sdlc_dir).parent, ["for-each-ref", "--format=%(refname)", prefix])
+        names = {line.strip()[len(prefix):] for line in str(out).splitlines() if line.strip().startswith(prefix)}
+        return sorted(n for n in names if n and n.lower() not in known)
+    except Exception:                                        # noqa: BLE001 - an unanswered read is no finding
+        return []
 
 
 def refs_of(config, unit):

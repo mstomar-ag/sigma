@@ -1451,6 +1451,21 @@ def _unit_record_rows(base, run, cheap_only):
                  " a modified one: " + _REGISTRY_COMMIT_CMD)]
 
 
+def _unmaintained_row(sched, base, cfg):
+    """#1493: upkeep maintains the units the registry lists; a remote `feature/*` branch with no record is not maintained.
+    One local ref read (no network), shown whenever upkeep is on, also when no `.sdlc/features/` exists."""
+    try:
+        registered = sched.list_units(base)
+        remote = _load_loop_script("feature_rebase")._remote(cfg)
+        loose = sched.unregistered_heads(base, remote, base.parent, registered=registered)
+    except Exception:                       # noqa: BLE001 - an unanswered read is no finding
+        return _chk("upkeep units: could not be read", False, "run /sigma-doctor again")
+    names = ", ".join(_UNIT_BRANCH_PREFIX + n for n in loose[:5])
+    return _chk("upkeep units: %d registered, %d remote feature branch(es) not maintained%s"
+                % (len(registered), len(loose), (" (" + names + ")") if loose else ""), not loose,
+                "register the unit (open it with /sigma-define) or it is never kept current; see docs/upkeep.md")
+
+
 def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
     """The background upkeep scheduler's liveness and readiness rows (never a pass for something that did not run). Silent
     unless the opt-in block is on or invalid, decided by the gate's own reader, not by looking for the block here. The git
@@ -1461,6 +1476,7 @@ def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
             return []
         rows = [_chk(f"{label}: {detail}", ok, "see docs/branching-model.md for the opt-in and the stop file")
                 for label, ok, detail in sched.health(cfg, base, now)]
+        rows.append(_unmaintained_row(sched, base, cfg))
         if not cheap_only:
             pf = _load_init_script("preflight")
             runner = None
