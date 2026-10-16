@@ -212,6 +212,8 @@ def _draft_auto(sdlc_dir, qkind, area, config, now):
     rb = _load("rulebook")
     if any(r.get("qkind") == qkind and r.get("area") == area for r in rb.load(sdlc_dir, config)):
         return _refuse("the pair already has a rule")
+    if {"qkind": qkind, "area": area} in rb.retired_pairs(sdlc_dir, config):
+        return _refuse("an owner retired this pair's auto rule; draft and approve it by hand to re-arm")
     answers = _human(sdlc_dir, qkind, area, config)
     opt, share = _majority(list(answers.values()))
     if opt is None:

@@ -84,8 +84,23 @@ def over_cap(counter, goal, run, config, per_goal=True):
     return run is not None and sum(1 for e in ents if e.get("run") == run) >= lim["max_per_run"]
 
 
-def bump(path, run, goal, now, config):
-    """Record one filing and prune. -> True when written, False when the file was unreadable or unwritable."""
+def evictable(counter, goal, new_priority):
+    """#1697: the armed entry of `goal` to park so a more urgent filing fits under the per-goal cap: the lowest
+    priority, newest among equals, and only when strictly lower than `new_priority`. Entries without a recorded
+    issue and priority (older counters) are never chosen. -> the entry or None."""
+    if counter is None or not re.fullmatch(r"P[0-4]", str(new_priority)):
+        return None
+    cands = [e for e in counter.get("entries", []) if e.get("goal") == str(goal) and e.get("issue")
+             and re.fullmatch(r"P[0-4]", str(e.get("prio")))]
+    if not cands:
+        return None
+    worst = max(cands, key=lambda e: (int(e["prio"][1]), e["t"]))
+    return worst if int(worst["prio"][1]) > int(new_priority[1]) else None
+
+
+def bump(path, run, goal, now, config, issue=None, prio=None, drop=None):
+    """Record one filing and prune. -> True when written, False when the file was unreadable or unwritable.
+    `issue`/`prio` are stored for #1697's lowest-priority parking; `drop` removes that issue's entry (it was parked)."""
     try:
         cur = load(path)
         if cur is None:
@@ -93,7 +108,12 @@ def bump(path, run, goal, now, config):
         lim = limits(config)
         floor = now - lim["counter_retention_days"] * 86400
         ents = [e for e in cur["entries"] if e["t"] >= floor]
-        ents.append({"run": run, "goal": str(goal), "t": now})
+        if drop is not None:
+            ents = [e for e in ents if str(e.get("issue")) != str(drop)]
+        ent = {"run": run, "goal": str(goal), "t": now}
+        if issue is not None and re.fullmatch(r"P[0-4]", str(prio)):
+            ent.update(issue=str(issue), prio=str(prio))
+        ents.append(ent)
         ents = ents[-HARD_MAX:]
         p = pathlib.Path(str(path))
         p.parent.mkdir(parents=True, exist_ok=True)

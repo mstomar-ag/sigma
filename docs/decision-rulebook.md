@@ -302,7 +302,7 @@ The rule is approved as the first configured owner and carries `approved_by` and
 The applier arms such a rule at once, at any level, and applies it after the window; the window, the daily cap, the re-ask age, the person-wins rule and an owner `no` all still apply.
 A `no` after an auto rule was applied reverts the goal and lowers the pair as usual, and the rule is then held until an owner reconfirms it by hand with `rule_draft.py reconfirm`.
 Hard-stop kinds, the `unknown` kind, shape-only options and pairs that already have a rule are never drafted.
-The doctor shows a warning row, `rules: auto-approve ON (rulebook.rules.auto_approve)`, while it is on. Hand-editing `auto` or `approved_by` breaks the seal and the rule stops counting.
+The doctor shows a warning row, `rules: auto-approve ON (rulebook.rules.auto_approve)`, while it is on. Hand-editing `auto` or `approved_by` breaks the seal and the rule stops counting. Retiring an auto-approved rule records its pair in a top-level `retired_pairs` list in the rulebook file (only `qkind` and `area`, unsealed, since it can only restrict the auto path), and auto-approve then skips that pair until a hand `rule_draft.py draft` or an `approve` of the pair clears it (#1696).
 
 ## The applier and the veto window
 
@@ -350,7 +350,7 @@ Instead it posts a waiting note (a person's "wait for it" answer, and a rule app
 
 PROVISIONAL (owner to ratify): a park applied by label only, with no Sigma park comment, also outranks an older waiting note. When the newest `sdlc:parked` label event on the issue is later than the newest waiting note, the sweep does not resume it. If no label event can be read, the #1549 behaviour is unchanged (#1630).
 
-PROVISIONAL (owner to ratify): a `keep-parked` on a quota park (route answer "wait it out") likewise posts no opt-out marker, so the sweep may resume the goal after the quota window. Every other route still posts it.
+PROVISIONAL (owner to ratify): a `keep-parked` on a quota park (route answer "wait it out") likewise posts no opt-out marker, but the sweep does not resume it either (a quota park names no blocker), so it stays parked until a person unparks it. Every other route still posts it.
 
 A quota ask matched to the "wait it out" rule is held until the reset time the ask records (`reset_at`). A quota park whose reason names a reset (`Retry-After: N` seconds, `resets in N minutes|hours`, `resets at` an ISO time or epoch, `x-ratelimit-reset`) records it on the park (a `sigma-reset-at:` line) and on the ask; a time not in the future or over 7 days away is ignored. When no reset is named there is one behaviour: the ask waits the ordinary window (`window_minutes`) and no longer, with no separate fixed wait. Other kinds are not affected.
 
