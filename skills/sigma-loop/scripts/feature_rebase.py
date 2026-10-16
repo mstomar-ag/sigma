@@ -1707,7 +1707,8 @@ def _default_level2_plan(config, sdlc_dir=None, cwd=None):
     return {"sdlc_dir": str(sdlc_dir), "launch": dict(common, model=launcher.CATALOG[s["conflicts.agent.model"]]),
             "review_launch": dict(common, model=review_model, directory=os.path.join(root, "review"), cap_usd=review_cap), "review_cap_usd": review_cap,
             "review_model": review_model, "resolver_root": os.path.join(root, "resolver"), "limits": None, "host": "claude",
-            "environ": None, "config": config, "max_units_per_sweep": int(s["conflicts.agent.max_units_per_sweep"])}
+            "environ": None, "config": config, "max_units_per_sweep": int(s["conflicts.agent.max_units_per_sweep"]),
+            "session": True, "net_prefix": None}      # #1573: a wall around the model CLI itself would cut its own API access
 
 
 LEVEL2_PLAN_FACTORY = _default_level2_plan
