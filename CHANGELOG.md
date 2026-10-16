@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **`resource_lease.py` lease-table fixes (#1715).** A lease whose pid was reused by another process (start time differs from the one recorded at admit) is reclaimed as stale; `wait --kind goal` holds while a started goal's verify is waiting, matching `admit`; releasing a lease file with no id no longer raises KeyError; `wait --max` rejects nan and negative values with a usage error (exit 2).
 - Filing triage now parks euro and pound amounts (symbol, code or word) near a compute noun as spend, like dollar amounts; fenced blocks and amounts with no compute noun still arm (#1710).
 - The Decision Rulebook doc's migration section no longer says rebase upkeep findings still get the legacy confirmation label while triage is on; it names the triage-off exception, and a docs-claim test pins it (#1709).
 - **The applier now says when evidence behind the default branch holds it (#1699).** A real tick and `--dry-run` print `applier: held - <reason>` instead of nothing or `would behind`, and the doctor applier row adds `HELD: <reason>` until a later tick runs; pull to clear. Output with current evidence is unchanged.

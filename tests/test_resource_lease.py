@@ -193,6 +193,66 @@ def test_release_records_the_peak_footprint(lease):
     assert _leases(lease) == []
 
 
+def test_lease_whose_pid_was_reused_is_reclaimed(lease, monkeypatch):
+    """#1715: same pid, different process start time than the one recorded at admit -> stale."""
+    seed_ring(lease, "verify", [100])
+    starts = {"now": 5000.0}
+    monkeypatch.setattr(lease, "process_start", lambda pid: starts["now"])
+    old = lease.admit("verify", 1, "r", "g1", pid=os.getpid())
+    starts["now"] = 9000.0  # the pid now belongs to another process
+    lease.admit("verify", 1, "r", "g2", pid=os.getpid())
+    assert old.id + ".json" not in _leases(lease)
+
+
+def test_lease_with_unchanged_process_start_is_kept(lease, monkeypatch):
+    seed_ring(lease, "verify", [100])
+    monkeypatch.setattr(lease, "process_start", lambda pid: 5000.0)
+    keep = lease.admit("verify", 1, "r", "g1", pid=os.getpid())
+    lease.admit("verify", 1, "r", "g2", pid=os.getpid())
+    assert keep.id + ".json" in _leases(lease)
+
+
+def test_process_start_of_this_process_is_stable_and_none_when_unknown(lease):
+    first = lease.process_start(os.getpid())
+    assert first is None or first == lease.process_start(os.getpid())
+    assert lease.process_start(-1) is None
+
+
+def test_wait_for_goal_holds_while_a_started_goals_verify_waits(lease):
+    pathlib.Path(lease.state_dir()).mkdir(parents=True, exist_ok=True)
+    seed = {"verify": [100], "goal": [50]}
+    (pathlib.Path(lease.state_dir()) / "observed.json").write_text(json.dumps(seed))
+    lease.admit("session", 1, "r", "g1", pid=os.getpid())
+    lease.box["available"] = 250
+    assert isinstance(lease.admit("verify", 1, "r", "g1", pid=os.getpid()), lease.Hold)
+    lease.box["available"] = 800
+    assert lease.wait(0, "goal") == lease.EXIT_HELD  # admit holds a new goal here; wait must agree
+    assert lease.wait(0, "session") == 0  # other kinds are unaffected
+    lease.admit("verify", 1, "r", "g1", pid=os.getpid())  # the waiter clears
+    assert lease.wait(0, "goal") == 0
+
+
+def test_release_of_a_lease_file_without_an_id_does_not_raise(lease):
+    leases = pathlib.Path(lease.state_dir()) / "leases"
+    leases.mkdir(parents=True)
+    (leases / "noid.json").write_text(json.dumps({"kind": "verify", "pid": os.getpid(), "start": 1.0,
+                                                   "ttl": 10.0, "est_mem": 0}))
+    assert lease.release("noid") is True
+    assert not (leases / "noid.json").exists()
+
+
+@pytest.mark.parametrize("bad", ["nan", "-1", "-0.5"])
+def test_cli_wait_max_rejects_nan_and_negative(tmp_path, bad):
+    proc, _ = cli(tmp_path, 800, "wait", "--max", bad)
+    assert proc.returncode == 2 and "--max" in proc.stderr and "Traceback" not in proc.stderr
+
+
+def test_wait_function_rejects_nan_and_negative(lease):
+    for bad in (float("nan"), -1.0):
+        with pytest.raises(ValueError):
+            lease.wait(bad, "goal")
+
+
 # ------------------------------------------------------------------------------------------ priority and floor
 def test_waiting_verify_blocks_a_new_goal_start(lease):
     seed_ring(lease, "verify", [100])
