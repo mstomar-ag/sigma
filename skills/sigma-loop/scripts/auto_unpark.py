@@ -263,6 +263,23 @@ def keep_parked_comment(reason=""):
             f"— exempted from the auto_unpark sweep. <!-- {KEEP_PARKED_MARKER} -->")
 
 
+#: #1549: posted with a "wait for it" decision on a dependency park (a person's answer or an applied
+#: rule). It is the one thing that lets the sweep resume an `sdlc:parked` issue: the decision said to
+#: wait for the blocker, so the blocker closing is the answer. A park comment newer than it cancels it.
+WAITING_MARKER = "sigma:waiting-on-dependency"
+WAITING_NOTE = ("Waiting for the blocking issue: this park resumes by itself when it closes. "
+                "<!-- %s -->" % WAITING_MARKER)
+
+
+def _waits_on_dependency(raw_comments):
+    """True when a comment after the newest Sigma park comment carries `WAITING_MARKER`."""
+    last_park = -1
+    for i, text in enumerate(raw_comments or []):
+        if any(str(text).startswith(pre) for pre in sources.OFFBOARD_COMMENT_PREFIXES):
+            last_park = i
+    return any(legacy.has_marker(str(t), WAITING_MARKER) for t in (raw_comments or [])[last_park + 1:])
+
+
 def _is_exempt(raw_comments):
     """True when ANY of `raw_comments` (the RAW, unfiltered, uncapped per-comment text -- see
     `backlog_check._fetch_scrubbed_comments`) carries `KEEP_PARKED_MARKER`. Deliberately the raw
@@ -349,8 +366,8 @@ def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cach
         #
         # `compute_blocking_actions` deliberately still scans BOTH: a parked issue can name a live
         # blocker, and that blocker genuinely blocks something. Only RESUMING narrows.
-        if source.parked_label in names:
-            continue
+        if source.parked_label in names and not _waits_on_dependency(raw_comments):
+            continue                                    # #1549: only a "wait for it" decision may resume a park
         # #1392: ONE atomic `swap-label` action, replacing the add/remove PAIR this used to emit.
         # The stakes are highest exactly here: this is the automatic sweep, running unattended, and
         # a half-applied unpark left `sdlc:goal` added with `sdlc:parked` never removed -- which

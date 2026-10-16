@@ -432,6 +432,20 @@ def due(sdlc_dir, config, now=None):
         return []
 
 
+ACTION_WORD = {"unpark": "unpark", "keep-parked": "keep parked", "none": "only recommends"}
+
+
+def approved_rows(sdlc_dir, config):
+    """One row per approved rule: id, kind, area, option, action (the same derivation `show` uses), confirmed."""
+    rows = []
+    for r in _load("rulebook").load(sdlc_dir, config):
+        if r.get("status") == "approved":
+            rows.append({"id": r["id"], "kind": r["qkind"], "area": r["area"], "option": r["option"],
+                         "action": ACTION_WORD.get(_load("applier").option_gesture(r["qkind"], r["option"]), "unknown"),
+                         "confirmed": r.get("confirmed")})
+    return rows
+
+
 def reconfirm(sdlc_dir, rule_id, config):
     """Re-stamp one approved rule's confirmation and seal as the invoking owner. -> (ok, line). Never raises."""
     try:
@@ -489,6 +503,8 @@ def main(argv=None):
     sg.add_argument("sdlc_dir")
     sg.add_argument("--propose", type=int, default=0, metavar="N",
                     help="draft rules (never approve) for the top N uncovered pairs")
+    sub.add_parser("rules", help="every approved rule: id, kind, area, option, action, last confirmed"
+                   ).add_argument("sdlc_dir")
     sh = sub.add_parser("show", help="print what one rule does: unpark, keep parked, or only recommends")
     sh.add_argument("sdlc_dir")
     sh.add_argument("rule_id")
@@ -514,6 +530,14 @@ def main(argv=None):
             return 2
         print("%s: %s / %s -> %s (%s); %s" % (rule["id"], rule["qkind"], rule["area"], rule["option"],
                                               rule["status"], meaning(rule["qkind"], rule["option"])))
+        return 0
+    if args.verb == "rules":
+        rows = approved_rows(args.sdlc_dir, config)
+        for x in rows:
+            print("%s: %s / %s -> %s (%s); last confirmed %s" % (
+                x["id"], x["kind"], x["area"], x["option"], x["action"], (x["confirmed"] or "unreadable")[:10]))
+        if not rows:
+            print("no approved rules")
         return 0
     if args.verb == "list":
         print(json.dumps(list_patterns(args.sdlc_dir, config), indent=2))
