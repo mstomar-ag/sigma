@@ -3,11 +3,13 @@
 
     label_drain.py plan   <sdlc_dir> <label> [--json]
     label_drain.py status <sdlc_dir> <label> [--json]
+    label_drain.py arm    <sdlc_dir> <label> [--apply]
 
 Draining a label is more than filtering. Members that carry the label but are not goals are invisible
 to the picker; a member held by an open blocker outside the label stalls the run silently; a parked
 member is a question nobody has seen. This module shows the whole set, with its transitive open
-blockers, before anything is written. IT NEVER WRITES: not to GitHub, the mirror, the ledger or any
+blockers, before anything is written. `plan` and `status` NEVER WRITE (`arm`, #1577, is the one verb
+that can, and only with --apply, see `arm()`): not to GitHub, the mirror, the ledger or any
 issue, and it never deletes or removes a label (a person does that). The guarantee is structural, not
 a habit: every call goes through `_ReadOnly`, which raises on anything that is not a GET, a GraphQL
 query, or a read-only `gh` view/list.
@@ -56,8 +58,10 @@ def _load(name):
 
 
 USAGE = ("usage: label_drain.py plan|status <sdlc_dir> <label> [--json]\n"
-         "  read-only: lists the open issues carrying <label>, their open blockers, and a verdict\n"
-         "  for each. Never writes and never removes the label.")
+         "       label_drain.py arm <sdlc_dir> <label> [--apply]\n"
+         "  plan/status are read-only: they list the open issues carrying <label>, their open blockers,\n"
+         "  and a verdict for each. arm is a dry run unless --apply: it arms what plan calls unarmed.\n"
+         "  Nothing here ever removes the label or edits an issue body.")
 
 MAX_MEMBERS = 200
 MAX_PULLED = 50
@@ -485,18 +489,152 @@ def render_status(p):
     return "\n".join(out) + "\n"
 
 
+# --- arm (#1577) ---------------------------------------------------------------------------------
+
+DEFAULT_PRIORITY = "P2"
+_REFUSED = ("upper-tier", "parked", "assigned-elsewhere", "held-by-gate")
+
+
+def arm_settings(config):
+    """-> {"default_priority": str, "arm_pulled_blockers": bool} from the optional `label_drain` block.
+    A wrong-typed value reads as its default, like every other block."""
+    blk = (config or {}).get("label_drain")
+    blk = blk if isinstance(blk, dict) else {}
+    pr = blk.get("default_priority")
+    if not isinstance(pr, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,20}", pr.strip()):
+        pr = DEFAULT_PRIORITY
+    pulled = blk.get("arm_pulled_blockers")
+    return {"default_priority": pr.strip(), "arm_pulled_blockers": pulled if isinstance(pulled, bool) else True}
+
+
+def arm(sdlc_dir, label, apply=False, config=None, run=None):
+    """Arm what `plan()` calls unarmed, reusing `triage.compute_actions` / `triage.apply_actions`.
+
+    -> {"label", "apply", "actions": [triage action dicts], "refused": [{"issue", "verdict",
+    "reason"}], "notes": [str]}. Dry-run (the default) hands the source a read-only runner, so a write
+    call is impossible rather than merely skipped. Never edits a body, creates or removes a label, or
+    deletes. Raises what `plan()` raises."""
+    sources, triage = _load("sources"), _load("triage")
+    gh_api = _load("gh_api")
+    config = config if config is not None else _load("state").load_config(sdlc_dir)
+    cfg = arm_settings(config)
+    base = run or sources._run_gh
+    p = plan(sdlc_dir, label, config=config, run=base)
+    source = sources.GitHubSource(config, run=base if apply else _ReadOnly(base))
+    dependents = collections.defaultdict(list)
+    for r in p["members"] + p["outside"]:
+        for b in r["waiting_on"]:
+            dependents[b].append(r["number"])
+    todo, refused, notes = [], [], []
+    for r in p["members"] + p["outside"]:
+        outside = r["verdict"] == "outside"
+        v = r["own_verdict"] if outside else r["verdict"]
+        if v in _REFUSED:
+            refused.append({"issue": r["number"], "verdict": v, "reason": r["detail"] or v})
+        elif v == "unarmed":
+            if not outside:
+                todo.append((r["number"], None))
+            elif cfg["arm_pulled_blockers"]:
+                todo.append((r["number"], min(dependents[r["number"]] or [0])))
+            else:
+                notes.append("#%d is an open blocker outside the label; arm_pulled_blockers is off, left alone"
+                             % r["number"])
+    me = source._assignee_login()
+    prefix = source.priority_prefix
+    label_ok = {}
+    pre_by_issue, actions = {}, []
+    for n, pulled_for in sorted(todo):
+        state = triage._fetch_issue_state(source, n)
+        if state is None:
+            refused.append({"issue": n, "verdict": "unreadable", "reason": "could not read its current state"})
+            continue
+        mine = next((a for a in state["assignees"] if me and (a or "").casefold() == me), None)
+        if me and state["assignees"] and mine is None:
+            refused.append({"issue": n, "verdict": "assigned-elsewhere", "reason":
+                            "assigned to %s, not %s" % (", ".join(sorted(map(str, state["assignees"]))), me)})
+            continue
+        item = {"issue": n}
+        if not any(l.startswith(prefix) for l in state["labels"]):
+            name = prefix + cfg["default_priority"]
+            if name not in label_ok:
+                try:
+                    label_ok[name] = bool(gh_api.label_exists(source._run, name, source.repo or None))
+                except Exception:      # noqa: BLE001 - fail closed: do not mint a label
+                    label_ok[name] = False
+                if not label_ok[name]:
+                    notes.append("label %s does not exist or could not be checked; arm never creates a "
+                                 "label, so no priority is set (create it, then re-run)" % name)
+            if label_ok[name]:
+                item["priority"] = cfg["default_priority"]
+        got = triage.compute_actions({"picked": [item]}, {str(n): state}, mine or me, source.goal_label,
+                                     source.parked_label, blocked_label=source.goal_blocked_label,
+                                     proposed_label=source.proposed_label)
+        for a in got:                  # compute_actions spells the prefix `priority:` unconditionally
+            if a["action"] == "add-label" and a["detail"].startswith("priority:") and prefix != "priority:":
+                a["detail"] = prefix + a["detail"][len("priority:"):]
+        pre = []
+        if pulled_for is not None:
+            pre = [{"action": "add-label", "issue": str(n), "detail": label, "result": None, "error": None},
+                   {"action": "comment", "issue": str(n), "result": None, "error": None,
+                    "detail": "Pulled into %s as a prerequisite of #%d." % (label, pulled_for)}]
+        pre_by_issue[n] = (pre, got)
+    for n in sorted(pre_by_issue):
+        pre, got = pre_by_issue[n]
+        done_pre = []
+        for a in pre:                  # label first, then its comment; stop at the first failure so a
+            r = triage.apply_actions(source, [a], apply)[0]   # retry never posts a second comment
+            done_pre.append(r)
+            if r["result"] == "failed":
+                break
+        actions += done_pre
+        if not any(a["result"] == "failed" for a in done_pre):
+            actions += triage.apply_actions(source, got, apply)
+    return {"label": label, "apply": bool(apply), "actions": actions,
+            "refused": sorted(refused, key=lambda x: x["issue"]), "notes": notes}
+
+
+def render_arm(res):
+    out = ["arm %s (%s): %d action(s), %d refused" % (
+        res["label"], "APPLIED" if res["apply"] else "DRY-RUN", len(res["actions"]), len(res["refused"]))]
+    verbs = _load("triage")._ACTION_VERBS
+    for a in res["actions"]:
+        line = "  [%s] #%s: %s %s" % (a["result"], a["issue"], verbs.get(a["action"], a["action"]), a["detail"])
+        if a["result"] == "failed" and a.get("error"):
+            line += " -- %s" % a["error"]
+        out.append(line)
+    for r in res["refused"]:
+        out.append("  refused #%d (%s): %s" % (r["issue"], r["verdict"], r["reason"]))
+    for n in res["notes"]:
+        out.append("  note: " + n)
+    if not res["actions"]:
+        out.append("  no actions needed")
+    if not res["apply"]:
+        out.append("dry run: pass --apply to execute")
+    return "\n".join(out) + "\n"
+
+
 def main(argv, run=None):
     args = list(argv[1:])
     if args in ([], ["-h"], ["--help"]):
         print(USAGE)
         return 0 if args else 2
     as_json = "--json" in args
-    args = [a for a in args if a != "--json"]
-    if len(args) != 3 or args[0] not in ("plan", "status"):
+    do_apply = "--apply" in args
+    args = [a for a in args if a not in ("--json", "--apply")]
+    if len(args) != 3 or args[0] not in ("plan", "status", "arm") or (do_apply and args[0] != "arm") \
+            or (as_json and args[0] == "arm"):
         print(USAGE, file=sys.stderr)
         return 2
     verb, sdlc_dir, label = args
     sources = _load("sources")
+    if verb == "arm":
+        try:
+            res = arm(sdlc_dir, label, apply=do_apply, run=run)
+        except (sources.LabelScopeError, ValueError) as exc:
+            print("label_drain.py: %s" % exc, file=sys.stderr)
+            return 2
+        print(render_arm(res), end="")
+        return 1 if any(a["result"] == "failed" for a in res["actions"]) else 0
     try:
         p = plan(sdlc_dir, label, run=run)
     except (sources.LabelScopeError, ValueError) as exc:
