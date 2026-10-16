@@ -118,6 +118,33 @@ def redact(record, visibility):
     return out
 
 
+def _scrub_mod():
+    spec = importlib.util.spec_from_file_location(
+        "scrub", os.path.join(os.path.dirname(os.path.abspath(__file__)), "scrub.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def scrub_record(record):
+    """Secret-shape scrub (the leak scan's shape set) over the free-text keys and string values under
+    `origin`. -> (new record, number of substitutions); a clean record comes back equal."""
+    sc, out, n = _scrub_mod(), dict(record), 0
+
+    def one(text):
+        nonlocal n
+        new = sc.scrub(text)
+        n += max(0, new.count("[REDACTED") - text.count("[REDACTED"))
+        return new
+
+    for key in FREE_TEXT + ("shape",):
+        if isinstance(out.get(key), str):
+            out[key] = one(out[key])
+    if isinstance(out.get("origin"), dict):
+        out["origin"] = {k: one(v) if isinstance(v, str) else v for k, v in out["origin"].items()}
+    return out, n
+
+
 def append(sdlc_dir, record, config, now=None):
     """Create the record's own file exclusively; returns its id, or None when the part is closed."""
     if not enabled(config):
@@ -126,6 +153,7 @@ def append(sdlc_dir, record, config, now=None):
     if problems:
         raise ValueError("; ".join(problems))
     rid = record.get("id") or new_id(now)
+    record, _n = scrub_record(record)
     body = redact(dict(record, id=rid, time=(now or datetime.datetime.now(datetime.timezone.utc)).isoformat()),
                   _visibility(config))
     store = _store(sdlc_dir, config)

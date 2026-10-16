@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- Decision records scrub secret shapes (the leak scan's set) from their free text before the file is written, and the import summary prints how many values were scrubbed (#1558).
+
 ## 1.0.15 — 2026-10-16 — the Rulebook learns and acts: declared question kinds, live comparisons, applier asks and vetoes, importance-ranked rule suggestions, upkeep union merge and agent conflict level, claim release, and ledger host privacy
 - The applier opens no ask for a park a person already answered (keep-parked, unpark or promote), so a sync after a rule is approved never turns an earlier human decision into a rule action (found by the acceptance run).
 - The goal-replay conflict cause probe now has a per-pass time budget (three guard timeouts, after which findings keep the original wording), and the rebase's reported text in the finding is sanitised and capped; a probe/replay disagreement is documented as unknown (#1537).

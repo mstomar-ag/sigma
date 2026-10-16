@@ -375,7 +375,7 @@ which means no call. When the rolling 24-hour spend reaches the ceiling, the doc
 
 ## Importing past decisions
 
-`decision_import.py` turns decisions you already made into records, so a repository does not start at zero.
+`decision_import.py` turns decisions you already made into records, so a repository does not start at zero. Every record writer passes the free text through the leak scan's secret-shape scrub before the file is written (matches become `[REDACTED:<shape>]`), and `apply` prints how many values were scrubbed, never the values.
 
 ```
 python3 skills/sigma-loop/scripts/decision_import.py scan  .sdlc [--profile DIR ...] [--project-dir DIR ...]
