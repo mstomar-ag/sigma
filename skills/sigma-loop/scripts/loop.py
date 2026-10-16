@@ -8,7 +8,7 @@ is enforced by /sigma-loop SKILL.md prose. Claim and outcome are mirrored to the
 (ledger.py) when `ledger.enabled` is on — every such call is fail-open, so a ledger problem can never
 stop a run."""
 import os, sys, pathlib, importlib.util, time, subprocess, inspect, json, re, tempfile, hashlib, uuid
-import contextlib
+import contextlib, calendar
 import errno
 
 try:
@@ -2127,6 +2127,8 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
     _reconcile_sweep(sdlc_dir, config)
     just_unparked = _auto_unpark_sweep(sdlc_dir, config)
     just_reclaimed = _auto_reclaim_stale_claims(sdlc_dir, source, config)
+    if refresh_heartbeat:                  # #1531: a standalone pick; next_batch ran it in its prologue
+        just_reclaimed = frozenset(just_reclaimed) | _release_held_unstarted(sdlc_dir, config)
     # #1468 / #2521: only when this call could actually do work. `_budget_reason`/`_handoff_reason`
     # are both local cursor reads, and skipping the sweep on a halted run is what keeps "a run that
     # reports BUDGET or HANDOFF mutated nothing" true of THIS commit's own code, not only of the
@@ -2428,6 +2430,7 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
     # This prologue can be the only tick when reconciliation blocks or drains the batch.
     write_session_heartbeat(sdlc_dir, session_pid)
     _reconcile_sweep(sdlc_dir, config)
+    capped_by_config = max_concurrent is None      # #1531: free slots count only against the configured cap
     if max_concurrent is None:
         enabled, cap = goals_parallel(config)
         if enabled and not work.enabled(config):
@@ -2455,8 +2458,16 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
             except (TypeError, ValueError):
                 pass  # malformed optional config still leaves the atomic `_next` guard in charge
     picks = []
-    skip = set(extra_skip)
-    for _ in range(max(1, max_concurrent)):
+    skip = set(extra_skip) | _release_held_unstarted(sdlc_dir, config)      # #1531
+    slots = max(1, max_concurrent)
+    try:                                   # #1531: never claim past this session's free slots
+        own = _session_marker_path(sdlc_dir, session_pid)
+        held = len(set(_session_read(own)["in_flight"])) if own.is_file() else 0
+    except (OSError, TypeError, ValueError):
+        held = 0
+    if held and capped_by_config:
+        slots = max(0, slots - held)
+    for _ in range(slots):
         kind, goal = _next(sdlc_dir, source, config, extra_skip=skip, session_pid=session_pid,
                            refresh_heartbeat=False)
         if kind != "goal":
@@ -2790,6 +2801,82 @@ def _release_unstarted(sdlc_dir, goals, why):
         ok = False
         print(f"loop: unstarted release skipped ({exc})", file=sys.stderr)
     return ok
+
+
+DEFAULT_CLAIM_HOLD_MINUTES = 30
+
+
+def claim_hold_seconds(config):
+    """#1531: how long a live session may hold a claimed goal it has not started --
+    `session_release.hold_minutes`, default 30; 0 or false turns the hold off (returns 0). A bad
+    value reads as the default (a typo must not silently disable or zero the bound)."""
+    raw = ((config or {}).get("session_release") or {}).get("hold_minutes", DEFAULT_CLAIM_HOLD_MINUTES)
+    if raw is False or (not isinstance(raw, bool) and raw == 0):
+        return 0
+    try:
+        minutes = float(raw)
+        if isinstance(raw, bool) or minutes < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        minutes = DEFAULT_CLAIM_HOLD_MINUTES
+    return minutes * 60
+
+
+def _claimed_at(sdlc_dir, goal):
+    """#1531: epoch of the newest action-log `claimed` entry for `goal` that no later `released`
+    entry has ended, or None when there is none or it cannot be read (the caller then keeps it)."""
+    try:
+        stamp = None
+        for entry in actionlog.read_goal(sdlc_dir, goal):
+            if entry.get("kind") == "claimed":
+                stamp = entry.get("ts")
+            elif entry.get("kind") == "released":
+                stamp = None
+        if not stamp:
+            return None
+        return calendar.timegm(time.strptime(stamp[:19], "%Y-%m-%dT%H:%M:%S")) + \
+            (int(stamp[20:23]) / 1000.0 if len(stamp) >= 23 and stamp[19] == "." else 0.0)
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
+def _release_held_unstarted(sdlc_dir, config, now=None):
+    """#1531: hand back every goal that a LIVE session has held in flight for longer than the hold
+    with no work record and no agent marker (`_goal_started`), through `_release_unstarted` (the
+    #1529 release: label off, "claimed but not started" comment, ledger release, action log).
+    Runs from any session's pick, so an idle or capped session cannot sit on goals other sessions
+    could take. GitHub source only; hold off (0), or no readable claim time, keeps the goal.
+    Fail-open. Returns a frozenset of the goal refs released."""
+    try:
+        hold = claim_hold_seconds(config)
+        if not hold or ((config.get("discovery") or {}).get("source")) != "github":
+            return frozenset()
+        current = time.time() if now is None else now
+        due = []
+        for pid, path, in_flight in _session_entries(sdlc_dir):
+            if not _session_pid_live(pid, path, config):
+                continue                                 # a dead session is #1529's, after its grace
+            for goal in in_flight:
+                since = _claimed_at(sdlc_dir, goal)
+                if since is not None and current - since > hold and not _goal_started(sdlc_dir, goal):
+                    due.append(str(goal))
+        if not due:
+            return frozenset()
+        due = list(dict.fromkeys(due))
+        _release_unstarted(sdlc_dir, due, "claimed but not started: held past the hold")
+        return frozenset(g for g in due if g not in _session_in_flight_goals_raw(sdlc_dir, config))
+    except Exception as exc:                             # noqa: BLE001
+        print(f"loop: claim-hold release skipped ({exc})", file=sys.stderr)
+        return frozenset()
+
+
+def _session_in_flight_goals_raw(sdlc_dir, config):
+    """Goals still registered by a live session, with no pruning side effect."""
+    goals = set()
+    for pid, path, in_flight in _session_entries(sdlc_dir):
+        if _session_pid_live(pid, path, config):
+            goals.update(in_flight)
+    return goals
 
 
 def session_active(sdlc_dir, config):
