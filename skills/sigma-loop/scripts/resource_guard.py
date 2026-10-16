@@ -138,7 +138,10 @@ def _pressure(text):
         if fields and fields[0] in ("some", "full"):
             for item in fields[1:]:
                 if item.startswith("avg10="):
-                    found[fields[0]] = float(item[6:])
+                    try:
+                        found[fields[0]] = float(item[6:])
+                    except ValueError:
+                        raise Unsupported("pressure text is malformed") from None
     return found or None
 
 
@@ -159,7 +162,10 @@ def linux_sample(root="/", cpus=None):
     swapouts = 0
     for line in (_try(os.path.join(root, "proc/vmstat")) or "").splitlines():
         if line.startswith("pswpout "):
-            swapouts = int(line.split()[1])
+            try:
+                swapouts = int(line.split()[1])
+            except (ValueError, IndexError):
+                raise Unsupported("/proc/vmstat is malformed") from None
     swapouts_at = time.time()
     if cpus is None:
         cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
@@ -220,6 +226,8 @@ def _darwin_lib():
     try:
         lib = c.CDLL("libSystem.B.dylib", use_errno=True)
         lib.mach_host_self.argtypes, lib.mach_host_self.restype = [], c.c_uint32
+        lib.mach_port_deallocate.argtypes, lib.mach_port_deallocate.restype = [c.c_uint32, c.c_uint32], c.c_int
+        lib.task_self = c.c_uint32.in_dll(lib, "mach_task_self_")
         lib.host_statistics64.argtypes = [c.c_uint32, c.c_int, c.c_void_p, c.POINTER(c.c_uint32)]
         lib.host_statistics64.restype = c.c_int
         lib.sysctlbyname.argtypes = [c.c_char_p, c.c_void_p, c.POINTER(c.c_size_t), c.c_void_p, c.c_size_t]
@@ -244,9 +252,14 @@ def darwin_sample():
     total = _sysctl(lib, b"hw.memsize", ctypes.c_uint64)
     stats = _VMStats()
     count = ctypes.c_uint32(ctypes.sizeof(stats) // 4)
-    host = lib.mach_host_self()
-    if total is None or total.value <= 0 or not host or lib.host_statistics64(
-            host, _HOST_VM_INFO64, ctypes.byref(stats), ctypes.byref(count)) != 0:
+    host = lib.mach_host_self()  # a new send right on every call: release it or a poller leaks one per sample
+    try:
+        failed = total is None or total.value <= 0 or not host or lib.host_statistics64(
+            host, _HOST_VM_INFO64, ctypes.byref(stats), ctypes.byref(count)) != 0
+    finally:
+        if host:
+            lib.mach_port_deallocate(lib.task_self.value, host)
+    if failed:
         raise Unsupported("hw.memsize or host_statistics64 is unreadable")
     available = min((stats.free_count + stats.inactive_count) * page, total.value)
     swap = _sysctl(lib, b"vm.swapusage", _SwapUsage)
@@ -283,7 +296,7 @@ def footprint(pid):
     """(bytes, approx) for one process, or None if it cannot be read. Never raises."""
     try:
         pid = int(pid)
-        if pid <= 0:
+        if pid <= 0 or pid > 2 ** 31 - 1:  # proc_pid_rusage takes a C int: a larger pid would wrap to another process
             return None
         if sys.platform == "darwin":
             return _darwin_footprint(pid)

@@ -114,6 +114,72 @@ def test_unreadable_meminfo_is_unsupported(tmp_path):
         g.linux_sample(root, cpus=2)
 
 
+def test_malformed_vmstat_is_unsupported(tmp_path):
+    g = guard()
+    root = fixture(tmp_path)
+    _write(root, "proc/vmstat", "pswpout abc\n")
+    with pytest.raises(g.Unsupported):
+        g.linux_sample(root, cpus=2)
+    _write(root, "proc/vmstat", "pswpout  \n")
+    with pytest.raises(g.Unsupported):
+        g.linux_sample(root, cpus=2)
+
+
+def test_malformed_pressure_is_unsupported(tmp_path):
+    g = guard()
+    root = fixture(tmp_path)
+    _write(root, "proc/pressure/memory", "some avg10=oops avg60=0.00\n")
+    with pytest.raises(g.Unsupported):
+        g.linux_sample(root, cpus=2)
+
+
+def test_malformed_vmstat_cli_exits_3(tmp_path):
+    root = fixture(tmp_path)
+    _write(root, "proc/vmstat", "pswpout abc\n")
+    code = textwrap.dedent("""
+        import importlib.util, sys
+        spec = importlib.util.spec_from_file_location("rg", sys.argv[1])
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        m.sys.platform = "linux"
+        orig = m.linux_sample
+        m.linux_sample = lambda root="/": orig(sys.argv[2], cpus=2)
+        sys.exit(m.main(["sample", "--json"]))
+    """)
+    done = subprocess.run([sys.executable, "-c", code, str(SCRIPT), str(root)], capture_output=True, text=True)
+    assert done.returncode == 3 and done.stdout == ""
+
+
+def test_footprint_rejects_pid_outside_c_int():
+    g = guard()
+    assert g.footprint(2 ** 31) is None
+    assert g.footprint(2 ** 32 + os.getpid()) is None  # would wrap to this very process as a C int
+    assert g.footprint(0) is None and g.footprint(-1) is None
+
+
+def _host_send_refs():
+    """User references on this task's send right to the host port (mach_host_self adds one per call)."""
+    c = __import__("ctypes")
+    lib = c.CDLL("libSystem.B.dylib")
+    lib.mach_host_self.restype = c.c_uint32
+    lib.mach_port_get_refs.argtypes = [c.c_uint32, c.c_uint32, c.c_int, c.POINTER(c.c_uint32)]
+    task = c.c_uint32.in_dll(lib, "mach_task_self_").value
+    host = lib.mach_host_self()
+    refs = c.c_uint32()
+    assert lib.mach_port_get_refs(task, host, 0, c.byref(refs)) == 0  # 0 = MACH_PORT_RIGHT_SEND
+    lib.mach_port_deallocate(task, host)
+    return refs.value
+
+
+@pytest.mark.skipif(not DARWIN, reason="macOS host port")
+def test_macos_sample_does_not_leak_host_port():
+    g = guard()
+    g.sample()
+    before = _host_send_refs()
+    for _ in range(1000):
+        g.sample()
+    assert _host_send_refs() - before <= 1
+
+
 def test_win32_is_unsupported_and_cli_exits_3(monkeypatch):
     g = guard()
     monkeypatch.setattr(g.sys, "platform", "win32")
