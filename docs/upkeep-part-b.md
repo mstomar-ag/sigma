@@ -73,13 +73,15 @@ re-enters it at every conflicted commit of the replay. It is a `git init` with n
 so it shares no objects with the real repository; the stopped tree is copied over it at each stop, and
 `.sigma-context/stopN/` holds, for each conflicted file, the base, ours and theirs versions and the recent integration
 commit subjects, plus the replayed commit's message, the files resolved at earlier stops, and PR texts when supplied.
-The model may edit, build and run tests there (`acceptEdits` with Read, Edit, Write, Glob, Grep and Bash), so the
-before/after discard of the plain export does not apply; the copy is thrown away. The session is NOT network
-isolated: a wall around the model command would cut its own API access, so the shipped plan sets none and the doctor row
-`resolver session network` says "not isolated on this platform" (informational, never failing). Its protection is the
-credential-free copy: no token, no agent socket, no credential helper, a temporary home and no remote. The launcher can
-still prefix a wall when a plan supplies one (`network_prefix` builds the macOS and Linux forms); that wiring is UNVERIFIED
-against a real model run.
+The model may edit, build and run tests there (`acceptEdits` with Read, Edit, Write, Glob, Grep and, only when confined, Bash), so the
+before/after discard of the plain export does not apply; the copy is thrown away. Confinement (#1693, PROVISIONAL: the live run is owner-gated). Where a wall helper exists
+(macOS `sandbox-exec`), the launch argv starts with it: reads of the account's credential directories are denied,
+writes outside the session and scratch directories are denied, and outbound network is limited to port 443. It cannot
+filter by host name, so any host on port 443 stays reachable; it is not a proof against a determined session. Where no
+wall exists (Linux, or the helper missing) the session runs WITHOUT the Bash tool, with Read, Edit, Write, Glob and Grep
+only, so it cannot run commands, read credentials or open connections. The doctor row `resolver session confinement`
+says which applies. Besides this, the copy is credential-free: no token, no agent socket, no credential helper, a
+temporary home and no remote.
 
 What does not change: Sigma alone writes a file back, and only a conflicted file that is a regular, non-link file inside
 the session directory with no marker left; the dropped-unit-line and dropped-integration-line proofs, the stamp, the

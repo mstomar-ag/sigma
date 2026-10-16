@@ -2502,3 +2502,12 @@ def test_resolver_module_docstrings_do_not_claim_it_is_uncalled_or_never_run(rel
 def test_resolver_readiness_reference_matches_the_rows():
     text = (ROOT / "skills/sigma-doctor/references/resolver-readiness.md").read_text(encoding="utf-8")
     assert "fails unless both" not in text and "holds only the placeholder" not in text
+
+
+def test_resolver_confinement_is_documented_with_what_it_does_not_cover():
+    part_b = (ROOT / "docs" / "upkeep-part-b.md").read_text(encoding="utf-8")
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    for text in (part_b, changelog):
+        assert "PROVISIONAL" in text and "port 443" in text and "Bash" in text
+    assert "not filtered by host" in changelog and "filter by host name" in part_b
+    assert "The session is NOT network" not in part_b
