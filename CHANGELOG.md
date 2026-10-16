@@ -25,6 +25,7 @@ All notable changes to Sigma are recorded here, newest first.
 - A needs_decision closing answer is now normalised through the bank (case, spacing, a trailing recommended marker) into the stored `answer`; other text is `free` and never learnable (#1521).
 
 - **The applier now asks for parks that already exist, never asks twice for one park, and counts its window from when a rule became eligible (#1499).** `applier.py` runs a bounded sync (20 reads per tick) before each tick, an ask in any state covers its park, a new park or an unpark supersedes or closes the old ask (superseded asks are pruned after two days), an ask opened below level 3 is armed with one notice comment and a fresh window, the applied record carries its gesture and answer, and `applier.py <dir> --dry-run` prints the plan and writes nothing. Closed, nothing changes.
+- A merge parked for a missing approval now says the PR is not approved and how to approve it, instead of blaming GraphQL; the failed-read (budget) park keeps its wording (#1506).
 
 - `promote.py migrate-confirmation` now arms an item whose only hold is an open blocker (`sdlc:goal` plus the `sdlc:blocked` overlay, reason `armed (held by #N)`) instead of parking it; the pick-time dependency hold and auto-unpark take it from there (#1518).
 
@@ -56,6 +57,7 @@ All notable changes to Sigma are recorded here, newest first.
 - **Every park declares a kind, and deny-list filings are hard stops (#1498).** Sigma's own park sites pass an explicit kind and `loop.py record parked` without `--qkind` stays undeclared (one stderr line suggests a kind; it never guesses from free text). One resolver, `qkind.resolve`, reads the newest kind line from a Sigma park comment or a later OWNER/MEMBER/COLLABORATOR declaration and ignores the rest; new `unpark.py declare`, `list --undeclared` and `resolve --qkind`. Filing triage declares the first hard-stop kind for deny-word, spend, secret and class matches and writes `sigma-hardstop: <class>` on the park, which the decision record copies into `hardstop_class`.
 - **Docs state that a merged goal branch is deleted on the remote (#1512).** The branch-shape section of the branching model now names the delete after `work.py merge`, the guards that refuse it, and that it cannot be turned off.
 - Switching `discovery.blocker_promotion.mode` from `"smart"` to `"always"` no longer lets the smart skip marker swallow the one-time first-run preview, and the doctor row reads "first repair has not run" until the first always tick runs instead of a zero count; always-from-fresh and smart are unchanged (#1526).
+- `board_migrate.py --apply` no longer raises when a seeded card is deleted before the final snapshot: it prints a failure, asks the operator to run the migration again and exits 1, and cards with null content are counted as `other` so the board breakdown adds up (#1525).
 
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
