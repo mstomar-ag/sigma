@@ -255,6 +255,8 @@ base has it on, landing prints one warning naming the disagreement.
 To stop upkeep entirely: set `upkeep.enabled` to `false` (the plain push returns), or create
 `.sdlc/state/upkeep.stop` for a running job.
 
+When an idle goal branch cannot be replayed onto the rebased unit branch because of a real content conflict, the filed finding says whether the pass caused it, measured by read-only `git merge-tree` probes of the goal tip: it also conflicts with the unit's previous tip (pre-existing, with the backup ref and the conflicted paths), or it merges cleanly with the previous tip AND conflicts with the new tip (introduced by this pass, with the paths from the new-tip probe, capped at 20; the only wording that says it was brought forward). Every other case (a replay outcome that is not a conflict such as not started, refused, gated or deferred; a clean or erroring new-tip probe; old git; a missing tip) makes no causal claim and keeps the original finding body unchanged. Paths taken from branches are sanitised (backticks, newlines and control characters replaced) before they enter the body.
+
 ## Scale and limits
 
 - One sweep per window per machine: at most `24 / window_hours` a day, at the default 2.
