@@ -83,8 +83,8 @@ class Spy:
 def verify_ok(m, monkeypatch, outcome="ok"):
     real = m._level1_options
 
-    def options(config):
-        got = real(config)
+    def options(config, *args, **kwargs):
+        got = real(config, *args, **kwargs)
         if got is not None:
             got["run_verify"] = lambda command, worktree, timeout: type("R", (), {"outcome": outcome})()
         return got

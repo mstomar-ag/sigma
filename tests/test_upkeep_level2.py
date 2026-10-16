@@ -285,9 +285,10 @@ def test_gate_closed_or_level_not_agent_touches_nothing(rig, tmp_path):
     assert not (w.sdlc / "state" / "upkeep" / "level2").exists() and not any((rig.tmp / "resolver").iterdir())
 
 
-def test_the_shipped_engine_has_no_level2_plan_so_agent_level_alone_changes_nothing():
+def test_the_shipped_engine_has_no_level2_plan_without_caps_so_agent_level_alone_changes_nothing():
+    """#1516: the factory is now wired from configuration, and with no caps set it still yields no plan."""
     m = l1.mod()
-    assert m.LEVEL2_PLAN_FACTORY is None and m._level1_options(cfg())["level2"] is None
+    assert m.LEVEL2_PLAN_FACTORY is m._default_level2_plan and m._level1_options(cfg())["level2"] is None
 
 
 # --------------------------------------------------------------------------- the chat door ruling (D-23)

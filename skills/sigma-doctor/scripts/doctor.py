@@ -1496,6 +1496,46 @@ def _upkeep_rows(base, cfg, run, which, injected, cheap_only, now=None):
 RESOLVER_PROBE_SECONDS = 5.0          # PROVISIONAL: a version probe on a healthy binary answers in well under a second
 
 
+MAX_STORE_READ = 1 << 20     # PROVISIONAL: the spend store holds at most a day of records; a larger file is not read
+
+
+def _resolver_spend_today(path, launcher, now):
+    """The rolling 24 hour resolver spend from the launcher's store, or None when it exists and cannot be read (bounded read)."""
+    try:
+        if not path.joinpath(launcher.SPEND_FILE).exists():
+            return 0.0
+        if path.joinpath(launcher.SPEND_FILE).stat().st_size > MAX_STORE_READ:
+            return None
+        records, ok = launcher._load_records(str(path))
+        return round(launcher._sum(records, now), 6) if ok else None
+    except Exception:                       # noqa: BLE001
+        return None
+
+
+def _count_parked(base, limit=200):
+    """How many units carry a park marker (bounded scan of the feature state directory)."""
+    try:
+        return sum(1 for _, e in zip(range(limit), (e for e in os.scandir(base / "state" / "features")
+                                                    if e.name.endswith(".rebase-parked.json"))))
+    except OSError:
+        return 0
+
+
+def _newest_resolution(store, suffix, limit=200):
+    """(level, verdict, outcome-word) of the newest resolution record, or None. A record that is a resolution was pushed."""
+    try:
+        files = [e for _, e in zip(range(limit), (e for e in os.scandir(store) if e.name.endswith(suffix) and e.is_file()))]
+        if not files:
+            return None
+        newest = max(files, key=lambda e: e.stat().st_mtime)
+        if newest.stat().st_size > MAX_STORE_READ:
+            return None
+        doc = json.loads(pathlib.Path(newest.path).read_text(encoding="utf-8"))
+        return (doc.get("level", "?"), doc.get("verdict") or "n/a", "pushed")
+    except (OSError, ValueError):
+        return None
+
+
 def _resolver_rows(base, cfg, which, cheap_only, now=None):
     """Resolver and reviewer readiness rows for the bounded conflict resolver (upkeep part B). EMPTY unless the upkeep
     gate (read through its one reader, never the raw block) is open and `conflicts.resolve` is `agent`: a closed gate
@@ -1534,11 +1574,25 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None):
         rows.append(_chk("resolver model: " + ("catalog holds only the placeholder id" if models <= {placeholder}
                                               else "a non-placeholder id is in the catalog"),
                          not models <= {placeholder}, "supply a validated model id override"))
-        caps = [k for k in gate.SCHEMA if ("usd" in k or "spend" in k)]
-        finite = bool(caps) and all(isinstance(settings.get(k), (int, float)) and not isinstance(settings.get(k), bool)
-                                    and math.isfinite(settings[k]) and settings[k] > 0 for k in caps)
+        rebase = _load_loop_script("feature_rebase")
+        budget, ceiling = settings.get("conflicts.agent.max_budget_usd_per_unit"), settings.get("conflicts.agent.spend_ceiling_usd_per_day")
+        finite = budget is not None and ceiling is not None
+        why_off = rebase.level2_off_reason(cfg, which)
+        rows.append(_chk("resolver configured: " + ("model %s, up to $%g per unit, $%g per day" % (settings["conflicts.agent.model"], budget, ceiling)
+                                                    if why_off is None else "behaves as off (%s)" % why_off), why_off is None,
+                         "set conflicts.agent.max_budget_usd_per_unit and conflicts.agent.spend_ceiling_usd_per_day in .sdlc/config.json"))
         rows.append(_chk("resolver spend: " + ("finite caps configured" if finite else "no finite spend cap in the upkeep settings"),
                          finite, "the launcher refuses a launch without finite per-run, per-machine and team caps"))
+        spent = _resolver_spend_today(pathlib.Path(base).joinpath(*rebase.LEVEL2_SPEND_REL.split("/")), launcher, now)
+        if spent is None:
+            rows.append(_chk("resolver spend today: unreadable", False, "check the spend store under .sdlc/state/upkeep/spend; the launcher stays closed on it"))
+        else:
+            over = ceiling is not None and spent >= ceiling
+            rows.append(_chk("resolver spend today: $%.2f%s" % (spent, "" if ceiling is None else " of $%g" % ceiling), not over,
+                             "the daily ceiling is met: units park as 'spend ceiling reached' until the 24 hour window moves on"))
+        parked = _count_parked(pathlib.Path(base))
+        if parked:
+            rows.append(_chk("units parked on conflict: %d" % parked, True, ""))
         store = pathlib.Path(base).joinpath(*review.STORE_REL.split("/"))
         shape_ok = not os.path.lexists(store) or (store.is_dir() and not store.is_symlink())
         rows.append(_chk("reviewer store: " + ("usable" if shape_ok else "exists but is not a plain directory"), shape_ok,
@@ -1556,6 +1610,9 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None):
             rows.append(_chk("resolution age: %d record(s), oldest %ds old" % (len(records), oldest) + ("" if ok else
                              " (older than the prune horizon: the prune may not be running)"), ok,
                              "review the open resolution records; the prune is not removing them"))
+        newest = _newest_resolution(rstore, resolution.SUFFIX)
+        if newest:
+            rows.append(_chk("last resolution: level %s, verdict %s, %s" % newest, True, ""))
         return rows
     except Exception:                       # noqa: BLE001 - a row that cannot be built says so; it is never an all-clear
         return [_chk("resolver readiness rows could not be built", False, "run /sigma-doctor again; see the loop scripts")]
@@ -3380,6 +3437,16 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                             "%d published ledger entry file(s) on a public repository carry a raw host name "
                             "(e.g. %s); set ledger.host_alias in .sdlc/config.json, then remove those files "
                             "from the ledger branch" % (len(raw), raw[0])))
+
+    # #1528: salt_host_token with no discovery.github.repo silently gets the UNSALTED hash
+    # (ledger.host_token's own condition); an alias wins before the salt is read, so it exempts.
+    _led = _block(cfg, "ledger")
+    if _led.get("salt_host_token") is True and not _led.get("host_alias"):
+        _repo = _block(_block(cfg, "discovery"), "github").get("repo")
+        if not isinstance(_repo, str):
+            out.append(_chk("ledger salt needs discovery.github.repo", False,
+                            "ledger.salt_host_token is true but discovery.github.repo is unset, so the host "
+                            "token is the plain unsalted hash; set discovery.github.repo in .sdlc/config.json"))
 
     # #2698: the same shape one channel over. Knowledge-graph analysis notes share an ops branch
     # only once `.sdlc/knowledge/analysis` is a worktree; until then `loop.py record` says so on

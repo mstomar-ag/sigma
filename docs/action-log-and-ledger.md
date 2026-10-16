@@ -137,6 +137,13 @@ are unchanged):
 - `salt_host_token: true`: salts the hash with `discovery.github.repo`, so one machine has a different
   token in each repository.
 
+Changing `host_alias` or `salt_host_token` re-roots this machine: its host token, and so its file
+names, change. During a re-root, older loose files look like another machine's, and open claims made
+under the old token are not this machine's until they expire. It is a one-time switch; pick the
+setting once. Two machines sharing one alias is unsupported, since they would write the same file
+names. `/sigma-doctor` warns when `salt_host_token` is true and `discovery.github.repo` is unset,
+which silently gives the unsalted hash.
+
 Files written by older versions are still read and attributed by the `actor` field inside each line.
 `/sigma-doctor` reads the file names in the local copy of the ledger branch (at most 500) and warns
 when a public repository's published entries carry a host part that is not a hash, the alias or a

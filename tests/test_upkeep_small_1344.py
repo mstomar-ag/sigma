@@ -51,10 +51,12 @@ def test_the_pass_reports_a_refused_lease_as_its_reason(monkeypatch):
     assert report["result"] == "failed" and report["reason"] == "lease-refused", report
 
 
-def test_doctor_says_the_agent_level_is_not_available_yet(tmp_path):
+def test_doctor_says_an_unconfigured_agent_level_behaves_as_off(tmp_path):
+    """#1516: the level is reachable now; with no spend keys set the doctor says it behaves as off, and why."""
     d, cfg = DR.doctor(), DR.config()
     found = DR.rows(d, DR.project(tmp_path, cfg), cfg)
-    assert any("not available yet" in (c["name"] + c.get("fix", "")).lower() for c in found), DR.names(found)
+    assert any("behaves as off" in c["name"].lower() for c in found), DR.names(found)
+    assert not any("not available yet" in (c["name"] + c.get("fix", "")).lower() for c in found)
 
 
 def test_a_pure_fast_forward_keeps_no_backup_ref_but_keeps_the_lease(tmp_path):

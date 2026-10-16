@@ -60,6 +60,8 @@ MAX_NAME_CHARS = 200
 MAX_HINT_KEY_CHARS = 26
 MAX_NEAR_EDITS = 2
 
+MODELS = ("haiku", "sonnet", "opus", "fable")
+MAX_USD = 100000.0
 SCHEMA = {   # dotted key -> spec; the lo/hi are guard rails against typos, not tuning advice
     "enabled": {"kind": "bool"},
     "window_hours": {"kind": "int", "lo": 1, "hi": 8760},
@@ -82,6 +84,13 @@ SCHEMA = {   # dotted key -> spec; the lo/hi are guard rails against typos, not 
     "backup.keep_last": {"kind": "int", "lo": 1, "hi": 1000},
     "conflicts.resolve": {"kind": "enum", "values": ("off", "mechanical", "agent")},
     "conflicts.mechanical_without_verify": {"kind": "bool"},
+    "conflicts.agent.model": {"kind": "enum", "values": MODELS},
+    "conflicts.agent.max_budget_usd_per_unit": {"kind": "usd_null"},
+    "conflicts.agent.spend_ceiling_usd_per_day": {"kind": "usd_null"},
+    "conflicts.agent.timeout_minutes": {"kind": "int", "lo": 1, "hi": 240},
+    "conflicts.agent.max_units_per_sweep": {"kind": "int", "lo": 1, "hi": 100},
+    "conflicts.agent.reviewer.enabled": {"kind": "bool"},
+    "conflicts.agent.reviewer.model": {"kind": "enum", "values": MODELS},
     "backup.former_prefixes": {"kind": "name_list", "min_items": 0},
 }
 DEFAULTS = {   # the one place the defaults live; the shipped template must equal this
@@ -91,6 +100,10 @@ DEFAULTS = {   # the one place the defaults live; the shipped template must equa
     "auto.target_hours": 12, "auto.floor": 3, "auto.ceiling": 40, "verify.clean_rebase": False,
     "verify.timeout_minutes": 60, "backup.keep_days": 14, "backup.keep_last": 5,
     "conflicts.resolve": "off", "conflicts.mechanical_without_verify": False,
+    "conflicts.agent.model": "sonnet", "conflicts.agent.max_budget_usd_per_unit": None,
+    "conflicts.agent.spend_ceiling_usd_per_day": None, "conflicts.agent.timeout_minutes": 30,
+    "conflicts.agent.max_units_per_sweep": 5, "conflicts.agent.reviewer.enabled": True,
+    "conflicts.agent.reviewer.model": "sonnet",
     "backup.former_prefixes": [],
 }
 CROSS_CHECKS = (   # run only after every per-key check, and only when the keys involved passed theirs
@@ -104,6 +117,7 @@ CROSS_CHECKS = (   # run only after every per-key check, and only when the keys 
 _ABSENT = object()
 _BROKEN = object()
 _SECTIONS = tuple(sorted({key.split(".")[0] for key in SCHEMA if "." in key}))
+_NESTED = tuple(sorted({".".join(key.split(".")[:n]) for key in SCHEMA for n in range(1, len(key.split("."))) }, key=lambda s: (s.count("."), s)))
 
 Reading = collections.namedtuple("Reading", "enabled settings problems")
 
@@ -165,6 +179,10 @@ def check(key, value):
                 and all(type(item) is str and 0 < len(item) <= MAX_NAME_CHARS for item in value)):
             return None
         return "expected a list of %d to %d non-empty names, got %s" % (spec["min_items"], MAX_LIST_ITEMS, _tname(value))
+    if kind == "usd_null":
+        if value is None or (type(value) in (int, float) and 0 < value <= MAX_USD):
+            return None
+        return "expected a positive number of dollars up to %d, or null, got %s" % (MAX_USD, _tname(value))
     extra = ""
     if kind == "auto_int_null":
         if value is None or (type(value) is str and value == "auto"):
@@ -206,12 +224,14 @@ def read(config):
         return Reading(False, defaults, ("upkeep: more than %d keys" % MAX_BLOCK_KEYS,))
     problems = _unknown("upkeep", block, {"enabled", "window_hours", "retry_minutes"} | set(_SECTIONS))
     sections = {}
-    for name in _SECTIONS:
-        got = block.get(name, _ABSENT)
-        if got is _ABSENT or (isinstance(got, dict) and len(got) <= MAX_BLOCK_KEYS):
+    for name in _NESTED:                                  # parents before children (sorted by depth)
+        parent, _, leaf = name.rpartition(".")
+        holder = sections[parent] if parent else block
+        got = _ABSENT if holder is _ABSENT else (_BROKEN if holder is _BROKEN else holder.get(leaf, _ABSENT))
+        if got is _ABSENT or got is _BROKEN or (isinstance(got, dict) and len(got) <= MAX_BLOCK_KEYS):
             sections[name] = got
-            if got is not _ABSENT:
-                known = {key.split(".")[1] for key in SCHEMA if key.startswith(name + ".")}
+            if isinstance(got, dict):
+                known = {key.split(".")[name.count(".") + 1] for key in SCHEMA if key.startswith(name + ".")}
                 problems += _unknown("upkeep." + name, got, known)
         else:
             sections[name] = _BROKEN
