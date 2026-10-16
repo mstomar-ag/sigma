@@ -595,6 +595,14 @@ def _owner_no(comments, since, until, config, strict):
     return False
 
 
+def _is_stuck(ask, period, now):
+    """#1360: True for a pending ask older than twice the window, counted from the later of opened and
+    armed_at. Unparseable times read as young."""
+    base = max([t for t in (_parse(ask.get("opened")), _parse(ask.get("armed_at"))) if t is not None],
+               default=None)
+    return base is not None and now - base > 2 * period
+
+
 def read_vetoes(sdlc_dir, config, asks, now, comments_fn):
     """An owner's `no` comment is passed to `answer`. On a pending ask (created at or after it opened)
     it cancels the ask; on an applied ask (posted after `applied_at` and by `applied_at` + window) it
@@ -609,9 +617,16 @@ def read_vetoes(sdlc_dir, config, asks, now, comments_fn):
         try:
             if ask.get("state") == "pending" and ask.get("answer") is None:
                 opened = _parse(ask.get("opened"))
+                stuck = _is_stuck(ask, period, now)
+                last_read = _parse(ask.get("veto_read_at"))
+                if stuck and last_read is not None and now - last_read < period:
+                    continue    # #1360: a stuck ask is read at most once a window
                 if opened is not None and _owner_no(comments_fn(ask.get("issue")), opened, None, config, False):
                     if answer(sdlc_dir, ask["id"], "no", config, now) == "answered":
                         ask.update(answer="no", answered_at=now.isoformat(), state="answered")
+                if stuck and ask.get("answer") is None:
+                    ask["veto_read_at"] = now.isoformat()
+                    _write_atomic(_ask_path(sdlc_dir, ask["id"]), ask)
                 continue
             applied = _parse(ask.get("applied_at"))
             if ask.get("state") != "applied" or ask.get("vetoed_at") or applied is None \
