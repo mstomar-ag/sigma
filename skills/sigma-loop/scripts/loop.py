@@ -2323,6 +2323,22 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
                                 session_pid=session_pid)
             return admission_stop
         try:
+            # #1575: an excluded goal must receive NO write, and `attach_at_pick` can write (attach
+            # label, refusal overlay + comment, no-unit handling). So the scope label is re-checked
+            # from a FRESH read BEFORE it. Cost: ONE extra `fetch_body_labels` read, on label-scoped
+            # runs only (`attach_at_pick` does its own read and cannot share this one); unscoped
+            # runs make exactly the same calls as before. A failed read falls back to the list
+            # read's labels (`scope_label_current`), and unknown means not-in-scope.
+            if getattr(source, "label_scope", None):
+                try:
+                    source.fetch_body_labels(goal)
+                except Exception:       # noqa: BLE001 - fail to the list read's labels, below
+                    pass
+                if not _label_scope_ok(source, goal):
+                    _cancel_goal_slot(sdlc_dir, session_pid, goal)
+                    _release_claim_lock(lock_fd)
+                    skip.add(goal)
+                    continue
             decision = feature_labels.attach_at_pick(sdlc_dir, source, goal, config)
             unit = _unit_at_pick(sdlc_dir, goal, config, decision)
             proceed = (decision.proceed

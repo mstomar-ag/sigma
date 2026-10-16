@@ -95,6 +95,37 @@ def test_a_label_removed_between_the_list_read_and_the_claim_leaves_the_goal_unt
     assert not [c for c in calls if mutates(c) and "10" in " ".join(map(str, c))]
 
 
+def test_a_dropped_label_goal_declaring_a_unit_gets_no_write_from_the_attach_step():
+    """The exclusion must precede `attach_at_pick`, which can attach a label, overlay and comment.
+    #10 loses the scope label before the claim and declares `Feature: voice` in its body (the unit
+    label does not exist, so the attach step would refuse it with an overlay + comment)."""
+    lp = _mod("loop")
+    issues = [_issue(10, LBL, body="Feature: voice\n"), _issue(11, LBL)]
+    calls = []
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d)
+        cfg = lp.state.load_config(base)
+        inner = _gh(issues, calls)
+
+        def run(args):
+            args = list(args)
+            if not _is_rest_issues_call(args) and any(str(a).endswith("/issues/10") for a in args):
+                issues[0]["labels"] = [l for l in issues[0]["labels"] if l["name"] != LBL]
+            return inner(args)
+        src = lp.sources.GitHubSource(cfg, run=run, sdlc_dir=base)
+        src._BACKLOG_READ_RETRY_BASE = 0
+        lp.sources.scope_to_label(src, LBL)
+        assert lp._next(base, src, cfg) == ("goal", "11")
+    def writes_10(c):
+        text = " ".join(map(str, c))
+        method = c[c.index("--method") + 1] if "--method" in c else "GET"
+        mutating = (method.upper() != "GET"
+                    or any(w in text for w in ("--add-label", "--remove-label", "comment")))
+        return mutating and any(str(a).endswith("/issues/10") or str(a) == "10"
+                                or "/issues/10/" in str(a) for a in c)
+    assert not [c for c in calls if writes_10(c)], [c for c in calls if writes_10(c)]
+
+
 def test_a_scoped_run_does_no_board_read_even_with_a_board_configured():
     lp = _mod("loop")
     src = lp.sources.GitHubSource({"discovery": {"source": "github", "github": {
