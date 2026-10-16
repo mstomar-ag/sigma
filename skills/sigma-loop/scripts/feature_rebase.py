@@ -1946,7 +1946,8 @@ def _replay_goals(sdlc_dir, config, goal, unit, branch, goals, run, report, cwd,
             report["replayed"].append(goal_branch)
             continue
         report["conflicts"].append(goal_branch)
-        cause = _conflict_cause(cwd, unit_before, before)
+        cause = _conflict_cause(cwd, unit_before, before,
+                                remote_tip(run, cwd, remote, branch), outcome)
         _file_issue(sdlc_dir, config, goal, report,
                     slot="goal-conflict:%s" % goal_branch,
                     key="%s@%s" % (goal_branch, before or "?"),
@@ -2206,30 +2207,61 @@ CAUSE_PRE_EXISTING, CAUSE_INTRODUCED, CAUSE_UNKNOWN = "pre-existing", "introduce
 _CAUSE_PATHS_MAX = 20
 
 
-def _conflict_cause(cwd, unit_before, goal_tip):
-    """(#1494) Did this pass cause a goal's replay conflict? -> (classification, conflicted paths).
+def _is_conflict_outcome(outcome):
+    """(#1494) Is this `work.rebase` outcome really a content conflict? `rebase` also returns "not started",
+    "refused", "gated" and "rebase deferred: <something that is not a conflict>" -- none of which a merge
+    probe can say anything about."""
+    text = str(outcome or "")
+    low = text.lower()
+    if not low.startswith("rebase deferred") or low.startswith("rebase deferred: could not confirm"):
+        return False
+    return "conflict" in low or "could not apply" in low
 
-    A READ-ONLY probe: `git merge-tree --write-tree --name-only <unit's previous tip> <goal tip>`
-    writes no ref, no worktree and no index. Exit 0 means the goal merges cleanly with the unit as it
-    stood BEFORE this pass, so the conflict is introduced by the pass; exit 1 means it already
-    conflicted with the previous tip; anything else (old git, a missing object, a timeout, no
-    previous tip or goal tip to compare) is UNKNOWN and makes no causal claim."""
-    if not unit_before or not goal_tip:
-        return CAUSE_UNKNOWN, []
-    try:
-        code, out = _merge_probe(cwd, unit_before, goal_tip)
-    except Exception:                     # noqa: BLE001 - a probe that cannot run is just unknown
-        return CAUSE_UNKNOWN, []
-    if code == 0:
-        return CAUSE_INTRODUCED, []
-    if code != 1:
-        return CAUSE_UNKNOWN, []
+
+def _probe_paths(out):
     paths = []
     for line in out.splitlines()[1:]:     # line 1 is the result tree; the paths end at the first blank line
         if not line.strip():
             break
         paths.append(line.strip())
-    return CAUSE_PRE_EXISTING, paths
+    return paths
+
+
+def _conflict_cause(cwd, unit_before, goal_tip, unit_after=None, outcome=None):
+    """(#1494) Did this pass cause a goal's replay conflict? -> (classification, conflicted paths).
+
+    READ-ONLY probes: `git merge-tree --write-tree --name-only <unit tip> <goal tip>` writes no ref,
+    no worktree and no index. Only a real conflict outcome is classified at all. PRE-EXISTING needs the
+    previous tip to conflict (exit 1). INTRODUCED needs evidence on both sides: the previous tip merges
+    cleanly (exit 0) AND the NEW tip conflicts (exit 1); the paths come from the new-tip probe. Anything
+    else (non-conflict outcome, old git, missing object, timeout, clean new tip, no tips) is UNKNOWN and
+    makes no causal claim."""
+    if not unit_before or not goal_tip or not _is_conflict_outcome(outcome):
+        return CAUSE_UNKNOWN, []
+    try:
+        code, out = _merge_probe(cwd, unit_before, goal_tip)
+        if code == 1:
+            return CAUSE_PRE_EXISTING, _probe_paths(out)
+        if code != 0 or not unit_after:
+            return CAUSE_UNKNOWN, []
+        new_code, new_out = _merge_probe(cwd, unit_after, goal_tip)
+    except Exception:                     # noqa: BLE001 - a probe that cannot run is just unknown
+        return CAUSE_UNKNOWN, []
+    if new_code == 1:
+        return CAUSE_INTRODUCED, _probe_paths(new_out)
+    return CAUSE_UNKNOWN, []
+
+
+def _code_span(text):
+    """A path from a branch is data: no backtick, newline or control character may end the span."""
+    clean = "".join("?" if (ord(c) < 32 or ord(c) == 127) else c for c in str(text)).replace("`", "'")
+    return "`%s`" % clean
+
+
+def _paths_phrase(paths):
+    shown = ", ".join(_code_span(one) for one in paths[:_CAUSE_PATHS_MAX])
+    more = " and %d more" % (len(paths) - _CAUSE_PATHS_MAX) if len(paths) > _CAUSE_PATHS_MAX else ""
+    return (" in " + shown + more) if shown else ""
 
 
 def _merge_probe(cwd, left, right):
@@ -2248,21 +2280,28 @@ def _cause_paragraph(cause, unit_before, backup_ref):
     tip = "`%s`" % unit_before[:12] if unit_before else "its previous tip"
     backup = " (backup `%s`)" % backup_ref if backup_ref else ""
     if kind == CAUSE_PRE_EXISTING:
-        shown = ", ".join("`%s`" % one for one in paths[:_CAUSE_PATHS_MAX])
-        more = " and %d more" % (len(paths) - _CAUSE_PATHS_MAX) if len(paths) > _CAUSE_PATHS_MAX else ""
         return ("This pass did not cause it: the goal branch also conflicts with the unit's previous tip "
-                "%s%s%s." % (tip, backup, (" in " + shown + more) if shown else ""))
-    if kind == CAUSE_INTRODUCED:
-        return ("The goal branch replays cleanly onto the unit's previous tip %s%s but not onto the new one, "
-                "so this pass brought the conflict forward. To undo the pass, restore the previous tip with "
-                "`feature_rebase.py restore` if needed." % (tip, backup))
-    return "Whether this pass caused it could not be determined, so no cause is claimed."
+                "%s%s%s." % (tip, backup, _paths_phrase(paths)))
+    return ("The goal branch replays cleanly onto the unit's previous tip %s%s but conflicts with the new one%s, "
+            "so this pass brought the conflict forward. To undo the pass, restore the previous tip with "
+            "`feature_rebase.py restore` if needed." % (tip, backup, _paths_phrase(paths)))
 
 
 def _goal_conflict_body(unit, goal_branch, branch, why, state, cause=None, unit_before=None, backup_ref=None):
-    cause = cause or (CAUSE_UNKNOWN, [])
+    kind = (cause or (CAUSE_UNKNOWN, []))[0]
+    if kind == CAUSE_UNKNOWN:
+        # Byte-identical to the body before #1494: no cause is claimed, so nothing is added or reworded.
+        return (
+            "`%s` could not be replayed onto `%s` after that feature branch was brought forward.\n\n"
+            "Measured afterwards:\n\n%s\n\n"
+            "Reproduce and resolve:\n\n"
+            "```\ngit switch %s\ngit rebase origin/%s\n```\n\n"
+            "it reported:\n\n```\n%s\n```\n\n"
+            "Filed by Sigma's rebase upkeep for unit `%s`.\n"
+            % (goal_branch, branch, "\n".join("- %s" % one for one in state),
+               goal_branch, branch, why, unit))
     head = ("`%s` could not be replayed onto `%s` after that feature branch was brought forward.\n\n"
-            if cause[0] == CAUSE_INTRODUCED else
+            if kind == CAUSE_INTRODUCED else
             "`%s` could not be replayed onto `%s`.\n\n") % (goal_branch, branch)
     return (
         "%s%s\n\n"
