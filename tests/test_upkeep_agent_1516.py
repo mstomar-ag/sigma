@@ -89,7 +89,8 @@ def test_defaults_are_off_by_money_and_equal_the_template():
     assert s["conflicts.agent.reviewer.enabled"] is True and s["conflicts.agent.reviewer.model"] == "sonnet"
     tmpl = support.parse_template()["upkeep"]["conflicts"]["agent"]
     assert tmpl == {"model": "sonnet", "max_budget_usd_per_unit": None, "spend_ceiling_usd_per_day": None,
-                    "timeout_minutes": 30, "max_units_per_sweep": 5, "reviewer": {"enabled": True, "model": "sonnet"}}
+                    "timeout_minutes": 30, "max_units_per_sweep": 5, "reviewer": {"enabled": True, "model": "sonnet"},
+                    "credential_var": None}
 
 
 # --------------------------------------------------------------------------- acceptance 2

@@ -135,3 +135,12 @@ job. A host limit was seen: branch names that start with `refs/` are rejected.
 - Branch rulesets and bypass actors (a private repository without a paid plan has none).
 
 Until an operator approves a kept throwaway repository and its spend, treat Level 2 as proven against a fake only.
+
+**Model login (#1691).** The resolver and the reviewer run in a scrubbed environment, where the CLI's own login is not found.
+Set `upkeep.conflicts.agent.credential_var` to the NAME of one environment variable that holds the model login (never a
+value); that single variable is the only credential passed on. Git, gh and ssh credentials (`GH_TOKEN`, `GITHUB_TOKEN`,
+`SSH_AUTH_SOCK`, any `GIT_*` name) are refused as the name and never forwarded. Before any spend is reserved, the launcher runs
+a bounded `claude auth status` in that environment; when it reports logged out, the unit parks with "resolver cli is not
+logged in in the scrubbed environment". The doctor row `resolver auth` runs the same probe. The agent level has not been run
+against a real CLI, and the shape of the real `auth status` output is unverified (only its exit code and a false `loggedIn`
+are read). The live run on a throwaway repository: Awaiting (owner-gated).
