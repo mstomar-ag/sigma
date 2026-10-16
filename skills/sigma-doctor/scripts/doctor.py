@@ -1279,6 +1279,11 @@ def _blocker_rank_row(cfg, sdlc_dir, now=None):
             when = "%s; %d not read" % (when, unread)
         if n == 0:
             return _chk("blockers ranked below what they block: 0 (%s)" % when, True, "")
+        refused = int(st.get("refused") or 0)
+        if refused and refused >= n:    # #1707: every remaining one is an ownership refusal, by design
+            return _chk("blockers ranked below what they block: %d (%s); %d not raised: not a Sigma issue"
+                        % (n, when, refused), True,
+                        "give the blocker the Sigma labels, or leave it: the hard-stop rule is working as designed")
         since = float(st.get("first_seen_nonzero") or now)
         limit = 2 * loop._reconcile_ttl_minutes(cfg) * 60
         stale = (now - since) > limit

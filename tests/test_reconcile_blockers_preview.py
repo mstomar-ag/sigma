@@ -66,3 +66,57 @@ def test_cli_refuses_a_non_github_source(tmp_path, capsys):
     (tmp_path / "config.json").write_text(json.dumps({"discovery": {"source": "local-goals"}}))
     assert rec.main(["reconcile.py", "blockers", str(tmp_path)]) == 2
     assert "github" in capsys.readouterr().err
+
+
+# ---- #1707: the preview applies the same ownership test as the apply pass ----
+
+def _foreign_board():
+    return [base._issue(9, [GOAL, "priority:P0"], body="blocked by #7; blocked by #8"),
+            base._issue(8, [GOAL, "priority:P3"]), base._issue(7, [])]
+
+
+def _hs_src(run, on, tmp_path=None):
+    cfg = base._cfg()
+    if on:
+        cfg["rulebook"] = {"hard_stops": {"enabled": True}}
+    return base._mod("sources").GitHubSource(cfg, run=run, sdlc_dir=str(tmp_path) if tmp_path else None)
+
+
+def test_preview_lists_a_foreign_blocker_as_skipped_and_apply_raises_exactly_the_raise_list(tmp_path):
+    prev = _hs_src(base._runner(_foreign_board()), True).repair_blocker_ranks(preview=True)
+    assert [p["blocker"] for p in prev["plan"]] == ["8"] and prev["foreign"] == ["7"], prev
+    run = base._runner(_foreign_board())
+    res = _hs_src(run, True, tmp_path).repair_blocker_ranks()
+    assert res["raised"] == ["8"] and res["refused"] == ["7"], res
+
+
+def test_preview_is_unchanged_with_hard_stops_off(tmp_path):
+    prev = _hs_src(base._runner(_foreign_board()), False).repair_blocker_ranks(preview=True)
+    assert sorted(p["blocker"] for p in prev["plan"]) == ["7", "8"] and "foreign" in prev
+    assert prev["foreign"] == []
+    res = _hs_src(base._runner(_foreign_board()), False, tmp_path).repair_blocker_ranks()
+    assert list(res) == APPLY_KEYS
+
+
+def test_cli_names_the_skipped_blocker(tmp_path, capsys):
+    rec = base._mod("reconcile")
+    cfg = base._cfg("always")
+    cfg["rulebook"] = {"hard_stops": {"enabled": True}}
+    (tmp_path / "config.json").write_text(json.dumps(cfg))
+    rc = rec.main(["reconcile.py", "blockers", str(tmp_path)], run=base._runner(_foreign_board()))
+    out = capsys.readouterr().out
+    assert rc == 0 and "1 to raise" in out and "would be skipped: not a Sigma issue: #7" in out
+
+
+def test_doctor_names_an_ownership_refusal_and_does_not_blame_label_permission(tmp_path):
+    import time
+    tick = base._mod("reconcile_tick", base.SL)
+    cfg = base._cfg("always")
+    cfg["rulebook"] = {"hard_stops": {"enabled": True}}
+    board = [base._issue(9, [GOAL, "priority:P0"], body="blocked by #7"), base._issue(7, [])]
+    tick._blocker_rank_repair(str(tmp_path), cfg, run=base._runner(board), now=time.time() - 99999)
+    st = tick.read_repair_state(str(tmp_path))
+    assert st["refused"] == 1 and st["violations"] == 1, st
+    doc = base._mod("doctor", base.S / "sigma-doctor" / "scripts")
+    row = doc._blocker_rank_row(cfg, str(tmp_path))
+    assert row["ok"] and "not a Sigma issue" in row["name"] and "label" not in row["fix"].replace("Sigma labels", ""), row
