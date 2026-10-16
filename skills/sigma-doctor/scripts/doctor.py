@@ -1106,6 +1106,42 @@ def _load_loop_script(name):
     return m
 
 
+def _ai_filed_rows(cfg, base):
+    """#1705: name the cause when the filing triage parks every AI-filed issue. Two advisory not-OK rows, each
+    present only when wrong: an invalid `ai_filed` triage/bucket block, and an unreadable counter file. Silent
+    when triage is switched off with the JSON boolean false. Never raises (a load failure reads as no row)."""
+    try:
+        blk = cfg.get("ai_filed")
+        if not isinstance(blk, dict):
+            return []
+        tri = blk.get("triage", {})
+        if isinstance(tri, dict) and tri.get("enabled", True) is False:
+            return []
+        ft = _load_loop_script("file_triage")
+        reason = None
+        if not isinstance(tri, dict):
+            reason = "ai_filed.triage must be an object"
+        elif tri.get("enabled", True) is not True:
+            reason = "ai_filed.triage.enabled must be true or false"
+        else:
+            v = ft.validate_buckets(cfg)
+            if not v["ok"]:
+                reason = v["reason"]
+        rows = []
+        if reason:
+            rows.append(_chk("AI-filed triage config is valid", False,
+                             f"{reason}: triage parks every AI-filed issue until this is fixed in .sdlc/config.json."))
+        ac = _load_loop_script("ai_filed_counter")
+        path = pathlib.Path(base) / ac.limits(cfg)["counter_path"]
+        if path.exists() and ac.load(path) is None:
+            rows.append(_chk("AI-filed counter is readable", False,
+                             f"{path} is unreadable or mis-shaped, so every AI-filed filing is parked: "
+                             "fix the file or delete it (it is rebuilt on the next filing)."))
+        return rows
+    except Exception:
+        return []
+
+
 def _graphql_capability_rows(base, cfg, env=None):
     """#801 slice 1: ONE advisory row when GitHub GraphQL looks unavailable (Claude Code cloud proxy).
 
@@ -3655,6 +3691,8 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     _br = _blocker_rank_row(cfg, sdlc_dir)
     if _br is not None:
         out.append(_br)
+
+    out.extend(_ai_filed_rows(cfg, base))  # #1705
 
     # #1555: BEFORE the loop ever commits. `work.commit()` stages with `git add -A`, which honours
     # .gitignore and nothing else, so "is this repo's `.env` ignored?" decides whether an unattended

@@ -599,6 +599,8 @@ flag, which closes the whole block.
 | `import.timeout_s` | `60` | classifier per call |
 | `import.require_repo_cwd` | `false` | same as `--only-in-repo` |
 
+Doctor rows for the filing triage (advisory, shown only when wrong, silent with `ai_filed.triage.enabled` false): "AI-filed triage config is valid" names the offending `ai_filed` key, and "AI-filed counter is readable" names the counter file; either fault parks every AI-filed filing until fixed.
+
 Related keys outside the block: `ai_filed.triage.enabled` (gate holds), `ai_filed.migration.*` (the label migration),
 `ledger.watch.interval_seconds` (the interval the dead-tick check is measured in), `action_log.enabled` (the record-done
 net), `spend_approval.approvers` (owner fallback), `gates.irreversible_actions` and `gates.on_block` (hard-stop legacy aliases).
