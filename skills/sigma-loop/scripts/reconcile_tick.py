@@ -152,11 +152,8 @@ def _blocker_rank_repair(sdlc_dir, config, run=None, now=None):
             "last_repair": now if wrote else prior.get("last_repair"),
             "first_seen_nonzero": (first or now) if found else None,
             "rollout_reported": True}
-<<<<<<< HEAD
         if res.get("refused"):      # #1707: ownership refusals, so the doctor can say they are by design
             record["refused"] = len(res["refused"])
-=======
->>>>>>> fork/feature/rulebook-learning
         if res.get("unread"):       # #1706: the key exists only while a blocker went unread
             record["unread"] = int(res["unread"])
         _write_repair_state(sdlc_dir, record)
