@@ -179,9 +179,9 @@ protection on `feature/*` blocks upkeep's own force push, so grant upkeep's acto
 
 Level `mechanical` needs a verify command unless `upkeep.conflicts.mechanical_without_verify` is `true`.
 A parked conflict is one finding: before filing, the pass looks for an open issue with the same conflict id and
-comments on it at most once a day instead of filing again. Upkeep findings are filed as proposals that need
-confirmation, never armed as goals, and carry the lowest AI bucket priority (the `unclear` bucket, P4 by default), never the human default.
-More detail is in [upkeep-part-b.md](upkeep-part-b.md).
+comments on it at most once a day instead of filing again. Upkeep findings are filed parked with a declared
+question kind and the lowest AI bucket priority (the `unclear` bucket, P4 by default), never armed as goals (with triage off they keep the legacy
+confirmation label instead). More detail is in [upkeep-part-b.md](upkeep-part-b.md).
 
 A refused replay that would delete content the branch has (a `would-drop`) is a blocked pass, not a clean one.
 Details are in branching-model.md section 3b.
