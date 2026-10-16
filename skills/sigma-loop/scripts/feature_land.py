@@ -200,6 +200,21 @@ def _pull_request(env, slug, branch, base, tip, title):
     return None, number
 
 
+def _measure_sibling(env, base):
+    """The default `landed(repo, branch)`: True only when some pull request headed by `branch` in `repo` merged;
+    False when the list was read and none merged; None (unmeasurable, so the guard refuses) on any error or a
+    truncated list. Read-only, via the shared helper."""
+    def measure(repo, branch):
+        try:
+            rows, truncated, error = env.landed.merged_pull_requests(env.run, env.cwd, repo, branch)
+        except Exception:                         # noqa: BLE001 - unreadable is not "not merged"
+            return None
+        if error is not None or truncated or rows is None:
+            return None
+        return any(r.get("merged_at") for r in rows)
+    return measure
+
+
 @_gate_first
 def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None, rebase_pass=None, verify=None,
          now=None, merge=False, record=None, landed=None):
@@ -249,10 +264,11 @@ def land(config, sdlc_dir, unit, *, argv=(), environ=None, run=None, gh_run=None
         got = approval.peek(config, sdlc_dir, unit, slug, tip, now=now)
         if not got["ok"]:
             return refuse("unattended-no-approval", got["reason"])
-    ok, why = _load("work").unit_sibling_guard(sdlc_dir, config, unit, slug, landed=landed)
+    ok, why = _load("work").unit_sibling_guard(
+        sdlc_dir, config, unit, slug, landed=landed if landed is not None else _measure_sibling(env, base))
     if not ok:
-        return refuse("sibling", "%s Land the other half first, or land each half by hand; this verb does not land "
-                                 "a pair." % why)
+        return refuse("sibling", "%s Land the other half first, or remove that repository from the unit's registry "
+                                 "entry, or land each half by hand; this verb does not land a pair." % why)
     for attempt in range(1, MAX_ATTEMPTS + 1):
         report = env.rebase_pass(sdlc_dir, config, None, unit, run=None, cwd=env.cwd, remote=env.remote)
         outcome = report.get("outcome") if isinstance(report, dict) else None
