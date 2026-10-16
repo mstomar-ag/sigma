@@ -4,6 +4,7 @@ UNVERIFIED: the real CLI's `auth status` output shape; the live run is owner-gat
 Controls (each broken once, seen red): drop the preflight in launch, drop the forwarding in the shipped factory."""
 import json
 import os
+import subprocess
 import sys
 
 import pytest
@@ -121,13 +122,14 @@ def test_end_to_end_no_working_login_parks_naming_the_login_and_pushes_nothing(r
     gated(rig)
     monkeypatch.delenv(VAR, raising=False)
     w = conflict_world(mk(tmp_path / "w"))
-    before = w.tip(l1.FEATURE) if hasattr(l1, "FEATURE") else None
+    before = w.tip(l1.FEATURE)       # #1713: a real before state, not a guarded None
+    assert not os.environ.get(VAR) and json.loads(subprocess.run([str(rig.binary), "auth", "status"], capture_output=True, text=True,
+                                                                  env={"PATH": os.environ["PATH"]}).stdout)["loggedIn"] is False
     w, report, spy = go_wired(rig, tmp_path, wired, agent_cfg(credential_var=None), w)
     assert report["outcome"] in (wired.CONFLICT, wired.PARKED) and not spy.pushes()
     assert "not logged in" in report["why"], report["why"]
     assert not (rig.fake / "calls.json").exists()
-    if before:
-        assert w.tip(l1.FEATURE) == before
+    assert w.tip(l1.FEATURE) == before
 
 
 # --------------------------------------------------------------------------- the doctor row
@@ -137,7 +139,7 @@ def test_the_resolver_auth_row_is_red_when_logged_out_and_green_when_logged_in(t
     seen = []
 
     def runner(logged):
-        def run(env, binary, cwd, timeout=None):
+        def run(env, binary, cwd, timeout=None, prefix=None):
             seen.append(env)
             return logged
         return run
@@ -159,3 +161,53 @@ def test_the_resolver_auth_row_names_the_route_and_is_absent_when_the_level_is_o
     assert row["ok"] and "route: " + VAR in row["name"] and "v" != row["name"]
     off = R.config(resolve="mechanical")
     assert d._resolver_rows(R.project(tmp_path / "o", off), off, lambda n: "/bin/" + n, False, None, lambda *a, **k: True) == []
+
+
+# --------------------------------------------------------------------------- #1713: the default parks, and the probe is walled
+
+def test_the_docs_and_the_doctor_fix_state_that_the_default_parks_until_credential_var_is_set():
+    doc = (S.ROOT / "docs" / "upkeep-part-b.md").read_text(encoding="utf-8") if hasattr(S, "ROOT") else \
+        open(os.path.join(os.path.dirname(__file__), "..", "docs", "upkeep-part-b.md"), encoding="utf-8").read()
+    assert "parks until `upkeep.conflicts.agent.credential_var` is set" in " ".join(doc.split())
+    d = R.doctor()
+    row = d._resolver_auth_row(L.load(), "/bin/claude", None, lambda *a, **k: False)
+    assert "parks until" in row["fix"] and "credential_var" in row["fix"], row["fix"]
+
+
+def test_auth_status_runs_through_the_wall_prefix_when_given_and_plain_otherwise(tmp_path):
+    launcher = L.load()
+    log = tmp_path / "argv.txt"
+    wrapper = tmp_path / "wall"
+    wrapper.write_text("#!%s\nimport sys, subprocess\nopen(%r, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+                       "raise SystemExit(subprocess.call(sys.argv[1:]))\n" % (sys.executable, str(log)))
+    wrapper.chmod(0o755)
+    binary = tmp_path / "claude"
+    binary.write_text("#!%s\nraise SystemExit(0)\n" % sys.executable)
+    binary.chmod(0o755)
+    env = {"PATH": os.environ["PATH"]}
+    assert launcher.auth_status(env, str(binary), str(tmp_path), 10) is True
+    assert not log.exists()
+    assert launcher.auth_status(env, str(binary), str(tmp_path), 10, prefix=[str(wrapper)]) is True
+    assert log.read_text().split() == [str(binary), "auth", "status"]
+
+
+def test_the_launch_preflight_probes_through_the_request_wall(lrig, monkeypatch):
+    gated(lrig)
+    monkeypatch.setenv(VAR, "login-value")
+    seen = []
+    real = lrig.launcher.auth_status
+    monkeypatch.setattr(lrig.launcher, "auth_status", lambda *a, **k: (seen.append(k.get("prefix")), real(*a, **k))[1])
+    lrig.fakedir.joinpath("mode.json").write_text("{}")
+    lrig.launcher.launch(lrig.request(credential_var=VAR, net_prefix=["/nonexistent-wall"]))
+    assert seen == [["/nonexistent-wall"]], seen
+
+
+def test_the_doctor_probe_is_walled_only_where_a_wall_exists(tmp_path, monkeypatch):
+    d = R.doctor()
+    launcher = L.load()
+    got = []
+    monkeypatch.setattr(launcher, "session_wall", lambda *a, **k: (["/w"], "sandbox-exec"))
+    d._resolver_auth_row(launcher, "/bin/claude", None, lambda env, b, c, timeout=None, prefix=None: got.append(prefix) or True)
+    monkeypatch.setattr(launcher, "session_wall", lambda *a, **k: (None, None))
+    d._resolver_auth_row(launcher, "/bin/claude", None, lambda env, b, c, timeout=None, prefix=None: got.append(prefix) or True)
+    assert got == [["/w"], None], got

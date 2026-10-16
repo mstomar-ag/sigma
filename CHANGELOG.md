@@ -3,8 +3,12 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+<<<<<<< Updated upstream
 - Filing triage now parks euro and pound amounts (symbol, code or word) near a compute noun as spend, like dollar amounts; fenced blocks and amounts with no compute noun still arm (#1710).
 - The Decision Rulebook doc's migration section no longer says rebase upkeep findings still get the legacy confirmation label while triage is on; it names the triage-off exception, and a docs-claim test pins it (#1709).
+=======
+- **The upkeep auth probe runs under the session wall, and the docs say the default parks (#1713).** `auth_status` takes the wall's argv prefix; the launcher preflight and the doctor `resolver auth` row run `claude auth status` inside the same confinement as the session where one exists (macOS), plain elsewhere. `docs/upkeep-part-b.md` and the doctor fix text now state that with `credential_var` unset every agent-level launch parks until it is set. The no-login end-to-end test now checks the logged-out state and the untouched branch tip for real. The wall stays unverified against a live session.
+>>>>>>> Stashed changes
 - **The upkeep confinement docs list what the macOS wall does not cover (#1712).** The profile allows everything by default, so the keychain and mach services stay reachable, reads outside the listed credential directories stay open, and writes to the temp areas stay open. The dead `SESSION_ARGV` constant is removed; the doctor flag check now reads `session_argv(True)`.
 - **The applier now says when evidence behind the default branch holds it (#1699).** A real tick and `--dry-run` print `applier: held - <reason>` instead of nothing or `would behind`, and the doctor applier row adds `HELD: <reason>` until a later tick runs; pull to clear. Output with current evidence is unchanged.
 - **`resource_lease.py admit|release|status|wait` keeps a lease table over the resource guard (#1599).** Under an `fcntl.flock` lock each admit reclaims stale leases (dead pid or past ttl), counts the unmaterialised remainder of every lease, and grants the largest fitting count or holds with a retry time (exit 10); costs are the p90 of the last 32 measured footprints per kind, outliers above 4x the median excluded and logged, and a verify gets at least one worker when one fits. State is in the XDG state folder beside `hold.json`; admission is paused, never a process. Not called by anything yet (operator-run); POSIX only.
