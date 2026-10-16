@@ -512,11 +512,19 @@ def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text
         plan["kind"], plan["priority"], plan["reason"] = "park", None, "permission marker on the first body line was quoted"
     # #1553: the bypass keys on the caller's REQUESTED priority (--priority; the unrequested default is not a request); the armed label priority stays bucket-clamped.
     # It skips only the per-goal cap; the per-run cap and an unreadable counter still park.
-    if plan["kind"] == "arm" and ai_filed_counter.over_cap(
-            counter, key_goal, _run_id(), config,
-            per_goal=not ai_filed_counter.bypasses_cap(requested_priority, config)):
-        plan["kind"], plan["priority"], plan["reason"] = "park", None, (
-            "ai_filed cap reached (ai_filed.max_per_goal / ai_filed.max_per_run) or counter unreadable")
+    # #1697: below the bypass, a per-goal cap hit parks the LOWEST priority of the goal (newest among equals): a
+    # strictly lower armed filing is parked instead of this one.
+    cap_reason = "ai_filed cap reached (ai_filed.max_per_goal / ai_filed.max_per_run) or counter unreadable"
+    plan["prio"] = requested_priority if re.fullmatch(r"P[0-4]", str(requested_priority)) else priority
+    bypass = ai_filed_counter.bypasses_cap(requested_priority, config)
+    if plan["kind"] == "arm" and ai_filed_counter.over_cap(counter, key_goal, _run_id(), config, per_goal=not bypass):
+        victim = None
+        if not ai_filed_counter.over_cap(counter, key_goal, _run_id(), config, per_goal=False):
+            victim = ai_filed_counter.evictable(counter, key_goal, plan["prio"])
+        if victim is None:
+            plan["kind"], plan["priority"], plan["reason"] = "park", None, cap_reason
+        else:
+            plan["evict"], plan["evict_reason"] = victim, cap_reason
     if plan["kind"] == "arm" and plan["depth"] is not None and plan["depth"] > lim["max_depth"]:
         plan["kind"], plan["priority"], plan["reason"] = "park", None, "ai_filed depth limit reached"
     return plan
@@ -543,25 +551,36 @@ def _run_id():
 def _triage_finish(sdlc_dir, config, source, plan, issue, key_goal, report):
     """#1003: after the issue exists: park it when triage said so (comment carries the declared kind, and
     a `park` event is appended), then count the filing. Never raises."""
-    if plan["kind"] == "park":
-        text = "Parked at filing: %s\n%s" % (plan["reason"], qkind.render_line(plan["qkind"]))
-        if plan.get("hardstop"):
-            text += "\n" + qkind.render_hardstop(plan["hardstop"])
+    def _park(target, reason, kind, hardstop=None):
+        text = "Parked at filing: %s\n%s" % (reason, qkind.render_line(kind))
+        if hardstop:
+            text += "\n" + qkind.render_hardstop(hardstop)
         try:
-            with sources.hsg.filing_park(issue):               # #1136: Sigma's own park keeps its text
-                source.park(str(issue), text)
-            ledger.safe_append(sdlc_dir, "park", str(issue), config=config, stream=ledger.EVENTS,
-                               reason_class="needs_decision", why=plan["reason"])
+            with sources.hsg.filing_park(target):              # #1136: Sigma's own park keeps its text
+                source.park(str(target), text)
+            ledger.safe_append(sdlc_dir, "park", str(target), config=config, stream=ledger.EVENTS,
+                               reason_class="needs_decision", why=reason)
             try:                                               # #1178: open the applier's ask (gate closed: nothing)
-                _load("applier").open_for_park(sdlc_dir, config, issue, plan["qkind"], source=source)
+                _load("applier").open_for_park(sdlc_dir, config, target, kind, source=source)
             except Exception:                                  # noqa: BLE001 - never block the filing
                 pass
+            return True
         except Exception as exc:                               # noqa: BLE001 - never block the filing
             report["warnings"].append("could not park #%s at filing (%s): it carries no goal label and "
-                                      "no parked label until a human looks at it" % (issue, exc))
+                                      "no parked label until a human looks at it" % (target, exc))
+            return False
+
+    drop = None
+    if plan["kind"] == "park":
+        _park(issue, plan["reason"], plan["qkind"], plan.get("hardstop"))
+    elif plan.get("evict"):                                    # #1697: the lowest-priority armed filing yields
+        old = plan["evict"]["issue"]
+        if _park(old, plan["evict_reason"], "needs_decision"):
+            drop = old
     if plan.get("report"):                                     # #1490: a report for a person, not a loop follow-up
         return
-    if not ai_filed_counter.bump(plan["counter_path"], _run_id(), key_goal, time.time(), config):
+    if not ai_filed_counter.bump(plan["counter_path"], _run_id(), key_goal, time.time(), config,
+                                 issue=issue if plan["kind"] == "arm" else None, prio=plan.get("prio"), drop=drop):
         report["warnings"].append("ai_filed counter could not be updated (unreadable or unwritable): "
                                   "later filings are parked until it is fixed or removed")
 
@@ -1299,7 +1318,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
 
 
 def hand_off(sdlc_dir, config, goal, area, why, priority=DEFAULT_PRIORITY,
-             title=None, source=None, run=None, target_unit=None):
+             title=None, source=None, run=None, target_unit=None, priority_requested=False):
     """Open the dependency, address it, record it. A thin, behavior-preserving wrapper: a hand-off is
     BY DEFINITION a blocking, cross-area, immediately-actionable dependency, so this pins
     `create_tracked_issue()`'s three axes accordingly and supplies the hand-off-specific title/body
@@ -1329,7 +1348,8 @@ def hand_off(sdlc_dir, config, goal, area, why, priority=DEFAULT_PRIORITY,
                                  same_area=False, immediately_actionable=True, blocks_goal=True,
                                  priority=priority, title=heading, body=body,
                                  extra_labels=[dependency_label(config)],
-                                 source=source, run=run, target_unit=target_unit)
+                                 source=source, run=run, target_unit=target_unit,
+                                 priority_requested=priority_requested)    # #1697
 
 
 def acknowledge(sdlc_dir, config, issue, state, why="", goal=None, area=None):
@@ -1423,7 +1443,7 @@ def main(argv):
         config = ledger._config(sdlc_dir)
         report = hand_off(sdlc_dir, config, goal, area, why,
                           priority=flags.get("priority", DEFAULT_PRIORITY),
-                          title=flags.get("title"),
+                          title=flags.get("title"), priority_requested="priority" in flags,
                           # #1820: optional, and its absence changes nothing -- see hand_off's own
                           # docstring and create_tracked_issue's `target_unit` doc for the scope
                           # boundary (operator/CLI-level only; the autonomous loop does not pass this).

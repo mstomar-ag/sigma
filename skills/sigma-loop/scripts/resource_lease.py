@@ -25,6 +25,7 @@ import hashlib
 import json
 import math
 import os
+import struct
 import sys
 import time
 import uuid
@@ -46,6 +47,7 @@ DEFAULT_TTL = 6 * 3600.0  # seconds; callers pass the verify timeout or session 
 WAIT_TTL = 600.0  # seconds a held verify keeps blocking new goal starts
 EVENTS_MAX = 262144  # events.jsonl is rotated once past this size
 POLL = 0.5
+START_TOLERANCE = 2.0  # seconds two readings of one process start time may differ
 
 
 class Grant:
@@ -83,6 +85,38 @@ def pid_alive(pid):
     except OSError:  # PermissionError: it exists, it is someone else's
         return True
     return True
+
+
+def process_start(pid):
+    """When the process began, in a number that is stable for one process (None when it cannot be read).
+
+    Only compared with the value recorded at admit, so the unit may differ per platform: Linux gives clock ticks
+    since boot (/proc), macOS gives epoch seconds (libproc). Reads only; no child process is started.
+    """
+    try:
+        if sys.platform == "darwin":
+            import ctypes
+            import ctypes.util
+            lib = ctypes.CDLL(ctypes.util.find_library("proc"), use_errno=True)
+            buf = ctypes.create_string_buffer(136)  # struct proc_bsdinfo
+            if lib.proc_pidinfo(int(pid), 3, 0, buf, 136) != 136:
+                return None
+            sec, usec = struct.unpack_from("=QQ", buf.raw, 120)
+            return sec + usec / 1e6
+        with open("/proc/%d/stat" % int(pid), "r") as handle:
+            text = handle.read()
+        return float(text[text.rindex(")") + 2:].split()[19])  # field 22, starttime
+    except (OSError, ValueError, IndexError, TypeError, AttributeError, ImportError):
+        return None
+
+
+def reused(record):
+    """True when the pid now belongs to another process than the one that took the lease."""
+    then = record.get("pid_start")
+    if not guard._number(then):
+        return False  # an older lease, or a platform that could not read it: nothing to compare
+    now = process_start(record["pid"])
+    return now is not None and abs(now - then) > START_TOLERANCE
 
 
 def expired(record, now):
@@ -208,7 +242,7 @@ def _load_leases(directory):
 
 
 def _stale(record, now):
-    return record is None or not pid_alive(record["pid"]) or expired(record, now)
+    return record is None or not pid_alive(record["pid"]) or expired(record, now) or reused(record)
 
 
 def _seen(record):
@@ -222,8 +256,9 @@ def _finish(directory, path, record, why):
         peak = _seen(record)
         workers = max(1, record.get("workers", 1))
         if peak > 0:
-            record_observation(directory, record["kind"], [peak // workers or 1])
-        log_event(directory, {"event": why, "id": record["id"], "kind": record["kind"], "peak": peak})
+            record_observation(directory, record.get("kind", "unknown"), [peak // workers or 1])
+        log_event(directory, {"event": why, "id": record.get("id", os.path.basename(path)[:-len(".json")]),
+                              "kind": record.get("kind", "unknown"), "peak": peak})
     try:
         os.unlink(path)
     except OSError:
@@ -325,6 +360,7 @@ def admit(kind, want, repo, goal, pid=None, ttl=None, config=None, now=None, env
         n, est = choice
         lease_id = uuid.uuid4().hex[:12]
         record = {"id": lease_id, "kind": kind, "pid": pid, "pgid": _pgid(pid), "start": now,
+                  "pid_start": process_start(pid),
                   "repo_hash": hashlib.sha256(str(repo).encode()).hexdigest()[:12], "goal": goal, "est_mem": est,
                   "workers": n, "ttl": ttl if guard._number(ttl) and ttl > 0 else DEFAULT_TTL, "peak": 0}
         _atomic_write(os.path.join(directory, "leases", lease_id + ".json"), record)
@@ -383,8 +419,11 @@ def status(env=None, config=None, now=None):
 
 def wait(max_s, kind="goal", env=None, config=None):
     """0 as soon as a unit of `kind` would be admitted, 10 at the cap after max_s. Never blocks past max_s + 1."""
+    max_s = float(max_s)
+    if math.isnan(max_s) or max_s < 0:
+        raise ValueError("wait max must be a number of seconds, 0 or more (got %r)" % max_s)
     directory = state_dir(env)
-    deadline = time.monotonic() + max(0.0, min(float(max_s), 3600.0))
+    deadline = time.monotonic() + min(max_s, 3600.0)
     while True:
         _, limits, live, observed = _view(directory, time.time(), config)
         cost = learned_cost(observed.get(kind, []))
@@ -392,6 +431,8 @@ def wait(max_s, kind="goal", env=None, config=None):
         open_ = not limits.critical and (room > 0 if cost is None else room >= cost)
         if kind == "goal" and limits.goal_block:
             open_ = False
+        if kind == "goal" and any(g in {r["goal"] for _, r in live} for g in _waiting(directory, time.time())):
+            open_ = False  # a started goal's verify is waiting: admit would hold a new goal start
         if open_:
             return 0
         remaining = deadline - time.monotonic()
@@ -401,6 +442,16 @@ def wait(max_s, kind="goal", env=None, config=None):
 
 
 # ------------------------------------------------------------------------------------------ CLI
+def _seconds(text):
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("%r is not a number of seconds" % text) from None
+    if math.isnan(value) or value < 0:
+        raise argparse.ArgumentTypeError("%r is not a number of seconds, 0 or more" % text)
+    return value
+
+
 def _parser():
     parser = argparse.ArgumentParser(prog="resource_lease.py", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd")
@@ -416,7 +467,7 @@ def _parser():
     s = sub.add_parser("status", help="leases, p90 per kind, headroom, hold age, swap-out rate")
     s.add_argument("--json", action="store_true")
     w = sub.add_parser("wait", help="exit 0 when open, 10 at the cap, within --max N (+1) seconds")
-    w.add_argument("--max", type=float, default=0, dest="max_s")
+    w.add_argument("--max", type=_seconds, default=0, dest="max_s")
     w.add_argument("--kind", default="goal", choices=("verify", "session", "goal"))
     return parser
 
