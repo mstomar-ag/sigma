@@ -2445,7 +2445,6 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
     # terminal reported on the next call) using the SAME session-local count that
     # `_next` reserves atomically. The reservation remains the final race guard.
     ceiling_applied = False
-    over_cap = False
     ceilings = [n for n in (_handoff_ceiling(config.get("handoff") or {}),
                              (config.get("budget") or {}).get("max_iterations")) if n]
     if ceilings:
@@ -2463,7 +2462,8 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
                 # of the two free-slot bounds, never both subtracted
                 max_concurrent = min(cap_free, max(0, min(ceilings) - admitted))
                 ceiling_applied = True
-                over_cap = cap_free == 0
+                if cap_free == 0:            # #1531: no free slot: a read-only answer, no claim
+                    return [("FULL", "no free slots, %d in flight" % len(set(snapshot["in_flight"])))]
             except (TypeError, ValueError):
                 pass  # malformed optional config still leaves the atomic `_next` guard in charge
     picks = []
@@ -2479,16 +2479,14 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
         except (OSError, TypeError, ValueError):
             held = 0
         if held:
-            over_cap = held >= slots
-            slots = max(1, slots - held)     # floor of one pick: the terminal line still prints
+            if held >= slots:                # no free slot: a read-only answer, nothing is claimed
+                return [("FULL", "no free slots, %d in flight" % held)]
+            slots -= held
     for _ in range(slots):
         kind, goal = _next(sdlc_dir, source, config, extra_skip=skip, session_pid=session_pid,
                            refresh_heartbeat=False)
         if kind != "goal":
             picks.append((kind, goal))
-            break
-        if over_cap:                         # no free slot: hand the probe's claim straight back
-            _release_unstarted(sdlc_dir, [goal], "claimed but not started: no free slot")
             break
         picks.append(("goal", goal))
         skip.add(goal)
@@ -5992,7 +5990,7 @@ def _print_pick(kind, payload):
         print(payload)
         return
     print(kind)
-    if payload and kind in ("BUDGET", "DONE", "HANDOFF"):
+    if payload and kind in ("BUDGET", "DONE", "HANDOFF", "FULL"):
         print(f"{kind} ({payload})", file=sys.stderr)
 
 

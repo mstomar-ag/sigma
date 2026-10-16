@@ -155,9 +155,18 @@ def test_ceilings_case_does_not_subtract_held_goals_twice():
     assert out == [("goal", "a"), ("goal", "b")] and rel == []
 
 
-def test_zero_free_slots_still_prints_the_terminal_and_keeps_no_goal():
+def test_zero_free_slots_claims_nothing_on_any_source():
     held = ["91", "92", "93"]
-    out, rel = _batch(_PAR, held, [])                 # nothing left: the terminal must show
-    assert out == [("DONE", None)]
-    out, rel = _batch(_PAR, held, ["a", "b"])         # work left: probe claim handed back
-    assert out == [] and rel == [["a"]]
+    for src in ({}, {"discovery": {"source": "github"}}):
+        out, rel = _batch(dict(_PAR, **src), held, ["a", "b"])
+        assert out == [("FULL", "no free slots, 3 in flight")] and rel == []   # never calls _next
+
+
+def test_zero_free_slots_cli_prints_one_terminal_line():
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+        import importlib.util as u
+        lp, base, _ = _setup(__import__("tempfile").mkdtemp(), _PAR)
+        lp._print_pick("FULL", "no free slots, 3 in flight")
+    assert buf.getvalue().strip() == "FULL"
