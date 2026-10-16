@@ -8,6 +8,7 @@ guess. Omit the flag and nothing changes.
 
 Pure and stdlib only: no I/O, no ledger import (the mapping is checked against the ledger's class
 list by a test, so the two cannot drift silently)."""
+import datetime
 import re
 import sys
 
@@ -111,3 +112,67 @@ def resolve_hardstop(comments, goal=None):
         if cls is not None and _honoured(c, goal, note=False):
             found = cls
     return found
+
+
+# ---- #1563: a quota park that names its reset time ------------------------------------------------
+
+RESET_PREFIX = "sigma-reset-at: "
+_RESET_LINE = re.compile(r"^" + re.escape(RESET_PREFIX) + r"([^\n]+?)[ \t]*$", re.MULTILINE)
+MAX_RESET_DAYS = 7
+_ISO = r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
+_RETRY_AFTER = re.compile(r"retry[- ]after\W{0,3}(\d{1,9})\b", re.IGNORECASE)
+_IN = re.compile(r"resets?\s+in\s+(\d{1,9})\s*(second|sec|minute|min|hour|hr|h|m|s)s?\b", re.IGNORECASE)
+_AT = re.compile(r"(?:resets?\s+at|reset\W{0,3})\s*[:=]?\s*(" + _ISO + r"|\d{10})\b", re.IGNORECASE)
+_UNIT = {"s": 1, "sec": 1, "second": 1, "m": 60, "min": 60, "minute": 60, "h": 3600, "hr": 3600, "hour": 3600}
+
+
+def _aware(t):
+    return t if t.tzinfo else t.replace(tzinfo=datetime.timezone.utc)
+
+
+def parse_reset(text, now):
+    """When the quota named in `text` resets, as an aware datetime; None when no time is named, the text is
+    unreadable, the time is not after `now`, or it is more than `MAX_RESET_DAYS` away. Reads `Retry-After: N`
+    (seconds), `resets in N minutes|hours|seconds`, and `resets at` / `reset:` followed by an ISO time or a
+    10-digit epoch. Pure; never raises."""
+    try:
+        if not isinstance(text, str) or not isinstance(now, datetime.datetime):
+            return None
+        now = _aware(now)
+        found = None
+        m = _RETRY_AFTER.search(text)
+        if m:
+            found = now + datetime.timedelta(seconds=int(m.group(1)))
+        if found is None:
+            m = _IN.search(text)
+            if m:
+                found = now + datetime.timedelta(seconds=int(m.group(1)) * _UNIT[m.group(2).lower()])
+        if found is None:
+            m = _AT.search(text)
+            if m:
+                v = m.group(1)
+                if v.isdigit():
+                    found = datetime.datetime.fromtimestamp(int(v), datetime.timezone.utc)
+                else:
+                    found = _aware(datetime.datetime.fromisoformat(v.replace("Z", "+00:00").replace("z", "+00:00")))
+        if found is None or found <= now or found - now > datetime.timedelta(days=MAX_RESET_DAYS):
+            return None
+        return found
+    except (ValueError, OverflowError, OSError, TypeError):
+        return None
+
+
+def render_reset_line(when):
+    """The machine line carrying a reset time; ValueError for anything but a datetime."""
+    if not isinstance(when, datetime.datetime):
+        raise ValueError("reset time must be a datetime")
+    return RESET_PREFIX + _aware(when).isoformat()
+
+
+def parse_reset_line(comment):
+    """The reset time in `comment`'s LAST machine line, or None (absent or unreadable)."""
+    try:
+        found = _RESET_LINE.findall(comment) if isinstance(comment, str) else []
+        return _aware(datetime.datetime.fromisoformat(found[-1])) if found else None
+    except ValueError:
+        return None
