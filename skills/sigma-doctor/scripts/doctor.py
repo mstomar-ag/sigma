@@ -1580,8 +1580,12 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None):
         budget, ceiling = settings.get("conflicts.agent.max_budget_usd_per_unit"), settings.get("conflicts.agent.spend_ceiling_usd_per_day")
         finite = budget is not None and ceiling is not None
         why_off = rebase.level2_off_reason(cfg, which)
-        rows.append(_chk("resolver configured: " + ("model %s, up to $%g per unit, $%g per day" % (settings["conflicts.agent.model"], budget, ceiling)
-                                                    if why_off is None else "behaves as off (%s)" % why_off), why_off is None,
+        on_placeholder = why_off is None and launcher.CATALOG.get(settings["conflicts.agent.model"], placeholder) == placeholder
+        rows.append(_chk("resolver configured: " + ("model %s resolves to the placeholder id, so every launch is refused" % settings["conflicts.agent.model"]
+                                                    if on_placeholder else
+                                                    "model %s, up to $%g per unit, $%g per day" % (settings["conflicts.agent.model"], budget, ceiling)
+                                                    if why_off is None else "behaves as off (%s)" % why_off), why_off is None and not on_placeholder,
+                         "supply a validated model id override" if on_placeholder else
                          "set conflicts.agent.max_budget_usd_per_unit and conflicts.agent.spend_ceiling_usd_per_day in .sdlc/config.json"))
         rows.append(_chk("resolver spend: " + ("finite caps configured" if finite else "no finite spend cap in the upkeep settings"),
                          finite, "the launcher refuses a launch without finite per-run, per-machine and team caps"))
