@@ -632,45 +632,13 @@ def arm_settings(config):
     return {"default_priority": pr.strip(), "arm_pulled_blockers": pulled if isinstance(pulled, bool) else True}
 
 
-def arm(sdlc_dir, label, apply=False, config=None, run=None, only=None):
-    """Arm what `plan()` calls unarmed, reusing `triage.compute_actions` / `triage.apply_actions`.
-
-    -> {"label", "apply", "actions": [triage action dicts], "refused": [{"issue", "verdict",
-    "reason"}], "notes": [str]}. Dry-run (the default) hands the source a read-only runner, so a write
-    call is impossible rather than merely skipped. Never edits a body, creates or removes a label, or
-    deletes. `only` (a set of issue numbers, `answer` #1580) restricts the arming to those issues.
-    Raises what `plan()` raises."""
-    sources, triage = _load("sources"), _load("triage")
-    gh_api = _load("gh_api")
-    config = config if config is not None else _load("state").load_config(sdlc_dir)
-    cfg = arm_settings(config)
-    base = run or sources._run_gh
-    p = plan(sdlc_dir, label, config=config, run=base)
-    source = sources.GitHubSource(config, run=base if apply else _ReadOnly(base))
-    dependents = collections.defaultdict(list)
-    for r in p["members"] + p["outside"]:
-        for b in r["waiting_on"]:
-            dependents[b].append(r["number"])
-    todo, refused, notes = [], [], []
-    for r in p["members"] + p["outside"]:
-        outside = r["verdict"] == "outside"
-        v = r["own_verdict"] if outside else r["verdict"]
-        if v in _REFUSED:
-            refused.append({"issue": r["number"], "verdict": v, "reason": r["detail"] or v})
-        elif v == "unarmed":
-            if not outside:
-                todo.append((r["number"], None))
-            elif cfg["arm_pulled_blockers"]:
-                todo.append((r["number"], min(dependents[r["number"]] or [0])))
-            else:
-                notes.append("#%d is an open blocker outside the label; arm_pulled_blockers is off, left alone"
-                             % r["number"])
-    if only is not None:
-        todo = [t for t in todo if t[0] in only]
+def _prepare(source, triage, gh_api, label, cfg, todo, refused, notes):
+    """Compute, per (issue, pulled_for) in `todo`, the pre-actions and arm actions -> {issue: (pre, got)}.
+    Reads only. Appends to `refused` / `notes`. Shared by `arm` and `pull`."""
     me = source._assignee_login()
     prefix = source.priority_prefix
     label_ok = {}
-    pre_by_issue, actions = {}, []
+    pre_by_issue = {}
     for n, pulled_for in sorted(todo):
         state = triage._fetch_issue_state(source, n)
         if state is None:
@@ -706,6 +674,12 @@ def arm(sdlc_dir, label, apply=False, config=None, run=None, only=None):
                    {"action": "comment", "issue": str(n), "result": None, "error": None,
                     "detail": "Pulled into %s as a prerequisite of #%d." % (label, pulled_for)}]
         pre_by_issue[n] = (pre, got)
+    return pre_by_issue
+
+
+def _apply(source, triage, pre_by_issue, apply):
+    """Run (or, when `apply` is false, only describe) what `_prepare` computed -> the action list."""
+    actions = []
     for n in sorted(pre_by_issue):
         pre, got = pre_by_issue[n]
         done_pre = []
@@ -717,8 +691,98 @@ def arm(sdlc_dir, label, apply=False, config=None, run=None, only=None):
         actions += done_pre
         if not any(a["result"] == "failed" for a in done_pre):
             actions += triage.apply_actions(source, got, apply)
+    return actions
+
+
+def arm(sdlc_dir, label, apply=False, config=None, run=None, only=None):
+    """Arm what `plan()` calls unarmed, reusing `triage.compute_actions` / `triage.apply_actions`.
+
+    -> {"label", "apply", "actions": [triage action dicts], "refused": [{"issue", "verdict",
+    "reason"}], "notes": [str]}. Dry-run (the default) hands the source a read-only runner, so a write
+    call is impossible rather than merely skipped. Never edits a body, creates or removes a label, or
+    deletes. `only` (a set of issue numbers, `answer` #1580) restricts the arming to those issues.
+    Raises what `plan()` raises."""
+    sources, triage = _load("sources"), _load("triage")
+    gh_api = _load("gh_api")
+    config = config if config is not None else _load("state").load_config(sdlc_dir)
+    cfg = arm_settings(config)
+    base = run or sources._run_gh
+    p = plan(sdlc_dir, label, config=config, run=base)
+    source = sources.GitHubSource(config, run=base if apply else _ReadOnly(base))
+    dependents = collections.defaultdict(list)
+    for r in p["members"] + p["outside"]:
+        for b in r["waiting_on"]:
+            dependents[b].append(r["number"])
+    todo, refused, notes = [], [], []
+    for r in p["members"] + p["outside"]:
+        outside = r["verdict"] == "outside"
+        v = r["own_verdict"] if outside else r["verdict"]
+        if v in _REFUSED:
+            refused.append({"issue": r["number"], "verdict": v, "reason": r["detail"] or v})
+        elif v == "unarmed":
+            if not outside:
+                todo.append((r["number"], None))
+            elif cfg["arm_pulled_blockers"]:
+                todo.append((r["number"], min(dependents[r["number"]] or [0])))
+            else:
+                notes.append("#%d is an open blocker outside the label; arm_pulled_blockers is off, left alone"
+                             % r["number"])
+    if only is not None:
+        todo = [t for t in todo if t[0] in only]
+    pre_by_issue = _prepare(source, triage, gh_api, label, cfg, todo, refused, notes)
+    actions = _apply(source, triage, pre_by_issue, apply)
     return {"label": label, "apply": bool(apply), "actions": actions,
             "refused": sorted(refused, key=lambda x: x["issue"]), "notes": notes}
+
+
+def pull(sdlc_dir, label, ref, for_goal, config=None, run=None):
+    """Pull ONE open prerequisite that sits outside the label into it, for a run already in flight (#1579).
+
+    -> {"ref", "result": "pulled"|"already"|"closed"|"refused"|"unreadable", "reason": str,
+    "actions": [triage action dicts]}. Reuses `arm`'s machinery (`_prepare`/`_apply`), so an unarmed
+    blocker is armed exactly as `arm` arms it and an armed one only gets the label plus the fixed comment.
+    Parked, assigned elsewhere, upper-tier, held by a gate, in another repository, or `arm_pulled_blockers`
+    off: nothing is written and the reason is returned. Writes for real; never raises on a bad ref."""
+    sources, triage, gh_api = _load("sources"), _load("triage"), _load("gh_api")
+    config = config if config is not None else _load("state").load_config(sdlc_dir)
+    cfg = arm_settings(config)
+    base = run or sources._run_gh
+    out = lambda res, why="", acts=(): {"ref": str(ref), "result": res, "reason": why, "actions": list(acts)}
+    text = str(ref).strip().lstrip("#")
+    if not text.isdigit():
+        return out("refused", "in another repository (%s); Sigma stays out of it" % ref)
+    n = int(text)
+    source = sources.GitHubSource(config, run=base)
+    try:
+        issue = gh_api.view_issue(base, n, source.repo or None, comments="none")
+        verdict, detail = _Judge(sdlc_dir, config, source).verdict(issue)
+    except Exception as exc:       # noqa: BLE001 - a pull never breaks the pick
+        return out("unreadable", "could not read #%d (%s)" % (n, exc))
+    if verdict == "closed":
+        return out("closed")
+    if label in _names(issue):
+        return out("already")
+    if verdict in _REFUSED:
+        return out("refused", "%s: %s" % (verdict, detail or verdict))
+    if verdict == "unarmed" and not cfg["arm_pulled_blockers"]:
+        return out("refused", "unarmed and arm_pulled_blockers is off")
+    refused, notes = [], []
+    if verdict == "unarmed":
+        prepared = _prepare(source, triage, gh_api, label, cfg, [(n, int(for_goal))], refused, notes)
+        if refused:
+            return out("refused", "%s: %s" % (refused[0]["verdict"], refused[0]["reason"]))
+        pre, got = prepared[n]
+        prepared = {n: (pre, got)}
+    else:
+        pre = [{"action": "add-label", "issue": str(n), "detail": label, "result": None, "error": None},
+               {"action": "comment", "issue": str(n), "result": None, "error": None,
+                "detail": "Pulled into %s as a prerequisite of #%d." % (label, int(for_goal))}]
+        prepared = {n: (pre, [])}
+    acts = _apply(source, triage, prepared, True)
+    failed = [a for a in acts if a["result"] == "failed"]
+    if failed:
+        return out("refused", "a write failed: %s" % (failed[0].get("error") or failed[0]["action"]), acts)
+    return out("pulled", "", acts)
 
 
 def render_arm(res):

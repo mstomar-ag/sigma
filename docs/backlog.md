@@ -435,7 +435,9 @@ and the board field write is skipped when the GraphQL budget is low; the label w
    raised, whichever member the walk enters through, and the cycle is reported once.
    Whole-body scans here use only the explicit phrases (blocked by, depends on, depends upon), so prose such as
    "after #N" makes no edge. A blocker that is merged, closed or a pull request is never written to, and the dry
-   pass writes nothing. At most 10 outside blockers are read per pass; the rest are reported on stderr, not dropped.
+   pass writes nothing. At most 10 outside blockers are read per pass, newest first; one read and found at its required rank is not read
+   again for ten minutes, so the next passes reach the older ones. Blockers not yet read are counted as unread
+   in the repair state and in the doctor row, never as a clean zero.
 
 **Picker order.** With `discovery.order` at `"priority"` and `discovery.blocking_priority_override` on (the
 default), the picker orders by priority tier first, then a goal that also carries `sdlc:blocking` ahead of

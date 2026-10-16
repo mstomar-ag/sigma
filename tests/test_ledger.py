@@ -1311,7 +1311,7 @@ def test_vocabulary_constants_match_spec_table():
             # #2521: the run_stop reason for a deliberate, healthy session-retirement
             # checkpoint -- see loop.py's `_handoff_reason` and a downstream budget metric's own
             # guardrail for why it is deliberately excluded from budget-exhaustion counting.
-            "handoff")
+            "handoff", "label-held")
 
 
 def test_retro_grades_matches_sdlc_retro_skill_prose():
