@@ -3163,9 +3163,11 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                 out.append(_chk(
                     "no issue still carries the legacy confirmation label (advisory)",
                     False,
-                    f"{len(leftovers)} open issue(s) ({shown}{more}) carry the legacy confirmation label. Nothing "
-                    "writes it any more, so "
-                    "this is a leftover from an older board: the loop will never pick these. " + how +
+                    f"{len(leftovers)} open issue(s) ({shown}{more}) carry the legacy confirmation label. " +
+                    ("Nothing writes it any more, so this is a leftover from an older board: the loop will "
+                     "never pick these. " if gate_on else
+                     "Triage is off, so follow-ups and upkeep findings are filed with it by design; the loop "
+                     "will never pick these. ") + how +
                     "`/sigma-promote` to approve or clear each one. Advisory only -- nothing was changed."))
 
             # #1408: a blocker that still carries the legacy label or has no priority (advisory).
@@ -5419,6 +5421,10 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
                                      % (ar["id"], ar["option"]))
                     if ar["answers"]:
                         extra.append(rbk.acceptance_line(ar))
+                rows = [r for r in _load_loop_script("rule_draft").suggest(sdlc_dir, cfg) if not r["covered"]][:3]
+                if rows:
+                    extra.append("top uncovered rule pairs (rule_draft.py suggest): " + "; ".join(
+                        "%s / %s (score %.1f)" % (r["qkind"], r["area"], r["score"]) for r in rows))
             ptr = _load_loop_script("ledger_pointer")
             if ptr.is_open(cfg):
                 extra.append("ledger pointer on: %d ledger entry files, %d ids queued"
