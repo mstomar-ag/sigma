@@ -4,7 +4,6 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-- The Rulebook and upkeep enable steps now say to remove a leftover `.sdlc/state/watch.stop` before starting the watcher, and doctor adds a "no leftover watcher stop file" row only when that file exists and no watcher is running; with the file absent doctor output is unchanged (#1510).
 - The source-error downgrade-to-park declares `quota` for a quota or budget failure and `needs_decision` otherwise, and the stale-worktree escalation park declares `needs_decision` (#1524).
 - **Upkeep's mechanical level resolves two append-only shapes (#1515).** A dated `## YYYY-MM` log and a bullet-list file that both sides only added to are unioned (per section in date order; base order then the unit's new items); an edit or removal on either side still parks.
 - A config that sets `discovery.blocker_promotion.mode` to `"smart"` now gets a one-time skip line from the reconcile tick and a not-OK "blocker priority rule inactive" doctor row naming the one-word fix to `"always"`; what smart, always and off do is unchanged (#1489).
@@ -51,6 +50,7 @@ All notable changes to Sigma are recorded here, newest first.
 - **An approved rule is shown as the recommendation, and agreement is explained (#1496).** `unpark.py brief` adds `recommendation` and `pair` (only with the rules part open and the option on offer), `resolve` records `rule_id`, `shown` and `accepted`, the autonomy row adds `misses` and `majority_share` with shown and not-shown agreement apart (level 3 judges the not-shown), `rule_draft.py list --why` and `due` and the doctor explain skipped pairs and per-rule acceptance, and the applier needs a rule's own live comparisons at level 3. Closed gates leave output unchanged.
 - **Every park declares a kind, and deny-list filings are hard stops (#1498).** Sigma's own park sites pass an explicit kind and `loop.py record parked` without `--qkind` stays undeclared (one stderr line suggests a kind; it never guesses from free text). One resolver, `qkind.resolve`, reads the newest kind line from a Sigma park comment or a later OWNER/MEMBER/COLLABORATOR declaration and ignores the rest; new `unpark.py declare`, `list --undeclared` and `resolve --qkind`. Filing triage declares the first hard-stop kind for deny-word, spend, secret and class matches and writes `sigma-hardstop: <class>` on the park, which the decision record copies into `hardstop_class`.
 - **Docs state that a merged goal branch is deleted on the remote (#1512).** The branch-shape section of the branching model now names the delete after `work.py merge`, the guards that refuse it, and that it cannot be turned off.
+- The Rulebook and upkeep enable steps now say to remove a leftover `.sdlc/state/watch.stop` before starting the watcher, and doctor adds a "no leftover watcher stop file" row only when that file exists and no watcher is running; with the file absent doctor output is unchanged (#1510).
 
 ## 1.0.14 — 2026-10-15 — the Decision Rulebook and upkeep documented, a 12-hour upkeep window, the blocker priority rule, and the fixes from the third validation pass
 
