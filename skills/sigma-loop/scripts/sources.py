@@ -5175,7 +5175,7 @@ class GitHubSource:
         confirmation label from a blocker and removes the blocking mark from a closed blocker or one that
         blocks nothing. Raise-only and idempotent. Returns a dict: violations (blockers found below
         what they block), raised, stripped, unmarked (issue refs written), unwritable (reported on
-        stderr), skipped (reason or ""). `apply=False` counts and writes nothing. Mode off returns
+        stderr), skipped (reason or ""), and `refused` only when an ownership refusal happened. `apply=False` counts and writes nothing. Mode off returns
         before any call; smart returns too (its claim is only checked by the board pass). At most `cap`
         writes (default 10) and 200 edges; the board field write is skipped when GraphQL remaining is
         low or unreadable, label writes stay REST. Fail-open. #1560: `preview=True` is `apply=False` that also
@@ -5248,6 +5248,9 @@ class GitHubSource:
                 name = lambda r: discovery.PRIORITIES[r] if r < len(discovery.PRIORITIES) else "unprioritised"  # noqa: E731
                 out["plan"] = [{"blocker": ref, "current": name(ranks[ref]), "new": name(new_rank), "cause": str(cause)}
                                for ref, (new_rank, cause) in sorted(required.items())]
+                # #1707: the apply pass refuses an issue Sigma does not own (hard stops on); the preview says so
+                out["foreign"] = [p["blocker"] for p in out["plan"] if not hsg.is_sigma_issue(self, p["blocker"])]
+                out["plan"] = [p for p in out["plan"] if p["blocker"] not in out["foreign"]]
                 out["cycles"] = sorted(str(c) for c in cyc)
             if not apply:
                 return out
@@ -5260,6 +5263,7 @@ class GitHubSource:
                         break
                     budget[0] -= 1
                     if self._write_blocker_promotion(ref, item_of(ref), ranks[ref], new_rank, cause) is False:
+                        out.setdefault("refused", []).append(ref)       # #1707: counted, so the doctor can say why
                         continue    # #1468: skipped, not raised
                     out["raised"].append(ref)
             finally:
