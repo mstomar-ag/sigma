@@ -25,7 +25,7 @@ It does not do the following:
   refs that match the backup namespace exactly.
 - It never commits to a unit branch itself. It rewrites the branch by replaying existing commits.
 - It does not land a unit unless a person asks for that (see [Landing a unit](#landing-a-unit)).
-- It does not run a language model to resolve a conflict in the shipped engine. See [Conflicts](#conflicts).
+- It does not run a language model to resolve a conflict unless `upkeep.conflicts.resolve` is `agent` and both spend caps are set. See [Conflicts](#conflicts).
 
 ## The two ways a unit gets brought forward
 
@@ -182,7 +182,7 @@ protection on `feature/*` blocks upkeep's own force push, so grant upkeep's acto
 |---|---|
 | `off` (default) | the conflict is parked: the unit branch is left untouched, nothing is pushed, one issue records why |
 | `mechanical` | a conflict confined to the changelog is resolved by a heading-aware union, proved, and pushed once through the atomic backup push; anything else parks |
-| `agent` | not available yet; it behaves as `off` and the doctor shows the resolver rows as failing by design |
+| `agent` | a capped headless resolver plus an independent reviewer (#1516); it behaves as `off` until `upkeep.conflicts.agent.max_budget_usd_per_unit` and `spend_ceiling_usd_per_day` are both set; see [Upkeep part B](upkeep-part-b.md) |
 
 Level `mechanical` needs a verify command unless `upkeep.conflicts.mechanical_without_verify` is `true`.
 A parked conflict is one finding: before filing, the pass looks for an open issue with the same conflict id and

@@ -79,3 +79,17 @@ def test_depth_reads_the_stamp_and_never_raises():
     assert m.ancestry_depth("g", Bad()) == 0
     assert m.ancestry_depth("g", None) == 0
     assert m.stamp("body", 3).endswith("sigma-depth: 3")
+
+
+def test_bypasses_cap_default_p1_and_configured_threshold_1553():
+    m = _mod()
+    assert m.bypasses_cap("P0", {}) and m.bypasses_cap("P1", {})
+    assert not m.bypasses_cap("P2", {}) and not m.bypasses_cap(None, {})
+    cfg = {"ai_filed": {"cap_bypass_priority": "P2"}}
+    assert m.bypasses_cap("P2", cfg) and not m.bypasses_cap("P3", cfg)
+
+
+def test_invalid_bypass_priority_reads_as_p1_1553():
+    m = _mod()
+    for bad in ("P9", 1, None, "p1", True):
+        assert m.limits({"ai_filed": {"cap_bypass_priority": bad}})["cap_bypass_priority"] == "P1"
