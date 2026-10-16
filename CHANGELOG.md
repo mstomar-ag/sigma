@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **Every Sigma-spawned model session now takes a `session` lease first (#1603).** The judge, the supervisor (Claude and Codex) and the upkeep launcher share `resource_guard.session_lease`, which releases on exit, exception or timeout; a hold becomes each site's own refusal, pause-and-relaunch or deferral. Off unless `resource.mode` (upkeep config) or `SIGMA_RESOURCE_MODE` is `observe` or `enforce`; off writes nothing. A ratchet test fails on a new host-CLI spawn that is not gated or listed.
 - **`resource_lease.py` lease-table fixes (#1715).** A lease whose pid was reused by another process (start time differs from the one recorded at admit) is reclaimed as stale; `wait --kind goal` holds while a started goal's verify is waiting, matching `admit`; releasing a lease file with no id no longer raises KeyError; `wait --max` rejects nan and negative values with a usage error (exit 2).
 - Filing triage now parks euro and pound amounts (symbol, code or word) near a compute noun as spend, like dollar amounts; fenced blocks and amounts with no compute noun still arm (#1710).
 - **A quoted or backticked deny word after an action verb now holds the filing (#1704).** A command in quotes after a verb, a hand-off word or a purpose clause (redact X to nuke Y) parks again; quoted mentions after a noun head or a naming verb still arm.

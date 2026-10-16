@@ -104,6 +104,21 @@ def _codex_runtime():
     return module
 
 
+_GUARD = []
+
+
+def _guard():
+    """resource_guard, loaded once (#1603): the one place a model session asks for admission."""
+    if not _GUARD:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "resource_guard", pathlib.Path(__file__).resolve().parent / "resource_guard.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _GUARD.append(module)
+    return _GUARD[0]
+
+
 def _load_legacy():
     import importlib.util
     spec = importlib.util.spec_from_file_location(
@@ -451,8 +466,15 @@ def _codex_main(sdlc_dir, max_runs, scale, run_id):
                 argv_cmd = codex_runtime.build_codex_command(executable, repo, skill, final_path)
             _log_and_print(log, f"supervisor: Codex run #{runs + 1} — {_date_str()}", warned)
             try:
-                output, exit_code, final = _capture_codex(
-                    argv_cmd, child_env, repo, logroll.cap_bytes(log.parent), final_path)
+                with _guard().session_lease("supervisor", run_id, repo=str(repo)) as lease:     # #1603
+                    held = lease if lease is not None and hasattr(lease, "reason") else None
+                    if held is None:
+                        output, exit_code, final = _capture_codex(
+                            argv_cmd, child_env, repo, logroll.cap_bytes(log.parent), final_path)
+                if held is not None:
+                    _log_and_print(log, f"supervisor: session held ({held.reason}) — pausing", warned)
+                    _pause(min(held.retry_after, 3600.0) * scale)
+                    continue
             except ValueError as exc:
                 print(f"supervisor: Codex final message refused: {exc}", file=sys.stderr)
                 return 2
@@ -560,6 +582,7 @@ def main(argv):
     child_env = {**os.environ, "SIGMA_RUN_ID": run_id}
 
     state = pathlib.Path(sdlc_dir) / "state"
+    repo_dir = pathlib.Path(sdlc_dir).resolve().parent
     log = state / "supervisor.log"
     tailf = state / "supervisor.tail"
     stopf = state / "supervisor.stop"
@@ -605,9 +628,16 @@ def main(argv):
                 # missing executable, so it is routed through the identical handling below rather
                 # than left as a second, uncaught path.
                 raise IndexError("SIGMA_CLAUDE_CMD is empty after word-splitting")
-            with open(runout, "wb") as f:
-                subprocess.run(argv_cmd, stdout=f, stderr=subprocess.STDOUT,
-                                env=child_env, check=False)
+            with _guard().session_lease("supervisor", run_id, repo=str(repo_dir)) as lease:   # #1603
+                held = lease if lease is not None and hasattr(lease, "reason") else None
+                if held is None:
+                    with open(runout, "wb") as f:
+                        subprocess.run(argv_cmd, stdout=f, stderr=subprocess.STDOUT,
+                                        env=child_env, check=False)
+            if held is not None:        # a crash-backoff pause: skip this launch, then relaunch
+                _log_and_print(log, f"supervisor: session held ({held.reason}) — pausing", warned)
+                _pause(min(held.retry_after, 3600.0) * scale)
+                continue
         except (OSError, IndexError) as exc:
             # The bash original got this survival for free from the SHELL: a failed exec of a
             # missing/unusable command is a 127 exit code plus a "command not found" message on
