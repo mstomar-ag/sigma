@@ -482,7 +482,8 @@ def _bucket_floor(config):
     return buckets.get("unclear") or max(buckets.values(), default="P4")
 
 
-def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, actionable):
+def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, actionable,
+                 requested_priority=None):
     """#1003: the triage outcome for one AI-filed issue, or None when triage is off (`ai_filed.triage.enabled`
     exactly false), in which case NOTHING here runs and the filing is as it was. -> a dict with `kind`
     ("arm" or "park"), `priority`, `reason`, `qkind`, `text` (marker line quoted) and `depth`.
@@ -509,8 +510,13 @@ def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text
         plan["depth"] = ai_filed_counter.ancestry_depth(goal, source) + 1
     if quoted and plan["kind"] == "arm":
         plan["kind"], plan["priority"], plan["reason"] = "park", None, "permission marker on the first body line was quoted"
-    if plan["kind"] == "arm" and ai_filed_counter.over_cap(counter, key_goal, _run_id(), config):
-        plan["kind"], plan["priority"], plan["reason"] = "park", None, "ai_filed cap reached or counter unreadable"
+    # #1553: the bypass keys on the caller's REQUESTED priority (--priority; the unrequested default is not a request); the armed label priority stays bucket-clamped.
+    # It skips only the per-goal cap; the per-run cap and an unreadable counter still park.
+    if plan["kind"] == "arm" and ai_filed_counter.over_cap(
+            counter, key_goal, _run_id(), config,
+            per_goal=not ai_filed_counter.bypasses_cap(requested_priority, config)):
+        plan["kind"], plan["priority"], plan["reason"] = "park", None, (
+            "ai_filed cap reached (ai_filed.max_per_goal / ai_filed.max_per_run) or counter unreadable")
     if plan["kind"] == "arm" and plan["depth"] is not None and plan["depth"] > lim["max_depth"]:
         plan["kind"], plan["priority"], plan["reason"] = "park", None, "ai_filed depth limit reached"
     return plan
@@ -566,7 +572,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                           priority=DEFAULT_PRIORITY, title=None, body=None,
                           extra_labels=(), source=None, run=None, dedup=True,
                           upstream_run=None, target_unit=None, idempotency_key=None,
-                          upkeep_finding=False, upkeep_qkind="needs_decision"):
+                          upkeep_finding=False, upkeep_qkind="needs_decision",
+                          priority_requested=False):
     """Open a tracked issue, address it, record it. The one real place the kit ever opens an issue on
     its own behalf — `hand_off()` below is a thin wrapper around this. Generalizes what used to be
     hand-off-only discipline (owner resolution, labels, the `gh` call, the ledger write, the dual
@@ -866,7 +873,8 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                 triage["qkind"] = upkeep_qkind
         else:
             triage = _triage_plan(
-                sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, immediately_actionable)
+                sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, immediately_actionable,
+                requested_priority=priority if priority_requested else None)
         if triage is not None:
             text = triage["text"]
         labels = [f"priority:{priority}", f"area:{area}", *extra_labels]
@@ -1496,6 +1504,7 @@ def main(argv):
             sdlc_dir, config, goal, area, why,
             same_area=assignee_map[assignee], immediately_actionable=queue_map[queue],
             blocks_goal=blocks_map[blocks], priority=flags.get("priority", DEFAULT_PRIORITY),
+            priority_requested="priority" in flags,
             title=flags.get("title"), body=body,
             # --label takes a COMMA-SEPARATED list, so ONE filing can carry both the class label
             # and any further labels of the caller's OWN taxonomy (`--label

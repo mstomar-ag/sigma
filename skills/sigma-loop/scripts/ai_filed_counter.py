@@ -11,7 +11,8 @@ lose one entry, so the cap may be exceeded by the number of concurrent writers, 
 Depth is carried in the filed body as a last line `sigma-depth: N`; a goal without one is depth 0.
 Config (key `ai_filed`, every value PROVISIONAL and overridable; a wrong type reads as the default):
 max_per_goal 5, max_per_run 20, max_depth 3, on_cap "park", counter_path "state/ai_filed_counter.json",
-counter_retention_days 14. Stdlib only.
+counter_retention_days 14, cap_bypass_priority "P1" (a filing at this priority or more urgent is armed past a
+reached cap when the counter is readable; an invalid value reads as P1). Stdlib only.
 """
 import json
 import os
@@ -20,7 +21,7 @@ import re
 
 HARD_MAX = 2000
 DEFAULTS = {"max_per_goal": 5, "max_per_run": 20, "max_depth": 3, "on_cap": "park",
-            "counter_path": "state/ai_filed_counter.json", "counter_retention_days": 14}
+            "counter_path": "state/ai_filed_counter.json", "counter_retention_days": 14, "cap_bypass_priority": "P1"}
 DEPTH_PREFIX = "sigma-depth: "
 _DEPTH = re.compile(r"^sigma-depth: (\d{1,3})\s*$", re.MULTILINE)
 
@@ -37,12 +38,22 @@ def limits(config):
                 out[k] = v
         if blk.get("on_cap") == "park":
             out["on_cap"] = "park"
+        bp = blk.get("cap_bypass_priority")
+        if isinstance(bp, str) and re.fullmatch(r"P[0-4]", bp):
+            out["cap_bypass_priority"] = bp
         p = blk.get("counter_path")
         if isinstance(p, str) and p.strip() and not os.path.isabs(p) and ".." not in pathlib.PurePath(p).parts:
             out["counter_path"] = p
     except Exception:
         return dict(DEFAULTS)
     return out
+
+
+def bypasses_cap(priority, config):
+    """True when `priority` (e.g. "P1") is at or more urgent than `ai_filed.cap_bypass_priority` (#1553)."""
+    if not (isinstance(priority, str) and re.fullmatch(r"P[0-4]", priority)):
+        return False
+    return int(priority[1]) <= int(limits(config)["cap_bypass_priority"][1])
 
 
 def load(path):
@@ -61,13 +72,14 @@ def load(path):
         return None
 
 
-def over_cap(counter, goal, run, config):
-    """True when one more filing would pass the per-goal or per-run cap, or the counter is unreadable."""
+def over_cap(counter, goal, run, config, per_goal=True):
+    """True when one more filing would pass the per-goal or per-run cap, or the counter is unreadable.
+    `per_goal=False` skips only the per-goal check (#1553 bypass); the per-run cap and an unreadable counter still count."""
     if counter is None:
         return True
     lim = limits(config)
     ents = counter.get("entries", [])
-    if sum(1 for e in ents if e.get("goal") == str(goal)) >= lim["max_per_goal"]:
+    if per_goal and sum(1 for e in ents if e.get("goal") == str(goal)) >= lim["max_per_goal"]:
         return True
     return run is not None and sum(1 for e in ents if e.get("run") == run) >= lim["max_per_run"]
 
