@@ -242,6 +242,11 @@ def bank_option(kind, text):
     return None
 
 
+# #1547: the routes that WAIT for the park to clear on its own; a keep-parked on one posts no sweep
+# opt-out marker, so the automatic sweep still resumes the goal. Every other route posts it.
+WAITING_ROUTES = {"dependency": "wait for it", "quota": "wait it out"}
+
+
 def route_answer(kind, answers):
     """The normalised route answer for `kind`: a bank option, or 'free'; None when the kind has no
     route question or none was answered."""
@@ -649,10 +654,10 @@ def resolve(sdlc_dir, config, number, answers, decision, source=None, run=None, 
         # reimplemented, and not approximated by pasting its marker. A human deciding "leave it
         # parked" here is making exactly the decision that comment exists to record, so the
         # automatic sweep must see it in the form it already knows how to read.
-        # F-02(4): "wait for it" on a dependency park posts NO opt-out marker, so the blocker sweep
-        # still resumes the goal when its blocker closes.
-        waits = (_declared_kind(data) == "dependency"
-                 and route_answer("dependency", answers) == "wait for it")
+        # F-02(4) / #1547: a waiting route (`WAITING_ROUTES`) posts NO opt-out marker, so the sweep
+        # still resumes the goal when its blocker closes or its quota window resets.
+        declared = _declared_kind(data)
+        waits = declared in WAITING_ROUTES and route_answer(declared, answers) == WAITING_ROUTES[declared]
         err = _comment_decision(sdlc_dir, config, source, n, block + ("" if waits else "\n\n"
                                 + auto_unpark.keep_parked_comment(_one_line(
                                     PRIVATE_VALUE if _keys_only(config) else _substantive_reason(answers)))),
