@@ -749,7 +749,7 @@ def apply(sdlc_dir, config, cands, call=None):
         if allrows[r["fp"]].get("shape"):
             record["shape"] = allrows[r["fp"]]["shape"]
         record, n = store.scrub_record(record)
-        out["scrubbed"] += n
+        out["scrubbed"] += n + rec.scrub_count(r["choice"], r["reason"])
         if store.append(sdlc_dir, record, config):
             out["records"] += 1
     if store._visibility(config) == "public":
