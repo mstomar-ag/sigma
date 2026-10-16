@@ -1607,6 +1607,8 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None):
                          "check conflicts.agent in .sdlc/config.json"))
         rows.append(_chk("resolver spend: " + ("finite caps configured" if finite else "no spend limit configured (each run bounded by timeout_minutes only)"),
                          True, "optional: set conflicts.agent.max_budget_usd_per_unit and spend_ceiling_usd_per_day to cap spend"))
+        rows.append(_chk("resolver session network: not isolated on this platform", True,
+                         "informational: the session is a credential-free copy with no remote; a wall around the model CLI would cut its own API access"))       # #1573
         spent = _resolver_spend_today(pathlib.Path(base).joinpath(*rebase.LEVEL2_SPEND_REL.split("/")), launcher, now)
         if spent is None:
             rows.append(_chk("resolver spend today: unreadable", False, "check the spend store under .sdlc/state/upkeep/spend; the launcher stays closed on it"))
@@ -5576,6 +5578,11 @@ def _rulebook_state_core(cfg, sdlc_dir=None, run=None):
                 if due:
                     extra.append("%d approved rule(s) due for confirmation (older than reask_days): %s"
                                  % (len(due), ", ".join(str(i) for i, _ in due)))
+                if rbm.auto_approve_on(cfg):        # #1555: approval without a person is a warning, never silent
+                    extra.append("WARNING: rules: auto-approve ON (rulebook.rules.auto_approve): the watcher approves "
+                                 "learned rules on an owner's behalf and the applier acts on them at any level"
+                                 + ("" if _load_loop_script("autonomy").owners(cfg)
+                                    else "; no owner is configured, so nothing is approved"))
                 rdr = _load_loop_script("rule_draft").approved_rows(sdlc_dir, cfg)
                 if rdr:
                     counts = {}

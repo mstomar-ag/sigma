@@ -101,6 +101,8 @@ Nothing below is needed for the rest of Sigma. Do the steps in order and stop wh
 10. **Last, and only if you want it: the applier.** Set `rulebook.autonomy.applier.enabled` to `true`, with the
     conservative defaults. It needs the ledger watcher running, because the watcher runs its tick. Before starting the watcher, check for a leftover `.sdlc/state/watch.stop`
     and remove it: while that file exists the watcher exits at once and the applier never runs.
+    Before turning it on, run `unpark.py report <sdlc_dir>`: it lists every parked or blocked issue with its kind, area,
+    matching rule, level and whether the applier would act now, later or never, and writes nothing.
 
 ## What it will never do
 
@@ -291,6 +293,15 @@ closed, brief and resolve output is unchanged.
 `approve` refuses, with one line, for an unknown id, an already approved rule, a non-owner, an unresolved login or a
 closed gate. For a login that is not an owner it prints the line that asks an owner to approve, and the rule stays proposed.
 
+### Auto-approve (opt-in, off by default)
+
+With `rulebook.rules.auto_approve` set to the JSON boolean true (and the rules, autonomy and records parts open, and at least one name in `rulebook.autonomy.owners`), the watcher tick, `rule_draft.py list` and `rule_draft.py suggest` draft and approve a rule for every learned pair that has a unique majority option, at any level and without the held-out exam.
+The rule is approved as the first configured owner and carries `approved_by` and `auto: true`; each approval writes one decision record with gesture `approve` and how `autonomous`.
+The applier arms such a rule at once, at any level, and applies it after the window; the window, the daily cap, the re-ask age, the person-wins rule and an owner `no` all still apply.
+A `no` after an auto rule was applied reverts the goal and lowers the pair as usual, and the rule is then held until an owner reconfirms it by hand with `rule_draft.py reconfirm`.
+Hard-stop kinds, the `unknown` kind, shape-only options and pairs that already have a rule are never drafted.
+The doctor shows a warning row, `rules: auto-approve ON (rulebook.rules.auto_approve)`, while it is on. Hand-editing `auto` or `approved_by` breaks the seal and the rule stops counting.
+
 ## The applier and the veto window
 
 The applier is the one part that answers for a person. It is a separate gate, `rulebook.autonomy.applier.enabled`,
@@ -304,6 +315,7 @@ What the tick does, in order:
 1. Reads owner comments. An owner's exact `no` on a **pending** ask cancels it. An owner's `no` on an **applied** ask,
    posted after it was applied and inside the window, records a veto. The veto is judged by the comment's own time, so
    a late tick still honours it, up to `stale_after_intervals` watch intervals past the window.
+   A pending ask stuck past twice its window is read at most once per window (`veto_read_at` on the ask), so its `no` can land up to one window late.
 2. Plans actions. An ask is applied only when all hold: nobody answered, the window (`window_minutes`, default 1440)
    has passed, the kind is not a hard-stop kind, the derived level is at least 3, exactly one sealed approved rule
    matches, and fewer than `max_auto_applied_per_day` (default 3, 0 stops it) were applied in the last 24 hours.
@@ -330,9 +342,11 @@ A `keep-parked` on a dependency park (route answer "wait for it") no longer post
 
 Instead it posts a waiting note (a person's "wait for it" answer, and a rule applied by the tick, always). The automatic sweep then resumes that dependency park when its last named blocker closes (#1549): gesture unpark, recorded as an autonomous sweep decision. A newer park comment cancels the note, and a person's keep-parked opt-out marker still wins.
 
+PROVISIONAL (owner to ratify): a park applied by label only, with no Sigma park comment, also outranks an older waiting note. When the newest `sdlc:parked` label event on the issue is later than the newest waiting note, the sweep does not resume it. If no label event can be read, the #1549 behaviour is unchanged (#1630).
+
 PROVISIONAL (owner to ratify): a `keep-parked` on a quota park (route answer "wait it out") likewise posts no opt-out marker, so the sweep may resume the goal after the quota window. Every other route still posts it.
 
-A quota ask matched to the "wait it out" rule is applied only after the reset time the ask records (`reset_at`). A reset time that is missing or unreadable counts as not yet reached, so the ask stays with the person. Other kinds are not affected.
+A quota ask matched to the "wait it out" rule is held until the reset time the ask records (`reset_at`). A quota park whose reason names a reset (`Retry-After: N` seconds, `resets in N minutes|hours`, `resets at` an ISO time or epoch, `x-ratelimit-reset`) records it on the park (a `sigma-reset-at:` line) and on the ask; a time not in the future or over 7 days away is ignored. When no reset is named there is one behaviour: the ask waits the ordinary window (`window_minutes`) and no longer, with no separate fixed wait. Other kinds are not affected.
 
 ## Hard stops and the record-done net
 
@@ -558,6 +572,7 @@ flag, which closes the whole block.
 | `autonomy.applier.stale_after_intervals` | `3` | watch intervals without a tick that the doctor reads as dead |
 | `autonomy.applier.prune_after_days` | `30` | age at which an applied ask with no veto is deleted |
 | `rules.enabled` | `false` | open the rules part |
+| `rules.auto_approve` | `false` | let the watcher approve learned rules as the first owner (see Auto-approve) |
 | `rules.path` | `".sdlc/rulebook.json"` | where the rule file lives |
 | `rules.reask_days` | `90` | age at which an approved rule is due for confirmation |
 | `rules.draft.min_agreement` | `0.90` | agreement of held-out answers needed to draft |

@@ -1707,7 +1707,8 @@ def _default_level2_plan(config, sdlc_dir=None, cwd=None):
     return {"sdlc_dir": str(sdlc_dir), "launch": dict(common, model=launcher.CATALOG[s["conflicts.agent.model"]]),
             "review_launch": dict(common, model=review_model, directory=os.path.join(root, "review"), cap_usd=review_cap), "review_cap_usd": review_cap,
             "review_model": review_model, "resolver_root": os.path.join(root, "resolver"), "limits": None, "host": "claude",
-            "environ": None, "config": config, "max_units_per_sweep": int(s["conflicts.agent.max_units_per_sweep"])}
+            "environ": None, "config": config, "max_units_per_sweep": int(s["conflicts.agent.max_units_per_sweep"]),
+            "session": True, "net_prefix": None}      # #1573: a wall around the model CLI itself would cut its own API access
 
 
 LEVEL2_PLAN_FACTORY = _default_level2_plan
@@ -3253,8 +3254,94 @@ def _rebase_pass(sdlc_dir, config, goal, unit, run, cwd, remote, branch, base, r
 # --------------------------------------------------------------------------- CLI
 
 
+PREVIEW_FILES_MAX = 20
+
+
+def _preview_conflict(run, cwd, base_ref, feature_ref):
+    """`merge-tree --write-tree` of the two tips -> `(True, [])` clean, `(False, files)` conflicting, None unanswered.
+    It writes content-addressed objects only and moves no ref. A rebase replays commit by commit, so it may conflict
+    where this merge does not: the answer is a prediction."""
+    argv = ["git", "merge-tree", "--write-tree", "--name-only", "--no-messages", base_ref, feature_ref]
+    try:
+        run(cwd, argv)
+        return True, []
+    except Exception as exc:                                  # noqa: BLE001 - exit 1 is the conflict answer
+        lines = str(exc).splitlines()
+        if lines and re.fullmatch(r"[0-9a-f]{40,64}", lines[0].strip()) and len(lines) > 1:
+            return False, sorted({l.strip() for l in lines[1:] if l.strip()})[:PREVIEW_FILES_MAX]
+        return None
+
+
+def _preview_unit(sdlc_dir, config, unit, run, cwd, remote, base):
+    """One unit's predicted outcome, from the remote-tracking refs only: reads, never writes."""
+    branch = features.BRANCH_PREFIX + unit
+    row = {"unit": unit, "branch": branch, "outcome": "refused", "why": "", "files": []}
+    base_ref, feature_ref = "%s/%s" % (remote, base), "%s/%s" % (remote, branch)
+    for ref, what in ((base_ref, "base"), (feature_ref, "feature branch")):
+        try:
+            run(cwd, ["git", "rev-parse", "--verify", "--quiet", "refs/remotes/%s^{commit}" % ref])
+        except Exception:                                     # noqa: BLE001
+            row["why"] = "no remote-tracking %s %s" % (what, ref)
+            return row
+    try:
+        direct, _ = _unacked(sdlc_dir, run, cwd, unit, base_ref, direct_commits(run, cwd, base_ref, feature_ref), config)
+    except Exception as exc:                                  # noqa: BLE001
+        row["why"] = "direct commits unreadable: %s" % _flat(exc)
+        return row
+    if direct:
+        row["why"] = "%d direct commit(s) not acknowledged (ack them with `ack`)" % len(direct)
+        return row
+
+    def ancestor(a, b):
+        try:
+            run(cwd, ["git", "merge-base", "--is-ancestor", a, b])
+            return True
+        except Exception:                                     # noqa: BLE001 - exit 1 means "no"
+            return False
+    if ancestor(base_ref, feature_ref):
+        row.update(outcome="current", why="the base is already in the feature branch")
+    elif ancestor(feature_ref, base_ref):
+        row.update(outcome="fast-forward", why="the feature branch has nothing the base lacks")
+    else:
+        got = _preview_conflict(run, cwd, base_ref, feature_ref)
+        if got is None:
+            row["why"] = "the merge probe gave no answer"
+        elif got[0]:
+            row.update(outcome="clean rebase", why="no conflict predicted")
+        else:
+            row.update(outcome="conflict", why="conflict predicted (a merge probe; a rebase may differ)", files=got[1])
+    return row
+
+
+def preview(sdlc_dir, config, run=None, fetch=False):
+    """The sweep-level dry run (#1559): every unit the sweep would consider, with its predicted outcome. Moves no ref,
+    pushes nothing, makes no worktree and writes nothing; works with the upkeep gate closed. No fetch unless asked: it
+    reads the remote-tracking refs, so the answer is as of the last fetch."""
+    run = run or _run
+    sched = _load("feature_upkeep_sched")
+    cwd = str(pathlib.Path(sdlc_dir).parent)
+    remote, base = _remote(config), base_of(config)
+    out = {"base": base, "remote": remote, "as_of": "last fetch", "units": [], "notes": []}
+    if not base:
+        out["notes"].append("no work.base configured: nothing can be predicted")
+        return out
+    if fetch:
+        try:
+            run(cwd, ["git", "fetch", "--quiet", remote])
+            out["as_of"] = "fetched now"
+        except Exception as exc:                              # noqa: BLE001
+            out["notes"].append("fetch failed, reading the last fetch: %s" % _flat(exc))
+    listed, notes = sched.list_units_notes(sdlc_dir)
+    out["notes"] += notes
+    settings = gate.read(config).settings
+    for unit in sched.selected(listed, settings["units.include"], settings["units.exclude"]):
+        out["units"].append(_preview_unit(sdlc_dir, config, unit, run, cwd, remote, base))
+    return out
+
+
 USAGE = ("usage: feature_rebase.py upkeep <sdlc_dir> <unit> [goal] | "
          "feature_rebase.py show <sdlc_dir> <unit> | "
+         "feature_rebase.py preview <sdlc_dir> [--fetch] | "
          "feature_rebase.py ack <sdlc_dir> <unit> (<sha>... | --all) | "
          "feature_rebase.py restore <sdlc_dir> <unit> (--list | <stamp> --expect <tip>) | "
          "feature_rebase.py prune <sdlc_dir> [--dry-run]")
@@ -3356,6 +3443,14 @@ def main(argv):
             "direct": direct_commits(_run, cwd, "%s/%s" % (remote, base),
                                      "%s/%s" % (remote, branch)) if base else []},
             indent=2, sort_keys=True))
+        return 0
+    if len(argv) >= 3 and argv[1] == "preview":
+        parsed = _flags(argv[3:], set(), {"--fetch"})
+        if parsed is None or parsed[0]:
+            print(USAGE, file=sys.stderr)
+            return 2
+        result = preview(argv[2], state.load_config(argv[2]), fetch="--fetch" in parsed[1])
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     if len(argv) >= 4 and argv[1] == "ack":
         rest = argv[4:]

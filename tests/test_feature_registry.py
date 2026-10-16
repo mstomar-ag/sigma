@@ -1460,6 +1460,9 @@ _NO_UNIT_NAME = {
     ("feature_upkeep_level2", "export_tree"),   # #951: copies the stopped tree into a directory the caller chose; no unit name
     ("feature_upkeep_level2", "resolve_stop"),   # #951: the unit name reaches the attempt store only through store_path, which refuses a bad name and folds the rest
     ("feature_upkeep_level2", "resolve_stops"),   # #951: the same; the resolver directory comes from the caller's root
+    ("feature_upkeep_level2", "session_dir"),   # #1573: the caller's resolver root plus a fixed name; no unit name
+    ("feature_upkeep_level2", "session_prepare"),   # #1573: writes inside that directory only; no unit name
+    ("feature_upkeep_level2", "session_problem"),   # #1573: checks one path inside that directory; no unit name
     ("feature_upkeep_review", "_sibling"),   # #950: the reviewer route; the importer, no unit name
     ("feature_upkeep_review", "write_manifest"),   # #950: the unit name reaches it only through store_dir, which refuses a bad name and folds the rest
     ("feature_upkeep_launcher", "_acquire_lock"),   # #949: the resolver launcher; paths come from a request and a scratch root, no unit name

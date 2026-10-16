@@ -5138,7 +5138,7 @@ class GitHubSource:
     _REPAIR_EDGE_CAP = 200
     _REPAIR_WRITE_CAP = 10
 
-    def repair_blocker_ranks(self, cap=None, apply=True):
+    def repair_blocker_ranks(self, cap=None, apply=True, preview=False):
         """#1410: find every open blocking edge whose blocker ranks below what it blocks and repair it.
         The same edge extraction as `_promote_blockers` (explicit phrases plus the ledger) over the open
         goal and blocked-goal issues read through REST, the shared rule `discovery.blocker_required_ranks`
@@ -5149,12 +5149,16 @@ class GitHubSource:
         stderr), skipped (reason or ""). `apply=False` counts and writes nothing. Mode off returns
         before any call; smart returns too (its claim is only checked by the board pass). At most `cap`
         writes (default 10) and 200 edges; the board field write is skipped when GraphQL remaining is
-        low or unreadable, label writes stay REST. Fail-open."""
+        low or unreadable, label writes stay REST. Fail-open. #1560: `preview=True` is `apply=False` that also
+        runs in mode off or smart, writes nothing (not even the closed-refs cache), and adds `plan` (one
+        {blocker, current, new, cause} per raise) and `cycles` to the result; those keys exist ONLY in a preview."""
         out = {"violations": 0, "raised": [], "stripped": [], "unmarked": [], "unwritable": [], "skipped": ""}
-        if self.blocker_promotion_mode == "off":
+        if preview:
+            apply = False
+        if self.blocker_promotion_mode == "off" and not preview:
             out["skipped"] = "off"
             return out
-        if self.blocker_promotion_mode == "smart":
+        if self.blocker_promotion_mode == "smart" and not preview:
             out["skipped"] = "smart"
             return out
         if cap is None:
@@ -5211,6 +5215,11 @@ class GitHubSource:
             out["violations"] = len(required)
             self._warn_unwritable_blockers(cross_repo)
             out["unwritable"] = sorted(set(cross_repo))
+            if preview:
+                name = lambda r: discovery.PRIORITIES[r] if r < len(discovery.PRIORITIES) else "unprioritised"  # noqa: E731
+                out["plan"] = [{"blocker": ref, "current": name(ranks[ref]), "new": name(new_rank), "cause": str(cause)}
+                               for ref, (new_rank, cause) in sorted(required.items())]
+                out["cycles"] = sorted(str(c) for c in cyc)
             if not apply:
                 return out
             budget = [cap]

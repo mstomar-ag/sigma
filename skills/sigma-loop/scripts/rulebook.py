@@ -35,7 +35,7 @@ import uuid
 _HERE = pathlib.Path(__file__).resolve().parent
 DEFAULT_PATH = ".sdlc/rulebook.json"
 DEFAULT_REASK_DAYS = 90
-FIELDS = ("id", "qkind", "area", "option", "reason", "status", "created", "confirmed", "seal")
+FIELDS = ("id", "qkind", "area", "option", "reason", "status", "created", "confirmed", "seal", "approved_by", "auto")
 _REQUIRED = ("id", "qkind", "area", "option", "status")
 _SEALED = ("id", "qkind", "area", "option", "reason", "created", "confirmed")
 STATUSES = ("proposed", "approved")
@@ -110,8 +110,19 @@ def _bank():
     return _BANK[0]
 
 
+def auto_approve_on(config):
+    """#1555: the JSON boolean true of `rulebook.rules.auto_approve` (default false) with the rules part open."""
+    return enabled(config) and _sub(config).get("auto_approve") is True
+
+
+def is_auto(rule):
+    """True for a sealed approved rule that the watcher approved on an owner's behalf (`auto: true`)."""
+    return _acts(rule) and rule.get("auto") is True
+
+
 def _seal(rule):
-    body = json.dumps({k: rule.get(k) for k in _SEALED}, sort_keys=True)
+    keys = _SEALED + (("approved_by", "auto") if rule.get("auto") is True else ())     # closed: legacy bytes
+    body = json.dumps({k: rule.get(k) for k in keys}, sort_keys=True)
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
@@ -128,6 +139,10 @@ def validate(rule):
     for k in ("reason", "created", "confirmed", "seal"):
         if k in rule and not isinstance(rule[k], str):
             return False, "rule field %s must be a string" % k
+    if "auto" in rule and rule["auto"] is not True:
+        return False, "rule field auto must be true when present"
+    if "approved_by" in rule and (not isinstance(rule["approved_by"], str) or not rule["approved_by"].strip()):
+        return False, "rule field approved_by must be a non-empty string"
     if rule["qkind"] not in _load("qkind").QKINDS:
         return False, "unknown question kind %r" % rule["qkind"]
     if rule["status"] not in STATUSES:
@@ -244,10 +259,12 @@ def park_line(rule_id):
     return "Rule %s is proposed in the rulebook and needs owner approval.\n%s" % (rule_id, q.render_line("owner_hold"))
 
 
-def approve(sdlc_dir, rule_id, login, config, now=None):
+def approve(sdlc_dir, rule_id, login, config, now=None, auto=False):
     """Approve a proposed rule. PermissionError unless the closed gate is open and `login` is an owner
-    (`autonomy.is_owner`); KeyError for an unknown or invalid rule. The approver is not recorded."""
-    if not enabled(config) or not _load("autonomy").is_owner(login, config):
+    (`autonomy.is_owner`); KeyError for an unknown or invalid rule. The approver is not recorded, except
+    on an `auto` approval (#1555: needs `rulebook.rules.auto_approve`), which stamps `auto: true` and
+    `approved_by`. A hand reconfirmation of an auto rule keeps `auto` and restamps `approved_by`."""
+    if not enabled(config) or not _load("autonomy").is_owner(login, config) or (auto and not auto_approve_on(config)):
         raise PermissionError("rule approval is refused")
     path = _file(sdlc_dir, config)
     rules = _read_raw(path)
@@ -255,6 +272,8 @@ def approve(sdlc_dir, rule_id, login, config, now=None):
         if r.get("id") == rule_id and validate(r)[0]:
             r["status"] = "approved"
             r["confirmed"] = _now(now).isoformat()
+            if auto or r.get("auto") is True:
+                r["auto"], r["approved_by"] = True, login.strip().lower()
             r["seal"] = _seal(r)
             _write(path, rules)
             with contextlib.suppress(Exception):        # #1313: commit only, best effort

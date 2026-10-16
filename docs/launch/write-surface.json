@@ -1225,6 +1225,22 @@
       "risk": "high"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_level2.py",
+      "function": "session_prepare",
+      "rule": "fs-write",
+      "count": 7,
+      "gate": "opt-in; upkeep.enabled, conflicts.resolve agent and the session plan key; writes the context files for one stop (versions, history, message, earlier stops) into the per-unit session directory this pass made outside the repository, never into the work tree",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_level2.py",
+      "function": "_remove_session",
+      "rule": "fs-rmtree",
+      "count": 1,
+      "gate": "opt-in; upkeep.enabled, conflicts.resolve agent and the session plan key; removes only the directory named session directly under the resolver root this pass made, checked by realpath and never a link, never the work tree or a ref",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_upkeep_review.py",
       "function": "prune",
       "rule": "fs-remove",

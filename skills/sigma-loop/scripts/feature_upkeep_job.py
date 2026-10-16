@@ -89,10 +89,16 @@ def _record(sdlc_dir, doc):
 PRUNE_REL = "state/upkeep/prune.json"     # #1557: the last automatic backup prune (read by the doctor)
 
 
-def _prune_pass(config, sdlc_dir, root, at, prune=None, prune_run=None):
+def _prune_pass(config, sdlc_dir, root, at, prune=None, prune_run=None, beat_path=None):
     """#1557: once per sweep, prune backup refs past keep_days (newest keep_last per unit kept; at most MAX_DELETES). Never
     raises: a failure is recorded as outcome `failed` and the next sweep replans the same refs. -> the bounded record."""
     try:
+        if beat_path:                       # #1632: the prune touches the sweep beat before every git call, so a slow remote never reads as a dead sweep
+            inner = prune_run or _sibling("feature_backup").sync._run
+
+            def prune_run(*a, **k):
+                _touch(beat_path)
+                return inner(*a, **k)
         res = (prune or _sibling("feature_backup").prune_backups)(
             config, sdlc_dir, remote=_sibling("feature_rebase")._remote(config), cwd=root, **({"run": prune_run} if prune_run else {}))
         word = str(res.get("outcome") or "failed")[:20]
@@ -259,7 +265,10 @@ def run_sweep(config, sdlc_dir, root, run_id, cap, *, environ=None, command=None
                     break
             outcome = "failed" if counter_failed else "swept"
             if not counter_failed and not any(os.path.exists(p) for p in stops):
-                seen["prune"] = _prune_pass(config, sdlc_dir, root, stamp_now(), prune, prune_run)      # #1557
+                if cap - (clk() - started) <= 0:      # #1632: the cap is spent, so the prune (which has no cap of its own) waits for the next sweep
+                    seen["prune"] = {"outcome": "skipped", "deleted": 0, "listed": 0, "at": stamp_now()}
+                else:
+                    seen["prune"] = _prune_pass(config, sdlc_dir, root, stamp_now(), prune, prune_run, beat_path)      # #1557
         finally:
             if feature_upkeep.conflict_level(config) == "agent":
                 try:
