@@ -509,8 +509,10 @@ def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text
         plan["depth"] = ai_filed_counter.ancestry_depth(goal, source) + 1
     if quoted and plan["kind"] == "arm":
         plan["kind"], plan["priority"], plan["reason"] = "park", None, "permission marker on the first body line was quoted"
-    if plan["kind"] == "arm" and ai_filed_counter.over_cap(counter, key_goal, _run_id(), config):
-        plan["kind"], plan["priority"], plan["reason"] = "park", None, "ai_filed cap reached or counter unreadable"
+    if plan["kind"] == "arm" and ai_filed_counter.over_cap(counter, key_goal, _run_id(), config) \
+            and (counter is None or not ai_filed_counter.bypasses_cap(plan["priority"], config)):   # #1553
+        plan["kind"], plan["priority"], plan["reason"] = "park", None, (
+            "ai_filed cap reached (ai_filed.max_per_goal / ai_filed.max_per_run) or counter unreadable")
     if plan["kind"] == "arm" and plan["depth"] is not None and plan["depth"] > lim["max_depth"]:
         plan["kind"], plan["priority"], plan["reason"] = "park", None, "ai_filed depth limit reached"
     return plan

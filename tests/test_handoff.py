@@ -2774,3 +2774,30 @@ def test_non_upkeep_filings_and_triage_off_keep_their_priority_1484(tmp_path):
     assert _prio(off) == ["priority:P1"]
     _r, human = _file(tmp_path, config=_off(), priority="P1")
     assert _prio(human) == ["priority:P1"]
+
+
+# --- #1553: P0/P1 filings bypass the per-goal ai_filed cap -------------------------------------------
+
+_ALL = {"urgent": "P2", "routine": "P2", "unclear": "P2"}
+
+
+def _five_armed(tmp_path, cfg):
+    for _ in range(5):
+        _r, src = _file(tmp_path, cfg)
+        assert src.parked == []
+
+
+def test_sixth_p1_filing_is_armed_past_the_goal_cap_1553(tmp_path):
+    cfg = {"ai_filed": {"human_default_priority": "P0", "buckets": {"urgent": "P1", "routine": "P2", "unclear": "P2"}}}
+    _five_armed(tmp_path, cfg)
+    cfg = {"ai_filed": {"human_default_priority": "P0", "buckets": {"urgent": "P1", "routine": "P1", "unclear": "P1"}}}
+    _r, src = _file(tmp_path, cfg)
+    assert src.parked == [] and "priority:P1" in src.created["labels"]
+
+
+def test_sixth_p2_filing_is_parked_naming_the_cap_key_1553(tmp_path):
+    cfg = {"ai_filed": {"buckets": _ALL}}
+    _five_armed(tmp_path, cfg)
+    _r, src = _file(tmp_path, cfg)
+    assert len(src.parked) == 1
+    assert "ai_filed.max_per_goal" in src.parked[0][1] and "cap" in src.parked[0][1]
