@@ -237,3 +237,14 @@ def test_scenario_through_the_list_verb_and_the_applier_verb(tmp_path, monkeypat
     assert AP.main(["applier.py", sd]) == 0
     assert [a["state"] for a in AP._asks(sd)] == ["applied"]
     assert sum(1 for _, n in src.notes if "Applied automatically" in n) == 1
+
+
+def test_turning_the_gate_off_closes_the_level_bypass_for_existing_auto_rules(tmp_path):
+    sd = _sd(tmp_path)
+    _answers(sd, _cfg())
+    RD.auto_approve(sd, _cfg(), T0)
+    off = _cfg(auto=False)
+    src = Src()
+    AP.open_for_park(sd, off, 7, KIND, source=src, now=T0 + MIN, info={"labels": ["area:docs"], "park": "c1"})
+    assert AP._asks(sd)[0]["armed_at"] is None
+    assert AP.tick(sd, off, T0 + 300 * MIN, source=src) == [] and src.swaps == []

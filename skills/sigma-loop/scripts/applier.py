@@ -257,10 +257,12 @@ def _park_info(source, issue):
         return None
 
 
-def _auto_rule(rules, rule_id):
-    """#1555: the sealed rule `rule_id` when an owner's auto approval made it (`auto: true`), else None."""
+def _auto_rule(rules, rule_id, config):
+    """#1555: the sealed rule `rule_id` when an auto approval made it (`auto: true`) AND the gate is still on, else None."""
     try:
         rb = _load("rulebook")
+        if not rb.auto_approve_on(config):
+            return None
         return next((r for r in rules if r.get("id") == rule_id and rb.is_auto(r)), None)
     except Exception:
         return None
@@ -345,7 +347,7 @@ def open_for_park(sdlc_dir, config, issue, qkind_, source=None, now=None, info=N
         if gesture not in GESTURES:                  # None: not a bank option; 'none': recommend only
             return None
         armed = now.isoformat() if _eligible(sdlc_dir, config, qkind_, area, m.option,
-                                             _auto_rule(rb.load(sdlc_dir, config), m.rule_id)) else None
+                                             _auto_rule(rb.load(sdlc_dir, config), m.rule_id, config)) else None
         aid = open_ask(sdlc_dir, issue, qkind_, area, [m.option], config, now, gesture=gesture, park=park,
                        armed_at=armed)
         if aid and armed is not None and source is not None:    # M-03: one notice when an ask becomes armed
@@ -703,7 +705,7 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
             if not isinstance(qkind, str) or hs.is_hardstop_kind(qkind, None, config):
                 continue
             am0 = _load("rulebook").match(qkind, area, ask.get("options"), rules)
-            ar0 = _auto_rule(rules, am0.rule_id) if am0 is not None else None
+            ar0 = _auto_rule(rules, am0.rule_id, config) if am0 is not None else None
             if (apply_actions and not dry_run and ask.get("armed_at") is not None
                     and not _level_ok(sdlc_dir, config, qkind, area, ar0)):
                 ask["armed_at"] = None      # #1499: dropped below 3; a later re-arm gets a fresh window and notice
