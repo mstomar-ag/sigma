@@ -63,6 +63,8 @@ The `resource` block holds the limits `resource_guard.py` derives from the machi
 | `resource.max_verify_workers` | derived (no extra cap) | cap on concurrent verify workers; uncalibrated |
 | `resource.hold_alert_minutes` | derived (no alert) | minutes a hold may last before it is reported; uncalibrated |
 
+`loop.py verify` goes through admission only when `resource.mode` is set to `enforce` or `observe`; unset or `off` runs the proving command exactly as before. Admitted, the command runs in its own process group (a killed caller takes the group with it) under the `verify.timeout_minutes` budget with a 64 KiB output tail. A `{workers}` token in `verify.command` or a goal's `verify_command` is replaced by the granted worker count (an integer only; other braces are left alone), and the child also gets `SIGMA_VERIFY_WORKERS` and `PYTEST_XDIST_AUTO_NUM_WORKERS` set to it. A literal `-n N` cannot be lowered: with a measured cost that N workers do not fit, verify holds instead of running fewer. A hold exits 5 with `RESOURCE-HOLD ... retry_after=<s>` on stderr, runs nothing and writes no evidence, so `record done` still refuses; retry after the stated time. (Exit 5 also still means `UNVERIFIED`, a flaky suite; the stderr prefix tells them apart.) The learned cost is the peak footprint of the verify's process tree divided by its workers, sampled every 2 seconds, so a run shorter than that records its final reading only.
+
 ## Where the optional features are documented
 
 The `rulebook` block (records, hard stops, autonomy levels, the applier, rules, the drift judge, the past-decision
