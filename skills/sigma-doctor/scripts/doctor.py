@@ -3339,6 +3339,16 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                             "(e.g. %s); set ledger.host_alias in .sdlc/config.json, then remove those files "
                             "from the ledger branch" % (len(raw), raw[0])))
 
+    # #1528: salt_host_token with no discovery.github.repo silently gets the UNSALTED hash
+    # (ledger.host_token's own condition); an alias wins before the salt is read, so it exempts.
+    _led = _block(cfg, "ledger")
+    if _led.get("salt_host_token") is True and not _led.get("host_alias"):
+        _repo = _block(_block(cfg, "discovery"), "github").get("repo")
+        if not isinstance(_repo, str):
+            out.append(_chk("ledger salt needs discovery.github.repo", False,
+                            "ledger.salt_host_token is true but discovery.github.repo is unset, so the host "
+                            "token is the plain unsalted hash; set discovery.github.repo in .sdlc/config.json"))
+
     # #2698: the same shape one channel over. Knowledge-graph analysis notes share an ops branch
     # only once `.sdlc/knowledge/analysis` is a worktree; until then `loop.py record` says so on
     # stderr at every goal end and the notes stay local. Both flags strict `is True`, mirroring

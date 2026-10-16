@@ -112,3 +112,35 @@ def test_doctor_no_row_when_clean_or_ledger_off(tmp_path):
     assert _rows(base, {"ledger": {"enabled": True}}, True) == []
     base2 = _led(tmp_path / "x", ["bo-alicesmacbook.9.jsonl"])
     assert _rows(base2, {"ledger": {"enabled": False}}, True) == []
+
+
+SALT_ROW = "ledger salt needs discovery.github.repo"
+
+
+def _salt_rows(tmp_path, cfg):
+    base = tmp_path / ".sdlc"
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "config.json").write_text(json.dumps(cfg))
+    return [r for r in doctor.check(str(base), run=lambda a: "") if r["name"] == SALT_ROW]
+
+
+def test_doctor_salt_on_repo_unset_warns(tmp_path):
+    rows = _salt_rows(tmp_path, {"ledger": {"salt_host_token": True}})
+    assert rows and rows[0]["ok"] is False and "discovery.github.repo" in rows[0]["fix"]
+
+
+def test_doctor_salt_on_repo_set_or_off_or_aliased_no_row(tmp_path):
+    cfg = {"ledger": {"salt_host_token": True}, "discovery": {"github": {"repo": "o/r"}}}
+    assert _salt_rows(tmp_path / "a", cfg) == []
+    assert _salt_rows(tmp_path / "b", {"ledger": {"salt_host_token": False}}) == []
+    assert _salt_rows(tmp_path / "c", {}) == []
+    assert _salt_rows(tmp_path / "d", {"ledger": {"salt_host_token": True, "host_alias": "pool7"}}) == []
+
+
+def test_docs_pin_reroot_statements():
+    text = (pathlib.Path(__file__).resolve().parent.parent / "docs" / "action-log-and-ledger.md").read_text()
+    low = " ".join(text.split()).lower()
+    assert "re-roots this machine" in low
+    assert "open claims made under the old token" in low
+    assert "one-time" in low
+    assert "two machines sharing one alias is unsupported" in low
