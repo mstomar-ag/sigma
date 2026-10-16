@@ -66,6 +66,7 @@ ENV_ALLOW = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SSH
              "GIT_SSH_COMMAND", "GIT_SSH")
 CREDENTIAL_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_HOST")
 CALL_TIMEOUT_ENV = "SIGMA_WATCH_CALL_TIMEOUT"
+SWEEP_RUN_ENV = "SIGMA_UPKEEP_SWEEP_RUN"         # the sweep job sets it in each child; the Level 2 sweep counter reads it (#1536)
 _JOBS = []                                      # Popen handles of jobs this process started; polled so none stays a zombie
 
 

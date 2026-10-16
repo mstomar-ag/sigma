@@ -336,6 +336,14 @@ def test_doctor_reports_the_configured_caps_todays_spend_and_the_last_resolution
     sdlc = D.project(tmp_path, cfg)
     rebase = l1.mod()
     monkeypatch.setitem(rebase._launcher().CATALOG, "sonnet", "test-model-id-1")
+    real_load = d._load_loop_script
+
+    def load(name):                                  # the doctor loads a fresh copy of the launcher each time (#1536)
+        mod = real_load(name)
+        if name == "feature_upkeep_launcher":
+            mod.CATALOG["sonnet"] = "test-model-id-1"
+        return mod
+    monkeypatch.setattr(d, "_load_loop_script", load)
     state = sdlc / "state" / "upkeep" / "spend"
     launcher = rebase._launcher()
     ok, _ = launcher.reserve_machine(str(state), 50.0, 2.0, "seed", time.time())
