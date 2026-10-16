@@ -165,6 +165,7 @@ The agent that parks a goal declares the kind with `loop.py record <sdlc_dir> <g
 which adds one machine line (`sigma-qkind: <kind>`) to the park comment. Without the flag the park is undeclared (one
 stderr line suggests a kind; nothing is guessed from the text), and the Rulebook treats it as not learnable.
 `unpark.py list <sdlc_dir> --undeclared` lists the parks with no kind.
+`unpark.py declare <sdlc_dir> --from-suggestions [--kind K] [--dry-run]` declares every confidently suggested one at once (never `irreversible`).
 `unpark.py declare <sdlc_dir> <issue> <kind>` declares one afterwards; only Sigma's own park comments and an
 OWNER, MEMBER or COLLABORATOR declaration count. A filing the deny-list parks is declared a hard-stop kind and
 carries `sigma-hardstop: <class>`. The closed list:
