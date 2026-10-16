@@ -31,6 +31,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 - **A dependency park kept parked by a "wait for it" decision is resumed when its last blocker closes (#1549).** The decision (a person's answer or an applied rule) now posts a waiting note; the sweep resumes only a park carrying it, as an autonomous unpark, and the keep-parked opt-out marker still wins.
 
+- **`resource_guard.py sample [--json]` reads the machine's memory, swap, pressure and CPU (#1597).** New stdlib-only readers (ctypes on macOS; /proc and cgroup v2 on Linux) return a typed `Sample` plus a per-process `footprint(pid)`; any other platform or an unreadable total raises `Unsupported` and the command exits 3. Nothing calls it yet; no process is spawned and no file written.
+
 ## 1.0.15 — 2026-10-16 — the Rulebook learns and acts: declared question kinds, live comparisons, applier asks and vetoes, importance-ranked rule suggestions, upkeep union merge and agent conflict level, claim release, and ledger host privacy
 - The applier opens no ask for a park a person already answered (keep-parked, unpark or promote), so a sync after a rule is approved never turns an earlier human decision into a rule action (found by the acceptance run).
 - The goal-replay conflict cause probe now has a per-pass time budget (three guard timeouts, after which findings keep the original wording), and the rebase's reported text in the finding is sanitised and capped; a probe/replay disagreement is documented as unknown (#1537).
