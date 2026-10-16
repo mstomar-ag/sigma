@@ -54,6 +54,10 @@ The scheduler no longer polls each unit. It works on a window, `upkeep.window_ho
   - a merge made through `work.py merge` on the machine that merged, which asks the same question once.
 - **What a closed window costs.** One small file read (`.sdlc/state/upkeep/window.json`) and some arithmetic.
   No git call, no GitHub call, no unit listing.
+- **The per-unit record.** `.sdlc/state/upkeep/units/<unit>.json` holds the last attempt and last success times, the unit
+  and base tips after the last success, the last outcome, why the pass started, and the consecutive-failure count. The
+  engine writes it at its single exit, under the unit's lock, on every pass (pick, CLI verb, job, sweep); a closed gate
+  writes nothing. Delete the file and the unit reads as never attempted.
 - **What the sweep does.** It takes the job lock, lists the units admitted by `upkeep.units.include` and
   `upkeep.units.exclude` (an exclude always wins), and then runs the per-unit engine for each unit, one at a
   time. A unit already at its base costs one bounded read and nothing else, which is how a user whose window
@@ -95,7 +99,7 @@ closed.
 
 1. In `.sdlc/config.json`, set `upkeep.enabled` to the JSON boolean `true`. The scaffold writes the block with
    `enabled` false; a repository adopted earlier copies the block in from the config template.
-2. Set `ledger.enabled` to exactly `true`. The watcher that runs the tick is the ledger watcher.
+2. Set `ledger.enabled` to exactly `true`. The watcher that runs the tick is the ledger watcher. Remove a leftover `.sdlc/state/watch.stop` first, or the watcher exits at once.
 3. Set the environment variable `SIGMA_UPKEEP_JOB` to exactly `1` in the environment of the process that
    starts the sweep, on **one** machine. Opt in one machine for any given set of units: two opted-in machines
    would both start passes. The lease makes the second push refuse, but each wastes a fetch and a replay. To

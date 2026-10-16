@@ -260,16 +260,24 @@ def main(argv, run=None):
         total = len(before)
         nostat = sum(1 for v in before.values() if not v[1])
         print("added the %r lane." % ready)
-        print("board: %d card(s) (%d issues, %d pull requests, %d drafts)."
-              % (total, kinds.count("Issue"), kinds.count("PullRequest"), kinds.count("DraftIssue")))
+        n_i, n_p, n_d = kinds.count("Issue"), kinds.count("PullRequest"), kinds.count("DraftIssue")
+        n_o = total - n_i - n_p - n_d          # null or unreadable content: keeps the parts summing to total
+        print("board: %d card(s) (%d issues, %d pull requests, %d drafts%s)."
+              % (total, n_i, n_p, n_d, ", %d other" % n_o if n_o else ""))
         print("option write: %d unchanged (%d had no Status), 0 changed." % (total, nostat))
         print("seed: %d moved %s -> %r (a subset of the %d unchanged)." % (moved, backlog, ready, total))
         if moved:
             final = card_statuses(owner, number, field_name, run)
             seeded = {c.get("id") for c in cards}
+            gone = sorted(i for i in seeded if i in before and i not in final)
+            if gone:
+                print("FAILED: %d seeded card(s) are no longer on the board: %s"
+                      % (len(gone), ", ".join(gone)))
+                print("Run this command again to check the board and finish the seed.")
+                return 1
             odd = sorted(i for i, v in before.items()
                          if final.get(i, (None, None))[1] != v[1]
-                         and not (i in seeded and final[i][1] == ready))
+                         and not (i in seeded and final.get(i, (None, None))[1] == ready))
             if odd:
                 print("FAILED: %d card(s) changed beyond the seed: %s" % (len(odd), ", ".join(odd)))
                 return 1
