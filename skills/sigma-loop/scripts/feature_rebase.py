@@ -1659,7 +1659,7 @@ def _launcher():
 
 
 LEVEL2_SPEND_REL = "state/upkeep/spend"
-LEVEL2_ROOT_PREFIX = "sigma-upkeep-l2-"
+LEVEL2_ROOT_PREFIX = "upkeep-l2-"
 
 
 def level2_off_reason(config, which=None):

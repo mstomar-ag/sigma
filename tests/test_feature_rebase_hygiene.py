@@ -356,7 +356,10 @@ def test_conflict_level_is_a_setting_of_the_project_opt_in():
 
 def test_template_carries_the_conflicts_keys_and_a_note():
     cfg = support.template_cfg()
-    assert cfg["upkeep"]["conflicts"] == {"resolve": "off", "mechanical_without_verify": False}
+    assert cfg["upkeep"]["conflicts"] == {
+        "resolve": "off", "mechanical_without_verify": False,
+        "agent": {"model": "sonnet", "max_budget_usd_per_unit": None, "spend_ceiling_usd_per_day": None, "timeout_minutes": 30,
+                  "max_units_per_sweep": 5, "reviewer": {"enabled": True, "model": "sonnet"}}}
     note = cfg["_upkeep_conflicts"]
     assert isinstance(note, str) and "upkeep.enabled" in note and '"off"' in note
     assert "later release" not in note and "later releases" not in note and "neither changes what runs" not in note
@@ -371,7 +374,7 @@ def test_upkeep_note_describes_what_runs_today():
     assert "NOTHING ELSE RUNS" not in note and "no schedule or resolver exists" not in note
     assert "will be needed" not in note and "a later release adds" not in note
     assert "feature_upkeep_sched.py" in note and "runs on a window" in note
-    assert "_upkeep_conflicts" in note and "SIGMA_UPKEEP_JOB" in note and "no credential route or cap exists yet" in note
+    assert "_upkeep_conflicts" in note and "SIGMA_UPKEEP_JOB" in note and "conflicts.agent" in note and "nothing that spends runs" in note
 
 
 def test_no_new_entry_point_launches_anything_while_closed(tmp_path):
