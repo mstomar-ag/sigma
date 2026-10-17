@@ -1990,8 +1990,31 @@ def _hold_subject(source, goal):
     return pathlib.Path(goal).stem, "still status: %s" % status if status else "status unchanged"
 
 
-def _held_release_note(gate):
-    """#1550: the DONE summary must not promise self-release for a hold only a human can lift."""
+def _held_cycles(sdlc_dir, config, held):
+    """#1615: one line per stored-map dependency cycle that holds at least one of the held goals; `[]`
+    (and `dag_cycles` not even loaded) when `discovery.dag.mode` is written `off`. Never raises."""
+    try:
+        if config.get("discovery", {}).get("dag", {}).get("mode") == "off":
+            return []
+        nums = set()
+        for subject, _ in held:
+            tail = str(subject).lstrip("#")
+            if tail.isdigit():
+                nums.add(int(tail))
+        if not nums:
+            return []
+        dc = _load("dag_cycles")
+        return [dc.line(c) for c in dc.find(sdlc_dir, config) if nums & set(c)]
+    except Exception:                       # noqa: BLE001 - the report is advice, never a failure
+        return []
+
+
+def _held_release_note(gate, cycles=()):
+    """#1550: the DONE summary must not promise self-release for a hold only a human can lift.
+    #1615: nor for a hold that is a dependency cycle, which no event ever releases."""
+    if cycles:
+        return ("At least one is in a dependency cycle and never releases by itself; "
+                "someone has to remove one Blocked by line")
     if gate.get("needs_human"):
         return ("At least one waits on a prerequisite that is parked, failed, proposed or names no "
                 "single local goal, which needs a human before it can move")
@@ -2556,13 +2579,16 @@ def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, re
                 # #1614: when EVERY held goal waits on a person's decision or a cycle (read from the
                 # stored map, a local file), say which; otherwise today's text, byte for byte.
                 root_lines = _stuck_root_lines(sdlc_dir, config, [h[0] for h in held])
+                cyc = [] if root_lines else _held_cycles(sdlc_dir, config, held)   # #1615: [] unless a stored cycle holds one
                 print("loop.py: nothing pickable — %d goal(s) are waiting on an open prerequisite "
                       "(%s). %s; nothing was written to them"
                       % (len(held), ", ".join("%s → %s" % h for h in held),
                          "None of them moves until a person acts" if root_lines
-                         else _held_release_note(gate)), file=sys.stderr)
+                         else _held_release_note(gate, cyc)), file=sys.stderr)
                 for text in root_lines:
                     print("loop.py: stuck: %s" % text, file=sys.stderr)
+                for c in cyc:
+                    print("loop.py: %s" % c, file=sys.stderr)
             # #1084: read ONCE, before anything below can touch `_last_read_degraded`
             # (`_feature_drained_note` -> `pending_outside_feature` saves/restores it around its
             # own diagnostic probe, so reading first keeps this call's own verdict authoritative

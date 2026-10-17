@@ -64,7 +64,7 @@ KNOWN_SCHEMAS = ("features@1", "landing@1", "withheld@1", "propagation@1")
 #: seen next to the rule that its readers must also accept the previous spelling
 #: (`tests/test_legacy_compat.py` pins that every marker literal in shipped code is listed).
 MARKERS = frozenset({
-    "<!-- sigma:acceptance",
+    "<!-- sigma:acceptance", "<!-- sigma:dag-cycle",
     "<!-- sigma:begin managed", "<!-- sigma:end managed -->",
     "<!-- sigma:codex:start -->", "<!-- sigma:codex:end -->",
     "<!-- sigma:unpark-qa:start -->", "<!-- sigma:unpark-qa:end -->",

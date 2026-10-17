@@ -41,6 +41,7 @@ def _load(name):
 
 dag_store = _load("dag_store")
 dag_collect = _load("dag_collect")
+dag_cycles = None                                       # #1615: loaded on first use after a saved refresh
 
 META = "dag-refresh.meta.json"
 RETRY_SECONDS = 300
@@ -148,6 +149,18 @@ def _bounded(run, cap, budget, clock=time.monotonic):
     return wrapped
 
 
+def _post_cycles(sdlc_dir, config, run):
+    """#1615: after a saved refresh, one comment per new dependency cycle through the same bounded
+    runner. Loaded only here (never on the pick path); can never fail the refresh."""
+    try:
+        global dag_cycles
+        if dag_cycles is None:
+            dag_cycles = _load("dag_cycles")
+        dag_cycles.post(sdlc_dir, config, run)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 def refresh_if_due(sdlc_dir, config, run=None, now=None, force=False):
     """Refresh the map when due (or `force`). Never raises. -> `{status, why, calls}` where status is
     `off`, `fresh` (not due, no read), `retry-wait`, `busy`, `kept`, `saved` or `error`."""
@@ -179,6 +192,8 @@ def refresh_if_due(sdlc_dir, config, run=None, now=None, force=False):
     streak = (int(_number(prior.get("errors")) or 0) + 1) if failed else 0
     _write_meta(sdlc_dir, {"last_attempt": now, "last_status": "error" if failed else "saved",
                            "last_error": err if failed else None, "errors": streak})
+    if not failed:
+        _post_cycles(sdlc_dir, config, counted)
     return {"status": "saved" if not failed else "kept", "why": why, "last_error": err}
 
 
