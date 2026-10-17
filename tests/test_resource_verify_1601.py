@@ -346,3 +346,35 @@ def test_the_guard_engages_only_for_an_explicit_non_off_mode(tmp_path, monkeypat
     assert loop._resource_verify_on({"resource": {"mode": "observe"}})
     assert loop._verify_timeout_seconds({"verify": {"timeout_minutes": 5}}) == 300
     assert loop._verify_timeout_seconds({"verify": {"timeout_minutes": True}}) == 3600
+
+
+# ------------------------------------------------------------------------------------------ #1804 env mode
+def _no_headroom_repo(tmp_path, monkeypatch, cfg, command="echo hi"):
+    sdlc, goal = _repo(tmp_path, cfg, command=command)
+    rstate = tmp_path / "rstate"
+    rstate.mkdir()
+    (rstate / "observed.json").write_text(json.dumps({"verify": [4 * GIB]}))
+    return sdlc, goal, _loop(monkeypatch, tmp_path, available=3 * GIB), rstate
+
+
+def _events(rstate):
+    path = rstate / "events.jsonl"
+    return path.read_text() if path.exists() else ""
+
+
+def test_observe_in_the_environment_admits_with_no_config_key_and_logs_would_hold(tmp_path, monkeypatch):
+    """#1804: the environment outranks an unset config key for admission. Control: pass the raw config block
+    to resource_guard.run again and this exits 5 and logs `hold`."""
+    sdlc, goal, loop, rstate = _no_headroom_repo(tmp_path, monkeypatch, {})
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "observe")
+    assert loop.verify_goal(sdlc, goal) == 0
+    log = _events(rstate)
+    assert '"would_hold"' in log and '"event": "hold"' not in log
+
+
+def test_enforce_in_the_environment_holds_over_an_observe_config(tmp_path, monkeypatch, capsys):
+    """#1804: the reverse. Control: the raw config block admits (exit 0, VERIFIED) here."""
+    sdlc, goal, loop, rstate = _no_headroom_repo(tmp_path, monkeypatch, {"resource": {"mode": "observe"}})
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "enforce")
+    assert loop.verify_goal(sdlc, goal) == 5
+    assert "RESOURCE-HOLD" in capsys.readouterr().err
