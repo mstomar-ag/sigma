@@ -127,8 +127,8 @@ figures. The same test fails if this table and the measured counts disagree.
 
 The repository state is six issues. Members of the label: one armed and ready, two unarmed, one parked,
 one holding a paid step and waiting on an open prerequisite. The sixth issue is that prerequisite, open
-and outside the label. The last two label rows use the state after `arm --apply` and after the parked
-member is answered; the no-label row uses that same state.
+and outside the label. The `after arm and answer` row and the no-label row use the state after `arm --apply` and after the
+parked member is answered; the other rows use the starting state.
 
 | what | calls | reads | writes |
 |---|---|---|---|
