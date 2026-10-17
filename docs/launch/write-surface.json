@@ -492,15 +492,23 @@
       "path": "skills/sigma-loop/scripts/chain.py",
       "function": "plan",
       "rule": "fs-write",
+      "count": 2,
+      "gate": "one atomic write of the local chain record `.sdlc/state/chains/c<N>.json` (issue numbers, verdict words and labels only; no titles or bodies) after a plan was produced, never for a refusal; reached only by an explicit `chain.py plan` run; the plan and sheet GitHub calls go through a GET-only gate that raises on anything else (`chain.py answer` is the separate verb, with its own row, that reaches GitHub through the unpark resolve path with bank options only)",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/chain.py",
+      "function": "answer",
+      "rule": "fs-write",
       "count": 1,
-      "gate": "one atomic write of the local chain record `.sdlc/state/chains/c<N>.json` (issue numbers, verdict words and labels only; no titles or bodies) after a plan was produced, never for a refusal; reached only by an explicit `chain.py plan` run; the plan and sheet GitHub calls go through a GET-only gate that raises on anything else (`chain.py answer` is the separate verb that reaches GitHub through the unpark resolve path with bank options only; the scanner does not see it)",
+      "gate": "one atomic write of the local chain record `.sdlc/state/chains/c<N>.json` (bank-option answers and the state word only; no free text) after the whole answer set was judged; reached only by an explicit `chain.py answer` run; for a parked member it also reaches GitHub through the unpark resolve path (`unpark.resolve`), which posts the recorded Q&A block as an issue comment and applies the chosen label gesture, with bank options only, never text a person typed; the scanner sees this local write, not the GitHub reach inside `unpark.resolve`, which is gated in its own rows",
       "risk": "low"
     },
     {
       "path": "skills/sigma-loop/scripts/dag_refresh.py",
       "function": "_write_meta",
       "rule": "fs-write",
-      "count": 1,
+      "count": 2,
       "gate": "one atomic write of the small refresh record under `.sdlc/state` after a real refresh attempt; reached only when `discovery.dag.mode` is written as shadow or on",
       "risk": "low"
     },
@@ -516,7 +524,7 @@
       "path": "skills/sigma-loop/scripts/dag_store.py",
       "function": "save",
       "rule": "fs-write",
-      "count": 1,
+      "count": 2,
       "gate": "one atomic write of the stored map under `.sdlc/state`; reached only through the DAG refresh, which `discovery.dag.mode` gates (off by default)",
       "risk": "low"
     },
@@ -660,7 +668,7 @@
       "path": "skills/sigma-loop/scripts/dag_store.py",
       "function": "save",
       "rule": "fs-write",
-      "count": 1,
+      "count": 2,
       "gate": "mode off returns before touching the disk; otherwise publishes the dependency map under the runtime state directory atomically (temp file then replace), numbers and codes only, no issue text",
       "risk": "low"
     },
@@ -1153,6 +1161,14 @@
       "risk": "high"
     },
     {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_landing.py",
+      "function": "_write",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "one atomic write of a size-capped JSON record under `.sdlc/state`, symlink-refused; failure returns a result and never raises",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_upkeep_launcher.py",
       "function": "_acquire_lock",
       "rule": "fs-write",
@@ -1231,6 +1247,14 @@
       "count": 1,
       "gate": "upkeep.enabled caller passes keep_days; removes only record-shaped files in the engine's own resolutions store, never a symlink, never outside it",
       "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_resolution.py",
+      "function": "write_record",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "one atomic write of a size-capped, wording-checked JSON record under `.sdlc/state`, symlink-refused; failure returns a result and never raises",
+      "risk": "low"
     },
     {
       "path": "skills/sigma-loop/scripts/feature_upkeep_level2.py",
@@ -1740,7 +1764,7 @@
       "path": "skills/sigma-loop/scripts/reconcile_tick.py",
       "function": "_write_repair_state",
       "rule": "fs-write",
-      "count": 1,
+      "count": 2,
       "gate": "discovery.source == github and blocker_promotion.mode is always; one small state record",
       "risk": "low"
     },
@@ -1956,7 +1980,7 @@
       "path": "skills/sigma-loop/scripts/sources.py",
       "function": "_backfill_note_refusal",
       "rule": "fs-write",
-      "count": 1,
+      "count": 2,
       "gate": "discovery.source == github; reached only from the watcher's board back-fill, which requires project.enabled; touches only one file under .sdlc/state",
       "risk": "low"
     },
@@ -2145,6 +2169,14 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/sources.py",
+      "function": "append_to_body",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "rewrites one local goal file in place with a `Blocked by` marker appended, frontmatter untouched, atomic; a missing or unreadable file raises and nothing is written; local sources only",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/spend_approval.py",
       "function": "_counter_write",
       "rule": "fs-remove",
@@ -2263,6 +2295,14 @@
       "count": 2,
       "gate": "ungated",
       "risk": "high"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/state.py",
+      "function": "_set_status",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "rewrites the status field of one local goal file, atomic; reached only by the status writers on a local goal path",
+      "risk": "low"
     },
     {
       "path": "skills/sigma-loop/scripts/supervise_daemon.py",
@@ -3836,7 +3876,7 @@
       "path": "skills/sigma-loop/scripts/dag_insert.py",
       "function": "record_unchecked",
       "rule": "fs-write",
-      "count": 1,
+      "count": 2,
       "gate": "discovery.dag.mode is not off (off returns before any write) and a GitHub Blocked by line was written with no cycle verdict (no usable map and the 25-read live walk undecided); creates only the runtime state directory and writes state/dag-unchecked.json by atomic replace, number pairs only, at most 200",
       "risk": "low"
     },
@@ -3860,7 +3900,7 @@
       "path": "skills/sigma-loop/scripts/dag_store.py",
       "function": "save",
       "rule": "fs-write",
-      "count": 1,
+      "count": 2,
       "gate": "discovery.dag.mode is not off (off returns before any write); one atomic replace of the dependency map under the runtime state directory, codes and numbers only",
       "risk": "low"
     },
@@ -4055,6 +4095,46 @@
       "count": 1,
       "gate": "resource guard controls runner (CI and by hand); writes only inside a temporary copy it creates, never the checkout",
       "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_land_approval.py",
+      "function": "approve",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "one atomic write of a small approval record under `.sdlc/state` (unit, slug, head, expiry; no free text), symlink-refused, reached only by the explicit approve verb; bounded ttl and pruned",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_prove.py",
+      "function": "_union_appended",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "writes the append-only union of one named file inside the caller's scratch checkout, then stages it; writes nothing when the union does not resolve",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_sched.py",
+      "function": "write_json",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "one atomic, symlink-refusing publish of a small JSON document under `.sdlc/state`; never raises",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_state.py",
+      "function": "_publish",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "one atomic write of the per-unit upkeep state under `.sdlc/state`, symlink-refused; failure returns a result and never raises",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/feature_upkeep_window.py",
+      "function": "_write",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "one atomic, symlink-refusing write of the small window stamp under `.sdlc/state`; never raises",
+      "risk": "low"
     }
   ]
 }
