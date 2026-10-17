@@ -137,6 +137,10 @@ def _load_logroll():
     return module
 
 
+#: #1737: the supervisor has no per-session timeout, so its session lease must outlive any realistic session
+#: (the 6h default would let a live long session be reclaimed); a dead pid is still reclaimed at once.
+SESSION_LEASE_TTL = 24 * 3600.0
+
 #: #460: size-capped rotation for supervisor.log.
 logroll = _load_logroll()
 
@@ -466,7 +470,8 @@ def _codex_main(sdlc_dir, max_runs, scale, run_id):
                 argv_cmd = codex_runtime.build_codex_command(executable, repo, skill, final_path)
             _log_and_print(log, f"supervisor: Codex run #{runs + 1} — {_date_str()}", warned)
             try:
-                with _guard().session_lease("supervisor", run_id, repo=str(repo)) as lease:     # #1603
+                with _guard().session_lease("supervisor", run_id, repo=str(repo),
+                                               ttl=SESSION_LEASE_TTL) as lease:     # #1603
                     held = lease if lease is not None and hasattr(lease, "reason") else None
                     if held is None:
                         output, exit_code, final = _capture_codex(
@@ -628,7 +633,8 @@ def main(argv):
                 # missing executable, so it is routed through the identical handling below rather
                 # than left as a second, uncaught path.
                 raise IndexError("SIGMA_CLAUDE_CMD is empty after word-splitting")
-            with _guard().session_lease("supervisor", run_id, repo=str(repo_dir)) as lease:   # #1603
+            with _guard().session_lease("supervisor", run_id, repo=str(repo_dir),
+                                           ttl=SESSION_LEASE_TTL) as lease:   # #1603
                 held = lease if lease is not None and hasattr(lease, "reason") else None
                 if held is None:
                     with open(runout, "wb") as f:
