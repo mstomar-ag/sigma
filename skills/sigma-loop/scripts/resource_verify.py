@@ -66,15 +66,38 @@ def literal_workers(command):
     return max(found) if found else None
 
 
+def proc_table(proc="/proc"):
+    """[(pid, ppid)] read from /proc/<pid>/stat: the process table where `ps` is not installed (minimal containers)."""
+    table = []
+    try:
+        names = os.listdir(proc)
+    except OSError:
+        return table
+    for name in names:
+        if not name.isdigit():
+            continue
+        try:
+            with open(os.path.join(proc, name, "stat"), "r") as handle:
+                after = handle.read().rpartition(")")[2].split()
+            table.append((int(name), int(after[1])))
+        except (OSError, ValueError, IndexError):
+            continue
+    return table
+
+
 def tree_footprint(root_pid, footprint, table=None):
     """Summed footprint of every descendant of `root_pid` (not itself). `table` is [(pid, ppid)] (default: ps)."""
     if table is None:
         try:
             done = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True, timeout=10)
-        except (OSError, subprocess.SubprocessError):
+        except OSError:                                          # no `ps` here (a minimal container): read /proc
+            table = proc_table()
+            done = None
+        except subprocess.SubprocessError:
             return 0
-        table = []
-        for line in done.stdout.splitlines():
+        else:
+            table = []
+        for line in (done.stdout.splitlines() if done else ()):
             parts = line.split()
             if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
                 table.append((int(parts[0]), int(parts[1])))

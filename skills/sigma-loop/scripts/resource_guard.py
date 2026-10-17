@@ -129,6 +129,19 @@ def _cgroup_room(chain):
     return room
 
 
+def _cgroup_limit(chain):
+    """The smallest numeric memory.max on the chain, or None when no level sets one."""
+    cap = None
+    for directory in chain:
+        try:
+            value = int((_try(os.path.join(directory, "memory.max")) or "").strip())
+        except ValueError:
+            continue
+        if value > 0:
+            cap = value if cap is None else min(cap, value)
+    return cap
+
+
 def _cgroup_cpus(chain):
     cap = None
     for directory in chain:
@@ -170,6 +183,10 @@ def linux_sample(root="/", cpus=None):
     room = _cgroup_room(chain)
     if room is not None:
         available = min(available, room)
+    limit = _cgroup_limit(chain)
+    if limit is not None:                       # #1772: a container's total is its cgroup limit, not the host's
+        total = min(total, limit)
+        available = min(available, total)
     swap_total = mem.get("SwapTotal", 0)
     swapouts = 0
     for line in (_try(os.path.join(root, "proc/vmstat")) or "").splitlines():

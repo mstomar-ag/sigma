@@ -83,9 +83,18 @@ def test_linux_cgroup_limit_below_memtotal(tmp_path):
     assert s.available == int(1.5 * GIB)  # min(MemAvailable 8 GiB, 2 GiB - 0.5 GiB)
 
 
+def test_linux_cgroup_limit_is_the_total(tmp_path):
+    """#1772: the 20 percent reserve and 60 percent share derive from the container's limit, not the host's memory."""
+    root = fixture(tmp_path, cgroup=(2 * GIB, 0))
+    s = guard().linux_sample(root, cpus=2)
+    assert s.total == 2 * GIB and s.available == 2 * GIB
+    assert guard().derive(s).reserve == int(0.2 * 2 * GIB)
+
+
 def test_linux_cgroup_limit_above_meminfo_is_ignored(tmp_path):
     root = fixture(tmp_path, cgroup=(64 * GIB, 0))
-    assert guard().linux_sample(root, cpus=2).available == 8 * GIB
+    s = guard().linux_sample(root, cpus=2)
+    assert s.available == 8 * GIB and s.total == 16 * GIB
 
 
 def test_linux_absent_psi_is_null(tmp_path):
