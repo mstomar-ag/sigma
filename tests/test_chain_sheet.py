@@ -98,7 +98,13 @@ Writes that follow approval:
   - record each answer in .sdlc/state/chains/c1.json (numbers and labels only)
   - #2: the Q&A block and one comment through the unpark resolve path; its labels change only if the answer starts it again
   - answers to an undeclared-kind or spend question are recorded here only: declaring the kind and writing the spend marker belong to a later slice
-  - nothing else: arming and starting members belong to a later slice
+  - after approval, `chain.py arm` creates the label chain:1 if it is missing
+  - #2: add label chain:1
+  - #3: add label chain:1
+  - #1: add label chain:1
+  - arming, per member below: add sdlc:goal, priority P2 only if it has none, assign you only if nobody is assigned, never edit the body; one comment with issue numbers only
+  - #3: arm it and add one comment
+  - nothing else: an upper-tier, parked or assigned-elsewhere member is labelled, never armed; starting the members belongs to a later slice
 
 Nothing has been changed yet.
 """

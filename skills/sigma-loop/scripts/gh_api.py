@@ -974,6 +974,24 @@ def label_exists(run, name, repo=None):
     return True
 
 
+def create_label(run, name, repo=None, color="ededed"):
+    """POST one repository label (`POST repos/{repo}/labels`, name and colour only, no free text).
+    -> True when it was created, False when GitHub says it already exists (a 422 naming `already_exists`,
+    read from gh's stderr only), so a re-run after a crash, or a label made by someone in between, is not
+    an error. Any other failure raises GhApiError. Not logged, no `gh label` fallback: the caller checks
+    `label_exists` first and only calls this for a 404. A `feature:` label is refused (the never-create
+    rule) before any call."""
+    _refuse_feature_labels([name], False)
+    try:
+        _json(run, ["api", _endpoint(repo, "labels"), "--method", "POST", "-f", "name=%s" % name,
+                    "-f", "color=%s" % color])
+    except GhApiError as exc:
+        if _write_status(exc) == 422 and "already_exists" in _hint_of(exc):
+            return False
+        raise
+    return True
+
+
 #: #1639: pages `newest_label_event` follows (100 events each); a longer timeline reads as no signal.
 EVENT_PAGES_CAP = 10
 

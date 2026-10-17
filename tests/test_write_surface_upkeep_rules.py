@@ -138,6 +138,7 @@ GH_API_HELPERS = [
     ("merge_pr_gh", 'gh_api.merge_pr_gh(run, 1, "squash", "a" * 40)'),
     ("merge_pr_via_loader", '_load("gh_api").merge_pr(run, 1)'),
     ("comment_issue_via_loop_script_loader", '_load_loop_script("gh_api").comment_issue(run, 1, "x")'),
+    ("create_label", 'gh_api.create_label(run, "x")'),
     ("create_pr_via_self_attribute", 'self.gh_api.create_pr(run, "t", "b", "h", "b")'),
 ]
 
