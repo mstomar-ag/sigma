@@ -50,12 +50,16 @@ Then repeat until the helper says stop:
    names which ceiling tripped. `HOLD` is never `DONE` or a stop (no claim, no spend): run
    `resource_lease.py wait --max 540`, then pick again.
 
-   On a terminal line, stop claiming; record active slots before ending. `DONE` does not always mean the backlog is empty. `next`/`next-batch` never hand back a goal
+   On a terminal line, stop claiming; record active slots before ending. `DONE` does not always mean the backlog is empty: `next`/`next-batch` never hand back a goal
    whose own body declares a prerequisite (`**Blocked by:** #N`) that is still OPEN. Report that
-   line rather than "the backlog is drained", and do NOT `--skip` past it. Confining a whole run to
+   line, do NOT `--skip` past it. Confining a whole run to
    one unit of work is `--feature <name>`, and it is *exclusive*:
 
    > **While a `--feature` run is active, no goal outside that unit may be picked.**
+
+   `--label <name>` confines a run to a temporary run label (`docs/label-drain.md`):
+
+   > **While a `--label` run is active, no goal outside that label may be picked, and an open prerequisite of a member is never skipped silently.**
 
    Full: `references/picking.md`.
 3. Otherwise, run the **opt-in pre-checks, in this order** — before spending a token. Each prints
