@@ -1105,9 +1105,11 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
             rec["accepted"] = dr.key_of(rec) == shown["option"]
         res = dr.write_all(sdlc_dir, rec, config, source,
                            text="Run label %s: answered %r." % ("(name withheld)" if _public(config) else label,
-                                                                choice))
+                                                                choice),
+                           poster=None if goal is not None else (lambda number, body: None))   # #1751: no open member, no comment target
         return ["recorded decision %s" % (res["id"] or "(not stored)")] + (
-            [res["error"]] if res["error"] else [])
+            [res["error"]] if res["error"] else []) + (
+            ["no open member left: recorded without a comment"] if goal is None else [])
 
     for qid in sorted(good, key=lambda x: (order.index(x) if x in order else len(order), x)):
         q, choice = good[qid]

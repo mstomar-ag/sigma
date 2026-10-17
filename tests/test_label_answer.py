@@ -185,6 +185,20 @@ def test_a_recovered_label_question_never_lands_on_an_outside_blocker(tmp_path):
     assert len(recs) == 1 and recs[0]["issue"] == 10
 
 
+def test_a_recovered_answer_with_every_member_closed_records_once_and_posts_no_comment(tmp_path):
+    """#1751: all members close after arming; the record is stored with no issue and no comment is attempted."""
+    ld, base, fk, _ = env(tmp_path, [issue(1, LBL), issue(2, LBL)])
+    ld.arm(base, LBL, apply=True, run=fk)
+    for n in (1, 2):
+        fk.by[n]["state"] = "closed"
+    res = ask(ld, base, fk, {"label_set:" + LBL: "arm them"})
+    assert len(records(base)) == 1 and fk.comments() == []
+    assert not [l for r in res["results"] for l in r["lines"] if "not posted" in l]
+    assert any("no open member" in l for r in res["results"] for l in r["lines"])
+    ask(ld, base, fk, {"label_set:" + LBL: "arm them"})
+    assert len(records(base)) == 1 and fk.comments() == []
+
+
 # 3 -- parked member == the unpark path ----------------------------------------------------------
 
 @pytest.mark.parametrize("kind_comment,qid,option,decision,slot", [
