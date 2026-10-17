@@ -28,6 +28,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 
 _HERE = pathlib.Path(__file__).resolve().parent
 TOKEN = "{workers}"
@@ -174,6 +175,7 @@ def run(kind, commands, root, timeout, goal, *, config=None, repo=None, env=None
         record = lease._read_json(os.path.join(lease.state_dir(), "leases", admitted.id + ".json"), {})
         if literal and n < literal:
             if record.get("est_mem", 0) > 0:                     # a measured cost says N workers do not fit
+                lease.note_waiting(goal, kind)                   # #1768: a held verify blocks new goal starts
                 return Outcome(hold=lease.Hold("memory: literal -n %d needs %d workers, %d fit" % (literal, literal, n),
                                                lease._retry()))
             n = literal                                          # cold ring: nothing to compare, learn from this run
@@ -194,9 +196,17 @@ def run(kind, commands, root, timeout, goal, *, config=None, repo=None, env=None
         if shedding:
             kwargs["stop_path"] = stop_path
         outputs, last, code, shed = [], None, 0, False
+        deadline = time.monotonic() + timeout                    # #1768: ONE budget across every command
         try:
             for command in commands:
-                last = runner(substitute_workers(command, n), root, timeout, shell=True, env=child_env, merge=True,
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    last = bounded.Result(bounded.TIMEOUT, None, detail="timed out after %gs; no time left for: %s"
+                                          % (timeout, command))
+                    outputs.append(last.detail)
+                    code = 1
+                    break
+                last = runner(substitute_workers(command, n), root, remaining, shell=True, env=child_env, merge=True,
                               tail_bytes=tail_bytes, **kwargs)
                 outputs.append(last.out + (("\n" + last.detail) if last.detail else ""))
                 code = last.code if last.code not in (None, 0) else (0 if last.outcome == bounded.OK else 1)
