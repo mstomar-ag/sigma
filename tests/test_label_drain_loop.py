@@ -5,6 +5,7 @@ The loop wiring is tested against the dependency-gate fake (`_Board`) with a rec
 `label_drain`, so every assertion is on what the loop asked for. The real `pull` is tested against the
 stateful fake `gh` of the arm tests. Nothing here touches a network or a model.
 """
+import os
 import tempfile
 
 import pytest
@@ -233,6 +234,77 @@ def test_next_label_refuses_to_start_on_an_unarmed_member(tmp_path, monkeypatch,
     out = capsys.readouterr()
     assert out.out.strip() == "DONE"
     assert "label_drain.py arm" in out.err and "1 unarmed" in out.err
+    assert fk.writes() == []
+
+
+# --- #1730: the controls for the memo, the start check and the unscoped no-op -------------------
+
+def _set_run_iteration(base, n):
+    p = os.path.join(base, "state", "STATE.md")
+    open(p, "w").write("iteration: 0\nrun_iteration: %d\nlast_run: none\n" % n)
+
+
+def test_same_ref_held_by_two_goals_is_pulled_once():
+    lp, stub = _loop(), Stub()
+    issues = [_blocked_by(1, 7), _blocked_by(2, 7), _issue(7)]
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=issues)
+        src = Scoped(["1", "2"], live=issues)
+        _run(lp, stub, base, src)
+    assert stub.pulls == ["7"]                       # held twice, pulled once: the memo, not the cap
+
+
+def test_start_check_runs_only_before_the_first_claim():
+    lp, stub = _loop(), Stub()
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 1
+        _set_run_iteration(base, 1)                  # a claim has been made in this run
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 1
+
+
+def test_unscoped_next_never_calls_label_drain():
+    lp, stub = _loop(), Stub(members=[{"number": 1, "verdict": "unarmed", "reason": "unarmed"}])
+    lp._label_drain = lambda: stub
+    lp._LABEL_PULLED.clear()
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = _Board(["1"], live=CHAIN_OPEN)         # no label_scope: the real guards must decide
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None
+        lp._label_pull_holds(base, src, _cfg(lp, base), "1", "#7")
+        lp._next(base, src, _cfg(lp, base))
+    assert stub.plans == 0 and stub.pulls == []      # the stub records before anything can swallow it
+
+
+def _next_batch_label(tmp_path, monkeypatch, capsys, issue):
+    lp = _loop()
+    base = A._repo(tmp_path, "alice")
+    fk = A.Fake([issue])
+    cfg = lp.state.load_config(base)
+    monkeypatch.setattr(lp.sources, "get_source",
+                        lambda d, c: lp.sources.GitHubSource(c, run=fk, sdlc_dir=d))
+    for hook in ("_ensure_watcher", "_ensure_ledger_delivery", "_surface_inbox", "_warn_knowledge_graph"):
+        monkeypatch.setattr(lp, hook, lambda *a, **k: None)
+    assert lp.main(["loop.py", "next-batch", base, "--label", A.LBL]) == 0
+    return base, fk, capsys.readouterr()
+
+
+def test_next_batch_label_refuses_to_start(tmp_path, monkeypatch, capsys):
+    base, fk, out = _next_batch_label(tmp_path, monkeypatch, capsys, A._issue(1, "sdlc:blocked", A.LBL))
+    assert out.out.strip() == "DONE"
+    assert "First run `label_drain.py arm %s %s --apply`, then start again" % (base, A.LBL) in out.err
+    assert "1 unarmed member(s)" in out.err and "nothing was claimed or written" in out.err
+    assert fk.writes() == []
+
+
+def test_parked_only_label_refuses_to_start(tmp_path, monkeypatch, capsys):
+    base, fk, out = _next_batch_label(tmp_path, monkeypatch, capsys, A._issue(1, "sdlc:parked", A.LBL))
+    assert out.out.strip() == "DONE"
+    assert "0 unarmed member(s), 1 open question(s)" in out.err
+    assert "First run `label_drain.py plan %s %s` and answer the open questions with /sigma-unpark" % (
+        base, A.LBL) in out.err
     assert fk.writes() == []
 
 

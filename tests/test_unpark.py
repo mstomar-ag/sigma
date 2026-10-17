@@ -685,3 +685,11 @@ def test_declared_kind_wins_in_the_brief():
     b = u.brief(".sdlc", _config(), 5, run=run)
     assert b["reason_class"] == "owner_hold"
     assert b["park_reason"] == "changes requested on the API shape"
+
+
+def test_declare_label_set_is_refused():
+    """#1735: `label_set` is the up-front route question for a run label, never declared on a park."""
+    u = _mod("unpark")
+    run = _runner(views={"1": _view(number=1)})
+    ok, detail = u.declare(".sdlc", _config(), 1, "label_set", run=run)
+    assert not ok and "label_set" in detail and "park" in detail
