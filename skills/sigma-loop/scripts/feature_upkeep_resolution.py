@@ -200,6 +200,15 @@ def store_path(sdlc_dir, run_id, unit):
     return pathlib.Path(sdlc_dir) / STORE_REL / ("%s-%s%s" % (registry.unit_key(unit), run_id, SUFFIX))
 
 
+def _bounded_lines(lines):
+    """#1741: at most 200 lines of 200 chars; a clipped line ends `...` and a cut list ends `... (N more lines)`."""
+    rows = list(lines)
+    out = [l[:200] + ("..." if len(l) > 200 else "") for l in rows[:200]]
+    if len(rows) > 200:
+        out.append("... (%d more lines)" % (len(rows) - 200))
+    return out
+
+
 def make_record(unit, level, run_id, original_tip, new_tip, backup_ref, files, checks, model=None, cost_usd=None,
                 verdict=None, route=None, at=None, dropped_by_delete=None):
     """A resolution record. `files` maps each conflicted path to the sha256 of its resolved blob; `checks` maps a check
@@ -229,7 +238,7 @@ def make_record(unit, level, run_id, original_tip, new_tip, backup_ref, files, c
                     and all(isinstance(k, str) and isinstance(v, (list, tuple)) and all(isinstance(l, str) for l in v)
                             for k, v in dropped_by_delete.items())):
                 raise ValueError("dropped_by_delete must map paths to lists of lines")
-            record["dropped_by_delete"] = {k: [l[:200] for l in list(v)[:200]] for k, v in dropped_by_delete.items()}
+            record["dropped_by_delete"] = {k: _bounded_lines(v) for k, v in dropped_by_delete.items()}
     return record
 
 
