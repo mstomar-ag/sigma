@@ -7904,3 +7904,61 @@ def test_ai_filed_missing_block_with_missing_or_valid_counter_shows_no_row(tmp_p
     assert "AI-filed counter is readable" not in rows
     rows = _ai_filed_names(tmp_path / "b", {}, counter='{"entries": []}')
     assert "AI-filed counter is readable" not in rows
+
+
+# --- #1810: the deny-list park row must not flag machine parks ---------------------------------
+def _deny_rows_check(rows, kinds):
+    """Run `_mis_kinded_hardstop_parks` over parked `rows` whose declared kinds are `kinds` (number -> kind)."""
+    from test_unpark import _runner, _view, _config, _mod
+    d = _doc()
+    pk = _mod("sources").PARK_COMMENT_PREFIX
+    views = {}
+    for n, kind in kinds.items():
+        view = json.loads(_view(number=n))
+        text = pk + "x" + (("\nsigma-qkind: " + kind) if kind else "")
+        view["comments"] = [{"body": text, "authorAssociation": "OWNER"}]
+        views[str(n)] = json.dumps(view)
+    run = _runner(by_label={"sdlc:parked": json.dumps(rows)}, views=views)
+    return d._mis_kinded_hardstop_parks(_config(), {"repo": "acme/widget"}, lambda argv: run(argv[1:]))
+
+
+_PARKED = [{"name": "sdlc:parked"}]
+_FENCE = "```\nCONFLICT in db.py: drop table users\n```"
+
+
+def test_machine_park_with_fenced_deny_word_is_not_listed():
+    rows = [{"number": 5, "title": "PR conflicts", "body": "merge failed\n" + _FENCE + "\ndone", "labels": _PARKED}]
+    assert _deny_rows_check(rows, {5: "merge_conflict"}) == []
+
+
+def test_fenced_deny_word_alone_is_not_listed_for_an_ordinary_kind():
+    rows = [{"number": 8, "title": "tidy", "body": "see output\n" + _FENCE, "labels": _PARKED}]
+    assert _deny_rows_check(rows, {8: "needs_decision"}) == []
+
+
+def test_machine_kind_with_unfenced_deny_word_is_not_listed():
+    rows = [{"number": 5, "title": "PR conflicts", "body": "please drop table users", "labels": _PARKED}]
+    assert _deny_rows_check(rows, {5: "merge_conflict"}) == []
+
+
+def test_needs_decision_park_with_unfenced_deny_word_is_listed():
+    rows = [{"number": 6, "title": "wipe", "body": "please drop table users", "labels": _PARKED}]
+    assert _deny_rows_check(rows, {6: "needs_decision"}) == [6]
+
+
+def test_rebase_parked_marker_title_with_fenced_deny_word_is_not_listed():
+    rows = [{"number": 7, "title": "Rebase parked: feature/x", "body": _FENCE, "labels": _PARKED}]
+    assert _deny_rows_check(rows, {7: None}) == []
+
+
+def test_rebase_parked_marker_title_alone_skips_unfenced_deny_word():
+    rows = [{"number": 7, "title": "Rebase parked: feature/x", "body": "drop table users", "labels": _PARKED}]
+    assert _deny_rows_check(rows, {7: None}) == []
+
+
+def test_deny_list_row_text_is_a_check_not_an_unconditional_instruction():
+    src = D.read_text()
+    i = src.index('"deny-list parks are declared a hard-stop kind"')
+    row = src[i:i + 900]
+    assert "irreversible action" in row and "needs no change" in row
+    assert "-- run `unpark.py declare .sdlc <issue> irreversible`." not in row
