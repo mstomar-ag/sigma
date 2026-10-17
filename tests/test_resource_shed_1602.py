@@ -146,6 +146,7 @@ def test_the_guard_modules_never_pause_or_resume_a_process():
 
 @unix_only
 def test_end_to_end_shed_gives_exit_5_shed_no_evidence_and_the_rerun_records_evidence(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("SIGMA_RESOURCE_MODE", raising=False)    # #1759: the environment now outranks the config key
     sdlc, goal = base._repo(tmp_path, {"resource": {"mode": "enforce"}},
                             command="%s -c 'import time; time.sleep(60)'" % sys.executable)
     loop = base._loop(monkeypatch, tmp_path, available=12 * GIB)

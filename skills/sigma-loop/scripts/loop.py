@@ -235,7 +235,9 @@ ENFORCEMENT_GATES = (
      "settings": (),
      "mechanism": "leaves goals unclaimed and prints HOLD while the machine has no room for another "
                   "goal session; slots follow the derived headroom, never a constant",
-     "condition": "mode `off` is byte-identical to before; `observe` only logs the would-be hold; "
+     "condition": "`resource.mode: null` resolves to `enforce` on every surface (`resource_guard.resolve_mode`: "
+                  "the environment variable, then the config key, then `enforce`); "
+                  "mode `off` is byte-identical to before; `observe` only logs the would-be hold; "
                   "an unreadable platform clamps to one goal with a notice"},
 )
 ENFORCEMENT_EXEMPT = ()
@@ -2175,10 +2177,10 @@ def _resource_gate(config):
     unguarded. Mode `off` returns before anything is imported. Read-only apart from the hold marker
     (`last.json`) and the would-hold event log in the resource state folder."""
     block = (config or {}).get("resource")
-    mode = block.get("mode") if isinstance(block, dict) else None
-    forced = os.environ.get("SIGMA_RESOURCE_MODE")       # an operator or test override of the config key
-    if forced in ("off", "observe", "enforce"):
-        mode, block = forced, dict(block if isinstance(block, dict) else {}, mode=forced)
+    if str(_HERE) not in sys.path:
+        sys.path.insert(0, str(_HERE))
+    mode = importlib.import_module("resource_guard").resolve_mode(config)     # #1759: the one rule
+    block = dict(block if isinstance(block, dict) else {}, mode=mode)
     if mode == "off":
         return None
     try:
@@ -5720,9 +5722,10 @@ _declared_verify_command = state.declared_verify_command
 
 
 def _resource_verify_on(config):
-    """#1601: verify goes through admission only when `resource.mode` is set and is not `off`."""
-    block = config.get("resource")
-    return isinstance(block, dict) and block.get("mode") in ("enforce", "observe")
+    """#1601: verify goes through admission unless the resolved mode (#1759) is `off`."""
+    if str(_HERE) not in sys.path:
+        sys.path.insert(0, str(_HERE))
+    return importlib.import_module("resource_guard").resolve_mode(config) != "off"
 
 
 def _verify_timeout_seconds(config):

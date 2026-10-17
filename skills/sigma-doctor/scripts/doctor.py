@@ -1258,19 +1258,13 @@ def _resource_rows(cfg, sdlc_dir, now=None, sampler=None, env=None):
         bound = live.sample_stale_after(cfg)
         beat = live.newest_heartbeat(sdlc_dir)
         at = snap["last_at"]
-        # The watcher's resource_step samples only for an EXPLICIT enforce/observe (same precedence: env, then key).
-        # Elsewhere last.json may never be written, so an age row there would be a permanent unfixable NOT OK.
-        forced = env.get("SIGMA_RESOURCE_MODE")
-        explicit = forced if forced in ("enforce", "observe", "off") else mode_key
-        if explicit not in ("enforce", "observe"):
-            if mode != "off":
-                rows.append(_chk("resource sample age: taken at admission points (resource.mode unset)", True, ""))
-        else:
-          rows.append(_chk("resource sample age: %s" % ("never sampled" if at is None else "%dm" % max(0, (now - at) // 60)),
-                         live.sample_age_ok(at, beat, now, bound),
-                         "the loop is running but the resource sampler has not run within %dm: start the watcher "
-                         "(a loop trigger starts one) or run `python3 skills/sigma-loop/scripts/resource_guard.py sample "
-                         "--record .sdlc`" % (bound // 60)))
+        # The watcher's resource_step samples under every resolved mode but off (#1759), so only off has no age row.
+        if mode != "off":
+            rows.append(_chk("resource sample age: %s" % ("never sampled" if at is None else "%dm" % max(0, (now - at) // 60)),
+                             live.sample_age_ok(at, beat, now, bound),
+                             "the loop is running but the resource sampler has not run within %dm: start the watcher "
+                             "(a loop trigger starts one) or run `python3 skills/sigma-loop/scripts/resource_guard.py sample "
+                             "--record .sdlc`" % (bound // 60)))
         rows.append(_chk("resource stale leases: %d" % snap["stale"], snap["stale"] == 0,
                          "%d lease(s) belong to dead or expired processes and count against headroom until reclaimed: "
                          "run `python3 skills/sigma-loop/scripts/resource_guard.py sample --record .sdlc`" % snap["stale"]))

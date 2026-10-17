@@ -259,12 +259,16 @@ def test_mode_off_fresh_heartbeat_no_last_json_has_no_sampler_row(tmp_path, mach
         assert [r["name"] for r in rows if not r["ok"]] == ["resource mode: off"]
 
 
-def test_mode_null_does_not_fail_on_missing_sample(tmp_path, machine):
+def test_mode_null_reads_as_the_resolved_default_for_the_sample_age_row(tmp_path, machine):
+    """#1759: an unset mode resolves to enforce, which the watcher samples under, so the age row is present."""
     base = _sdlc(tmp_path, _cfg())
     _beat(base, NOW - 10)
     rows = _doctor()._resource_rows(_cfg(), str(base), now=NOW, sampler=lambda: machine["sample"])
     row = {r["name"].split(":")[0]: r for r in rows}["resource sample age"]
-    assert row["ok"] is True and "admission" in row["name"]
+    assert "never sampled" in row["name"] and row["ok"] is False
+    off = _cfg(mode="off")
+    rows = _doctor()._resource_rows(off, str(base), now=NOW, sampler=lambda: machine["sample"])
+    assert "resource sample age" not in {r["name"].split(":")[0] for r in rows}
 
 
 # ------------------------------------------------------------------------------------ 5. watcher tick

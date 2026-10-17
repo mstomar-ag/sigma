@@ -298,6 +298,7 @@ def _loop(monkeypatch, tmp_path, available):
 
 
 def test_end_to_end_hold_gives_exit_5_no_evidence_events_and_done_still_refuses(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("SIGMA_RESOURCE_MODE", raising=False)    # #1759: the environment now outranks the config key
     sdlc, goal = _repo(tmp_path, {"resource": {"mode": "enforce"}, "journal": {"enabled": True}, "action_log": {"enabled": True}})
     rstate = tmp_path / "rstate"
     rstate.mkdir()
@@ -318,6 +319,7 @@ def test_end_to_end_hold_gives_exit_5_no_evidence_events_and_done_still_refuses(
 
 
 def test_end_to_end_admitted_run_writes_the_same_evidence_shape_as_off(tmp_path, monkeypatch):
+    monkeypatch.delenv("SIGMA_RESOURCE_MODE", raising=False)    # #1759: the environment outranks the config key
     """mode off vs enforce: the evidence file has the same keys, and for the off run the exact historical shape."""
     shapes = {}
     for mode in ("off", "enforce"):
@@ -336,9 +338,10 @@ def test_end_to_end_admitted_run_writes_the_same_evidence_shape_as_off(tmp_path,
 
 
 def test_the_guard_engages_only_for_an_explicit_non_off_mode(tmp_path, monkeypatch):
+    monkeypatch.delenv("SIGMA_RESOURCE_MODE", raising=False)    # #1759: the environment now outranks the config key
     loop = _loop(monkeypatch, tmp_path, available=12 * GIB)
     assert not loop._resource_verify_on({"resource": {"mode": "off"}})
-    assert not loop._resource_verify_on({})
+    assert loop._resource_verify_on({})                    # #1759: unset resolves to the default, enforce
     assert loop._resource_verify_on({"resource": {"mode": "observe"}})
     assert loop._verify_timeout_seconds({"verify": {"timeout_minutes": 5}}) == 300
     assert loop._verify_timeout_seconds({"verify": {"timeout_minutes": True}}) == 3600
