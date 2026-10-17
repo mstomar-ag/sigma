@@ -94,6 +94,11 @@ registry shards. It has gone wrong twice: tracked registry writes refused the ne
 (#954), and untracked plan, research and acceptance copies stop the root fast-forwarding over the
 commit that lands them. 1.0.15 closes the second case (#1474): `work.py commit` copies the record into the goal branch, and a confirmed merge removes the byte-identical root copies.
 
+## The resource guard
+
+Limits derive from the machine, never constants; the guard admits or holds work and never pauses a process
+(`SIGSTOP` is banned). It stops only a verify group Sigma started. See [parallelism](docs/parallelism.md).
+
 ## Before you run the loop
 
 If the installed Sigma plugin is older than 1.0.0, do not start the loop; run

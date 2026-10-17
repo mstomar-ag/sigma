@@ -1009,6 +1009,20 @@ def _parse_total_cost_usd(stdout_text):
         return None
 
 
+_GUARD = []
+
+
+def _guard():
+    """resource_guard, loaded once (#1758): the one place a model session asks for admission."""
+    if not _GUARD:
+        spec = importlib.util.spec_from_file_location(
+            "resource_guard", pathlib.Path(__file__).resolve().parent / "resource_guard.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _GUARD.append(module)
+    return _GUARD[0]
+
+
 def _drive(sdlc_dir, config, settings, issue, next_hop, deps):
     run = deps.get("run_drive") or _run_drive
     cmd_str = _drive_cmd(settings)
@@ -1112,11 +1126,21 @@ def _tick_inner(sdlc_dir, config, settings, issue, deps):
     before_ids = _terminal_outcome_ids(entries, target)
 
     try:
-        exit_code, output = _drive(sdlc_dir, config, settings, target, next_hop, deps)
+        # #1758: a driven model session asks for admission like every other spawn; a hold defers the tick.
+        with _guard().session_lease("autowatch", target, repo=str(pathlib.Path(sdlc_dir).resolve().parent),
+                                       ttl=(settings.get("timeout_seconds") or DEFAULT_DRIVE_TIMEOUT_SECONDS) * 2 + 60) as lease:
+            held = lease if lease is not None and hasattr(lease, "reason") else None
+            if held is None:
+                exit_code, output = _drive(sdlc_dir, config, settings, target, next_hop, deps)
     except Exception as exc:                                # noqa: BLE001 - the driven run must never
         _record_outcome(sdlc_dir, config, target,                          # take this tick down with it
                          f"failed — driving /sigma-loop raised: {exc}", ref=ref, to=to, hop=incoming_hop)
         return "failed"
+
+    if held is not None:
+        _record_outcome(sdlc_dir, config, target, f"deferred — session held ({held.reason}); nothing was started",
+                         ref=ref, to=to, hop=incoming_hop)
+        return "deferred: resource hold"
 
     if exit_code != 0:
         why = f"failed — driven /sigma-loop exited {exit_code}"

@@ -132,6 +132,31 @@ and [Anthropic's prompt caching guide](https://platform.claude.com/docs/en/build
 describe the underlying mechanisms. Measure input, cached input, output, model mix and completed
 goals before claiming savings; a cached-token total alone is not a quota or bill.
 
+### The resource guard (derived limits, holds, shed)
+
+Sigma reads the machine (memory, load, pressure, cores) and derives its own limits: a memory reserve, a share cap
+for all leases together and a CPU reserve, each a ratio of THIS machine (the keys are in
+[configuration](configuration.md); every default is **uncalibrated**, see the evidence below). Nothing is a
+constant copied from a laptop, and nothing here ever pauses a process.
+
+- **Admission, not interruption.** A goal pick is gated by the machine's limits, and a Sigma-spawned model session
+  and a `loop.py verify` each take a lease first. When the machine has no room the answer is **HOLD** with a
+  reason and a retry time: the picker leaves goals unclaimed, a verify exits 5 (`RESOURCE-HOLD`) without running or writing evidence, and the goal is
+  not failed. The hold lifts by itself after consecutive healthy samples (hysteresis), so a dip and a hover do not
+  flap. `resource.mode` is `enforce`, `observe` (logs the would-be hold, admits) or `off`.
+- **Verify workers.** The granted worker count reaches the proving command as a `{workers}` token (replaced by an
+  integer before the shell sees it), as `SIGMA_VERIFY_WORKERS`, and as `PYTEST_XDIST_AUTO_NUM_WORKERS` for
+  `-n auto`. A literal `-n N` is never lowered: a warm cost record that cannot fit N holds instead.
+- **Shed.** With `resource.shed` at `verify` (the default) and `enforce`, three critical samples in a row stop the
+  verify process group Sigma itself started (TERM, a grace, then KILL). The result is `RESOURCE-HOLD (shed)`,
+  exit 5, no evidence, the goal not failed; rerun once admission reopens. A session is never signalled.
+- **What the guard cannot cover.** Tests you run by hand outside the verify wrapper; memory used by other
+  programs; a host's own subagent fan-out; Windows (the guard refuses there rather than guess).
+- **Measured or not.** The macOS and Linux calibration runs are recorded in
+  `docs/launch/evidence/resource-guard-macos-calibration.md` and
+  `docs/launch/evidence/resource-guard-linux-calibration.md`; both say NOT RUN until a real run fills them in.
+  Every clause and the test that covers it is in `docs/launch/evidence/resource-guard-controls.md`.
+
 Two things genuinely grow with a repo's own lifetime and are worth knowing about:
 
 - **Per-process ledger entry files** (`.sdlc/ledger/entries/<actor>-<host>.<pid>.jsonl`, when

@@ -776,6 +776,8 @@ def declare(sdlc_dir, config, number, kind, source=None, run=None):
     machine line. Changes no label, writes no ledger event. -> (ok, detail)."""
     if kind not in qkind.QKINDS:
         return False, "unknown kind %r (expected one of %s)" % (kind, ", ".join(qkind.QKINDS))
+    if kind == "label_set":
+        return False, "label_set is the up-front route question for a run label, never declared on a park"
     source = source or sources.GitHubSource(config, run=run)
     if not _github(source):
         return False, "unparking needs github discovery mode"
