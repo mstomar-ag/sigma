@@ -37,6 +37,7 @@ import math
 import mmap
 import os
 import sys
+import threading
 import time
 
 EXIT_UNSUPPORTED = 3
@@ -518,13 +519,16 @@ def session_mode(config=None, env=None):
 
 
 @contextlib.contextmanager
-def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None):
+def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None, renew_every=None, clock=time.time):
     """Hold one "session" lease around a model-session spawn. Yields None (mode off), a Grant, or a Hold.
 
     The caller treats a Hold as its own existing "could not start now" outcome. The lease is released in `finally`,
     so an exception or a timeout in the child never leaves one behind. Never raises for pressure, a busy lock or a
     table error. On a platform that cannot take a lease (or a table error): observe proceeds unguarded, enforce yields a
     Hold that says so (refuse loudly rather than a silent half-guarantee).
+
+    While a Grant is held a daemon thread renews the lease every `renew_every` seconds (default ttl/3), so a session
+    longer than the ttl keeps it; the thread is stopped and joined before release. Off, a Hold, an error: no thread.
     """
     mode = session_mode(config, env)
     if mode == "off":
@@ -541,9 +545,26 @@ def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None):
             else "lease table error (%s)" % type(exc).__name__
         yield None if mode == "observe" else _Held(why)
         return
+    stop, thread = threading.Event(), None
+    if hasattr(got, "id"):
+        every = renew_every
+        if not _number(every) or every <= 0:
+            every = (ttl if _number(ttl) and ttl > 0 else lease.DEFAULT_TTL) / 3.0
+
+        def _renew():
+            while not stop.wait(every):
+                try:
+                    lease.renew(got.id, now=clock(), env=env)
+                except Exception:  # noqa: BLE001 - a missed renewal costs only the ttl margin
+                    pass
+        thread = threading.Thread(target=_renew, name="sigma-lease-renew", daemon=True)
+        thread.start()
     try:
         yield got
     finally:
+        stop.set()
+        if thread is not None:
+            thread.join(timeout=5)
         if hasattr(got, "id"):
             try:
                 lease.release(got.id, env=env)

@@ -302,3 +302,69 @@ def test_spawn_control_is_red(monkeypatch, tmp_path):
 def test_module_has_no_stop_signals():
     text = SCRIPT.read_text()
     assert "SIGSTOP" not in text and "SIGCONT" not in text and "subprocess" not in text
+
+
+# ------------------------------------------------------------------------------------------ #1740 renewer
+def _session_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("SIGMA_RESOURCE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("SIGMA_RESOURCE_MODE", raising=False)
+    g = _load(SCRIPT, "rg_renew")
+    lease = g._lease()
+    lease.take_sample = lambda: lease.guard.Sample(
+        total=16 << 30, available=8 << 30, swap_used=0, swap_total=0, swapouts=0, swapouts_at=0.0, pressure=1,
+        cpu_count=8, load1=0.0)
+    lease.take_footprint = lambda pid: None
+    return g, lease
+
+
+def _starts(tmp_path):
+    root = tmp_path / "state" / "leases"
+    return [json.loads(p.read_text())["start"] for p in root.glob("*.json")]
+
+
+def test_session_lease_is_renewed_past_its_ttl(tmp_path, monkeypatch):
+    import time
+    g, lease = _session_env(tmp_path, monkeypatch)
+    with g.session_lease("judge", "1", ttl=0.4, config={"mode": "enforce"}, renew_every=0.05):
+        time.sleep(1.0)  # 2.5x the ttl
+        (start,) = _starts(tmp_path)
+        assert time.time() < start + 0.4  # still unexpired: it was refreshed
+
+
+def test_renewer_is_stopped_before_release(tmp_path, monkeypatch):
+    import threading
+    g, lease = _session_env(tmp_path, monkeypatch)
+    before = set(threading.enumerate())
+    with g.session_lease("judge", "1", ttl=30, config={"mode": "enforce"}, renew_every=0.01):
+        assert len(set(threading.enumerate()) - before) == 1
+    assert set(threading.enumerate()) - before == set()
+    assert _starts(tmp_path) == []
+
+
+def test_renewer_thread_is_daemon(tmp_path, monkeypatch):
+    import threading
+    g, lease = _session_env(tmp_path, monkeypatch)
+    before = set(threading.enumerate())
+    with g.session_lease("judge", "1", ttl=30, config={"mode": "enforce"}, renew_every=0.01):
+        (thread,) = set(threading.enumerate()) - before
+        assert thread.daemon
+
+
+def test_mode_off_starts_no_thread_and_writes_nothing(tmp_path, monkeypatch):
+    import threading
+    g, lease = _session_env(tmp_path, monkeypatch)
+    before = set(threading.enumerate())
+    with g.session_lease("judge", "1", config={"mode": "off"}, renew_every=0.01) as got:
+        assert got is None and set(threading.enumerate()) == before
+    assert not (tmp_path / "state").exists()
+
+
+def test_a_hold_starts_no_thread(tmp_path, monkeypatch):
+    import threading
+    g, lease = _session_env(tmp_path, monkeypatch)
+    lease.take_sample = lambda: lease.guard.Sample(
+        total=16 << 30, available=1 << 20, swap_used=0, swap_total=0, swapouts=0, swapouts_at=0.0, pressure=1,
+        cpu_count=8, load1=0.0)
+    before = set(threading.enumerate())
+    with g.session_lease("judge", "1", config={"mode": "enforce"}, renew_every=0.01) as got:
+        assert hasattr(got, "reason") and set(threading.enumerate()) == before

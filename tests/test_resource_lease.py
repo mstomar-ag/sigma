@@ -499,3 +499,26 @@ def test_source_has_no_byte_literal_of_a_mebibyte_or_more():
 
 def test_docs_name_the_lease_command():
     assert "resource_lease.py" in DOC.read_text()
+
+
+# ------------------------------------------------------------------------------------------ #1740 renew
+def _lease_record(lease, grant):
+    return json.loads((pathlib.Path(lease.state_dir()) / "leases" / (grant.id + ".json")).read_text())
+
+
+def test_renew_moves_start_forward(lease):
+    grant = lease.admit("session", 1, "r", "g1", pid=os.getpid(), ttl=100, now=1000.0)
+    assert lease.renew(grant.id, now=1050.0) is True
+    record = _lease_record(lease, grant)
+    assert record["start"] == 1050.0 and record["ttl"] == 100
+    assert not lease.expired(record, 1140.0)
+
+
+def test_renew_unknown_id_is_false(lease):
+    assert lease.renew("nosuchlease", now=1.0) is False
+
+
+def test_renew_does_not_resurrect_a_dead_pid(lease):
+    grant = lease.admit("session", 1, "r", "g1", pid=_dead_pid(), ttl=100, now=1000.0)
+    assert lease.renew(grant.id, now=1050.0) is False
+    assert _lease_record(lease, grant)["start"] == 1000.0
