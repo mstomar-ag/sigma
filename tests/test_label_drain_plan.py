@@ -172,7 +172,7 @@ def test_assigned_elsewhere_and_held_by_gate(tmp_path):
 
 def test_unassigned_member_is_not_pickable_when_an_assignee_is_configured(tmp_path):
     p, _ = _plan(tmp_path, [_goal(1), _goal(2, assignees=["me-login"])], assignee="me-login")
-    assert _by(p, 1)["verdict"] == "assigned-elsewhere" and "unassigned" in _by(p, 1)["detail"]
+    assert _by(p, 1)["verdict"] == "unassigned" and "unassigned" in _by(p, 1)["detail"]
     assert _by(p, 2)["verdict"] == "armed"
     p, _ = _plan(tmp_path / "x", [_goal(1)])                 # no assignee configured: unchanged
     assert _by(p, 1)["verdict"] == "armed"
@@ -408,3 +408,11 @@ def test_a_sigma_answer_comment_is_never_the_park_reason(tmp_path, capsys):
     rc = ld.main(["label_drain.py", "status", base, LBL, "--json"], run=fk)
     reason = next(r["reason"] for r in json.loads(capsys.readouterr().out)["not_pickable"] if r["number"] == 1)
     assert rc == 0 and "legacy column" in reason and "sigma:unpark-qa" not in reason and "\n" not in reason
+
+
+def test_armed_member_with_no_assignee_is_unassigned_never_assigned_elsewhere(tmp_path):
+    """#1807: no assignee is its own verdict; an issue held by someone else keeps assigned-elsewhere."""
+    p, _ = _plan(tmp_path, [_goal(1), _goal(2, assignees=["other-person"])], assignee="me-login")
+    assert _by(p, 1)["verdict"] == "unassigned"
+    assert _by(p, 1)["verdict"] != "assigned-elsewhere"
+    assert _by(p, 2)["verdict"] == "assigned-elsewhere"
