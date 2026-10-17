@@ -253,7 +253,8 @@ def chains(sdlc, rank="biggest", now=None):
 def stuck(sdlc, now=None):
     """Decision roots that hold other work: `[{root, why, hint, waiting}]`, most freeing first. A root
     is an unresolved member with no unresolved blocker that needs a human; `waiting` is every open
-    node that transitively waits on it. Cycles are listed with `why: cycle` and their members."""
+    node that transitively waits on it. Cycles are listed with `why: cycle` and their members. `kind` is
+    the root's kind (issue|pr), added with #1614; a cycle entry also carries `cycle`, its sorted members."""
     now = time.time() if now is None else now
     m, _md, _c = _open_map(sdlc, now)
     g = _graph(m)
@@ -264,9 +265,10 @@ def stuck(sdlc, now=None):
         why, hint = _why(g.nodes[n], in_cycle, set())
         waiting = dag_core.open_dependents(g, n)
         if why and waiting:
-            out.append({"root": n, "why": why, "hint": hint, "waiting": waiting})
+            out.append({"root": n, "why": why, "hint": hint, "waiting": waiting, "kind": g.nodes[n].kind})
     for c in cyc:
         waiting = sorted({d for n in c for d in dag_core.open_dependents(g, n)} - set(c))
         out.append({"root": c[0], "why": "cycle", "hint": _why(g.nodes[c[0]], set(c), set())[1],
-                    "waiting": sorted(set(c[1:]) | set(waiting))})
+                    "waiting": sorted(set(c[1:]) | set(waiting)), "kind": g.nodes[c[0]].kind,
+                    "cycle": sorted(c)})
     return sorted(out, key=lambda s: (-len(s["waiting"]), s["root"]))

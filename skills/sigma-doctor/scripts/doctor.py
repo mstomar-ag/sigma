@@ -1355,6 +1355,12 @@ def _dag_map_row(cfg, sdlc_dir, now=None):
         age = "no map yet" if h["age"] is None else "age %s" % dr._age(h["age"])
         name = "dag map: mode %s, %s, %d nodes, %d edges, %d cycles" % (
             h["mode"], age, h["nodes"], h["edges"], h["cycles"])
+        try:                                 # #1614: stuck decision roots, from the same local map
+            stuck = len(_load_loop_script("dag_stuck").roots(sdlc_dir, now=now))
+        except Exception:                    # noqa: BLE001 - a count that cannot be made adds nothing
+            stuck = 0
+        if stuck:
+            name += ", %d stuck root%s" % (stuck, "" if stuck == 1 else "s")
         why = []
         if h["stale"]:
             why.append("last good refresh is over %d TTLs old while the loop or watcher is live" % dr.STALE_TTLS)
