@@ -139,9 +139,9 @@ for all leases together and a CPU reserve, each a ratio of THIS machine (the key
 [configuration](configuration.md); every default is **uncalibrated**, see the evidence below). Nothing is a
 constant copied from a laptop, and nothing here ever pauses a process.
 
-- **Admission, not interruption.** A goal start, a Sigma-spawned model session and a `loop.py verify` each take a
-  lease first. When the machine has no room the answer is **HOLD** with a reason and a retry time: the picker
-  leaves goals unclaimed, a verify exits 5 (`RESOURCE-HOLD`) without running or writing evidence, and the goal is
+- **Admission, not interruption.** A goal pick is gated by the machine's limits, and a Sigma-spawned model session
+  and a `loop.py verify` each take a lease first. When the machine has no room the answer is **HOLD** with a
+  reason and a retry time: the picker leaves goals unclaimed, a verify exits 5 (`RESOURCE-HOLD`) without running or writing evidence, and the goal is
   not failed. The hold lifts by itself after consecutive healthy samples (hysteresis), so a dip and a hover do not
   flap. `resource.mode` is `enforce`, `observe` (logs the would-be hold, admits) or `off`.
 - **Verify workers.** The granted worker count reaches the proving command as a `{workers}` token (replaced by an
