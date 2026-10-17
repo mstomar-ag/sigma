@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""dag.py -- the dependency map's command line (#1610). One verb so far.
+"""dag.py -- the dependency map's command line (#1610, #1611).
 
-  dag.py show [--sdlc DIR]    mode, age and counts of the stored map
+  dag.py show [--sdlc DIR]      mode, age and counts of the stored map
+  dag.py rebuild [--sdlc DIR]   read GitHub once, publish the map, print the call counts by class
 
-With `discovery.dag.mode` off, `show` prints `dag: off` and touches nothing. `show` only reads: it
-never creates the state directory, never takes the refresh lock and never calls `gh`.
+With `discovery.dag.mode` off, both verbs print `dag: off` and touch nothing. `rebuild` runs
+`dag_collect.refresh` (under the refresh lock; a failed or empty read leaves the old file as it was)
+and exits 1 when nothing was published. `show` only reads: it never creates the state directory, never takes the refresh lock and never calls `gh`.
 """
 import argparse
 import importlib.util
@@ -48,13 +50,35 @@ def show(sdlc):
             f"{'usable' if ok else 'not usable (' + reason + ')'}")
 
 
+def rebuild(sdlc):
+    """`(line, exit_code)`: the outcome and the call counts by class (list, read, pull)."""
+    dc = _load("dag_collect")
+    rep = dc.refresh(sdlc)
+    if rep["status"] == "off":
+        return "dag: off", 0
+    c = rep["calls"]
+    line = (f"dag rebuild: {rep['status']}, calls list {c['list']} read {c['read']} pull {c['pull']}, "
+            f"unread {len(rep['unread'])}")
+    if rep["partial"]:
+        line += ", partial"
+    if rep["last_error"]:
+        line += f", last_error {rep['last_error']}"
+    return line, (0 if rep["status"] in ("saved", "busy") else 1)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="dag.py", description="The dependency map's command line.")
     sub = ap.add_subparsers(dest="verb", required=True)
     sp = sub.add_parser("show", help="print mode, age and counts of the stored map")
     sp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
+    rp = sub.add_parser("rebuild", help="read GitHub and publish the map; print call counts by class")
+    rp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     args = ap.parse_args(argv)
     sdlc = args.sdlc or os.path.join(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd(), ".sdlc")
+    if args.verb == "rebuild":
+        line, code = rebuild(sdlc)
+        print(line)
+        return code
     print(show(sdlc))
     return 0
 

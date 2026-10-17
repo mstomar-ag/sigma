@@ -68,7 +68,7 @@ LIBRARY_ONLY = {
     "feature_land_merge",
     "feature_land_approval_prune",
     "conflict_state",
-    "dag_store",
+    "dag_store", "dag_collect",
     "feature_park",
     "qkind",
     "landing_preflight",
