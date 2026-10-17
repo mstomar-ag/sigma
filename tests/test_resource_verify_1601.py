@@ -20,6 +20,27 @@ SCRIPTS = ROOT / "skills" / "sigma-loop" / "scripts"
 MIB = 1024 ** 2
 GIB = 1024 ** 3
 unix_only = pytest.mark.skipif(sys.platform == "win32", reason="process groups are POSIX")
+_GUARD_MODULES = ("resource_guard", "resource_lease", "bounded_run", "resource_verify")
+
+
+_MISSING = object()
+
+
+def _restoring_modules():
+    """#1833: this file pops and reloads the guard modules; put each name back as it was (or remove it) so a
+    later file in the same process finds the interpreter as it left it."""
+    saved = {name: sys.modules.get(name, _MISSING) for name in _GUARD_MODULES}
+    try:
+        yield
+    finally:
+        for name, module in saved.items():
+            if module is _MISSING:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
+_restore_guard_modules = pytest.fixture(autouse=True)(_restoring_modules)
 
 
 def _fresh(name):
@@ -37,10 +58,13 @@ def _fresh(name):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    """The verify module with a temp state folder and a roomy fake machine (16 GiB, 8 cpus)."""
+    """The verify module with a temp state folder and a roomy fake machine (16 GiB, 8 cpus). #1833: it depends on
+    its own restore, so a file that imports `env` (the shed file does) restores the modules too."""
+    snapshot = _restoring_modules()
+    next(snapshot)
     monkeypatch.setenv("SIGMA_RESOURCE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("SIGMA_RESOURCE_MODE", raising=False)    # #1794: the shed reads the environment too
-    for name in ("resource_guard", "resource_lease", "bounded_run", "resource_verify"):
+    for name in _GUARD_MODULES:
         sys.modules.pop(name, None)
     verify = _fresh("resource_verify")
     lease = verify._sibling("resource_lease")
@@ -51,7 +75,8 @@ def env(tmp_path, monkeypatch):
                                   swapouts_at=0.0, pressure=1, cpu_count=8, load1=0.0)
     monkeypatch.setattr(lease, "take_sample", fake_sample)
     verify.box, verify.lease, verify.state = box, lease, tmp_path / "state"
-    return verify
+    yield verify
+    next(snapshot, None)
 
 
 def seed(env, values):
@@ -346,3 +371,27 @@ def test_the_guard_engages_only_for_an_explicit_non_off_mode(tmp_path, monkeypat
     assert loop._resource_verify_on({"resource": {"mode": "observe"}})
     assert loop._verify_timeout_seconds({"verify": {"timeout_minutes": 5}}) == 300
     assert loop._verify_timeout_seconds({"verify": {"timeout_minutes": True}}) == 3600
+
+
+# ------------------------------------------------------------------------------------------ #1833 module hygiene
+
+
+def test_the_module_restore_puts_back_what_was_there_and_removes_what_was_not(monkeypatch):
+    """#1833: this file pops and reloads four modules; a later file in the same process must find them as they
+    were. Control: delete the restore loop in `_restoring_modules` and this goes red."""
+    before = {"resource_guard": object(), "resource_lease": object()}
+    for name in _GUARD_MODULES:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    for name, obj in before.items():
+        monkeypatch.setitem(sys.modules, name, obj)
+    gen = _restoring_modules()
+    next(gen)
+    for name in _GUARD_MODULES:
+        sys.modules.pop(name, None)
+    _fresh("resource_lease")                      # the reload this file does, leaving a different object behind
+    sys.modules["bounded_run"] = object()
+    with pytest.raises(StopIteration):
+        next(gen)
+    assert sys.modules["resource_guard"] is before["resource_guard"]
+    assert sys.modules["resource_lease"] is before["resource_lease"]
+    assert "bounded_run" not in sys.modules and "resource_verify" not in sys.modules

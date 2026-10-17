@@ -12,7 +12,7 @@ import time
 import pytest
 
 import test_resource_verify_1601 as base
-from test_resource_verify_1601 import GIB, SCRIPTS, env, unix_only  # noqa: F401  (env is a fixture)
+from test_resource_verify_1601 import GIB, SCRIPTS, _restore_guard_modules, env, unix_only  # noqa: F401  (fixtures)
 
 CHILD = ("import os,signal,sys,time\n"
          "open(sys.argv[1],'w').write(str(os.getpid()))\n"
