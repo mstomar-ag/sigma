@@ -557,7 +557,7 @@ def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None, renew_
                     lease.renew(got.id, now=clock(), env=env)
                 except Exception:  # noqa: BLE001 - a missed renewal costs only the ttl margin
                     pass
-        thread = threading.Thread(target=_renew, name="sigma-lease-renew", daemon=True)
+        thread = threading.Thread(target=_renew, name="lease-renewer", daemon=True)
         thread.start()
     try:
         yield got
