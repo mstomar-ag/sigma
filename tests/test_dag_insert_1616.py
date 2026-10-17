@@ -450,3 +450,108 @@ def test_a_cycle_refusal_surfaces_as_a_hand_off_warning_and_the_goal_is_not_mark
                                        immediately_actionable=True, blocks_goal=True, source=src, dedup=False)
     assert any("dependency cycle" in w for w in rep["warnings"])
     assert gh.writes_to(7) == [] and "Blocked by" not in gh.issues[7]["body"]
+
+
+# ----------------------------------------------------------------- 8. #1844: unknown nodes, the unchecked lock
+
+def test_a_usable_map_missing_the_blocker_or_the_goal_is_undecided_not_no_cycle(tmp_path):
+    """control: (a) put back `return []` for a missing blocker; (b) put back `return []` for a missing goal
+    -- each clause alone turns its half of this test red."""
+    sdlc, cfg, gh, src = _setup(tmp_path, nodes=CHAIN_NODES, edges=CHAIN_EDGES)
+    cm = lambda a, b: dag_insert.closing_members(str(sdlc), cfg, a, b)         # noqa: E731
+    assert cm(9, 7) == [7, 8, 9]                                               # both known: still decided
+    assert cm(500, 7) is None                                                  # blocker not in the map
+    assert cm(9, 500) is None                                                  # goal not in the map
+    assert cm(500, 501) is None
+
+
+def _slow_pairs(monkeypatch, delay=0.05, first_only=False):
+    """Widen the read-modify-write window so an unlocked implementation loses an update every time.
+    `first_only` slows only the first read (the taker's), so a recorder slips in between its read and clear."""
+    real, calls = dag_insert._pairs, []
+
+    def slow(sdlc):
+        out = real(sdlc)
+        calls.append(1)
+        if not first_only or len(calls) == 1:
+            time.sleep(delay)
+        return out
+    monkeypatch.setattr(dag_insert, "_pairs", slow)
+
+
+def test_concurrent_record_unchecked_keeps_both_pairs(tmp_path, monkeypatch):
+    """control: remove the lock around the read-modify-write in `record_unchecked` -> red."""
+    import threading
+    sdlc = tmp_path / ".sdlc"
+    (sdlc / "state").mkdir(parents=True)
+    cfg = _cfg()
+    _slow_pairs(monkeypatch)
+    ts = [threading.Thread(target=dag_insert.record_unchecked, args=(str(sdlc), 100 + i, 5, cfg)) for i in range(4)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert sorted(dag_insert.unchecked(str(sdlc))) == [[100 + i, 5] for i in range(4)]
+
+
+def test_a_pair_recorded_during_take_is_not_lost(tmp_path, monkeypatch):
+    """control: remove the lock in `take_unchecked` -> red (the recorded pair is in neither the taken list
+    nor the file)."""
+    import threading
+    sdlc = tmp_path / ".sdlc"
+    (sdlc / "state").mkdir(parents=True)
+    cfg = _cfg()
+    assert dag_insert.record_unchecked(str(sdlc), 1, 5, cfg)
+    _slow_pairs(monkeypatch, first_only=True)
+    taken = []
+    a = threading.Thread(target=lambda: taken.extend(dag_insert.take_unchecked(str(sdlc))))
+    b = threading.Thread(target=dag_insert.record_unchecked, args=(str(sdlc), 2, 5, cfg))
+    a.start()
+    time.sleep(0.01)
+    b.start()
+    a.join()
+    b.join()
+    seen = taken + dag_insert.unchecked(str(sdlc))
+    assert [1, 5] in taken and [2, 5] in seen
+
+
+def test_the_unchecked_lock_is_its_own_file_and_does_not_block_the_refresh_lock(tmp_path):
+    """control: take the refresh lock file for the unchecked list -> insert (holding it) deadlocks/busy."""
+    import fcntl
+    sdlc = tmp_path / ".sdlc"
+    (sdlc / "state").mkdir(parents=True)
+    cfg = _cfg()
+    assert dag_insert.UNCHECKED_LOCK != dag_store.LOCK
+    with dag_store.refresh_lock(str(sdlc), cfg) as held:
+        assert held == "held"
+        assert dag_insert.record_unchecked(str(sdlc), 1, 2, cfg)
+        assert dag_insert.take_unchecked(str(sdlc)) == [[1, 2]]
+    fd = open(sdlc / "state" / dag_insert.UNCHECKED_LOCK, "a+")
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        with dag_store.refresh_lock(str(sdlc), cfg) as held:                  # the other lock is free
+            assert held == "held"
+    finally:
+        fd.close()
+
+
+def test_without_fcntl_two_interleaved_inserts_still_leave_a_valid_map(tmp_path, monkeypatch):
+    """No `fcntl`: the refresh lock yields `open`, so insert has no mutual exclusion (module docstring). One of
+    two interleaved inserts may lose its node, but the file stays a valid map and nothing raises."""
+    sdlc, cfg, gh, src = _setup(tmp_path, nodes=[_node(7)], edges=[])
+    monkeypatch.setattr(dag_insert.dag_store, "fcntl", None)
+    with dag_insert.dag_store.refresh_lock(str(sdlc), cfg) as held:
+        assert held == "open"
+    real_save, inner, started = dag_insert.dag_store.save, [], []
+
+    def save(sd, m, **kw):
+        if not started:                                  # first save: the second insert runs in its window
+            started.append(1)
+            inner.append(dag_insert.insert(str(sdlc), cfg, 9, blockers=[7]))
+        return real_save(sd, m, **kw)
+    monkeypatch.setattr(dag_insert.dag_store, "save", save)
+    assert dag_insert.insert(str(sdlc), cfg, 8, blockers=[7]) == "inserted"
+    assert inner == ["inserted"]
+    m = _read_map(sdlc)
+    nums = {n["number"] for n in m["nodes"]}
+    assert {7, 8} <= nums and nums <= {7, 8, 9}
+    assert all(e["blocker"] in nums and e["blocked"] in nums for e in m["edges"])
+    assert "no mutual exclusion" in dag_insert.__doc__.lower()
