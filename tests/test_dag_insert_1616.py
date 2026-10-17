@@ -351,6 +351,31 @@ def test_dag_refresh_clears_the_unchecked_list_after_a_saved_refresh_and_only_th
         assert dag_insert.unchecked(str(sdlc)) == left
 
 
+def test_a_pair_recorded_during_a_saved_refresh_is_kept_not_dropped(tmp_path, monkeypatch):
+    """#1847. control: restore the discard (take the whole list after the save) -> red."""
+    sdlc, cfg, gh, src = _setup(tmp_path)
+    dag_insert.record_unchecked(str(sdlc), 200, 7, cfg)
+
+    def collect(*a, **k):
+        dag_insert.record_unchecked(str(sdlc), 300, 8, cfg)          # late: recorded mid-refresh
+        return {"status": "saved", "last_error": None}
+    monkeypatch.setattr(dag_refresh.dag_collect, "refresh", collect)
+    monkeypatch.setattr(dag_refresh, "_post_cycles", lambda *a, **k: None)
+    dag_refresh.refresh_if_due(str(sdlc), cfg, run=gh, force=True)
+    assert dag_insert.unchecked(str(sdlc)) == [[300, 8]]
+
+
+def test_drop_unchecked_removes_only_the_named_pairs(tmp_path):
+    sdlc = tmp_path / ".sdlc"
+    (sdlc / "state").mkdir(parents=True)
+    cfg = _cfg()
+    for b in (1, 2, 3):
+        dag_insert.record_unchecked(str(sdlc), b, 5, cfg)
+    assert dag_insert.drop_unchecked(str(sdlc), [[1, 5], [3, 5]])
+    assert dag_insert.unchecked(str(sdlc)) == [[2, 5]]
+    assert dag_insert.drop_unchecked(str(sdlc), [[2, 5]]) and dag_insert.unchecked(str(sdlc)) == []
+
+
 # ----------------------------------------------------------------- 5. the map never fails a filing
 
 def test_an_insertion_failure_never_fails_the_filing_and_prints_one_line(tmp_path, monkeypatch, capsys):

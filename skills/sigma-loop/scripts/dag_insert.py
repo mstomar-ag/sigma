@@ -302,6 +302,26 @@ def unchecked(sdlc):
     return _pairs(sdlc)
 
 
+def drop_unchecked(sdlc, pairs):
+    """Remove only `pairs` from the list; any other pair (one recorded since they were read) stays.
+    Never raises."""
+    try:
+        gone = {tuple(q) for q in pairs}
+        with _unchecked_lock(sdlc):
+            left = [q for q in _pairs(sdlc) if tuple(q) not in gone]
+            p = _unchecked_path(sdlc)
+            if not left:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+            else:
+                dag_store.state.atomic_write_text(p, json.dumps(left, separators=(",", ":")) + "\n")
+        return True
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
 def take_unchecked(sdlc):
     """Return the recorded pairs and clear the list. Never raises."""
     try:
