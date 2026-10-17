@@ -103,19 +103,28 @@ class Recorder:
         self.current = name
 
     def count_args(self, args):
-        self._bucket(self.current)[classify(args)] += 1
+        """Tracing must never break a pick (#1815): any failure here is dropped, never raised."""
+        try:
+            self._bucket(self.current)[classify(args)] += 1
+        except Exception:
+            pass
 
     def end(self):
-        self.mark(self.current)
-        wall = self.t_mark - self.t0
-        stages = {}
-        for name, b in self.stages.items():
-            calls = {c: b[c] for c in CLASSES if b[c]}
-            if calls or b["seconds"] > 0:
-                stages[name] = {"calls": calls, "seconds": round(b["seconds"], 6)}
-        line = json.dumps({"v": 1, "ts": int(time.time()), "wall": round(wall, 6), "stages": stages},
-                          sort_keys=True)
-        _append(self.sdlc_dir, line)
+        """Builds and writes the trace line. Any failure is dropped, never raised (#1815): `loop._next`
+        calls this in a `finally`, where a raise would replace the pick's own result."""
+        try:
+            self.mark(self.current)
+            wall = self.t_mark - self.t0
+            stages = {}
+            for name, b in self.stages.items():
+                calls = {c: b[c] for c in CLASSES if b[c]}
+                if calls or b["seconds"] > 0:
+                    stages[name] = {"calls": calls, "seconds": round(b["seconds"], 6)}
+            line = json.dumps({"v": 1, "ts": int(time.time()), "wall": round(wall, 6), "stages": stages},
+                              sort_keys=True)
+            _append(self.sdlc_dir, line)
+        except Exception:
+            pass
 
 
 def begin(sdlc_dir, env=None, forced=False):

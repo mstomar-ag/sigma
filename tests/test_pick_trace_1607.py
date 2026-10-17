@@ -249,3 +249,28 @@ def test_picking_reference_documents_the_trace():
     text = PICKING.read_text()
     for needle in ("SIGMA_PICK_TRACE", "--trace", "pick-trace-report"):
         assert needle in text, needle
+
+
+def test_a_serialiser_failure_leaves_the_pick_result_unchanged(tmp_path, monkeypatch):
+    """#1815. control: remove the try/except in `Recorder.end` and this goes red (the raise from
+    `loop._next`'s `finally` replaces the pick's result)."""
+    monkeypatch.setenv("SIGMA_PICK_TRACE", "1")
+    loop, sources = _mod("loop"), _mod("sources")
+    base = _base(tmp_path)
+    src = _source(sources, [], base)
+    _wire(loop, src)
+
+    def boom(*a, **k):
+        raise ValueError("serialiser down")
+    monkeypatch.setattr(loop.pick_trace.json, "dumps", boom)
+    assert _pick(loop, base, src) == ("goal", "5")
+    assert not _lines(base)
+
+
+def test_a_failing_call_count_hook_is_dropped(tmp_path):
+    """#1815. control: remove the try/except in `Recorder.count_args` and this goes red."""
+    pt = _mod("pick_trace")
+    rec = pt.Recorder(tmp_path)
+    rec.stages = None   # any failure while counting, whatever its cause
+    rec.count_args(["api", "x"])
+    rec.end()

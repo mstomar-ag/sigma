@@ -489,6 +489,22 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag_store.py",
+      "function": "refresh_lock",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "opens the per-repo refresh lock file under `.sdlc/state` for an advisory flock; it writes no content and runs only when the DAG mode is on",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_store.py",
+      "function": "save",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "one atomic write of the stored map under `.sdlc/state`; reached only through the DAG refresh, which `discovery.dag.mode` gates (off by default)",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/feature_judge.py",
       "function": "ask_claude",
       "rule": "fs-rmtree",

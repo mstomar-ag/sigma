@@ -1318,7 +1318,6 @@ class GitHubSource:
         records the call first (so a runner that raises is still counted, and a retry counts each
         attempt); off, it is `None` and this is a plain call. It never adds or reorders a call."""
         counter = self.call_counter
-        counter = self.call_counter
         if counter is not None:
             counter(args)
         return self._raw_run(args)
