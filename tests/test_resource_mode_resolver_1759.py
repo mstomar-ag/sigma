@@ -123,6 +123,7 @@ def test_the_documented_default_is_the_resolvers_default():
     enforcement = (ROOT / "docs" / "enforcement.md").read_text(encoding="utf-8")
     row = next(line for line in enforcement.splitlines() if line.startswith("| Resource hold at pick"))
     assert "resolves to `%s` on every surface" % default in row
+    assert "| %s — " % default in row, "the default column must lead with the resolver default"
     assert "resource_guard.resolve_mode" in row
 
 

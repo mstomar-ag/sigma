@@ -231,11 +231,11 @@ ENFORCEMENT_GATES = (
      "condition": "`handoff.after_goals` is checked first and wins a tie: at the shipped 20/20 the "
                   "stop reads HANDOFF, not BUDGET"},
     {"control": "Resource hold at pick", "function": "_resource_gate",
-     "kind": "python-gate", "hosts": "all", "enabled_by": ("resource.mode",),
+     "kind": "python-gate", "hosts": "all", "enabled_by": (),
      "settings": (),
      "mechanism": "leaves goals unclaimed and prints HOLD while the machine has no room for another "
                   "goal session; slots follow the derived headroom, never a constant",
-     "condition": "`resource.mode: null` resolves to `enforce` on every surface (`resource_guard.resolve_mode`: "
+     "condition": "enforce — `resource.mode: null` resolves to `enforce` on every surface (`resource_guard.resolve_mode`: "
                   "the environment variable, then the config key, then `enforce`); "
                   "mode `off` is byte-identical to before; `observe` only logs the would-be hold; "
                   "an unreadable platform clamps to one goal with a notice"},

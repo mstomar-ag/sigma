@@ -686,7 +686,7 @@ def resource_step(p, sdlc_dir, call_timeout, config=None):
     """#1604: one more bounded call AFTER the applier step, in its own guard: `resource_guard.py sample --record`,
     which refreshes last.json/hold.json and reclaims stale leases. Through `run_call`, so through
     `run_with_timeout.py` like every other tick call; no new daemon and no process outlives the call. Nothing is
-    spawned, touched or logged when the resolved resource mode (#1759) is "enforce" or "observe". -> the summary line (only while held) or ""."""
+    spawned, touched or logged unless the resolved resource mode (#1759) is "enforce" or "observe". -> the summary line (only while held) or ""."""
     try:
         config = read_config(sdlc_dir) if config is None else config
         import resource_guard
