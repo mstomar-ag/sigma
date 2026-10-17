@@ -226,3 +226,24 @@ def test_cli_answer_with_a_rule_prints_and_records_the_acceptance(tmp_path, caps
     (rec,) = records(base)
     assert rec["accepted"] is True and rec["scope"] == "label:run:a"
     assert "APPLIED" in capsys.readouterr().out
+
+
+# 8 -- review follow-ups (#1743) ------------------------------------------------------------------
+
+def test_rules_open_records_closed_plan_is_byte_identical_to_all_closed(tmp_path):
+    ld, base, fk, cfg = _world(tmp_path / "a", _unarmed("run:a"), records_on=False)
+    want = ld.render_plan(ld.plan(base, "run:a", config=cfg, run=fk))
+    ld2, base2, fk2, cfg2 = _world(tmp_path / "b", _unarmed("run:a"), records_on=False)
+    cfg2["rulebook"] = {"rules": {"enabled": True, "reask_days": 100000}, "autonomy": {"enabled": True, "owners": ["boss"]}}
+    _approve_rule(base2, cfg2, "label_set", "repo", ARM)
+    p = ld2.plan(base2, "run:a", config=cfg2, run=fk2)
+    assert "recommendation" not in _q(p)
+    assert ld2.render_plan(p) == want
+
+
+def test_history_is_for_the_label_set_question_only(tmp_path):
+    ld, base, fk, cfg = _world(tmp_path, _unarmed("run:a"))
+    ld.answer(base, "run:a", {"label_set:run:a": LEAVE}, run=fk)
+    q = {"kind": "quota", "area": "repo", "options": []}
+    assert ld._history(base, cfg, "run:a", q) == ""
+    assert ld._history(base, cfg, "run:a", dict(q, kind="label_set", area="label-kind:run")).startswith("last time")

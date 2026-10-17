@@ -500,7 +500,10 @@ def _rec_qid(qid, label, config):
 
 def _history(sdlc_dir, config, label, q):
     """#1581: one line saying what was answered before on this label (or, failing that, on labels of its
-    kind); '' when nothing is on record. Only with the records part open."""
+    kind); '' when nothing is on record. Only with the records part open, and only for the label-set
+    question: a member-level question never shows another member's last answer."""
+    if q["kind"] != "label_set":
+        return ""
     try:
         scope, recs = _scope(label, config), _light("decision_store").list_by(sdlc_dir, config)
         mine = [r for r in recs if r.get("scope") == scope and r.get("qkind") == q["kind"]]
@@ -523,7 +526,7 @@ def _recommend(sdlc_dir, config, q):
     arming question is learnable; a spend question is never recommended. Never applied by itself."""
     try:
         rb = _light("rulebook")
-        if q["kind"] != "label_set" or not rb.enabled(config):
+        if q["kind"] != "label_set" or not rb.enabled(config) or not _light("decision_store").enabled(config):
             return None
         pre = rb.prefill(sdlc_dir, "label_set", q["area"], q["options"], config)
         return {"rule_id": pre["rule"], "option": pre["recommend"]} if pre else None
