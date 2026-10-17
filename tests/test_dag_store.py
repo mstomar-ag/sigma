@@ -184,6 +184,31 @@ def test_lock_fails_open_without_fcntl(tmp_path, monkeypatch):
         assert a == b == "open"
 
 
+def test_lock_fails_open_on_an_unwritable_state_directory(tmp_path):
+    """A state directory that cannot be created or opened fails open, as a missing `fcntl` does.
+    control: drop the OSError guard in `refresh_lock`; this goes red."""
+    sdlc = _sdlc(tmp_path)
+    (sdlc / "state").write_text("a file where the directory should be")
+    with ds.refresh_lock(sdlc) as got:
+        assert got == "open"
+
+
+def test_lock_fails_open_when_the_lock_file_cannot_be_opened(tmp_path, monkeypatch):
+    """The open of the lock file itself raising (read-only directory). control: guard only the
+    mkdir; this goes red."""
+    sdlc = _sdlc(tmp_path)
+    real_open = open
+
+    def deny(path, *a, **k):
+        if str(path).endswith(ds.LOCK):
+            raise PermissionError(13, "denied")
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr("builtins.open", deny)
+    with ds.refresh_lock(sdlc) as got:
+        assert got == "open"
+
+
 def test_save_goes_through_the_atomic_publish(tmp_path, monkeypatch):
     """The deterministic control at the exact seam. control: write the file directly in `save`
     (no atomic replace); this goes red."""

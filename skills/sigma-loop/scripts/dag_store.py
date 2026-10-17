@@ -266,7 +266,8 @@ def load(sdlc, config=None):
 
 @contextlib.contextmanager
 def refresh_lock(sdlc, config=None):
-    """Yields `held`, `busy`, `open` (no fcntl; fail open) or `off` (mode off; nothing touched)."""
+    """Yields `held`, `busy`, `open` (no fcntl or an unwritable state directory; fail open) or `off`
+    (mode off; nothing touched)."""
     if _mode_for(sdlc, config) == "off":
         yield "off"
         return
@@ -274,8 +275,12 @@ def refresh_lock(sdlc, config=None):
         yield "open"
         return
     p = pathlib.Path(sdlc) / "state" / LOCK
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd = open(p, "a+")
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd = open(p, "a+")
+    except OSError:                             # unwritable state directory: read the map, do not raise
+        yield "open"
+        return
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
