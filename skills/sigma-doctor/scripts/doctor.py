@@ -1113,7 +1113,8 @@ def _ai_filed_rows(cfg, base):
     try:
         blk = cfg.get("ai_filed")
         if not isinstance(blk, dict):
-            return []
+            blk = {}
+            cfg = {**cfg, "ai_filed": blk}
         tri = blk.get("triage", {})
         if isinstance(tri, dict) and tri.get("enabled", True) is False:
             return []

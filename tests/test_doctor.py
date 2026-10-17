@@ -7886,3 +7886,21 @@ def test_ai_filed_rows_silent_when_triage_is_json_false(tmp_path):
     rows = _ai_filed_names(tmp_path, {"ai_filed": {"triage": {"enabled": False}, "buckets": {"urgent": "P9"}}},
                            counter="{not json")
     assert "AI-filed counter is readable" not in rows and "AI-filed triage config is valid" not in rows
+
+
+def test_ai_filed_unreadable_counter_row_shows_with_missing_ai_filed_block(tmp_path):
+    rows = _ai_filed_names(tmp_path, {}, counter="{not json")
+    row = rows["AI-filed counter is readable"]
+    assert row["ok"] is False and "ai_filed_counter.json" in row["fix"]
+
+
+def test_ai_filed_unreadable_counter_row_shows_with_non_dict_ai_filed(tmp_path):
+    rows = _ai_filed_names(tmp_path, {"ai_filed": "x"}, counter="{not json")
+    assert rows["AI-filed counter is readable"]["ok"] is False
+
+
+def test_ai_filed_missing_block_with_missing_or_valid_counter_shows_no_row(tmp_path):
+    rows = _ai_filed_names(tmp_path / "a", {})
+    assert "AI-filed counter is readable" not in rows
+    rows = _ai_filed_names(tmp_path / "b", {}, counter='{"entries": []}')
+    assert "AI-filed counter is readable" not in rows
