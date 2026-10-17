@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 - **`next --label` re-checks readiness for every label, not only the checkout's first (#1805).** The start check was skipped whenever the checkout's `run_iteration` was above 0, so a second label picked unchecked after any earlier pick. A passed check now records its label (`label_checked` in `state/STATE.md`) and later picks skip `plan` only inside that label's started run; `next-batch --label` follows the same rule, and a refusal still claims and writes nothing.
+- **Answering "which kind" in a label drain now declares the kind (#1806).** The question was built with kind `undeclared` while `answer` dispatched on `kind`, so the answer was only recorded; now `answer` declares the kind (`--dry-run` prints `would declare kind <k> on #N`) and the next `plan` asks the member's own question. The park reason shown by `plan` and the `label-held` stop no longer falls back to a Sigma answer or declaration comment.
 - **`loop.py verify` admission follows the one resource-mode resolver (#1804).** `SIGMA_RESOURCE_MODE=observe` now logs `would_hold` and admits with no config key, and `enforce` in the environment holds (exit 5) even when the config says `observe`.
 
 ## 1.0.16 — 2026-10-17 — the resource guard: machine-derived limits, admission for verify and model sessions, a lease table, holds and shedding, calibrated on macOS and Linux; label drains with blockers and up-front questions; Rulebook learning by label kind; and the filing-triage and upkeep fixes
