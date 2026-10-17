@@ -766,7 +766,7 @@ def plan_for(issue, config, unresolved=(), hold=None):
     if d.kind != "arm":
         if getattr(d, "matched", None):             # #1498: a deny-list match is a hard stop
             return Park(d.reason, _feature("hard_stop").first_hardstop_kind(config), d.matched)
-        return Park(d.reason, "needs_decision")
+        return Park(d.reason, getattr(d, "qkind", None) or "needs_decision")      # #1703: a question keeps its kind
     why = "human-confirmed filing" if pop == "human" else d.reason
     # #1484: an AI-filed followup is armed at the bucket priority triage chose, never the P1 it may have been filed at.
     return Arm("armed (held by %s)" % ", ".join(held) if held else why, None, tuple(held),

@@ -374,7 +374,8 @@ def _env(root, bin_dir, extra=None):
            "GIT_CONFIG_SYSTEM": os.devnull, "PYTHONDONTWRITEBYTECODE": "1",
            "GIT_AUTHOR_NAME": "Onboarding Control", "GIT_AUTHOR_EMAIL": "control@example.com",
            "GIT_COMMITTER_NAME": "Onboarding Control", "GIT_COMMITTER_EMAIL": "control@example.com",
-           "LANG": "C.UTF-8", "PYTHONIOENCODING": "utf-8"}
+           "LANG": "C.UTF-8", "PYTHONIOENCODING": "utf-8",
+           "SIGMA_RESOURCE_MODE": "off"}   # #1600: a loaded machine must not turn the control into a HOLD
     env.update(extra or {})
     (root / "home").mkdir(exist_ok=True)
     return env

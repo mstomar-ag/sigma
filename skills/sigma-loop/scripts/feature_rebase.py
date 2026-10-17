@@ -1553,6 +1553,9 @@ def _rebase_feature(run, cwd, path, branch, base_ref, sha, remote, report, stric
         # reach the replay; it says nothing about what the replay keeps.
         try:
             dropped = dropped_paths(path, sha, after, inherited_ok=True)
+            if resolved is not None and resolved.get("accepted_deletes"):
+                # #1716: a delete the Level 2 proofs accepted (every unit line moved, or listed and approved) is the decision
+                dropped = [one for one in dropped if one not in set(resolved["accepted_deletes"])]
         except Exception as exc:          # noqa: BLE001 - unmeasured is never "nothing dropped"
             report["why"] = ("the pre/post tree comparison could not be made, so nothing was "
                              "pushed: %s" % _flat(exc))
@@ -1743,7 +1746,8 @@ def _level2(run, path, report, level1):
         _park_resolved(report, dict(out["refusal"], level=2))
         return {"parked": True}
     return {"run_id": level1["run_id"], "stops": out["stops"], "files": out["files"], "level": 2, "evidence": out["evidence"],
-            "charged": out["charged"], "plan": plan}
+            "charged": out["charged"], "plan": dict(plan, dropped_by_delete=out.get("dropped_by_delete") or {}),
+            "dropped_by_delete": out.get("dropped_by_delete") or {}, "accepted_deletes": list(out.get("accepted_deletes") or ())}
 
 
 def _attempt_of(resolved):

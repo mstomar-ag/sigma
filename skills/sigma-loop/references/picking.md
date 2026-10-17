@@ -160,10 +160,9 @@ outcomes without refilling. A goal claimed this way but never actually dispatche
 that never got a free slot this run, or one you deliberately leave out of a refill — is not
 cleaned up on its own: release its stale claim explicitly with `python3
 "${CLAUDE_SKILL_DIR}/scripts/loop.py" release .sdlc "$goal" "<why>"`, the sanctioned counterpart
-to `mark_in_progress` (removes `sdlc:in-progress`/resets local `status`, leaves an audit comment,
-never touches budget). Unlike 3b's slices, goals carry no declared file-conflict graph — each
-gets its own worktree and PR, so overlap surfaces later as an ordinary PR-rebase (this plugin's own
-history already handles that routinely), not a silent lost edit. Note also that with multiple slots
+to `mark_in_progress` (leaves an audit comment,
+never touches budget). Goals carry no file-conflict graph — each has its own worktree and PR, so overlap
+surfaces as a plain PR-rebase. With multiple slots
 live, it is the ORCHESTRATING pass — the one calling `next`/`next-batch` for refills — that sees any
 **LEDGER INBOX** block (SKILL.md step 6), not a subagent mid-goal; handle it there, between refills,
 the same way you would between goals in the single-goal path.
@@ -178,6 +177,9 @@ review mechanism, park the goal instead of self-approving it.
 2. If output is `DONE` (nothing pickable), `BUDGET` (a per-run budget hit: iterations, wall-clock
 minutes, or reported tokens — each only when `config.json` sets it), or `HANDOFF` (the per-session
 goal-count ceiling) → STOP new claims, finish any live goal slots, and report its stderr reason.
+
+`HOLD` (no room) is not a stop, never `DONE`; nothing is claimed, no `budget` spent. Run
+`resource_lease.py wait --max 540`, then pick again.
 
 `DONE` does not always mean the backlog is empty. `next`/`next-batch` never hand back a goal
 whose own body declares a prerequisite (`**Blocked by:** #N`) that is still OPEN — it is left
