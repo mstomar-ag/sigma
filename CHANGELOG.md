@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **The stored dependency map skips other-repository references (#1608).** `blocker_scan.extract_refs` now calls `is_cross_repo` for every match, so `owner/repo#N` and `repo#N` are no longer stored as local blocker edges; the board mirror schema is `board-mirror/v3`, so an existing mirror is refetched once.
 
 ## 1.0.16 — 2026-10-17 — the resource guard: machine-derived limits, admission for verify and model sessions, a lease table, holds and shedding, calibrated on macOS and Linux; label drains with blockers and up-front questions; Rulebook learning by label kind; and the filing-triage and upkeep fixes
 - **The verify shed follows the one resource-mode resolver (#1794).** `SIGMA_RESOURCE_MODE=observe` no longer lets a critical machine stop a verify, and `enforce` in the environment arms the shed even when the config says `off`.

@@ -1199,7 +1199,7 @@ def test_c5_delimiter_belt_span_takes_a_delimiter(lr, extra, text):
 def test_c5_blocked_by_marker_stays_an_edit_and_counts_one_edge(lr):
     plan = lr.plan_edit("**Blocked by:** " + SLUG + "#12", P(lr))
     assert plan["reasons"] == []
-    assert plan["edges_removed"] == 1
+    assert plan["edges_removed"] == 0           # #1608: `owner/repo#N` was never a stored local edge
 
 
 def _qa(lr, x):
@@ -1408,7 +1408,7 @@ def test_c5_dry_run_file_counts_and_manifest(lr, pats, tmp_path, capsys):
     assert "[redacted" not in out + err
     assert "edits 3" in out
     assert "manual 2" in out and "not-owned 1" in out and "title 1" in out
-    assert "blocker edges removed 1" in out
+    assert "blocker edges removed 0" in out     # #1608: the only marker names another repository
     assert "history revisions to purge 1" in out and "revisions the apply will add 2" in out
     assert fake.writes() == []
     m = _manifest(out_file)

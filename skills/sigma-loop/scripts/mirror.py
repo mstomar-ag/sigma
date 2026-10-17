@@ -41,7 +41,8 @@ blocker_scan = _load("blocker_scan")   # #1487: the ONE blocker vocabulary, shar
 #: by a pre-#1487 install is refetched on the next pick instead of being served from the TTL
 #: cache -- a v1 record has no `blocker_refs` at all, and silently gating on nothing for up to
 #: a full TTL is the exact failure this issue exists to close.
-SCHEMA = "board-mirror/v2"
+#: v3 (#1608): `extract_refs` skips other-repository references, so a v2 record may hold a phantom edge.
+SCHEMA = "board-mirror/v3"
 MIRROR_REL = "state/board-mirror.ndjson"          # under state/ => covered by RUNTIME_IGNORES (gitignored)
 META_REL = "state/board-mirror.meta.json"
 _EXCERPT_CHARS = 500                              # enough for an optional rerank; never the raw body
