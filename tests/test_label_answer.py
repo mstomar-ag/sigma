@@ -176,6 +176,15 @@ def test_a_recovered_label_question_records_a_goal_and_posts_its_comment_once(tm
     assert len(records(base)) == 1 and len(fk.comments()) == 1
 
 
+def test_a_recovered_label_question_never_lands_on_an_outside_blocker(tmp_path):
+    """#1725 review: the lowest number overall is the unlabelled blocker #5; the record must use label member #10."""
+    ld, base, fk, _ = env(tmp_path, [issue(10, LBL, body="Blocked by #5\n\n" + DW), issue(12, LBL), issue(5, "sdlc:goal", assignees=("bob",))])
+    ld.arm(base, LBL, apply=True, run=fk)
+    ask(ld, base, fk, {"label_set:" + LBL: "arm them"})
+    recs = records(base)
+    assert len(recs) == 1 and recs[0]["issue"] == 10
+
+
 # 3 -- parked member == the unpark path ----------------------------------------------------------
 
 @pytest.mark.parametrize("kind_comment,qid,option,decision,slot", [
