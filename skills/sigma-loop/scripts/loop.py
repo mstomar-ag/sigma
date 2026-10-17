@@ -1578,7 +1578,8 @@ def _label_not_ready(sdlc_dir, source, config):
               file=sys.stderr)
         return None
     unarmed = sum(1 for r in p["members"] if r["verdict"] == "unarmed")
-    asks = len(p.get("questions") or [])
+    # #1732: the plan's real open questions; a scope-hold, dependency or spend question still never blocks a start
+    asks = sum(1 for q in p.get("questions") or [] if q.get("kind") not in ("scope_hold", "dependency", "irreversible"))
     if unarmed and not any(q.get("kind") == "label_set" for q in p.get("questions") or []) \
             and _label_set_decided(sdlc_dir, config, label):
         unarmed = 0                             # #1732: a recorded decision to leave them unarmed
