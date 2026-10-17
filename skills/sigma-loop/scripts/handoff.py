@@ -483,18 +483,18 @@ def _bucket_floor(config):
 
 
 def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, actionable,
-                 requested_priority=None):
+                 requested_priority=None, needs_person=None):
     """#1003: the triage outcome for one AI-filed issue, or None when triage is off (`ai_filed.triage.enabled`
     exactly false), in which case NOTHING here runs and the filing is as it was. -> a dict with `kind`
     ("arm" or "park"), `priority`, `reason`, `qkind`, `text` (marker line quoted) and `depth`.
 
     A caller's `--queue` word does not decide: queued and actionable both defer to the bucket, and an
     actionable caller `--priority` may only LOWER urgency below the bucket's, never raise it."""
-    decision = file_triage.decide(heading, text, {}, config)
+    decision = file_triage.decide(heading, text, {"park": needs_person} if needs_person else {}, config)
     if decision.kind == "queue":
         return None
     plan = {"kind": decision.kind, "priority": decision.priority, "reason": decision.reason,
-            "qkind": "needs_decision", "text": text, "depth": None}
+            "qkind": decision.qkind or "needs_decision", "text": text, "depth": None}
     if decision.matched:                           # #1498: a deny-list match is a hard stop, never a plain question
         plan["qkind"], plan["hardstop"] = _load("hard_stop").first_hardstop_kind(config), decision.matched
     text, quoted = spend_approval.scrub_marker(text)
@@ -592,7 +592,7 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
                           extra_labels=(), source=None, run=None, dedup=True,
                           upstream_run=None, target_unit=None, idempotency_key=None,
                           upkeep_finding=False, upkeep_qkind="needs_decision",
-                          priority_requested=False):
+                          priority_requested=False, needs_person=None):
     """Open a tracked issue, address it, record it. The one real place the kit ever opens an issue on
     its own behalf — `hand_off()` below is a thin wrapper around this. Generalizes what used to be
     hand-off-only discipline (owner resolution, labels, the `gh` call, the ledger write, the dual
@@ -893,7 +893,9 @@ def create_tracked_issue(sdlc_dir, config, goal, area, why, *,
         else:
             triage = _triage_plan(
                 sdlc_dir, config, goal, key_goal, nogoal, source, heading, text, priority, immediately_actionable,
-                requested_priority=priority if priority_requested else None)
+                requested_priority=priority if priority_requested else None, needs_person=needs_person)
+            if triage is None and needs_person:                 # #1703: triage off keeps the legacy path
+                report["warnings"].append("--needs-person ignored: ai_filed triage is off")
         if triage is not None:
             text = triage["text"]
         labels = [f"priority:{priority}", f"area:{area}", *extra_labels]
@@ -1424,7 +1426,7 @@ def _issue_clause(report):
 USAGE = ("usage: handoff.py open <dir> <goal> --area A --why TEXT [--priority P --title T] | "
          "track <dir> <goal> --area A --why TEXT --queue actionable|queued "
          "--assignee same-area|cross-area --blocks yes|no "
-         "[--priority P --title T --label L --body-file F] | "
+         "[--priority P --title T --label L --body-file F --needs-person QKIND] | "
          f"ack <dir> --issue N | --goal G [--area A] --state {'|'.join(ledger.STATES)} [--why TEXT]")
 
 
@@ -1503,6 +1505,11 @@ def main(argv):
                   "[--priority P --title T --label L1,L2 --body-file F --target-unit NAME]",
                   file=sys.stderr)
             return 2
+        person = flags.get("needs-person")
+        if person is not None and (person == "unknown" or person not in _load("qkind").QKINDS):
+            print("handoff.py track: --needs-person must be a declared question kind (not 'unknown'), got %r"
+                  % person, file=sys.stderr)
+            return 2
         # #522: --body-file reads a file verbatim as the new issue's body -- the way the
         # `goal_decompose` file-mode meta-goal (and any other multi-paragraph tracked issue) hands
         # `track` a body too long for a CLI arg. Read BEFORE any create so a missing file can never
@@ -1542,7 +1549,7 @@ def main(argv):
             # #1820: optional, and its absence changes nothing -- see create_tracked_issue's own
             # `target_unit` doc for the scope boundary (operator/CLI-level only; the autonomous
             # loop's own SKILL.md-driven filing does not pass this).
-            target_unit=flags.get("target-unit"))
+            target_unit=flags.get("target-unit"), needs_person=person)
         for warning in report["warnings"]:
             print(f"handoff: {warning}", file=sys.stderr)
         print(f"tracked to {report['owner'] or '(unowned)'}"

@@ -86,6 +86,13 @@ _HANDOFF = re.compile(
     r"^\s*HANDOFF\s*$"
     r"|^\s*\**\s*LOOP STOP:\s*handoff\b",
     re.I | re.M)
+# #1600: a resource HOLD is a pause, not a stop. `loop.py` prints the bare `HOLD` line on stdout and
+# `HOLD (<reason>; retry ~Ns; ...)` on stderr; the retry figure is the only part of the reason that
+# can steer the pause, and it is clamped.
+_HOLD = re.compile(r"^\s*HOLD\s*$", re.I | re.M)
+_HOLD_DETAIL = re.compile(r"^\s*HOLD \((.*)\)\s*$", re.I | re.M)
+_HOLD_RETRY = re.compile(r"retry ~(\d{1,5})s")
+_HOLD_RETRY_RANGE = (30, 900)
 _LIMIT = re.compile(r"(usage|rate).{0,3}limit|limit (reached|exhausted|hit)|out of (usage|quota)|"
                     r"hit your.{0,12}limit|quota exceeded", re.I)
 _RESET_AT = re.compile(r"reset[s]?\s*(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", re.I)
@@ -150,6 +157,14 @@ def classify(tail_text, attempt=0, now=None, rng=None):
             return ("sleep", secs + jitter, f"usage limit — resuming after the stated reset (+{jitter}s jitter)")
         wait = _LIMIT_FALLBACK[min(attempt, len(_LIMIT_FALLBACK) - 1)]
         return ("backoff", wait, "usage limit with no parseable reset time — capped retry")
+    if _HOLD.search(text):
+        detail = _HOLD_DETAIL.search(text)
+        body = detail.group(1) if detail else ""
+        found = _HOLD_RETRY.search(body)
+        wait = int(found.group(1)) if found else _HOLD_RETRY_RANGE[0]
+        wait = min(max(wait, _HOLD_RETRY_RANGE[0]), _HOLD_RETRY_RANGE[1])
+        body = body.replace("sleep=", "sleep-").replace("action=", "action-")
+        return ("sleep", wait, "resource hold: " + (body or "no reason given") + " — not a stop; waiting for room")
     if _BUDGET.search(text):
         return ("relaunch", _BUDGET_PAUSE, "per-run budget stop — budgets reset on relaunch by design")
     if _HANDOFF.search(text):

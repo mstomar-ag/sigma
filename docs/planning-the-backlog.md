@@ -40,7 +40,7 @@ the same thing as the matched issue.
    `P0`–`P4` priority, `blocked_by` edges between siblings), decide whether an epic wrapper is
    warranted, show you the draft, and — once you confirm — compile it into real issues (or real
    local goal files in local-goals mode). Triage then decides each issue at this step: it is
-   armed (`sdlc:goal` at its plan priority) or parked with a declared question kind. With
+   armed (`sdlc:goal` at its plan priority) or parked with a declared question kind (a deny-list match, a cap, a question title such as "Question: ...", or `track --needs-person <kind>`). With
    `ai_filed.triage.enabled` false the legacy `sdlc:needs-confirmation` label is written instead.
 7. **Resolve assignment and the execution path** — who owns this, and does it start now or wait?
 

@@ -168,7 +168,7 @@ def authorship_problems(run, cwd, original, new):
     return [label for label, a, b in zip(("name", "email", "date"), before, after) if a != b]
 
 
-def stamp_commit(run, cwd, level, run_id, ref="REBASE_HEAD"):
+def stamp_commit(run, cwd, level, run_id, ref="REBASE_HEAD", note=""):
     """Commit the staged resolution at the stop with the original's message plus the stamp and the original's author.
 
     -> the new commit's sha. Refuses while any path is still unmerged, and an empty result is left to git's own refusal
@@ -177,7 +177,10 @@ def stamp_commit(run, cwd, level, run_id, ref="REBASE_HEAD"):
     if _sibling("conflict_state").conflicted_paths(run, cwd):
         raise StampError("unmerged paths remain; resolve and stage them before the stamping commit")
     name, email, date = original_authorship(run, cwd, ref)
-    message = stamp_message(str(run(cwd, ["git", "log", "-1", "--format=%B", ref]) or ""), level, run_id)
+    original = str(run(cwd, ["git", "log", "-1", "--format=%B", ref]) or "")
+    if note:                                                  # #1716: the lines a delete dropped, visible in the pushed commit
+        original = original.rstrip() + "\n\n" + note
+    message = stamp_message(original, level, run_id)
     run(cwd, ["git", "commit", "--no-verify", "--no-gpg-sign", "--cleanup=verbatim",
               "--author=%s <%s>" % (name, email), "--date=" + date, "-m", message])
     return str(run(cwd, ["git", "rev-parse", "HEAD"]) or "").strip()
@@ -198,7 +201,7 @@ def store_path(sdlc_dir, run_id, unit):
 
 
 def make_record(unit, level, run_id, original_tip, new_tip, backup_ref, files, checks, model=None, cost_usd=None,
-                verdict=None, route=None, at=None):
+                verdict=None, route=None, at=None, dropped_by_delete=None):
     """A resolution record. `files` maps each conflicted path to the sha256 of its resolved blob; `checks` maps a check
     name to a short result word. The last four are Level 2 only. Raises ValueError for any field out of shape."""
     if type(level) is not int or level not in LEVELS:
@@ -221,6 +224,12 @@ def make_record(unit, level, run_id, original_tip, new_tip, backup_ref, files, c
               "at": int(time.time() if at is None else at)}
     if level == 2:
         record.update({"model": model, "cost_usd": cost_usd, "verdict": verdict, "route": route})
+        if dropped_by_delete:                                 # #1716: absent unless a delete dropped listed lines
+            if not (isinstance(dropped_by_delete, dict) and len(dropped_by_delete) <= MAX_FILES
+                    and all(isinstance(k, str) and isinstance(v, (list, tuple)) and all(isinstance(l, str) for l in v)
+                            for k, v in dropped_by_delete.items())):
+                raise ValueError("dropped_by_delete must map paths to lists of lines")
+            record["dropped_by_delete"] = {k: [l[:200] for l in list(v)[:200]] for k, v in dropped_by_delete.items()}
     return record
 
 
@@ -241,7 +250,7 @@ def _strings(value, skip_keys=()):
 def record_wording_problems(record):
     """The wording check over every text of a record except the conflicted paths (data, not prose)."""
     found = []
-    for text in _strings({k: v for k, v in record.items() if k != "files"}):
+    for text in _strings({k: v for k, v in record.items() if k not in ("files", "dropped_by_delete")}):
         found += [p for p in wording_problems(text) if p not in found]
     return found
 

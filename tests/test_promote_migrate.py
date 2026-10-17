@@ -365,3 +365,18 @@ def test_migrate_arm_of_a_followup_with_no_priority_label_gains_one_1484(tmp_pat
     src.add(10, PROPOSED, "sdlc:followup", title="tidy the docs", body="cleanup of old text")
     _run(src, apply=True, tmp=tmp_path)
     assert [l for l in src.store[10]["labels"] if l.startswith("priority:")] == ["priority:P3"]
+
+
+def test_migrate_parks_a_question_followup_and_a_human_typed_one_but_arms_a_plain_followup_1703():
+    src = FakeSource()
+    src.add(1, PROPOSED, "sdlc:followup", "priority:P2", title="Question: should X follow Y?", body="context")
+    src.add(2, PROPOSED, "priority:P1", title="Decide whether A needs B", body="context")
+    src.add(3, PROPOSED, "sdlc:followup", "priority:P2", title="tidy the docs", body="cleanup of old text")
+    rows = {r["number"]: r["outcome"] for r in _run(src)["items"]}
+    assert rows == {"1": "would-park", "2": "would-park", "3": "would-arm"}
+    assert src.writes == []
+    _run(src, apply=True)
+    for n in (1, 2):
+        assert GOAL not in src.store[n]["labels"] and PARKED in src.store[n]["labels"]
+    assert any(n == 1 and "sigma-qkind: needs_decision" in c and "question" in c for n, c in src.comments)
+    assert GOAL in src.store[3]["labels"]
