@@ -394,6 +394,8 @@ DROPPED_FILE = "dropped-by-delete.txt"      # #1716: the session's list, under i
 MAX_DROPPED_LINES = 200                     # per file, on the record and in the commit message
 MAX_DROPPED_CHARS = 200
 MAX_ELSEWHERE_FILES = 200
+MIN_ACCOUNTED_CHARS = 4                     # #1741: a shorter trimmed line (a lone brace, punctuation) is everywhere, so it proves nothing
+TOUCHED_AGAIN = "deleted-path-touched-again"
 MAX_ELSEWHERE_BYTES = 1024 * 1024
 
 
@@ -403,7 +405,7 @@ def _line_counts(text):
 
 def unaccounted_lines(added, elsewhere):
     """#1716: the lines in `added` (a Counter, whitespace-trimmed) that `elsewhere` (a Counter) does not hold as many times."""
-    return [line for line, n in sorted(added.items()) if elsewhere[line] < n]
+    return [line for line, n in sorted(added.items()) if len(line) < MIN_ACCOUNTED_CHARS or elsewhere[line] < n]
 
 
 def parse_dropped_list(text):
@@ -459,7 +461,7 @@ def dropped_section(dropped):
     for name in sorted(dropped):
         shown = list(dropped[name])[:MAX_DROPPED_LINES]
         out.append("- %s" % name)
-        out += ["    " + str(l)[:MAX_DROPPED_CHARS] for l in shown]
+        out += ["    " + str(l)[:MAX_DROPPED_CHARS] + ("..." if len(str(l)) > MAX_DROPPED_CHARS else "") for l in shown]   # #1741: "..." marks a clipped line
         if len(dropped[name]) > len(shown):
             out.append("    and %d more (see the upkeep record)" % (len(dropped[name]) - len(shown)))
     return "\n".join(out)
@@ -519,6 +521,11 @@ def session_problem(directory, name, deletable=False):
     target = pathlib.Path(directory) / name
     if target.is_symlink():
         return "%s is a symbolic link" % name
+    walk = target.parent                                        # #1741: a link in any parent directory is as bad as a link in place
+    while walk != pathlib.Path(directory) and walk != walk.parent:
+        if walk.is_symlink():
+            return "%s sits under a symbolic link (%s)" % (name, walk.name)
+        walk = walk.parent
     if deletable and not os.path.lexists(str(target)):
         return None                                             # #1692: removed by the session = resolve by deleting
     if not target.is_file() or not _inside(target, directory):
@@ -636,6 +643,15 @@ def resolve_stop(run, path, plan, evidence, stamped):
     conflicted = state.conflicted_paths(run, str(path))
     original = str(run(str(path), ["git", "rev-parse", "REBASE_HEAD"]) or "").strip()
     before_stage0 = state.stage0_listing(run, str(path))
+    if session and plan.get("accepted_deletes"):                # #1741: a path an earlier stop deleted must not come back
+        try:
+            listed = str(run(str(path), ["git", "diff", "--name-only", "-z", "REBASE_HEAD^", "REBASE_HEAD"]) or "").split("\0")
+        except Exception:                                       # noqa: BLE001
+            listed = []
+        again = sorted(set(plan["accepted_deletes"]) & (set(conflicted) | set(listed)))
+        if again:
+            return refusal(TOUCHED_AGAIN, "%s was deleted at an earlier stop and this commit touches it again; a person must decide" % ", ".join(again)[:150],
+                           paths=again)
     texts = {name: (_blob(run, path, 1, name), _blob(run, path, 2, name), _blob(run, path, 3, name)) for name in conflicted}
     directory = pathlib.Path(plan["resolver_dir"])
     remaining = None
