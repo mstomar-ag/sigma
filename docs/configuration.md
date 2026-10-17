@@ -54,7 +54,7 @@ The `resource` block holds the limits `resource_guard.py` derives from the machi
 | Key | Default | What it sets |
 |---|---|---|
 | `resource.mode` | derived (`enforce`; also `observe`, `off`) | `observe` computes a hold but never holds; `off` skips the check; uncalibrated |
-| env `SIGMA_RESOURCE_MODE` | unset | `off`, `observe` or `enforce` overrides `resource.mode` on every surface (picker, verify, sessions, watcher, doctor, log); unset and no config key resolves to `enforce`; the test suite sets `off` |
+| env `SIGMA_RESOURCE_MODE` | unset | `off`, `observe` or `enforce` overrides `resource.mode` on every surface (picker, verify, sessions, watcher, doctor, log); unset and no config key resolves to `enforce`; the test suite sets `off`; the doctor shows its resource rows whenever the resolved mode is not `off` |
 | `resource.reserve_fraction` | derived (0.20 of total memory) | memory kept free for the machine; uncalibrated |
 | `resource.max_share_fraction` | derived (0.60 of total memory) | most memory all sessions together may lease; uncalibrated |
 | `resource.cpu_reserve_cores` | derived (one eighth of the cores, at least 1) | cores kept free; uncalibrated |
