@@ -118,7 +118,7 @@ What stays unchanged:
 - **A deny word holds only in an action clause (#1519).** A clause that describes redaction, detection, gating or
   documentation before the deny word no longer parks, and the park reason quotes the matched clause. Secret-shaped
   text and spend amounts still hold.
-- **A plain money amount for compute is spend (#1511).** A body that names a dollar amount near GPU, instance,
+- **A plain money amount for compute is spend (#1511).** A body that names a money amount near GPU, instance,
   cluster, credits, compute, pod or run time (in digits or words, either order) parks with the spend class.
   Amounts inside fenced blocks stay a miss. An empty `triage.spend_phrases` still disables the check.
 - **A hand-typed blocker on a third-party issue is reported, not raised (#1468).** With hard stops on, the

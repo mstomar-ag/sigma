@@ -1089,6 +1089,10 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
         """The one record + comment, through the shared writer. -> list of lines."""
         ids = q.get("unblocks") or []
         goal = int(q["target"]) if str(q["target"]).isdigit() else (min(ids) if ids else None)
+        if kind == "label_set":                         # #1725: the lowest open label member carries it, never an outside blocker (a recovered question also has no members)
+            nums = [r["number"] for r in p["members"] if str(r.get("number", "")).isdigit()]
+            mine = [n for n in ids if n in nums]
+            goal = min(mine) if mine else (min(nums) if nums else None)
         if not dr.enabled(config):
             return []
         if dry_run:

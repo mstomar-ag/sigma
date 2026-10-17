@@ -272,6 +272,8 @@ hedged — and reading it is cheaper than discovering any one of them.
 
 ---
 
+A temporary run label (`--label`) is not a unit and does not change a goal's base; see `docs/label-drain.md`.
+
 *This page is a route through [`docs/branching-model.md`](branching-model.md). That file is the
 contract, and it is the only one of the two that is authoritative. The `sdlc:*` lifecycle labels are
 a different contract again — [`docs/label-model.md`](label-model.md).*
