@@ -284,8 +284,81 @@ def test_upkeep_mode_off_creates_no_state(state, rig):
     assert result.outcome == "ok" and not state.exists()
 
 
+# ------------------------------------------------------------------------------------------ the reviewer (#1738)
+@pytest.fixture
+def reviewer():
+    return _load("reviewer", "rv_t")
+
+
+def reviewer_rig(tmp_path, state, program):
+    """A stub review.command that records how many leases exist while it runs, then prints a verdict."""
+    import shlex
+    import test_reviewer as tr
+    seen = tmp_path / "seen"
+    script = tmp_path / "stub_reviewer.py"
+    script.write_text(
+        "import pathlib, sys\n"
+        "root = pathlib.Path(%r) / 'leases'\n"
+        "n = len(list(root.glob('*.json'))) if root.is_dir() else 0\n"
+        "pathlib.Path(%r).write_text(str(n))\n"
+        "sys.stdin.read()\n%s\n" % (str(state), str(seen), program))
+    base = tr._sdlc(tmp_path, {"host": "command", "command": "%s %s" % (shlex.quote(sys.executable),
+                                                                         shlex.quote(str(script))),
+                               "timeout_seconds": 5})
+    brief = tmp_path / "brief.md"
+    brief.write_text("Review the concrete plan.\n")
+    return base, str(brief), str(tmp_path / "scratch"), seen
+
+
+def test_reviewer_holds_a_lease_while_the_child_runs(state, reviewer, monkeypatch, tmp_path, capsys):
+    with_sample(reviewer._guard())
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "observe")
+    base, brief, scratch, seen = reviewer_rig(tmp_path, state, "print('VERDICT: ok')")
+    assert reviewer.run_review(base, brief, [scratch]) == 0
+    assert seen.read_text() == "1" and leases(state) == []
+    assert "VERDICT: ok" in capsys.readouterr().out
+
+
+def test_reviewer_releases_after_an_exception_in_the_child_wait(state, reviewer, monkeypatch, tmp_path):
+    with_sample(reviewer._guard())
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "observe")
+    base, brief, scratch, _ = reviewer_rig(tmp_path, state, "print('VERDICT: ok')")
+
+    real = subprocess.Popen.communicate
+
+    def boom(self, *a, **k):
+        if "stub_reviewer" not in str(self.args):      # admission's own probes also use Popen
+            return real(self, *a, **k)
+        assert len(leases(state)) == 1
+        raise RuntimeError("wait blew up")
+    monkeypatch.setattr(subprocess.Popen, "communicate", boom)
+    with pytest.raises(RuntimeError):
+        reviewer.run_review(base, brief, [scratch])
+    assert leases(state) == []
+
+
+def test_reviewer_hold_is_a_failed_run_never_an_approval(state, reviewer, monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "enforce")
+    with_sample(reviewer._guard(), available=1 << 20)
+    base, brief, scratch, seen = reviewer_rig(tmp_path, state, "print('VERDICT: APPROVE')")
+    code = reviewer.run_review(base, brief, [scratch], goal="1738", phase="plan_review")
+    got = capsys.readouterr()
+    assert code != 0 and not seen.exists()                  # the child never started
+    assert "VERDICT" not in got.out and "APPROVE" not in got.out
+    assert "held" in got.err
+    status, receipt = reviewer._read_receipt(base, "1738", "plan_review")
+    assert status == "ok" and receipt["outcome"] == "failed" and receipt["failure"] == "held"
+    assert leases(state) == []
+
+
+def test_reviewer_mode_off_creates_no_state(state, reviewer, tmp_path):
+    base, brief, scratch, seen = reviewer_rig(tmp_path, state, "print('VERDICT: ok')")
+    assert reviewer.run_review(base, brief, [scratch]) == 0
+    assert seen.read_text() == "0" and not state.exists()
+
+
 # ------------------------------------------------------------------------------------------ one helper, no re-implementation
-GATED = ("feature_judge.py", "supervise_daemon.py", "feature_upkeep_launcher.py")
+GATED = ("feature_judge.py", "supervise_daemon.py", "feature_upkeep_launcher.py", "reviewer.py")
 
 
 @pytest.mark.parametrize("name", GATED)
@@ -309,7 +382,6 @@ SPAWN_SHAPES = (
 #: spawn files that take no lease, each with the reason and the follow-up. The list only goes down.
 NOT_GATED = {
     "codex_runtime.py": "builds the Codex argv only; the spawn is supervise_daemon._capture_codex, which is gated",
-    "reviewer.py": "advisory reviewer spawn (cursor/codex), outside #1603's three sites; follow-up",
 }
 
 
