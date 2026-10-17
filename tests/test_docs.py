@@ -2630,3 +2630,6 @@ def test_label_drain_page_describes_the_filed_during_the_drain_window_1832():
     page = " ".join(_LABEL_PAGE.read_text(encoding="utf-8").split())
     assert "filed since the label's start check first passed" in page
     assert "With no drain start recorded it lists nothing" in page
+def test_whats_new_1_0_16_lists_the_unassigned_verdict_1824():
+    page = " ".join((ROOT / "docs" / "whats-new-1.0.16.md").read_text(encoding="utf-8").split())
+    assert "armed, unarmed, unassigned, parked" in page

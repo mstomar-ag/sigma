@@ -212,6 +212,20 @@ def test_pull_refuses_without_writing_anything(tmp_path, issue, ref, word):
     assert fk.writes() == []
 
 
+def test_pull_labels_comments_and_assigns_an_outside_armed_unassigned_blocker(tmp_path):
+    """#1824: an armed blocker with no assignee is `unassigned`; pull gives it the label, the comment and the assignee."""
+    fk, res = _pull(tmp_path, [A._issue(7, "sdlc:goal")])
+    assert res["result"] == "pulled"
+    assert A.LBL in fk._names(7) and len(fk.comments()) == 1
+    assert [a["login"] for a in fk.by[7]["assignees"]] == ["alice"]
+
+
+def test_pull_never_takes_an_outside_issue_assigned_to_someone_else(tmp_path):
+    fk, res = _pull(tmp_path, [A._issue(7, "sdlc:goal", assignees=("bob",))])
+    assert res["result"] == "refused" and "assigned" in res["reason"]
+    assert fk.writes() == [] and fk.by[7]["assignees"] == [{"login": "bob"}]
+
+
 def test_pull_leaves_closed_and_already_labelled_issues_alone(tmp_path):
     fk, res = _pull(tmp_path, [A._issue(7, "sdlc:goal", state="closed")])
     assert res["result"] == "closed" and fk.writes() == []
@@ -552,3 +566,10 @@ def test_a_repeated_pass_keeps_the_first_start_and_a_new_label_gets_its_own():
         lp.state.set_label_checked(base, "label-b", now=4000.0)
         lp.state.start_run(base, now=5000.0)
         assert lp.state.load_label_checked_at(base) == 0.0 and lp.state.load_label_checked(base) == ""
+def test_readiness_refusal_names_unassigned_members_in_its_count(tmp_path, monkeypatch, capsys):
+    """#1824: an armed member with no assignee is `unassigned`, counted beside the unarmed ones."""
+    base, fk, out = _next_batch_label(tmp_path, monkeypatch, capsys, A._issue(1, "sdlc:goal", A.LBL))
+    assert out.out.strip() == "DONE"
+    assert "0 unarmed member(s), 1 unassigned member(s), 1 open question(s)" in out.err
+    assert "First run `label_drain.py arm %s %s --apply`, then start again" % (base, A.LBL) in out.err
+    assert fk.writes() == []
