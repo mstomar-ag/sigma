@@ -1634,8 +1634,9 @@ def _label_drained_note(sdlc_dir, source, config, skip):
                   file=sys.stderr)
     try:
         since = state.load_cursor(sdlc_dir).get("run_started_at") or 0
-        filed = []
-        for i in sources.fetch_issues_rest(getattr(source, "_run"), source.repo, [source.goal_label], 200):
+        filed = []              # #1809: no recorded run start means no window; never count from the epoch
+        for i in (sources.fetch_issues_rest(getattr(source, "_run"), source.repo, [source.goal_label], 200)
+                  if since else ()):
             made = calendar.timegm(time.strptime(i.get("created_at") or "", "%Y-%m-%dT%H:%M:%SZ"))
             if made >= since and label not in {(l.get("name") if isinstance(l, dict) else l)
                                                for l in i.get("labels") or []}:

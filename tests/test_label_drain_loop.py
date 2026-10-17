@@ -429,3 +429,35 @@ def test_unscoped_terminal_done_never_plans_a_label():
         assert lp._next(base, src, _cfg(lp, base))[0] == "DONE"
         assert lp._label_drained_note(base, src, _cfg(lp, base), set()) == "backlog-empty"
     assert stub.plans == 0 and stub.pulls == []
+
+
+# --- the "filed during the drain" line (#1809) ---------------------------------------------------
+
+def _note(monkeypatch, capsys, started_at, created):
+    lp = _loop()
+    stub = Stub(members=[{"number": 5, "verdict": "armed", "reason": "in progress (claimed by a run)"}])
+    lp._label_drain = lambda: stub
+    lp._LABEL_PULLED.clear()
+    outside = dict(_issue(7), created_at=created)
+    monkeypatch.setattr(lp.state, "load_cursor", lambda sdlc_dir: {"run_started_at": started_at})
+    monkeypatch.setattr(lp.sources, "fetch_issues_rest", lambda *a, **k: [outside])
+    src = Scoped([], live=[])
+    src._run = object()
+    with tempfile.TemporaryDirectory() as d:
+        assert lp._label_drained_note(d, src, {}, ()) == "label-held"
+    return capsys.readouterr().err
+
+
+def test_a_goal_filed_before_the_drain_is_not_listed_when_no_run_start_is_recorded(monkeypatch, capsys):
+    err = _note(monkeypatch, capsys, 0.0, "2026-10-01T00:00:00Z")
+    assert "has 1 open member" in err and "filed during the drain" not in err
+
+
+def test_a_goal_filed_after_the_recorded_drain_start_is_listed(monkeypatch, capsys):
+    err = _note(monkeypatch, capsys, 1791590400.0, "2026-10-17T00:00:00Z")
+    assert "filed during the drain, not in the label: #7" in err
+
+
+def test_a_goal_filed_before_the_recorded_drain_start_is_not_listed(monkeypatch, capsys):
+    err = _note(monkeypatch, capsys, 1791590400.0, "2026-10-01T00:00:00Z")
+    assert "filed during the drain" not in err
