@@ -245,8 +245,9 @@ def test_trace_holds_no_issue_text(tmp_path):
     assert "SECRET" not in (tmp_path / "state" / "pick-trace.jsonl").read_text()
 
 
-def test_picking_reference_documents_the_trace():
-    text = PICKING.read_text()
+def test_parallelism_doc_documents_the_trace():
+    """The detail left the orchestrator payload (picking.md) to hold its context ceiling (#1850)."""
+    text = (S.parents[2] / "docs" / "parallelism.md").read_text()
     for needle in ("SIGMA_PICK_TRACE", "--trace", "pick-trace-report"):
         assert needle in text, needle
 

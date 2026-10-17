@@ -273,14 +273,3 @@ only changes the DEPTH instructions written into the filed meta-issue, never whe
 acts — unlike `goal_decompose.mode`, there is no log-only rung here. `sdlc:designed` itself is
 written only by `goal-review` (contract §7) confirming a design. Where `sigma-goal-review` is not
 installed, a human applies the label by hand once a filed design pass is confirmed.
-
-**Measuring a pick (opt-in, #1607).** When a pick is slow, turn the trace on for it:
-`SIGMA_PICK_TRACE=1` in the environment, or `loop.py next .sdlc --trace`. Off by default, and
-off it writes nothing and adds no `gh` call. On, each pick appends one JSON line to
-`.sdlc/state/pick-trace.jsonl`: per named stage (reconcile sweep, auto-unpark sweep, stale-claim
-reclaim, release of unstarted claims, pending fetch, dependency hold, the unit/scope/owner gates,
-claim writes, and `other` for the rest) the number of `gh` calls by class (list, read, write,
-graphql, project) and the seconds. Calls are counted once, at the single transport seam, retries
-included; no issue text is recorded. The file rotates at 1 MB to `pick-trace.jsonl.1` (one
-generation, so about 2 MB at most). `loop.py pick-trace-report .sdlc` prints each stage's median and
-p90 calls and seconds across the recorded picks. The trace measures; it does not change a pick.
