@@ -4,6 +4,8 @@
 **Status:** shipped in **1.0.0**, the first public release. Every number below was measured, not estimated, and re-verified
 against a live board on the day this was published.
 
+A temporary run label that confines one loop run to a chosen set of goals is a different thing from the `sdlc:*` labels; see `docs/label-drain.md`.
+
 ---
 
 ## 1. The one-paragraph version

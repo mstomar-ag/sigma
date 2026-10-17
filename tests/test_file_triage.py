@@ -221,6 +221,29 @@ def test_euro_and_pound_near_misses_still_arm():
         assert m.decide("tidy docs", text, {}, _cfg()).kind == "arm", text
 
 
+def test_currency_after_number_for_compute_parks_as_spend():
+    m = _mod()
+    for text in ("Spend 40\u20ac on cloud credits", "use 30\u00a3 of GPU time", "rent a node, 40 CHF",
+                 "use 500 \u00a5 of compute", "budget 40 CAD for a pod", "20 INR of GPU credits",
+                 "pay 3000 yen for compute", "ten quid of cloud credits"):
+        d = m.decide("tidy docs", text, {}, _cfg())
+        assert d.kind == "park" and "spend phrase" in d.reason, (text, d)
+
+
+def test_currency_after_number_near_misses_still_arm():
+    m = _mod()
+    for text in ("We need 40\u20ac of flour.", "see log:\n```\ncost 40\u20ac gpu run\n```\ntidy the docs"):
+        assert m.decide("tidy docs", text, {}, _cfg()).kind == "arm", text
+
+
+def test_hyphenated_deny_word_parks_and_descriptive_still_arms():
+    m = _mod()
+    d = m.decide("cleanup", "Run force-push now", {}, _cfg())
+    assert d.kind == "park" and d.matched == "hard-stop word", d
+    assert m.decide("cleanup", "Run force_push now", {}, _cfg()).kind == "park"
+    assert m.decide("cleanup", "Detect a force-push in the hook and warn the author.", {}, _cfg()).kind == "arm"
+
+
 DESCRIPTIVE = (
     "Redact SSH private keys at runtime so they never reach the log.",
     "Wire the check so the gate gets production data only through the reader.",

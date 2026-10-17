@@ -666,6 +666,8 @@ issue's body and labels, so releasing N goals costs no per-issue reads.
 
 ---
 
+A `--label` run does not move the base: a member that declares a unit is still based on that unit's branch. See `docs/label-drain.md`.
+
 ## 7. At pick: the label, and `sdlc:needs-label`
 
 The body is what a human writes; the label is what everything queries. So at pick, on the
