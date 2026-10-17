@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **The `unassigned` verdict is pinned (#1824).** `label_drain.py pull` is tested to label, comment on and assign an outside armed blocker with no assignee (and to leave one assigned to someone else alone), the `next --label` readiness refusal now counts unassigned members beside the unarmed ones, and the 1.0.16 whats-new page lists the verdict.
 - **`loop.py start-run` clears the recorded `label_checked` (#1823).** It survived a new run, so after `start-run` and an unscoped pick `next --label A` skipped the readiness check although no check had passed in that run. The line is now removed; every other `state/STATE.md` line is unchanged.
 - **`feature_rebase.py preview` says when an `upkeep.units.include` entry matches no registered unit (#1812).** It printed `"units": []` and no note, so a branch the person asked the sweep to keep current read as "nothing to do". One note per such entry now names any remote `feature/*` branch it matches and says to register it with `/sigma-define`; output with every entry matched is unchanged.
 - **The changelog layout duplicate-control test seeds its own repeated entry (#1828).** It no longer depends on the live Unreleased entries naming one issue.

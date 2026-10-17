@@ -1587,22 +1587,24 @@ def _label_not_ready(sdlc_dir, source, config):
               file=sys.stderr)
         return None
     unarmed = sum(1 for r in p["members"] if r["verdict"] == "unarmed")
+    unassigned = sum(1 for r in p["members"] if r["verdict"] == "unassigned")      # #1824
     # #1732: the plan's real open questions; a scope-hold, dependency or spend question still never blocks a start
     asks = sum(1 for q in p.get("questions") or [] if q.get("kind") not in ("scope_hold", "dependency", "irreversible"))
-    if unarmed and not any(q.get("kind") == "label_set" for q in p.get("questions") or []) \
+    if (unarmed or unassigned) and not any(q.get("kind") == "label_set" for q in p.get("questions") or []) \
             and _label_set_decided(sdlc_dir, config, label):
-        unarmed = 0                             # #1732: a recorded decision to leave them unarmed
-    if not unarmed and not asks:
+        unarmed = unassigned = 0                # #1732: a recorded decision to leave them unarmed
+    if not unarmed and not unassigned and not asks:
         try:
             state.set_label_checked(sdlc_dir, label)
         except OSError as exc:                  # fail-open: an unrecorded pass only means a re-check
             print("loop.py: label %r start check not recorded (%s); continuing" % (label, exc), file=sys.stderr)
         return None
-    verb = ("run `label_drain.py arm %s %s --apply`" % (sdlc_dir, label) if unarmed
+    verb = ("run `label_drain.py arm %s %s --apply`" % (sdlc_dir, label) if unarmed or unassigned
             else "run `label_drain.py plan %s %s` and answer the open questions with /sigma-unpark"
                  % (sdlc_dir, label))
-    return ("label %s is not ready: %d unarmed member(s), %d open question(s); nothing was claimed or "
-            "written. First %s, then start again" % (label, unarmed, asks, verb))
+    return ("label %s is not ready: %d unarmed member(s)%s, %d open question(s); nothing was claimed or "
+            "written. First %s, then start again"
+            % (label, unarmed, ", %d unassigned member(s)" % unassigned if unassigned else "", asks, verb))
 
 
 def _label_drained_note(sdlc_dir, source, config, skip):
