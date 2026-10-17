@@ -15,7 +15,7 @@
      "test": "tests/test_resource_shed_1602.py::test_the_stop_file_is_removed_after_a_shed_and_after_an_exception"},
     {"id": "enforce-only", "clause": "shed: enforce mode only",
      "file": "skills/sigma-loop/scripts/resource_verify.py",
-     "old": "(resolved.get(\"mode\") or \"enforce\") == \"enforce\"", "new": "True",
+     "old": "guard.resolve_mode(config) == \"enforce\"", "new": "True",
      "test": "tests/test_resource_shed_1602.py::test_observe_mode_never_sheds"},
     {"id": "shed-after-key", "clause": "shed: shed_after key is honoured",
      "file": "skills/sigma-loop/scripts/resource_verify.py",

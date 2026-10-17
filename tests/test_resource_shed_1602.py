@@ -88,6 +88,43 @@ def test_observe_mode_never_sheds(env, tmp_path):
 
 
 @unix_only
+def test_env_observe_never_sheds_without_a_config_key(env, tmp_path, monkeypatch):
+    """#1794: SIGMA_RESOURCE_MODE=observe outranks a config with no mode. Control: read resolved["mode"] only."""
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "observe")
+    _critical_after_admission(env, 0.2)
+    out = env.run("verify", "sleep 1.5", str(tmp_path), 30, "g1", sample_gap=0.1, config={})
+    assert not out.shed and out.hold is None and out.returncode == 0
+
+
+@unix_only
+def test_env_enforce_sheds_although_the_config_says_off(env, tmp_path, monkeypatch):
+    """#1794: SIGMA_RESOURCE_MODE=enforce outranks resource.mode off, so the shed acts."""
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "enforce")
+    _critical_after_admission(env, 0.2)
+    out = env.run("verify", "sleep 20", str(tmp_path), 30, "g1", sample_gap=0.1, config={"mode": "off"})
+    assert out.shed
+
+
+@unix_only
+def test_end_to_end_env_observe_does_not_end_shed(tmp_path, monkeypatch, capsys):
+    """#1794 through loop.verify_goal: observe from the environment, no config key, critical mid-run."""
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "observe")
+    sdlc, goal = base._repo(tmp_path, {}, command="%s -c 'import time; time.sleep(3)'" % sys.executable)
+    loop = base._loop(monkeypatch, tmp_path, available=12 * GIB)
+    lease = sys.modules["resource_lease"]
+    t0 = time.time()
+
+    def sample():
+        crit = time.time() - t0 > 1.0
+        return lease.guard.Sample(total=16 * GIB, available=(1 if crit else 12) * GIB, swap_used=0, swap_total=0,
+                                  swapouts=0, swapouts_at=0.0, pressure=1, cpu_count=8, load1=0.0)
+    monkeypatch.setattr(lease, "take_sample", sample)
+    loop.verify_goal(sdlc, goal)
+    assert "(shed)" not in capsys.readouterr().err
+    assert not list((pathlib.Path(os.environ["SIGMA_RESOURCE_DIR"]) / "shed").glob("*.stop")) if (pathlib.Path(os.environ["SIGMA_RESOURCE_DIR"]) / "shed").exists() else True
+
+
+@unix_only
 def test_a_non_critical_hold_level_does_nothing(env, tmp_path):
     """Pressure level 2 holds new goals but is not critical: the running verify is left alone."""
     def sample():
