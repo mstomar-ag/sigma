@@ -75,6 +75,19 @@ def test_cap_fail_closed(tmp_path):
         (bad / "events" / "x.jsonl").chmod(0o644)
     assert not ok and "unreadable" in why
     assert cs.admit(bad, {}, chain) == (True, "")   # no cap set: nothing is read
+    dd = tmp_path / "dir"
+    (dd / "events").mkdir(parents=True)
+    (dd / "events").chmod(0)
+    try:
+        ok, why = cs.admit(dd, cfg, chain)
+    finally:
+        (dd / "events").chmod(0o755)
+    assert not ok and "unreadable" in why   # an unreadable directory is not an empty ledger
+    for bad_cap in ("5", 0, -1, True):
+        ok, why = cs.admit(tmp_path, {"chain": {"max_usd": bad_cap}}, chain)
+        assert not ok and "invalid chain.max_usd" in why   # a mistyped cap is never "no cap"
+    ok, why = cs.admit(tmp_path, {"chain": {"max_minutes": 5}}, {"members": ["1"]})
+    assert not ok and "approval stamp" in why
     ok, why = cs.admit(tmp_path, {"chain": {"max_goals": 2, "max_added": 0}}, {"members": ["1", "2", "3"]})
     assert not ok and "goals" in why
 
@@ -89,6 +102,12 @@ def test_unpriced(tmp_path):
     assert cs.admit(tmp_path, {"chain": {"max_usd": 10.0}}, chain)[0] is True
     ok, why = cs.admit(tmp_path, {"chain": {"max_usd": 9.0}}, chain)
     assert not ok and "unpriced" in why   # 900 cents at p90 reaches the 9.00 cap
+
+
+def test_since_edges(tmp_path):
+    assert cs._epoch("2026-10-18T10:00:00.5Z") == cs._epoch("2026-10-18T10:00:00Z")
+    _write(tmp_path, [_phase(1, "implement", at=SINCE - 50)])   # before approval: not an unpriced phase now
+    assert cs.admit(tmp_path, {"chain": {"max_usd": 10.0}}, {"members": ["1"], "approved_at": SINCE})[0] is True
 
 
 def test_overshoot_sentence():

@@ -9,7 +9,9 @@ FAILS CLOSED, and so does an unpriced phase when no p90 exists to charge it at.
 import calendar
 import json
 import math
+import os
 import pathlib
+import re
 import time
 
 DEFAULT_MAX_ADDED = 5
@@ -22,7 +24,7 @@ def _epoch(ts):
     if isinstance(ts, (int, float)) and not isinstance(ts, bool):
         return float(ts)
     try:
-        return float(calendar.timegm(time.strptime(str(ts), "%Y-%m-%dT%H:%M:%SZ")))
+        return float(calendar.timegm(time.strptime(re.sub(r"\.\d+Z$", "Z", str(ts)), "%Y-%m-%dT%H:%M:%SZ")))
     except (ValueError, TypeError):
         return None
 
@@ -40,7 +42,9 @@ def _events(sdlc_dir):
     base = pathlib.Path(sdlc_dir) / "events"
     out = []
     try:
-        paths = sorted(base.glob("*.jsonl"))
+        paths = sorted(p for p in (base / n for n in os.listdir(base)) if p.suffix == ".jsonl")
+    except FileNotFoundError:
+        return [], True
     except OSError:
         return [], False
     for p in paths:
@@ -106,9 +110,16 @@ def _spent_of(records, members, since):
     return total
 
 
-def _num(v):
+_BAD = object()
+
+
+def _num(block, key):
+    """-> None when the key is absent (unset), the number, or _BAD when present but not a positive number."""
+    if key not in block or block[key] is None:
+        return None
+    v = block[key]
     ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v > 0
-    return float(v) if ok else None
+    return float(v) if ok else _BAD
 
 
 def admit(sdlc_dir, config, chain, now=None):
@@ -116,22 +127,27 @@ def admit(sdlc_dir, config, chain, now=None):
     stamp), and optionally `started_at`."""
     try:
         block = config["chain"]
-        block = block if isinstance(block, dict) else {}
     except Exception:
         block = {}
-    max_usd, max_min = _num(block.get("max_usd")), _num(block.get("max_minutes"))
+    if not isinstance(block, dict):
+        return False, "capped: chain config is not a mapping"
+    max_usd, max_min, max_goals = _num(block, "max_usd"), _num(block, "max_minutes"), _num(block, "max_goals")
+    for key, v in (("max_usd", max_usd), ("max_minutes", max_min), ("max_goals", max_goals)):
+        if v is _BAD:
+            return False, "capped: invalid chain.%s (not a positive number)" % key
     members = list(chain.get("members") or [])
     added = block.get("max_added", DEFAULT_MAX_ADDED)
     added = added if isinstance(added, int) and not isinstance(added, bool) and added >= 0 else DEFAULT_MAX_ADDED
-    max_goals = block.get("max_goals")
-    if not (isinstance(max_goals, int) and not isinstance(max_goals, bool) and max_goals > 0):
+    if max_goals is None:
         max_goals = len(members) + added
     if len(members) > max_goals:
         return False, "capped: %d goals over the %d goal cap" % (len(members), max_goals)
     since = chain.get("approved_at")
-    if max_min is not None and since is not None:
+    if max_min is not None:
         t0 = _epoch(since)
-        if t0 is not None and ((now if now is not None else time.time()) - t0) / 60 >= max_min:
+        if t0 is None:
+            return False, "capped: chain.max_minutes is set and there is no approval stamp to measure from"
+        if ((now if now is not None else time.time()) - t0) / 60 >= max_min:
             return False, "capped: ran %g minutes, the cap is %g" % (max_min, max_min)
     if max_usd is None:
         return True, ""
@@ -140,9 +156,15 @@ def admit(sdlc_dir, config, chain, now=None):
         return False, "capped: the spend ledger is unreadable and a cap is set"
     cents = _spent_of(records, members, since)
     mem = {str(m) for m in members}
-    priced = {(str(r.get("goal")), r.get("phase")) for r in records if r["kind"] == "spend"}
+    t0 = _epoch(since)
+
+    def _after(r):
+        t = _epoch(r.get("ts"))
+        return t0 is None or (t is not None and t >= t0)
+
+    priced = {(str(r.get("goal")), r.get("phase")) for r in records if r["kind"] == "spend" and _after(r)}
     unpriced = {(str(r.get("goal")), r.get("phase")) for r in records
-                if r["kind"] == "phase" and str(r.get("goal")) in mem} - priced
+                if r["kind"] == "phase" and str(r.get("goal")) in mem and _after(r)} - priced
     extra = 0
     if unpriced:
         p90 = _p90_phase(records)
