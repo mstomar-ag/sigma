@@ -134,7 +134,7 @@ def test_arm_only_the_ones_that_can_start_arms_exactly_that_subset_and_writes_on
     recs = records(base)
     assert len(recs) == 1
     r = recs[0]
-    assert (r["qkind"], r["area"], r["choice"], r["scope"]) == ("label_set", "repo", "arm only the ones that can start",
+    assert (r["qkind"], r["area"], r["choice"], r["scope"]) == ("label_set", "label-kind:" + ld.label_kind(LBL), "arm only the ones that can start",
                                                                 "label:" + LBL)
     assert len(fk.comments()) == 1
 
