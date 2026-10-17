@@ -93,8 +93,9 @@ def test_start_registers_a_session_but_claims_nothing_under_hold(machine, tmp_pa
     machine["sample"] = _sample(**LOW)
     base = backlog(tmp_path)
     goals = {k: v for k, v in snapshot(base).items() if k.startswith("goals")}
-    code, out, _ = cli(capsys, "start", str(base))
+    code, out, err = cli(capsys, "start", str(base))
     assert code == 0 and len(out) == 1 and out != ["HOLD"]     # `start` prints its generation token only
+    assert "HOLD" not in err                           # and never consults the gate
     assert {k: v for k, v in snapshot(base).items() if k.startswith("goals")} == goals
 
 

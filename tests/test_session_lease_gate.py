@@ -12,6 +12,8 @@ import re
 import subprocess
 import sys
 
+import types
+
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -84,6 +86,26 @@ def test_unset_mode_is_off(state):
     with guard.session_lease("judge", "1") as got:
         assert got is None
     assert not state.exists()
+
+
+def test_renewer_default_interval_is_a_third_of_the_ttl(state, monkeypatch):
+    """No `renew_every` passed: the renewer waits ttl/3 between renewals (ttl*3 would outlive the lease)."""
+    guard = _load("resource_guard", "rg_t_every")
+    with_sample(guard)
+    waits = []
+
+    real = guard.threading
+
+    class SpyEvent(real.Event):
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            return True                       # the renewer thread exits at once
+
+    # a shim module: Thread keeps the real Event it uses internally
+    monkeypatch.setattr(guard, "threading", types.SimpleNamespace(Event=SpyEvent, Thread=real.Thread))
+    with guard.session_lease("judge", "1", ttl=30, config={"mode": "enforce"}) as got:
+        assert not is_hold(got)
+    assert waits and waits[0] == pytest.approx(10.0)
 
 
 def test_lease_is_held_inside_and_gone_after_even_on_exception(state):
@@ -358,7 +380,7 @@ def test_reviewer_mode_off_creates_no_state(state, reviewer, tmp_path):
 
 
 # ------------------------------------------------------------------------------------------ one helper, no re-implementation
-GATED = ("feature_judge.py", "supervise_daemon.py", "feature_upkeep_launcher.py", "reviewer.py")
+GATED = ("feature_judge.py", "supervise_daemon.py", "feature_upkeep_launcher.py", "reviewer.py", "autowatch.py")
 
 
 @pytest.mark.parametrize("name", GATED)
@@ -374,6 +396,7 @@ def test_each_site_uses_the_shared_helper_and_never_touches_the_table(name):
 SPAWN_SHAPES = (
     re.compile(r'"claude",\s*"-p"'),
     re.compile(r'"claude -p /'),
+    re.compile(r'"claude -p\b'),                    # #1758: a string command such as DEFAULT_DRIVE_CMD
     re.compile(r'BASE_ARGV\s*=\s*\("-p"'),
     re.compile(r'\[str\(executable\),\s*"exec"'),
     re.compile(r'\["cursor-agent",\s*"-p"'),
@@ -404,6 +427,11 @@ def test_every_spawn_file_is_gated_or_listed_with_a_reason():
     assert set(GATED) <= spawn_files(SCRIPTS)
     for name in NOT_GATED:
         assert name in spawn_files(SCRIPTS), "stale NOT_GATED entry: %s" % name
+
+
+def test_ratchet_goes_red_for_an_ungated_string_command_spawn(tmp_path):
+    (tmp_path / "strspawn.py").write_text('DEFAULT_CMD = "claude -p --output-format json"\n')
+    assert ungated(tmp_path) == ["strspawn.py"]
 
 
 def test_ratchet_goes_red_for_an_ungated_spawn(tmp_path):

@@ -50,8 +50,9 @@ All take the project's `.sdlc` directory and the label name.
 
 ## Arming defaults
 
-The optional `label_drain` block in the project config has two keys: `default_priority` (default `P2`)
-and `arm_pulled_blockers` (default `true`). A wrong-typed value reads as the default. With
+The optional `label_drain` block in the project config has three keys: `default_priority` (default `P2`),
+`arm_pulled_blockers` (default `true`) and `kinds` (default empty; maps exact run-label names to kinds, so labels
+without a `:` or `/` prefix can share a kind). A wrong-typed value reads as the default. With
 `arm_pulled_blockers` an open prerequisite outside the label is armed as well, given the run label and
 one comment. An upper-tier issue, a parked one, one held by a gate, or one assigned to someone else is
 refused with its reason and not written. Keys are listed in `docs/configuration.md`.
