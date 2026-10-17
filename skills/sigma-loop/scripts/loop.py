@@ -5932,7 +5932,8 @@ def verify_goal(sdlc_dir, goal):
         # runs nothing and writes no evidence, so `record done` still refuses.
         guarded = _load("resource_guard").run(
             "verify", list(commands), root, _verify_timeout_seconds(config), goal,
-            config=config.get("resource"), repo=root)
+            config=dict(config.get("resource") or {}, mode=_load("resource_guard").resolve_mode(config)),
+            repo=root)                                  # #1804: the one resolver, env > config > default
         if guarded.hold is not None:
             _what = ("the verify group Sigma started was stopped; no evidence, the goal is not failed; rerun when "
                      "admission reopens" if getattr(guarded, "shed", False)
