@@ -1208,6 +1208,96 @@ def _landing_rows(base, cfg, run, which):
         return []
 
 
+def _resource_rows(cfg, sdlc_dir, now=None, sampler=None, env=None):
+    """#1604 LIVENESS: seven rows on the resource guard, present only when it is in play (`parallel.goals.enabled`, or
+    `resource.mode` / SIGMA_RESOURCE_MODE names a mode), so a repo that never opted in sees no new row. Facts come
+    from sigma-loop's `resource_liveness` (the one reader of hold.json / last.json); this only words them. Age is the
+    tell: a sampler that died reports no error, so row 4 reads the age of last.json against the watcher-derived
+    bound while a loop heartbeat is fresh. `sampler` is DI for tests. Never raises."""
+    import time as _time
+    env = os.environ if env is None else env
+    try:
+        goals = _block(_block(cfg, "parallel"), "goals")
+        mode_key = _block(cfg, "resource").get("mode")
+        named = mode_key in ("enforce", "observe") or env.get("SIGMA_RESOURCE_MODE") in ("enforce", "observe")
+        if goals.get("enabled") is not True and not named:
+            return []
+        live = _load_loop_script("resource_liveness")
+        now = _time.time() if now is None else now
+        rows = []
+        try:
+            snap = live.snapshot(cfg, env=env, now=now, sampler=sampler)
+        except Exception as exc:                 # noqa: BLE001 - the typed reason is the whole answer here
+            why = getattr(exc, "reason", None) or type(exc).__name__
+            return [_chk("resource platform: unsupported (%s)" % why, False,
+                         "the resource guard cannot read this machine (%s): it refuses rather than guessing, so set "
+                         "resource.mode to \"off\" and cap parallel.goals.max_concurrent by hand" % why)]
+        limits, sample = snap["limits"], snap["sample"]
+        rows.append(_chk("resource platform: supported", True, ""))
+        mode = live.effective_mode(cfg, env)
+        rows.append(_chk("resource mode: %s" % mode, not (mode == "off" and goals.get("enabled") is True),
+                         "resource.mode is off while parallel.goals.enabled is true: nothing limits concurrent goals by "
+                         "memory. Set resource.mode to \"enforce\" (or \"observe\" to watch first) in .sdlc/config.json."))
+        mib = lambda n: "%d MiB" % (max(n, 0) // (1024 * 1024))     # noqa: E731
+        hold, minutes = snap["hold"], live.alert_minutes(cfg)
+        if hold is None:
+            rows.append(_chk("resource admission: open, headroom %s, reserve %s" % (mib(limits.headroom), mib(limits.reserve)),
+                             True, ""))
+        else:
+            age = int(hold["age"] // 60)
+            if snap["live"]:
+                who = "held with %d Sigma leases" % snap["live"]
+                tip = "wait for the leased work to finish; its leases free the memory on release"
+            else:
+                who = "held with 0 leases: memory is used by other software, Sigma cannot release it"
+                tip = "close other applications or processes using memory, then the hold lifts on its own"
+            rows.append(_chk("resource admission: HELD %dm (%s); %s; headroom %s, reserve %s" % (
+                age, hold.get("reason"), who, mib(limits.headroom), mib(limits.reserve)), age < minutes,
+                "admission has been held over hold_alert_minutes (%d): %s" % (minutes, tip)))
+        bound = live.sample_stale_after(cfg)
+        beat = live.newest_heartbeat(sdlc_dir)
+        at = snap["last_at"]
+        # The watcher's resource_step samples only for an EXPLICIT enforce/observe (same precedence: env, then key).
+        # Elsewhere last.json may never be written, so an age row there would be a permanent unfixable NOT OK.
+        forced = env.get("SIGMA_RESOURCE_MODE")
+        explicit = forced if forced in ("enforce", "observe", "off") else mode_key
+        if explicit not in ("enforce", "observe"):
+            if mode != "off":
+                rows.append(_chk("resource sample age: taken at admission points (resource.mode unset)", True, ""))
+        else:
+          rows.append(_chk("resource sample age: %s" % ("never sampled" if at is None else "%dm" % max(0, (now - at) // 60)),
+                         live.sample_age_ok(at, beat, now, bound),
+                         "the loop is running but the resource sampler has not run within %dm: start the watcher "
+                         "(a loop trigger starts one) or run `python3 skills/sigma-loop/scripts/resource_guard.py sample "
+                         "--record .sdlc`" % (bound // 60)))
+        rows.append(_chk("resource stale leases: %d" % snap["stale"], snap["stale"] == 0,
+                         "%d lease(s) belong to dead or expired processes and count against headroom until reclaimed: "
+                         "run `python3 skills/sigma-loop/scripts/resource_guard.py sample --record .sdlc`" % snap["stale"]))
+        if goals.get("enabled") is True:
+            cap = live.goal_cap(snap, cfg)
+            try:
+                want = int(goals.get("max_concurrent", 3))
+            except (TypeError, ValueError):
+                want = 3
+            rows.append(_chk("resource max_concurrent: %d (derived cap %d)" % (want, cap), want <= cap,
+                             "parallel.goals.max_concurrent (%d) is above what this machine supports (%d): lower it "
+                             "to %d or less in .sdlc/config.json." % (want, cap, cap)))
+        command = _block(cfg, "verify").get("command")
+        if isinstance(command, str) and command.strip():
+            pin = live.verify_pin(command)
+            workers = live.verify_workers(snap)
+            over = pin == "auto" or (pin is not None and pin > workers)
+            rows.append(_chk("resource verify workers: %s against %d derived" % (
+                "no -n pin" if pin is None else "-n %s" % pin, workers), not over,
+                "verify.command pins -n %s but this machine derives %d workers: write `-n {workers}` so "
+                "Sigma substitutes the granted count. Note: the PYTEST_XDIST_AUTO_NUM_WORKERS lever "
+                "lowers only `-n auto`, never a literal count, and only where the installed xdist reads it."
+                % (pin, workers)))
+        return rows
+    except Exception:                            # noqa: BLE001 - a diagnostic never raises
+        return []
+
+
 def _awaiting_merge_row(sdlc_dir, now=None):
     """#255 LIVENESS: one row for every goal awaiting a merge. A goal that waits reports no error,
     ever -- an armed auto-merge whose required check failed never lands, a PR that can no longer be
@@ -3698,6 +3788,8 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     # records), so it is not gated by `cheap_only`; silent (no row) when work is off.
     if _block(cfg, "work").get("enabled") is True:
         out.append(_awaiting_merge_row(sdlc_dir))
+
+    out.extend(_resource_rows(cfg, sdlc_dir))  # #1604: silent unless the resource guard is in play
 
     # #1410: blockers ranked below what they block. Local state read only; silent unless github + rule on.
     _br = _blocker_rank_row(cfg, sdlc_dir)
