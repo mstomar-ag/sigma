@@ -241,7 +241,8 @@ def test_next_label_refuses_to_start_on_an_unarmed_member(tmp_path, monkeypatch,
 
 def _set_run_iteration(base, n):
     p = os.path.join(base, "state", "STATE.md")
-    open(p, "w").write("iteration: 0\nrun_iteration: %d\nlast_run: none\n" % n)
+    text = open(p).read() if os.path.exists(p) else "iteration: 0\nlast_run: none\n"
+    open(p, "w").write(_loop().state._set_line(text, "run_iteration", n))   # keeps every other line
 
 
 def test_same_ref_held_by_two_goals_is_pulled_once():
@@ -263,6 +264,80 @@ def test_start_check_runs_only_before_the_first_claim():
         assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 1
         _set_run_iteration(base, 1)                  # a claim has been made in this run
         assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 1
+
+
+def _scoped_to(label):
+    class S(Scoped):
+        label_scope = label
+    return S
+
+
+def test_a_second_label_is_checked_after_the_first_label_run_started():
+    """#1805: run_iteration is per checkout, so a label change must re-run the start check."""
+    lp, stub = _loop(), Stub(members=[{"number": 1, "verdict": "unarmed", "reason": "unarmed"}])
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        a = _scoped_to("label-a")(["1"], live=CHAIN_OPEN)
+        stub.members = []                            # label A is ready
+        assert lp._label_not_ready(base, a, _cfg(lp, base)) is None and stub.plans == 1
+        _set_run_iteration(base, 1)                  # A's first pick claimed a goal
+        stub.members = [{"number": 1, "verdict": "unarmed", "reason": "unarmed"}]
+        b = _scoped_to("label-b")(["1"], live=CHAIN_OPEN)
+        refusal = lp._label_not_ready(base, b, _cfg(lp, base))
+    assert refusal and "label-b is not ready" in refusal and "nothing was claimed or written" in refusal
+    assert stub.plans == 2
+
+
+def test_a_run_started_with_no_recorded_label_is_checked_again():
+    """#1805: the no-run-started clause: run_iteration alone (no recorded label) never skips."""
+    lp, stub = _loop(), Stub()
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        _set_run_iteration(base, 3)                  # a run is on, but no check ever passed here
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None
+    assert stub.plans == 1
+
+
+def test_a_recorded_label_with_no_run_started_is_checked_again():
+    """#1805: the recorded label alone (run_iteration 0, e.g. after start-run) never skips."""
+    lp, stub = _loop(), Stub()
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 1
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 2
+
+
+def test_a_refusal_does_not_record_the_label():
+    lp, stub = _loop(), Stub(members=[{"number": 1, "verdict": "unarmed", "reason": "unarmed"}])
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        assert lp._label_not_ready(base, src, _cfg(lp, base))
+        _set_run_iteration(base, 1)
+        assert lp._label_not_ready(base, src, _cfg(lp, base))   # still refused: nothing was recorded
+    assert stub.plans == 2
+
+
+def test_next_batch_label_b_refuses_after_label_a_ran(tmp_path, monkeypatch, capsys):
+    lp = _loop()
+    base = A._repo(tmp_path, "alice")
+    lp.state.set_label_checked(base, "other-label")
+    _set_run_iteration(base, 2)
+    fk = A.Fake([A._issue(1, "sdlc:blocked", A.LBL)])
+    monkeypatch.setattr(lp.sources, "get_source",
+                        lambda d, c: lp.sources.GitHubSource(c, run=fk, sdlc_dir=d))
+    for hook in ("_ensure_watcher", "_ensure_ledger_delivery", "_surface_inbox", "_warn_knowledge_graph"):
+        monkeypatch.setattr(lp, hook, lambda *a, **k: None)
+    assert lp.main(["loop.py", "next-batch", base, "--label", A.LBL]) == 0
+    out = capsys.readouterr()
+    assert out.out.strip() == "DONE" and "1 unarmed member(s)" in out.err
+    assert fk.writes() == []
 
 
 def test_unscoped_next_never_calls_label_drain():

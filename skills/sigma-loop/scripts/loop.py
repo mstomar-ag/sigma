@@ -1570,9 +1570,15 @@ def _label_set_decided(sdlc_dir, config, label):
 def _label_not_ready(sdlc_dir, source, config):
     """#1579: the one line to print when a `--label` run must not start yet, else None. Runs the
     read-only `plan` once, before the run's first claim, and refuses on unarmed members or open
-    questions. Fail-open on a plan that cannot run: the picker's own posture."""
+    questions. Fail-open on a plan that cannot run: the picker's own posture.
+
+    #1805: `run_iteration` is per checkout, so it cannot say "this label's run has started". The
+    check is skipped only when a run is started AND this very label is the one it last passed for
+    (`label_checked`); a different label, or no started run, runs `plan` again. A refusal records nothing."""
     label = getattr(source, "label_scope", None)
-    if not label or state.load_cursor(sdlc_dir).get("run_iteration"):
+    if not label:
+        return None
+    if state.load_cursor(sdlc_dir).get("run_iteration") and state.load_label_checked(sdlc_dir) == label:
         return None
     try:
         p = _label_drain().plan(sdlc_dir, label, config=config, run=getattr(source, "_run", None))
@@ -1587,6 +1593,10 @@ def _label_not_ready(sdlc_dir, source, config):
             and _label_set_decided(sdlc_dir, config, label):
         unarmed = 0                             # #1732: a recorded decision to leave them unarmed
     if not unarmed and not asks:
+        try:
+            state.set_label_checked(sdlc_dir, label)
+        except OSError as exc:                  # fail-open: an unrecorded pass only means a re-check
+            print("loop.py: label %r start check not recorded (%s); continuing" % (label, exc), file=sys.stderr)
         return None
     verb = ("run `label_drain.py arm %s %s --apply`" % (sdlc_dir, label) if unarmed
             else "run `label_drain.py plan %s %s` and answer the open questions with /sigma-unpark"
