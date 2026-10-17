@@ -118,8 +118,9 @@ def diff(old, new, ts):
     old_short = bool((old.get("header") or {}).get("partial"))
     e_old = {(e["blocker"], e["blocked"]) for e in old["edges"]}
     e_new = {(e["blocker"], e["blocked"]) for e in new["edges"]}
-    for a, b in sorted(e_new - e_old):
-        out.append({"t": ts, "ev": "edge-added", "a": a, "b": b})
+    if not old_short:                                    # a partial old map would make every dropped edge look new
+        for a, b in sorted(e_new - e_old):
+            out.append({"t": ts, "ev": "edge-added", "a": a, "b": b})
     if not cut_short:
         for a, b in sorted(e_old - e_new):
             out.append({"t": ts, "ev": "edge-removed", "a": a, "b": b})

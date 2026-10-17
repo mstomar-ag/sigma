@@ -456,6 +456,7 @@ def test_a_complete_map_after_a_partial_one_records_nothing_false():
     full = _map([(1, OPEN), (2, OPEN)], [(1, 2)])
     recs = dag_history.diff(partial, full, T)
     assert not _ev(recs, "node-deleted") and not _ev(recs, "edge-removed")
+    assert not _ev(recs, "edge-added")        # the edge the cap had dropped is not new; control: drop the old_short guard
 
 
 def test_a_partial_old_map_cannot_make_a_false_merge_record():
