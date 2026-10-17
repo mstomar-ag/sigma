@@ -390,3 +390,34 @@ def test_cli_record_exit_codes(tmp_path, machine, monkeypatch, capsys):
     assert guard.main(["sample", "--record", str(base)]) == 0
     assert (machine["state"] / "last.json").exists()
     assert guard.main(["sample", "--record"]) == 2
+
+
+# ------------------------------------------------------------------------- 6. review follow-up (#1750)
+def test_log_hold_path_rule_matches_the_guard(machine, tmp_path, monkeypatch):
+    """The log skill copies `hold_path`; the tail must read the very file the guard writes."""
+    _hold_json(machine["state"], since=NOW - 720)
+    assert "admission HELD" in _log().admission_tail({}, now=NOW)
+    assert os.path.dirname(guard.hold_path()) == str(machine["state"])
+    monkeypatch.delenv("SIGMA_RESOURCE_DIR")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    assert guard.hold_path() == os.path.join(str(tmp_path), "sigma", "resource", "hold.json")
+    pathlib.Path(tmp_path, "sigma", "resource").mkdir(parents=True)
+    _hold_json(pathlib.Path(tmp_path, "sigma", "resource"), since=NOW - 720)
+    assert "admission HELD" in _log().admission_tail({}, now=NOW)
+
+
+def test_observe_mode_tail_says_not_enforced(machine):
+    _hold_json(machine["state"], since=NOW - 720)
+    assert "not enforced" in _log().admission_tail({"resource": {"mode": "observe"}}, now=NOW)
+    assert "not enforced" not in _log().admission_tail({"resource": {"mode": "enforce"}}, now=NOW)
+
+
+def test_slots_reads_the_admission_tail_once(machine, tmp_path, monkeypatch):
+    log = _log()
+    calls = []
+    real = log.admission_tail
+    monkeypatch.setattr(log, "admission_tail", lambda *a, **k: calls.append(1) or real(*a, **k))
+    d = tmp_path / "sdlc"
+    d.mkdir()
+    log.slots(d)
+    assert len(calls) <= 1

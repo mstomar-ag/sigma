@@ -779,7 +779,8 @@ def admission_tail(config, now=None, env=None):
     `resource.mode` is "off" (a left-over file nobody refreshes must not read as a live hold)."""
     env = os.environ if env is None else env
     block = config.get("resource") if isinstance(config, dict) else None
-    if env.get("SIGMA_RESOURCE_MODE", (block or {}).get("mode") if isinstance(block, dict) else None) == "off":
+    mode = env.get("SIGMA_RESOURCE_MODE", (block or {}).get("mode") if isinstance(block, dict) else None)
+    if mode == "off":
         return ""
     base = env.get("SIGMA_RESOURCE_DIR")
     if not base:
@@ -794,7 +795,8 @@ def admission_tail(config, now=None, env=None):
         return ""
     now = time.time() if now is None else now
     reason = record.get("reason")
-    return "admission HELD %dm%s" % (max(0, now - since) // 60, ": %s" % reason if isinstance(reason, str) and reason else "")
+    return "admission HELD %dm%s%s" % (max(0, now - since) // 60, ": %s" % reason if isinstance(reason, str) and reason else "",
+                                       " (observe: not enforced)" if mode == "observe" else "")
 
 
 def slots(sdlc_dir, now=None, render_py=None):
@@ -839,12 +841,13 @@ def slots(sdlc_dir, now=None, render_py=None):
     shown = [row[0] for row in chosen]
     blocked = sum(bool(row[2]) for row in renderable)
     blocked_hidden = blocked - sum(bool(row[2]) for row in chosen)
+    heartbeat, admission = loop_heartbeat_tail(sdlc_dir, now), admission_tail(config, now)
     block = {
         "headline": _headline(in_flight, len(rows), blocked),
         "slots": shown,
         "tail": _tail(len(shown), collapsed, stale, len(withheld), blocked_hidden)
-                + (("; " + loop_heartbeat_tail(sdlc_dir, now)) if loop_heartbeat_tail(sdlc_dir, now) else "")
-                + (("; " + admission_tail(config, now)) if admission_tail(config, now) else ""),
+                + (("; " + heartbeat) if heartbeat else "")
+                + (("; " + admission) if admission else ""),
     }
     ok, rendered, why = render_block_a(block, render_py=render_py)
     if ok:

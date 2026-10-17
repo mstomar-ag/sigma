@@ -1251,8 +1251,9 @@ def _resource_rows(cfg, sdlc_dir, now=None, sampler=None, env=None):
             else:
                 who = "held with 0 leases: memory is used by other software, Sigma cannot release it"
                 tip = "close other applications or processes using memory, then the hold lifts on its own"
-            rows.append(_chk("resource admission: HELD %dm (%s); %s; headroom %s, reserve %s" % (
-                age, hold.get("reason"), who, mib(limits.headroom), mib(limits.reserve)), age < minutes,
+            rows.append(_chk("resource admission: HELD %dm (%s)%s; %s; headroom %s, reserve %s" % (
+                age, hold.get("reason"), " (observe: not enforced)" if mode == "observe" else "", who,
+                mib(limits.headroom), mib(limits.reserve)), age < minutes,
                 "admission has been held over hold_alert_minutes (%d): %s" % (minutes, tip)))
         bound = live.sample_stale_after(cfg)
         beat = live.newest_heartbeat(sdlc_dir)
