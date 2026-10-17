@@ -5939,7 +5939,7 @@ def verify_goal(sdlc_dir, goal):
             _what = ("the verify group Sigma started was stopped; no evidence, the goal is not failed; rerun when "
                      "admission reopens" if getattr(guarded, "shed", False)
                      else "the proving command was not run; nothing was killed")
-            print(f"RESOURCE-HOLD exit=5 -- {guarded.hold.reason}; retry_after={guarded.hold.retry_after:g}s "
+            print(f"RESOURCE-HOLD exit=5 -- {guarded.hold.reason}; retry_after={max(HOLD_RETRY_FLOOR, guarded.hold.retry_after):g}s "
                   f"({_what})", file=sys.stderr)
             ledger.safe_append(sdlc_dir, "verify", goal, config=config, stream=ledger.EVENTS, exit=5)
             actionlog.safe_append(sdlc_dir, goal, "verify_run", exit=5)
