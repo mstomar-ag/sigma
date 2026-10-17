@@ -39,6 +39,7 @@ def _fresh(name):
 def env(tmp_path, monkeypatch):
     """The verify module with a temp state folder and a roomy fake machine (16 GiB, 8 cpus)."""
     monkeypatch.setenv("SIGMA_RESOURCE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("SIGMA_RESOURCE_MODE", raising=False)    # #1794: the shed reads the environment too
     for name in ("resource_guard", "resource_lease", "bounded_run", "resource_verify"):
         sys.modules.pop(name, None)
     verify = _fresh("resource_verify")

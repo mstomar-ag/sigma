@@ -39,7 +39,7 @@ TABLE = [
     (None, "bogus", "enforce"),
     ("", "off", "off"),
 ]
-SURFACES = ("resolver", "sessions", "liveness", "picker", "verify", "watcher", "doctor", "log")
+SURFACES = ("resolver", "sessions", "liveness", "picker", "verify", "shed", "watcher", "doctor", "log")
 
 
 def _config(value):
@@ -54,6 +54,24 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("SIGMA_RESOURCE_DIR", str(state))
     monkeypatch.delenv("SIGMA_RESOURCE_MODE", raising=False)
     return tmp_path
+
+
+def _shed_mode(config, home, monkeypatch):
+    """#1794: the mode the verify shed acts on: enforce when it creates its stop file, else off (observe/off)."""
+    rv = _load(SCRIPTS / "resource_verify.py", "resource_verify_1794")
+    lease = rv._sibling("resource_lease")
+    made = []
+    real = os.path.join
+    monkeypatch.setattr(lease, "take_sample", lambda: guard.Sample(
+        total=32000, available=20000, swap_used=0, swap_total=0, swapouts=0, swapouts_at=0.0, pressure=1,
+        cpu_count=8, load1=0.0))
+    monkeypatch.setattr(rv, "_Meter", lambda lease_, id_, gap, shed: made.append(shed) or type(
+        "M", (), {"start": lambda s: None, "stop": lambda s, *a, **k: None, "__getattr__": lambda s, n: (lambda *a, **k: None)})())
+    try:
+        rv.run("verify", "true", str(home), 30, "g1", config=config)
+    except Exception:                                    # noqa: BLE001 - only whether a shed was armed matters
+        pass
+    return "enforce" if made and made[0] is not None else "off"
 
 
 def _probe(surface, env_value, cfg_value, home, monkeypatch):
@@ -71,6 +89,8 @@ def _probe(surface, env_value, cfg_value, home, monkeypatch):
     if surface == "verify":
         loop = _load(SCRIPTS / "loop.py", "loop_1759")
         return "enforce" if loop._resource_verify_on(config) else "off"
+    if surface == "shed":
+        return _shed_mode(config, home, monkeypatch)
     if surface == "picker":
         loop = _load(SCRIPTS / "loop.py", "loop_1759p")
         seen = []
@@ -112,6 +132,8 @@ def _probe(surface, env_value, cfg_value, home, monkeypatch):
 def test_every_surface_resolves_the_same_mode(surface, env_value, cfg_value, expected, home, monkeypatch):
     if surface == "verify" and expected == "observe":
         expected = "enforce"                              # verify's gate is on/off: observe is "on"
+    if surface == "shed" and expected == "observe":
+        expected = "off"                                  # #1794: observe only logs, the shed must not act
     if surface == "watcher" and expected == "observe":
         expected = "enforce"
     assert _probe(surface, env_value, cfg_value, home, monkeypatch) == expected

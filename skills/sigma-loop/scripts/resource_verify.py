@@ -210,7 +210,7 @@ def run(kind, commands, root, timeout, goal, *, config=None, repo=None, env=None
         if shed_after is None:                                   # #1769: an explicit argument wins, then the key
             shed_after = resolved.get("shed_after") or SHED_AFTER
         # observe only logs would-be actions (#1600): the shed acts in enforce mode alone
-        shedding = resolved.get("shed") != "off" and (resolved.get("mode") or "enforce") == "enforce"
+        shedding = resolved.get("shed") != "off" and guard.resolve_mode(config) == "enforce"   # #1794: env, config, default
         stop_path = os.path.join(lease.state_dir(), "shed", admitted.id + ".stop") if shedding else None
         meter = _Meter(lease, admitted.id, sample_gap, (stop_path, config, shed_after) if shedding else None)
         meter.start()
