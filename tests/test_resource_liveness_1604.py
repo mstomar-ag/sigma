@@ -457,3 +457,44 @@ def test_slots_reads_the_admission_tail_once(machine, tmp_path, monkeypatch):
     out = log.slots(d)
     assert "admission HELD" in out        # the directory is non-empty, so slots reached the tail
     assert len(calls) == 1
+
+
+# ------------------------------------------------------------------- 7. held admission with nothing to render (#1808)
+def _held_log(tmp_path, claimed):
+    tl = _load(ROOT / "tests" / "test_log.py", "test_log_for_1808")
+    d = tl._sdlc(tmp_path)
+    tl._config(d, tl.GITHUB_ON)
+    return tl, d
+
+
+def test_slots_says_held_with_no_goal_files(machine, tmp_path):
+    _tl, d = _held_log(tmp_path, False)
+    _hold_json(machine["state"], since=time.time() - 720)
+    out = _log().slots(d)
+    assert "nothing logged yet" in out and out.endswith("admission HELD 12m: memory")
+    _hold_json(machine["state"], held=False)
+    assert "admission HELD" not in _log().slots(d)
+
+
+def test_slots_says_held_with_goals_that_are_not_renderable(machine, tmp_path):
+    tl, d = _held_log(tmp_path, True)
+    tl._seed(d, "158", "claimed", now=time.time() - 10)      # claimed, no phase recorded: withheld
+    _hold_json(machine["state"], since=time.time() - 720)
+    out = _log().slots(d)
+    assert "none renderable" in out and out.endswith("admission HELD 12m: memory")
+
+
+def test_hold_json_absent_last_json_held_agrees_with_the_doctor(machine, tmp_path):
+    base = _sdlc(tmp_path)
+    _last_json(machine["state"], NOW, hold=True, since=NOW - 720)
+    assert not (machine["state"] / "hold.json").exists()
+    tail = _log().admission_tail({}, now=NOW)
+    view = live.hold_view(now=NOW)
+    assert view and tail == "admission HELD %dm: %s" % (view["age"] // 60, view["reason"])
+    # an explicit open hold.json is final, as in hold_view
+    (machine["state"] / "hold.json").write_text(json.dumps({
+        "state": "open", "since": NOW - 5, "reason": None, "resource": None, "retry_after": None}))
+    assert _log().admission_tail({}, now=NOW) == "" and live.hold_view(now=NOW) is None
+    # a corrupt hold.json falls back to last.json in both
+    (machine["state"] / "hold.json").write_text("{")
+    assert _log().admission_tail({}, now=NOW) != "" and live.hold_view(now=NOW) is not None

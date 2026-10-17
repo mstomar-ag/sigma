@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **`log.py slots` says `admission HELD` when nothing is claimed or renderable (#1808).** The admission clause is now on every `slots` answer (nothing logged, 0 active goals, none renderable), and when `hold.json` is absent it reads a held `last.json`, the same rule as the doctor row.
 - **Answering "which kind" in a label drain now declares the kind (#1806).** The question was built with kind `undeclared` while `answer` dispatched on `kind`, so the answer was only recorded; now `answer` declares the kind (`--dry-run` prints `would declare kind <k> on #N`) and the next `plan` asks the member's own question. The park reason shown by `plan` and the `label-held` stop no longer falls back to a Sigma answer or declaration comment.
 - **`loop.py verify` admission follows the one resource-mode resolver (#1804).** `SIGMA_RESOURCE_MODE=observe` now logs `would_hold` and admits with no config key, and `enforce` in the environment holds (exit 5) even when the config says `observe`.
 
