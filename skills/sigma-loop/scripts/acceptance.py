@@ -136,7 +136,12 @@ def record(sdlc_dir, goal, config=None, source=None, draft=None, verify_command=
     body = issue.get('body', '')
     if not body.strip():
         raise ValueError('goal body unavailable; restore source access before recording acceptance')
-    items = criteria(body)
+    try:
+        items = criteria(body)
+    except ValueError as exc:
+        if draft is None:           # #1811: an invalid body list is the thing to fix, or a draft replaces it
+            raise ValueError('%s; edit the issue body, or pass --draft with 3–7 criteria' % exc)
+        items = None
     drafted = items is None
     if drafted:
         if draft is None:

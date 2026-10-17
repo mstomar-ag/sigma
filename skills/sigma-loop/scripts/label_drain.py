@@ -324,7 +324,7 @@ def _done_when_missing(body, acceptance):
     try:
         return acceptance.criteria(body or "") is None
     except ValueError:
-        return False               # a malformed section is present, just not valid
+        return True                # #1811: a list acceptance refuses cannot be verified once picked
 
 
 def _unit(issue, features):
@@ -731,7 +731,7 @@ def render_plan(p):
     for c in w["cycles"]:
         out.append("  warning: cycle " + " -> ".join("#%d" % x for x in c))
     if w["no_done_when"]:
-        out.append("  warning: no Done when: " + ", ".join("#%d" % x for x in w["no_done_when"]))
+        out.append("  warning: no valid Done when (3-7 single-line items): " + ", ".join("#%d" % x for x in w["no_done_when"]))
     if w["paid_step"]:
         out.append("  warning: declares a paid step: " + ", ".join("#%d" % x for x in w["paid_step"]))
     for m in w["parked_not_briefed"]:

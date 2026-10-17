@@ -254,3 +254,32 @@ def test_paragraph_cannot_hide_later_acceptance_criteria(tmp_path):
 def test_empty_checkboxes_are_not_acceptance_statements(tmp_path):
     with pytest.raises(ValueError):
         capture(tmp_path, source=Source('## Done when\n- [ ]\n- [ ]\n- [ ]\n'))
+
+
+def test_a_valid_draft_is_recorded_when_the_body_list_is_invalid(tmp_path):
+    """#1811: the refusal says to pass --draft, so --draft must work when the body's own list is short."""
+    a = load('acceptance')
+    source = Source('## Done when\n- [ ] Only one\n')
+    draft = tmp_path / 'draft.md'
+    draft.write_text(CRITERIA)
+    a.record(tmp_path, '42', source=source, config={}, draft=draft)
+    assert a.read(tmp_path, '42')['criteria'] == ['First works.', 'Second refuses bad input.', 'Third recovers.']
+    assert source.posts == 1
+
+
+def test_an_invalid_body_list_without_a_draft_names_the_body_as_the_thing_to_fix(tmp_path):
+    a = load('acceptance')
+    with pytest.raises(ValueError) as err:
+        a.record(tmp_path, '42', source=Source('## Done when\n- [ ] Only one\n'), config={})
+    assert 'issue body' in str(err.value) and '--draft' in str(err.value)
+    assert not (tmp_path / 'acceptance/42.md').exists()
+
+
+def test_an_invalid_draft_still_refuses_when_the_body_list_is_invalid(tmp_path):
+    a = load('acceptance')
+    draft = tmp_path / 'draft.md'
+    draft.write_text('## Done when\n- [ ] one\n')
+    source = Source('## Done when\n- [ ] Only one\n')
+    with pytest.raises(ValueError):
+        a.record(tmp_path, '42', source=source, config={}, draft=draft)
+    assert source.posts == 0 and not (tmp_path / 'acceptance/42.md').exists()

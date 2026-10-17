@@ -332,6 +332,18 @@ def test_cross_unit_cycle_and_missing_done_when_are_warned_with_numbers(tmp_path
     assert w["paid_step"] == [4]
 
 
+def test_a_one_item_or_multiline_done_when_is_warned_like_a_missing_one(tmp_path):
+    """#1811: acceptance refuses these lists, so a member carrying one cannot be verified once picked."""
+    issues = [
+        _goal(1, body="## Done when\n- [ ] only one\n"),
+        _goal(2, body="## Done when\n- [ ] a\n- [ ] b\n- [ ] c\n- [ ] d\n- [ ] e\n- [ ] f\n- [ ] g\n- [ ] h\n"),
+        _goal(3, body="## Done when\nprose, not a checklist\n"),
+        _goal(4),
+    ]
+    p, _ = _plan(tmp_path, issues)
+    assert p["warnings"]["no_done_when"] == [1, 2, 3]
+
+
 # --- status ---------------------------------------------------------------------------------------
 
 def test_status_gives_one_reason_per_open_member_and_is_not_drained(tmp_path, capsys):
