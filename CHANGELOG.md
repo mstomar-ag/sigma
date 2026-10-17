@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 - **Doctor shows the resource rows on a default install (#1786).** The rows appear whenever the resolved resource mode is not `off` (an empty config resolves to `enforce`), instead of only when a mode was named or parallel goals were on.
+- The controls runner matches a FAILED line on the full test node id, so a test whose name is a prefix of another's can no longer pass for it (#1787).
 - **Spend triage recognises a dollar sign and more currency codes after the number (#1756).** `40$`, `40 $`, `40 AUD`, `500 JPY` and similar three-letter codes next to a compute word now park as a spend phrase; non-money units such as `40 MB` and amounts inside a fenced block still arm.
 - **The lease CLI reads the `resource` config block (#1733).** `resource_lease.py admit|release|status|wait` takes its mode, ttl and limits from the project's `resource` block, like the other resource callers, instead of its built-in defaults only.
 - **The session lease is renewed while its session runs (#1740).** `resource_guard.session_lease` starts a daemon renewer thread (default every ttl/3, stopped before the release), so a long session is no longer reclaimed as expired.

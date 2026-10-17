@@ -65,3 +65,13 @@ def test_a_control_whose_baseline_fails_is_rejected(tmp_path):
 def test_a_break_that_errors_instead_of_failing_is_rejected(tmp_path):
     ok, detail = rc.run_control(_control(new="VALUE = (\n"), root=_fake_root(tmp_path))
     assert not ok and "no FAILED line" in detail
+
+
+def test_failed_line_matches_the_exact_node_id_not_a_prefix_name():
+    """#1787: a FAILED line for test_ab must not count as a red for test_a."""
+    out = "FAILED tests/test_mod.py::test_ab - assert False\n"
+    assert not rc._failed_line(out, "tests/test_mod.py::test_a")
+    assert rc._failed_line(out, "tests/test_mod.py::test_ab")
+    assert rc._failed_line("FAILED tests/test_mod.py::test_a\n", "tests/test_mod.py::test_a")
+    assert rc._failed_line("FAILED tests/test_mod.py::test_p[x] - boom\n", "tests/test_mod.py::test_p")
+    assert not rc._failed_line("FAILED tests/other.py::test_a - boom\n", "tests/test_mod.py::test_a")

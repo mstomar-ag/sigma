@@ -45,8 +45,13 @@ def _pytest(copy, test):
 
 def _failed_line(out, test):
     """True when pytest reported the named test as FAILED (not a collection/setup ERROR)."""
-    node = test.split("::")[-1].split("[")[0]
-    return any(line.startswith("FAILED ") and node in line for line in out.splitlines())
+    node = test.split("[")[0]
+    for line in out.splitlines():
+        if line.startswith("FAILED "):
+            rest = line[len("FAILED "):]
+            if rest == node or rest.startswith((node + " ", node + "[")):
+                return True
+    return False
 
 
 def run_control(control, root=ROOT):
