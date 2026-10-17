@@ -539,6 +539,7 @@
     "skills/sigma-loop/scripts/state.py::park",
     "skills/sigma-loop/scripts/state.py::phase_end_lock",
     "skills/sigma-loop/scripts/state.py::record_phase_end",
+    "skills/sigma-loop/scripts/state.py::set_label_checked",
     "skills/sigma-loop/scripts/state.py::start_run",
     "skills/sigma-loop/scripts/supervise_daemon.py::_codex_main",
     "skills/sigma-loop/scripts/supervise_daemon.py::main",
@@ -570,6 +571,7 @@
     "skills/sigma-loop/scripts/state.py::add_tokens",
     "skills/sigma-loop/scripts/state.py::advance_cursor",
     "skills/sigma-loop/scripts/state.py::record_phase_end",
+    "skills/sigma-loop/scripts/state.py::set_label_checked",
     "skills/sigma-loop/scripts/state.py::start_run",
     "skills/sigma-scope/scripts/assign.py::_start_drain"
    ]
@@ -588,6 +590,7 @@
     "skills/sigma-loop/scripts/state.py::add_tokens",
     "skills/sigma-loop/scripts/state.py::advance_cursor",
     "skills/sigma-loop/scripts/state.py::record_phase_end",
+    "skills/sigma-loop/scripts/state.py::set_label_checked",
     "skills/sigma-loop/scripts/state.py::start_run",
     "skills/sigma-scope/scripts/assign.py::_start_drain"
    ]
