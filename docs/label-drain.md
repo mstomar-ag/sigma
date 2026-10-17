@@ -88,8 +88,9 @@ the label (at most 50 per run) so it is picked first, and says so on stderr; one
 stays out with its reason and the member stays held. Nothing is skipped silently.
 
 Work filed during the drain does not carry the label, so it is not picked by this run. When the run
-stops, `loop.py` lists what was filed during the drain without the label, so a person can label it for
-a later run. The stop is `label-held` when open members remain that were not picked, with a reason
+stops, `loop.py` lists what was filed since the label's start check first passed (the drain start;
+`start-run` sets it too) without the label, so a person can label it for a later run. With no drain start
+recorded it lists nothing. The stop is `label-held` when open members remain that were not picked, with a reason
 per member, and `backlog-empty` when the label has no open members; then the label can be deleted
 by a person.
 

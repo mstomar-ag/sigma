@@ -479,10 +479,28 @@ def load_label_checked(sdlc_dir):
     return m.group(1).strip() if m else ""
 
 
-def set_label_checked(sdlc_dir, label):
+def load_label_checked_at(sdlc_dir):
+    """#1832: epoch seconds the `label_checked` label's start check first passed, 0.0 when unrecorded."""
+    f = pathlib.Path(sdlc_dir) / "state" / "STATE.md"
+    try:
+        return _read_float(f.read_text(), "label_checked_at")
+    except FileNotFoundError:
+        return 0.0
+
+
+def set_label_checked(sdlc_dir, label, now=None):
     """#1805: record the label the start check passed for, beside `run_iteration`, through the one
-    locked cursor writer. Every other writer edits its own lines by key, so this line survives them."""
-    _patch_cursor(sdlc_dir, lambda text: _set_line(text, "label_checked", label))
+    locked cursor writer. Every other writer edits its own lines by key, so this line survives them.
+    #1832: `label_checked_at` is the drain start the documented gesture (no `start-run`) can know; a
+    re-pass for the same label keeps the first time, a different label starts its own."""
+    stamp = time.time() if now is None else float(now)
+
+    def patch(text):
+        m = re.search(r"^label_checked:[ \t]*(.*)$", text, re.MULTILINE)
+        kept = m and m.group(1).strip() == label and _read_float(text, "label_checked_at")
+        text = _set_line(text, "label_checked", label)
+        return text if kept else _set_line(text, "label_checked_at", stamp)
+    _patch_cursor(sdlc_dir, patch)
 
 
 def _drop_line(text, key):
@@ -910,6 +928,7 @@ def start_run(sdlc_dir, now=None):
         text = _set_line(text, "run_codex_raw_tokens", 0)
         text = _set_line(text, "run_codex_token_credits", "{}")
         text = _set_line(text, "run_phase_ends", "[]")
+        text = _drop_line(text, "label_checked_at")     # #1832: its start time goes with it
         return _drop_line(text, "label_checked")        # #1823: a new run has passed no label check yet
     _patch_cursor(sdlc_dir, patch)
 

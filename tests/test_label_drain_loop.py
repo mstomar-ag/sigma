@@ -7,6 +7,7 @@ stateful fake `gh` of the arm tests. Nothing here touches a network or a model.
 """
 import os
 import tempfile
+import time
 
 import pytest
 
@@ -501,3 +502,53 @@ def test_a_goal_filed_after_the_recorded_drain_start_is_listed(monkeypatch, caps
 def test_a_goal_filed_before_the_recorded_drain_start_is_not_listed(monkeypatch, capsys):
     err = _note(monkeypatch, capsys, 1791590400.0, "2026-10-01T00:00:00Z")
     assert "filed during the drain" not in err
+
+
+# --- the drain start under the documented gesture (#1832) ----------------------------------------
+
+def _stamp(offset):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + offset))
+
+
+def _documented_gesture_stop(monkeypatch, capsys, made):
+    """No `start-run`: the start is recorded only by the start check, which `_label_not_ready` runs."""
+    lp = _loop()
+    stub = Stub(members=[{"number": 5, "verdict": "armed", "reason": "in progress (claimed by a run)"}])
+    lp._label_drain = lambda: stub
+    lp._LABEL_PULLED.clear()
+    monkeypatch.setattr(lp.sources, "fetch_issues_rest",
+                        lambda *a, **k: [dict(_issue(7), created_at=made)])
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        src._run = object()
+        stub.members = []
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None       # the start check passes
+        assert lp.state.load_cursor(base)["run_started_at"] == 0.0           # and no run start exists
+        stub.members = [{"number": 5, "verdict": "armed", "reason": "in progress (claimed by a run)"}]
+        assert lp._label_drained_note(base, src, _cfg(lp, base), ()) == "label-held"
+    return capsys.readouterr().err
+
+
+def test_documented_gesture_lists_a_goal_filed_after_the_first_pick(monkeypatch, capsys):
+    err = _documented_gesture_stop(monkeypatch, capsys, _stamp(+3600))
+    assert "filed during the drain, not in the label: #7" in err
+
+
+def test_documented_gesture_does_not_list_a_goal_filed_before_the_first_pick(monkeypatch, capsys):
+    err = _documented_gesture_stop(monkeypatch, capsys, _stamp(-3600))
+    assert "has 1 open member" in err and "filed during the drain" not in err
+
+
+def test_a_repeated_pass_keeps_the_first_start_and_a_new_label_gets_its_own():
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        lp.state.set_label_checked(base, "label-a", now=1000.0)
+        lp.state.set_label_checked(base, "label-a", now=2000.0)
+        assert lp.state.load_label_checked_at(base) == 1000.0
+        lp.state.set_label_checked(base, "label-b", now=3000.0)
+        assert lp.state.load_label_checked_at(base) == 3000.0
+        lp.state.set_label_checked(base, "label-b", now=4000.0)
+        lp.state.start_run(base, now=5000.0)
+        assert lp.state.load_label_checked_at(base) == 0.0 and lp.state.load_label_checked(base) == ""
