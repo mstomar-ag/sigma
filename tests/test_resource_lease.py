@@ -669,3 +669,32 @@ def test_non_session_lease_measures_only_its_pid(lease, monkeypatch):
     monkeypatch.setattr(lease, "take_descendants", lambda pid: [101])
     lease.box["foot"].update({100: 14, 101: 400})
     assert lease._seen({"kind": "verify", "pid": 100, "peak": 0}) == 14
+
+
+def test_peak_taken_while_the_session_runs_is_what_release_records(lease, monkeypatch):
+    """#1816: the tree is gone at release; the observation is the peak sampled while it lived."""
+    monkeypatch.setattr(lease, "take_descendants", lambda pid: [101] if pid == 100 else [])
+    lease.box["foot"].update({100: 14, 101: 400})
+    got = lease.admit("session", 1, "r", "supervisor:x", pid=os.getpid(), now=1000.0)
+    path = pathlib.Path(lease.state_dir()) / "leases" / (got.id + ".json")
+    record = json.loads(path.read_text())
+    path.write_text(json.dumps(dict(record, pid=100)))
+    monkeypatch.setattr(lease, "pid_alive", lambda pid: True)
+    assert lease.note_peak(got.id) is True
+    lease.box["foot"].pop(101)  # the session exited; only the supervisor remains
+    lease.release(got.id)
+    ring = json.loads((pathlib.Path(lease.state_dir()) / "observed.json").read_text())
+    assert ring["session"] == [414]
+
+
+def test_real_descendants_are_all_found():
+    import subprocess
+    sys.path.insert(0, str(SCRIPTS))
+    import resource_guard as guard
+    kids = [subprocess.Popen(["sleep", "20"]) for _ in range(6)]
+    try:
+        assert {k.pid for k in kids} <= set(guard.descendants(os.getpid()))
+    finally:
+        for k in kids:
+            k.kill()
+            k.wait()

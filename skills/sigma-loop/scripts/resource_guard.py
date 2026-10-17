@@ -326,7 +326,7 @@ def _darwin_children(pid):
     lib.proc_listchildpids.argtypes, lib.proc_listchildpids.restype = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int], ctypes.c_int
     buf = (ctypes.c_int * 4096)()
     got = lib.proc_listchildpids(pid, buf, ctypes.sizeof(buf))
-    return [buf[i] for i in range(max(got, 0) // ctypes.sizeof(ctypes.c_int)) if buf[i] > 0]
+    return [buf[i] for i in range(min(max(got, 0), len(buf))) if buf[i] > 0]  # got is a pid count
 
 
 def _linux_parents(root="/"):
@@ -599,7 +599,8 @@ def session_mode(config=None, env=None):
 
 
 @contextlib.contextmanager
-def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None, renew_every=None, clock=time.time):
+def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None, renew_every=None, clock=time.time,
+                  sample_every=30.0):
     """Hold one "session" lease around a model-session spawn. Yields None (mode off), a Grant, or a Hold.
 
     The caller treats a Hold as its own existing "could not start now" outcome. The lease is released in `finally`,
@@ -607,7 +608,7 @@ def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None, renew_
     table error. On a platform that cannot take a lease (or a table error): observe proceeds unguarded, enforce yields a
     Hold that says so (refuse loudly rather than a silent half-guarantee).
 
-    While a Grant is held a daemon thread renews the lease every `renew_every` seconds (default ttl/3), so a session
+    While a Grant is held a daemon thread samples the lease's peak every `sample_every` seconds and renews the lease every `renew_every` seconds (default ttl/3), so a session
     longer than the ttl keeps it; the thread is stopped and joined before release. Off, a Hold, an error: no thread.
     """
     mode = session_mode(config, env)
@@ -632,11 +633,19 @@ def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None, renew_
             every = (ttl if _number(ttl) and ttl > 0 else lease.DEFAULT_TTL) / 3.0
 
         def _renew():
-            while not stop.wait(every):
+            # the peak is sampled while the session runs (#1816): its tree is gone by the time the lease is released
+            tick, last = min(every, sample_every), clock()
+            while not stop.wait(tick):
                 try:
-                    lease.renew(got.id, now=clock(), env=env)
-                except Exception:  # noqa: BLE001 - a missed renewal costs only the ttl margin
+                    lease.note_peak(got.id, env=env)
+                except Exception:  # noqa: BLE001 - a missed sample costs only precision
                     pass
+                if clock() - last >= every or every <= tick:
+                    try:
+                        lease.renew(got.id, now=clock(), env=env)
+                    except Exception:  # noqa: BLE001 - a missed renewal costs only the ttl margin
+                        pass
+                    last = clock()
         thread = threading.Thread(target=_renew, name="lease-renewer", daemon=True)
         thread.start()
     try:

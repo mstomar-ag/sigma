@@ -540,3 +540,16 @@ def test_session_lease_is_released_per_session_while_the_supervisor_lives(state)
         assert leases(state) == []  # released at session end, the supervisor still running
     ring = json.loads((pathlib.Path(state) / "observed.json").read_text())
     assert len(ring["session"]) == 2
+
+
+def test_session_lease_samples_the_peak_while_the_session_runs(state):
+    import time
+    guard = _load("resource_guard", "rg_cold5")
+    lease = with_sample(guard)
+    size = {"v": 300 << 20}
+    lease.take_footprint = lambda pid: (size["v"], False)
+    with guard.session_lease("supervisor", "r2", sample_every=0.02, renew_every=5) as got:
+        time.sleep(0.3)
+        size["v"] = 10 << 20  # the tree has shrunk by the time the lease is released
+    ring = json.loads((pathlib.Path(state) / "observed.json").read_text())
+    assert ring["session"] == [300 << 20]

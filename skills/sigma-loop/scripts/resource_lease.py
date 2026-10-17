@@ -458,6 +458,23 @@ def release(lease_id, env=None):
         return True
 
 
+def note_peak(lease_id, env=None):
+    """Raise a live lease's recorded peak to what it measures now (#1816): a session's tree is gone by release, so the
+    peak has to be taken while it runs. False when the lease is unknown, dead or the lock is busy."""
+    directory = state_dir(env)
+    path = os.path.join(directory, "leases", os.path.basename(str(lease_id)) + ".json")
+    with _locked(directory) as got:
+        if not got or not os.path.exists(path):
+            return False
+        record = dict(_load_leases(directory)).get(path)
+        if record is None or not pid_alive(record["pid"]) or reused(record):
+            return False
+        seen = _seen(record, _held_pids(directory, record.get("id")))
+        if seen > record.get("peak", 0):
+            _atomic_write(path, dict(record, peak=seen))
+        return True
+
+
 def renew(lease_id, now=None, env=None):
     """Push an existing lease's start to `now` so a long session outlives its ttl. False when it cannot be renewed.
 
