@@ -1280,6 +1280,11 @@ def _blocker_rank_row(cfg, sdlc_dir, now=None):
             when = "%s; %d not read" % (when, unread)
         if n == 0:
             return _chk("blockers ranked below what they block: 0 (%s)" % when, True, "")
+        refused = int(st.get("refused") or 0)
+        if refused and refused >= n:    # #1707: every remaining one is an ownership refusal, by design
+            return _chk("blockers ranked below what they block: %d (%s); %d not raised: not a Sigma issue"
+                        % (n, when, refused), True,
+                        "give the blocker the Sigma labels, or leave it: the hard-stop rule is working as designed")
         since = float(st.get("first_seen_nonzero") or now)
         limit = 2 * loop._reconcile_ttl_minutes(cfg) * 60
         stale = (now - since) > limit
@@ -5724,6 +5729,9 @@ def _autonomy_state(cfg, sdlc_dir=None):
                     lines.append("%s / %s: level %d unreachable: needs %d comparisons, %d recorded in the last %d days"
                                  % (r["qkind"], r["area"] or "-", r["next_level"], need, recent, days))
         lines += _load_loop_script("autonomy").category_notes(sdlc_dir if sdlc_dir is not None else ".sdlc", cfg)
+        for k in _load_loop_script("label_drain").kind_summary(sdlc_dir if sdlc_dir is not None else ".sdlc", cfg):
+            lines.append("run label kind %s: %d answer(s), level %d, rule covers: %s"
+                         % (k["kind"], k["answers"], k["level"], "yes" if k["covered"] else "no"))
         return head + "".join("\n      " + l for l in lines)
     except Exception as exc:  # a readout never fails the dashboard
         return "unreadable (%s)" % type(exc).__name__
