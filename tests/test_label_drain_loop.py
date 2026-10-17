@@ -312,6 +312,46 @@ def test_a_recorded_label_with_no_run_started_is_checked_again():
         assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 2
 
 
+def test_start_run_clears_the_recorded_label():
+    """#1823: a new run starts with no check passed, so start-run drops `label_checked`."""
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        lp.state.set_label_checked(base, "label-a")
+        assert lp.state.load_label_checked(base) == "label-a"
+        lp.state.start_run(base, now=5.0)
+        assert lp.state.load_label_checked(base) == ""
+
+
+def test_start_run_leaves_every_other_line_byte_identical():
+    """#1823: only `label_checked` goes; with or without it, the rest of STATE.md matches a run that never had it."""
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        with_label, without = _base(d + "/a", mirror=CHAIN_OPEN), _base(d + "/b", mirror=CHAIN_OPEN)
+        lp.state.set_label_checked(with_label, "label-a")
+        lp.state.start_run(with_label, now=5.0)
+        lp.state.start_run(without, now=5.0)
+        read = lambda b: open(os.path.join(b, "state", "STATE.md")).read()
+        assert "label_checked" not in read(with_label)
+        assert read(with_label) == read(without)
+
+
+def test_next_label_refuses_after_start_run_even_when_a_pick_raised_the_iteration():
+    """#1823: A passes, start-run, an unscoped pick raises run_iteration, A is no longer ready -> refused."""
+    lp, stub = _loop(), Stub()
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        a = _scoped_to("label-a")(["1"], live=CHAIN_OPEN)
+        assert lp._label_not_ready(base, a, _cfg(lp, base)) is None and stub.plans == 1
+        lp.state.start_run(base, now=5.0)
+        _set_run_iteration(base, 1)                  # an unscoped pick in the new run
+        stub.members = [{"number": 1, "verdict": "unarmed", "reason": "unarmed"}]
+        refusal = lp._label_not_ready(base, a, _cfg(lp, base))
+    assert refusal and "label-a is not ready" in refusal
+    assert stub.plans == 2
+
+
 def test_a_refusal_does_not_record_the_label():
     lp, stub = _loop(), Stub(members=[{"number": 1, "verdict": "unarmed", "reason": "unarmed"}])
     lp._label_drain = lambda: stub

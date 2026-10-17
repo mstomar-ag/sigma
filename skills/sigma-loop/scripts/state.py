@@ -485,6 +485,11 @@ def set_label_checked(sdlc_dir, label):
     _patch_cursor(sdlc_dir, lambda text: _set_line(text, "label_checked", label))
 
 
+def _drop_line(text, key):
+    """Remove the `key:` line when present; text without it comes back unchanged (no line is added)."""
+    return re.sub(rf"^{re.escape(key)}:.*\n?", "", text, flags=re.MULTILINE)
+
+
 def _set_line(text, key, value):
     line_re = re.compile(rf"^{re.escape(key)}:.*$", re.MULTILINE)
     new = f"{key}: {value}"
@@ -904,7 +909,8 @@ def start_run(sdlc_dir, now=None):
         text = _set_line(text, "run_token_credits", "[]")
         text = _set_line(text, "run_codex_raw_tokens", 0)
         text = _set_line(text, "run_codex_token_credits", "{}")
-        return _set_line(text, "run_phase_ends", "[]")
+        text = _set_line(text, "run_phase_ends", "[]")
+        return _drop_line(text, "label_checked")        # #1823: a new run has passed no label check yet
     _patch_cursor(sdlc_dir, patch)
 
 

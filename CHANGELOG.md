@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **`loop.py start-run` clears the recorded `label_checked` (#1823).** It survived a new run, so after `start-run` and an unscoped pick `next --label A` skipped the readiness check although no check had passed in that run. The line is now removed; every other `state/STATE.md` line is unchanged.
 - **The changelog layout duplicate-control test seeds its own repeated entry (#1828).** It no longer depends on the live Unreleased entries naming one issue.
 - **The `label-held` stop no longer lists goals filed before the drain as filed during it (#1809).** With no recorded run start the window began at the epoch, so every armed goal outside the label matched; with no start the line is now skipped.
 - **A held verify never advertises a retry sooner than the picker's 30 s floor, and the 1.0.16 whats-new sentence about the label-drain keys is corrected (#1813).** `RESOURCE-HOLD` printed `retry_after=4s` while `next` printed ~30 s; both now use `HOLD_RETRY_FLOOR`. The `label_drain` block ships with its defaults in the init template, so it is no longer listed as absent.
