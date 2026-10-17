@@ -3927,6 +3927,22 @@
       "count": 2,
       "gate": "opt-in; upkeep.enabled and conflicts.resolve agent; the one sweep counter file under the local state directory, written to a temporary name then replaced",
       "risk": "medium"
+    },
+    {
+      "path": "tools/resource_controls.py",
+      "function": "apply_break",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "resource guard controls runner (CI and by hand); writes only inside a temporary copy it creates, never the checkout",
+      "risk": "medium"
+    },
+    {
+      "path": "tools/resource_controls.py",
+      "function": "run_control",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "resource guard controls runner (CI and by hand); writes only inside a temporary copy it creates, never the checkout",
+      "risk": "medium"
     }
   ]
 }
