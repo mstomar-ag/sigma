@@ -3,11 +3,8 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
-<<<<<<< HEAD
 - **The verify shed follows the one resource-mode resolver (#1794).** `SIGMA_RESOURCE_MODE=observe` no longer lets a critical machine stop a verify, and `enforce` in the environment arms the shed even when the config says `off`.
-=======
 - **Spend triage recognises a nationality before "dollars" (#1795).** `40 US dollars`, `40 Canadian dollars` and `forty US dollars` next to a compute word now park as a spend phrase; without a compute word, or inside a fenced block, they still arm.
->>>>>>> fork/feature/rulebook-learning
 - **The resource guard is calibrated on a real macOS host and in a 2 GiB Linux container (#1772).** Both evidence records are measured. The runs found two Linux gaps, fixed here: a container's total memory is its cgroup limit (the host's memory made every verify wait forever), and the footprint meter reads `/proc` when `ps` is not installed. The five defaults stay uncalibrated.
 - **Doctor shows the resource rows on a default install (#1786).** The rows appear whenever the resolved resource mode is not `off` (an empty config resolves to `enforce`), instead of only when a mode was named or parallel goals were on.
 - The controls runner matches a FAILED line on the full test node id, so a test whose name is a prefix of another's can no longer pass for it (#1787).
