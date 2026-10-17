@@ -3817,6 +3817,14 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag_cycles.py",
+      "function": "post",
+      "rule": "gh-api-write",
+      "count": 1,
+      "gate": "discovery.dag.mode is not off and discovery.dag.cycle_comment is true; runs only after a refresh that saved the map; one comment per distinct dependency cycle on its lowest-numbered open member, skipped when the member's comments already hold the cycle's marker; comments only, never a label, claim or board write; at most 20 cycles per call",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/dag_store.py",
       "function": "refresh_lock",
       "rule": "fs-write",
