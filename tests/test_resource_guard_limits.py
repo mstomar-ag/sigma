@@ -415,3 +415,17 @@ def test_oversized_cpu_reserve_reads_as_derived_with_a_note():
     assert any("cpu_reserve_cores" in n for n in limits.notes)
     ok = g.derive(smp(g, cpus=8), {"cpu_reserve_cores": 7})
     assert ok.cpu_reserve == 7 and not ok.notes
+
+
+def test_shed_after_defaults_to_three_and_reads_a_valid_value():
+    g = guard()
+    assert g.derive(smp(g), None).shed_after == 3
+    assert g.derive(smp(g), {"shed_after": None}).shed_after == 3
+    assert g.derive(smp(g), {"shed_after": 5}).shed_after == 5
+
+
+@pytest.mark.parametrize("bad", [0, -2, "3", True, 2.5, [], {}], ids=repr)
+def test_shed_after_bad_values_read_as_derived_with_a_note(bad):
+    g = guard()
+    limits = g.derive(smp(g), {"shed_after": bad})
+    assert limits.shed_after == 3 and len(limits.notes) == 1 and "shed_after" in limits.notes[0]

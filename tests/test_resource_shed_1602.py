@@ -170,3 +170,18 @@ def test_end_to_end_shed_gives_exit_5_shed_no_evidence_and_the_rerun_records_evi
     (pathlib.Path(sdlc) / "config.json").write_text(json.dumps(cfg))
     assert loop.verify_goal(sdlc, goal) == 0
     assert (pathlib.Path(sdlc) / "state" / "verify" / "0001.json").exists()
+
+
+@unix_only
+def test_configured_shed_after_sets_the_critical_samples_before_a_shed(env, tmp_path):
+    """#1769: `resource.shed_after` is read from the config; unset keeps 3. Control: ignore the key and this goes red."""
+    readings = iter([False, False, False] + [True] * 5 + [False] * 300)   # admit reads, then five critical samples
+
+    def sample():
+        crit = next(readings)
+        return env.lease.guard.Sample(total=16 * GIB, available=(1 if crit else 12) * GIB, swap_used=0, swap_total=0,
+                                      swapouts=0, swapouts_at=0.0, pressure=1, cpu_count=8, load1=0.0)
+    env.lease.take_sample = sample
+    out = env.run("verify", "sleep 1.5", str(tmp_path), 30, "g1", sample_gap=0.1, term_grace=1,
+                  config={"shed_after": 9})
+    assert not out.shed and out.hold is None        # five critical samples are fewer than the configured nine

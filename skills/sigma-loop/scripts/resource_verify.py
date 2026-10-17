@@ -160,7 +160,7 @@ def _want(guard, lease, config, literal):
 
 
 def run(kind, commands, root, timeout, goal, *, config=None, repo=None, env=None, sample_gap=SAMPLE_GAP,
-        tail_bytes=TAIL_BYTES, term_grace=None, run_group=None, shed_after=SHED_AFTER):
+        tail_bytes=TAIL_BYTES, term_grace=None, run_group=None, shed_after=None):
     """Admit, run each command in its own process group under `timeout` seconds, measure, release. -> Outcome."""
     guard, lease, bounded = _sibling("resource_guard"), _sibling("resource_lease"), _sibling("bounded_run")
     commands = [commands] if isinstance(commands, str) else list(commands)
@@ -182,6 +182,8 @@ def run(kind, commands, root, timeout, goal, *, config=None, repo=None, env=None
         child_env[ENV_WORKERS] = str(n)
         child_env[ENV_XDIST] = str(n)
         resolved = guard.resolve_config(config)[0]
+        if shed_after is None:                                   # #1769: an explicit argument wins, then the key
+            shed_after = resolved.get("shed_after") or SHED_AFTER
         # observe only logs would-be actions (#1600): the shed acts in enforce mode alone
         shedding = resolved.get("shed") != "off" and (resolved.get("mode") or "enforce") == "enforce"
         stop_path = os.path.join(lease.state_dir(), "shed", admitted.id + ".stop") if shedding else None

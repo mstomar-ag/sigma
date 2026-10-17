@@ -1,0 +1,55 @@
+"""#1769 - the controls runner detects a red, and refuses a break that does not apply or a test that stays green.
+
+Control: make run_control return ok on a green test and test_a_test_that_stays_green_is_not_ok goes red."""
+import importlib.util
+import pathlib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+_spec = importlib.util.spec_from_file_location("resource_controls", ROOT / "tools" / "resource_controls.py")
+rc = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(rc)
+
+
+def _fake_root(tmp_path):
+    (tmp_path / "skills").mkdir()
+    (tmp_path / "skills" / "mod.py").write_text("VALUE = 1\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_mod.py").write_text(
+        "import sys, pathlib\nsys.path.insert(0, str(pathlib.Path(__file__).parent.parent / 'skills'))\n"
+        "import mod\n\ndef test_value():\n    assert mod.VALUE == 1\n\ndef test_always():\n    assert True\n")
+    return tmp_path
+
+
+def _control(**over):
+    base = {"id": "x", "file": "skills/mod.py", "old": "VALUE = 1", "new": "VALUE = 2",
+            "test": "tests/test_mod.py::test_value"}
+    base.update(over)
+    return base
+
+
+def test_a_known_good_break_is_detected_red(tmp_path):
+    ok, detail = rc.run_control(_control(), root=_fake_root(tmp_path))
+    assert ok, detail
+
+
+def test_a_test_that_stays_green_is_not_ok(tmp_path):
+    ok, detail = rc.run_control(_control(test="tests/test_mod.py::test_always"), root=_fake_root(tmp_path))
+    assert not ok and "green" in detail
+
+
+def test_a_patch_that_does_not_apply_is_not_ok(tmp_path):
+    ok, detail = rc.run_control(_control(old="NOT THERE"), root=_fake_root(tmp_path))
+    assert not ok and "did not apply" in detail
+
+
+def test_the_checkout_is_never_written(tmp_path):
+    root = _fake_root(tmp_path)
+    rc.run_control(_control(), root=root)
+    assert (root / "skills" / "mod.py").read_text() == "VALUE = 1\n"
+
+
+def test_every_listed_control_names_an_existing_test_and_an_applicable_patch(tmp_path):
+    for control in rc.load():
+        assert (ROOT / control["test"].split("::")[0]).is_file(), control["id"]
+        text = (ROOT / control["file"]).read_text(encoding="utf-8")
+        assert text.count(control["old"]) == 1, control["id"]
