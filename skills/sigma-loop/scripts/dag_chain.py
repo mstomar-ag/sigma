@@ -272,3 +272,44 @@ def stuck(sdlc, now=None):
                     "waiting": sorted(set(c[1:]) | set(waiting)), "kind": g.nodes[c[0]].kind,
                     "cycle": sorted(c)})
     return sorted(out, key=lambda s: (-len(s["waiting"]), s["root"]))
+
+
+LONGEST_TOP = 3
+
+
+def longest(sdlc, by="length", now=None):
+    """The end goals to work on first (#1591): `{"by", "ends": [top three], "excluded": [...]}`, from the
+    stored map only. An end goal is an unresolved issue with no unresolved dependent and at least one
+    unresolved blocker; its members are its unresolved closure plus itself. Default order: priority rank
+    (P0 first), deeper chain, more members, earlier `updated_at` of any member (a map node carries no
+    creation time; a member without one is last), lower number. `by="freeing"` puts the member count
+    first. An end in or downstream of a dependency cycle is not offered; it is listed under `excluded`
+    with the cycle. Writes nothing and reads no GitHub. ChainError as `chain`."""
+    now = time.time() if now is None else now
+    m, _md, _c = _open_map(sdlc, now)
+    g = _graph(m)
+    stamp = {n["number"]: dag_store.parse_ts(n.get("updated_at")) for n in m["nodes"]}
+    cyc = [sorted(c) for c in dag_core.cycles(g)]
+    in_cycle = {n for c in cyc for n in c}
+    found, excluded = [], []
+    for n, node in sorted(g.nodes.items()):
+        if g.resolved(n) or node.kind != "issue" or any(not g.resolved(d) for d in g.dependents[n]):
+            continue
+        clo = dag_core.closure(g, n)
+        if not clo and n not in in_cycle:
+            continue
+        reach = set(clo) | {n}
+        hit = [c for c in cyc if any(x in reach for x in c)]
+        if hit:
+            excluded.append({"goal": n, "cycle": hit[0]})
+            continue
+        ts = [stamp[x] for x in reach if stamp.get(x) is not None]
+        found.append({"goal": n, "prio": g.rank(n), "depth": dag_core.depth(g, n), "members": len(reach),
+                      "oldest": min(ts) if ts else None})
+    age = lambda e: (1, 0) if e["oldest"] is None else (0, e["oldest"])        # noqa: E731
+    if by == "freeing":
+        key = lambda e: (-e["members"], e["prio"], -e["depth"], age(e), e["goal"])      # noqa: E731
+    else:
+        key = lambda e: (e["prio"], -e["depth"], -e["members"], age(e), e["goal"])      # noqa: E731
+    found.sort(key=key)
+    return {"by": by, "ends": found[:LONGEST_TOP], "candidates": len(found), "excluded": excluded}

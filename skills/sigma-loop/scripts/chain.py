@@ -77,7 +77,9 @@ dag_core = dag_chain.dag_core
 SCHEMA = "chain-plan/1"
 USAGE = ("usage: chain.py plan <sdlc_dir> <N> [--json]\n"
          "  Plan the chain of open prerequisites behind goal N, deepest first. Read-only toward GitHub;\n"
-         "  writes only .sdlc/state/chains/c<N>.json (numbers and labels, no titles or bodies).")
+         "  writes only .sdlc/state/chains/c<N>.json (numbers and labels, no titles or bodies).\n"
+         "       chain.py plan <sdlc_dir> --longest [--by freeing] [--json]\n"
+         "  Offer the top three end goals to work on first, from the stored map only. Writes nothing.")
 DEFAULT_MAX_MEMBERS = 100
 LIVE_MAX_MEMBERS = 50
 _UNPRIORITISED = dag_core.discovery.UNPRIORITISED
@@ -712,6 +714,35 @@ def render(p):
     return "\n".join(lines) + "\n"
 
 
+def render_longest(p):
+    lines = ["end goals to work on first (by %s), from the stored map:" % p["by"]]
+    for e in p["ends"]:
+        lines.append("  #%d prio %s, depth %d, %d members" % (
+            e["goal"], "P%d" % e["prio"] if e["prio"] <= 4 else "none", e["depth"], e["members"]))
+    if not p["ends"]:
+        lines.append("  none")
+    for x in p["excluded"]:
+        lines.append("excluded: #%d (in or behind a cycle: %s)" % (x["goal"], _ids(x["cycle"])))
+    return "\n".join(lines) + "\n"
+
+
+def _main_longest(args, as_json, now):
+    rest = [a for a in args[2:] if a != "--longest"]
+    by = "length"
+    if rest[:1] == ["--by"] and rest[1:] == ["freeing"]:
+        by, rest = "freeing", []
+    if len(args) < 3 or args[1].startswith("--") or args.count("--longest") != 1 or rest:
+        print(USAGE, file=sys.stderr)
+        return 2
+    try:
+        p = dag_chain.longest(args[1], by=by, now=now)
+    except dag_chain.ChainError as exc:
+        print("chain.py: %s" % exc, file=sys.stderr)
+        return 2
+    print(json.dumps(p, indent=2, sort_keys=True) if as_json else render_longest(p), end="\n" if as_json else "")
+    return 0
+
+
 def main(argv, run=None, now=None):
     args = list(argv[1:])
     if args in (["-h"], ["--help"]):
@@ -722,6 +753,8 @@ def main(argv, run=None, now=None):
         return _main_sheet(args, run, now)
     as_json = "--json" in args
     args = [a for a in args if a != "--json"]
+    if args[:1] == ["plan"] and "--longest" in args:
+        return _main_longest(args, as_json, now)
     if len(args) != 3 or args[0] != "plan" or not (args[2].isascii() and args[2].isdigit()):
         print(USAGE, file=sys.stderr)
         return 2
