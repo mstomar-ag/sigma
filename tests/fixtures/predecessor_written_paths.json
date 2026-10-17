@@ -475,7 +475,7 @@
   {
    "compatible": true,
    "pattern": ".sdlc/state",
-   "reason": "Directory creation only; the files inside carry their own entries. Vetted #1152 (refs #1142): sync.py::_reroot_guarded takes the existing knowledge flock (the already vetted _knowledge_lock file) and sync.py::bootstrap makes directories and aside copies only under .sdlc/state/orphaned/<stamp>/, a subtree the predecessor does not write; neither writes a file the predecessor writes in .sdlc/state. Vetted #1229: drift_shadow.py::_save and ::shadow_for_park write only .sdlc/state/drift-shadow.json, a file the predecessor never writes (shadow-mode drift verdicts of this product). Vetted #1243: decision_import.py::classify_model and ::_cache_save write only .sdlc/state/decision-import-classes.json (the import classification cache), a file the predecessor never writes. Vetted #1410: reconcile_tick.py::_blocker_rank_repair and ::_write_repair_state write only .sdlc/state/blocker-repair.meta.json (the blocker-rank repair record), a file the predecessor never writes. Vetted #1612: dag_refresh.py::_write_meta and ::refresh_if_due write only .sdlc/state/dag-refresh.meta.json (the dependency map refresh record), a file the predecessor never writes.",
+   "reason": "Directory creation only; the files inside carry their own entries. Vetted #1152 (refs #1142): sync.py::_reroot_guarded takes the existing knowledge flock (the already vetted _knowledge_lock file) and sync.py::bootstrap makes directories and aside copies only under .sdlc/state/orphaned/<stamp>/, a subtree the predecessor does not write; neither writes a file the predecessor writes in .sdlc/state. Vetted #1229: drift_shadow.py::_save and ::shadow_for_park write only .sdlc/state/drift-shadow.json, a file the predecessor never writes (shadow-mode drift verdicts of this product). Vetted #1243: decision_import.py::classify_model and ::_cache_save write only .sdlc/state/decision-import-classes.json (the import classification cache), a file the predecessor never writes. Vetted #1410: reconcile_tick.py::_blocker_rank_repair and ::_write_repair_state write only .sdlc/state/blocker-repair.meta.json (the blocker-rank repair record), a file the predecessor never writes. Vetted #1612: dag_refresh.py::_write_meta and ::refresh_if_due write only .sdlc/state/dag-refresh.meta.json (the dependency map refresh record), a file the predecessor never writes. Vetted #1584: chain.py::plan writes only .sdlc/state/chains/c<N>.json (the local chain plan record, issue numbers and labels only), a file the predecessor never writes.",
    "verdict": "directory",
    "vetted_writers": [
     "skills/sigma-init/scripts/init_flow.py::main",
@@ -492,6 +492,7 @@
     "skills/sigma-loop/scripts/autowatch.py::_tick_inner",
     "skills/sigma-loop/scripts/backlog_check.py::_dense_channel",
     "skills/sigma-loop/scripts/backlog_check.py::cross_check",
+    "skills/sigma-loop/scripts/chain.py::plan",
     "skills/sigma-loop/scripts/channel_notify.py::tick",
     "skills/sigma-loop/scripts/coexist.py::write_owner",
     "skills/sigma-loop/scripts/comment_watch.py::tick",
