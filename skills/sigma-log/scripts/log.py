@@ -62,6 +62,7 @@ honest answer when it has nothing to say.
 """
 import calendar
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -770,6 +771,32 @@ def loop_heartbeat_tail(sdlc_dir, now=None):
     return "" if newest is None else "loop heartbeat: " + _format_ago(now - newest)
 
 
+def admission_tail(config, now=None, env=None):
+    """#1604: `admission HELD 12m: memory` while the resource guard holds new work, else an empty string.
+
+    Reads `hold.json` in the resource state folder (the path rule is sigma-loop's `resource_guard.hold_path`,
+    copied: this skill imports nothing from sigma-loop). Silent when the file is absent, open, unreadable, or
+    `resource.mode` is "off" (a left-over file nobody refreshes must not read as a live hold)."""
+    env = os.environ if env is None else env
+    block = config.get("resource") if isinstance(config, dict) else None
+    if env.get("SIGMA_RESOURCE_MODE", (block or {}).get("mode") if isinstance(block, dict) else None) == "off":
+        return ""
+    base = env.get("SIGMA_RESOURCE_DIR")
+    if not base:
+        state = env.get("XDG_STATE_HOME") or os.path.join(env.get("HOME") or os.path.expanduser("~"), ".local", "state")
+        base = os.path.join(state, "sigma", "resource")
+    try:
+        record = json.loads(pathlib.Path(base, "hold.json").read_text())
+        since = record["since"]
+        if record["state"] != "hold" or isinstance(since, bool) or not isinstance(since, (int, float)):
+            return ""
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+    now = time.time() if now is None else now
+    reason = record.get("reason")
+    return "admission HELD %dm%s" % (max(0, now - since) // 60, ": %s" % reason if isinstance(reason, str) and reason else "")
+
+
 def slots(sdlc_dir, now=None, render_py=None):
     """The rendered `slots` output — a string, ready to print, in every state including the ones
     where it has nothing to render.
@@ -816,7 +843,8 @@ def slots(sdlc_dir, now=None, render_py=None):
         "headline": _headline(in_flight, len(rows), blocked),
         "slots": shown,
         "tail": _tail(len(shown), collapsed, stale, len(withheld), blocked_hidden)
-                + (("; " + loop_heartbeat_tail(sdlc_dir, now)) if loop_heartbeat_tail(sdlc_dir, now) else ""),
+                + (("; " + loop_heartbeat_tail(sdlc_dir, now)) if loop_heartbeat_tail(sdlc_dir, now) else "")
+                + (("; " + admission_tail(config, now)) if admission_tail(config, now) else ""),
     }
     ok, rendered, why = render_block_a(block, render_py=render_py)
     if ok:
