@@ -245,7 +245,8 @@ def _load_leases(directory):
     for path in _lease_files(directory):
         record = _read_json(path, None)
         ok = (isinstance(record, dict) and isinstance(record.get("pid"), int) and guard._number(record.get("start"))
-              and guard._number(record.get("ttl")) and guard._number(record.get("est_mem")))
+              and guard._number(record.get("ttl")) and guard._number(record.get("est_mem"))
+              and isinstance(record.get("goal"), str) and isinstance(record.get("kind"), str))
         found.append((path, record if ok else None))
     return found
 
@@ -308,8 +309,9 @@ def _waiting(directory, now):
         if isinstance(data, dict) else {}
 
 
-def _choose(kind, want, goal, limits, live, ring, waiting, now):
-    """(n, est_mem) or a Hold. Pure over its inputs; the caller holds the lock."""
+def _decide(kind, want, goal, limits, live, observed, waiting, now):
+    """(n, est_mem) or a Hold: the one admission decision, shared by admit and wait. Pure over its inputs."""
+    ring = observed.get(kind, [])
     started = {r.get("goal") for _, r in live}
     if limits.critical:
         return Hold("critical: memory below half the reserve", _retry())
@@ -351,7 +353,7 @@ def admit(kind, want, repo, goal, pid=None, ttl=None, config=None, now=None, env
             if seen > record.get("peak", 0):
                 _atomic_write(path, dict(record, peak=seen))
         waiting = _waiting(directory, now)
-        choice = _choose(kind, want, goal, limits, live, observed.get(kind, []), waiting, now)
+        choice = _decide(kind, want, goal, limits, live, observed, waiting, now)
         previous = _read_json(os.path.join(directory, "last.json"), {})
         if isinstance(choice, Hold):
             if limits.mode != "enforce":
@@ -454,17 +456,10 @@ def wait(max_s, kind="goal", env=None, config=None):
     directory = state_dir(env)
     deadline = time.monotonic() + min(max_s, 3600.0)
     while True:
-        _, limits, live, observed = _view(directory, time.time(), config)
-        cost = learned_cost(observed.get(kind, []))
-        room = _room(kind, limits)
-        open_ = not limits.critical and (room > 0 if cost is None else room >= cost)
-        if kind in ("goal", "session") and not limits.admits(kind, running=len(live)):
-            open_ = False
-        if kind == "goal" and limits.max_goals and sum(1 for _, r in live if r["kind"] == "goal") >= limits.max_goals:
-            open_ = False
-        if kind == "goal" and any(g in {r.get("goal") for _, r in live} for g in _waiting(directory, time.time())):
-            open_ = False  # a started goal's verify is waiting: admit would hold a new goal start
-        if open_:
+        now = time.time()
+        _, limits, live, observed = _view(directory, now, config)
+        choice = _decide(kind, 1, "", limits, live, observed, _waiting(directory, now), now)
+        if not isinstance(choice, Hold) or limits.mode != "enforce":  # admit grants outside enforce mode
             return 0
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -503,15 +498,30 @@ def _parser():
     return parser
 
 
+def load_config(path=None):
+    """The `resource` block of .sdlc/config.json (cwd-relative). None when absent; one stderr note when unreadable."""
+    path = path or os.path.join(".sdlc", "config.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as err:
+        sys.stderr.write("resource_lease: cannot read %s (%s); limits derived\n" % (path, type(err).__name__))
+        return None
+    return data.get("resource") if isinstance(data, dict) else None
+
+
 def main(argv=None):
     parser = _parser()
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if not args.cmd:
         parser.print_help()
         return 0
+    config = load_config() if args.cmd != "release" else None
     try:
         if args.cmd == "admit":
-            got = admit(args.kind, args.want, args.repo, args.goal, pid=args.pid, ttl=args.ttl)
+            got = admit(args.kind, args.want, args.repo, args.goal, pid=args.pid, ttl=args.ttl, config=config)
             sys.stdout.write(json.dumps(got.as_dict(), sort_keys=True) + "\n")
             return 0 if isinstance(got, Grant) else EXIT_HELD
         if args.cmd == "release":
@@ -520,7 +530,7 @@ def main(argv=None):
             sys.stderr.write("resource_lease: no such lease, or the lock stayed busy\n")
             return 1
         if args.cmd == "status":
-            snap = status()
+            snap = status(config=config)
             if args.json:
                 sys.stdout.write(json.dumps(snap, sort_keys=True) + "\n")
             else:
@@ -528,7 +538,7 @@ def main(argv=None):
                     len(snap["leases"]), snap["headroom"], snap["hold"]["state"], snap["hold"]["age"],
                     snap["swapout_rate"], json.dumps(snap["p90"], sort_keys=True)))
             return 0
-        return wait(args.max_s, args.kind)
+        return wait(args.max_s, args.kind, config=config)
     except guard.Unsupported as refusal:
         sys.stderr.write("resource_lease: unsupported: %s\n" % refusal.reason)
         return guard.EXIT_UNSUPPORTED

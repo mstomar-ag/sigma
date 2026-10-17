@@ -1,0 +1,645 @@
+"""#1599 - resource_lease: a lease table over resource_guard.
+
+Controls (break one thing, see red): the flock test is the system of record for the double-admit race; the
+`*_control` tests break the remainder clause and the stale clauses and assert the check goes red. The
+50x barrier test is probabilistic: `test_admit_inside_the_lock_is_exclusive` is the deterministic seam control.
+"""
+import ast
+import importlib.util
+import json
+import multiprocessing
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import time
+
+import pytest
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+SCRIPTS = ROOT / "skills" / "sigma-loop" / "scripts"
+SCRIPT = SCRIPTS / "resource_lease.py"
+DOC = ROOT / "docs" / "configuration.md"
+MIB = 1024 ** 2
+
+# A fake machine counted in plain units: total 1000, so reserve is 200 and the share cap 600 (policy ratios).
+TOTAL = 1000
+
+
+def load(name="resource_lease_under_test", path=SCRIPT):
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(SCRIPTS))
+    return module
+
+
+def fake_sample(guard, available, **extra):
+    values = dict(total=TOTAL, available=available, swap_used=0, swap_total=0, swapouts=0, swapouts_at=0.0,
+                  pressure=1, cpu_count=8, load1=0.0)
+    values.update(extra)
+    return guard.Sample(**values)
+
+
+@pytest.fixture
+def lease(tmp_path, monkeypatch):
+    monkeypatch.setenv("SIGMA_RESOURCE_DIR", str(tmp_path / "state"))
+    module = load()
+    box = {"available": 800, "foot": {}}
+    monkeypatch.setattr(module, "take_sample", lambda: fake_sample(module.guard, box["available"]))
+    monkeypatch.setattr(module, "take_footprint", lambda pid: (box["foot"][pid], False) if pid in box["foot"] else None)
+    module.box = box
+    return module
+
+
+def seed_ring(lease, kind, values):
+    path = pathlib.Path(lease.state_dir()) / "observed.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({kind: list(values)}))
+
+
+# ------------------------------------------------------------------------------------------ state location
+def test_state_dir_resolution_order(tmp_path):
+    module = load()
+    assert module.state_dir({"SIGMA_RESOURCE_DIR": "/a", "XDG_STATE_HOME": "/b", "HOME": "/c"}) == "/a"
+    assert module.state_dir({"XDG_STATE_HOME": "/b", "HOME": "/c"}) == "/b/sigma/resource"
+    assert module.state_dir({"HOME": "/c"}) == "/c/.local/state/sigma/resource"
+
+
+def test_git_status_stays_clean_after_every_command(tmp_path, lease, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    monkeypatch.chdir(repo)
+    seed_ring(lease, "verify", [100])
+    grant = lease.admit("verify", 2, str(repo), "g1", pid=os.getpid())
+    lease.status()
+    lease.wait(0.2)
+    lease.release(grant.id)
+    out = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"], capture_output=True, text=True).stdout
+    assert out == ""
+
+
+# ------------------------------------------------------------------------------------------ reservation
+def test_remainder_of_a_lease_is_reserved(lease):
+    seed_ring(lease, "verify", [100])
+    lease.box["available"] = 400  # 400-200 reserve = 200 -> room for 2
+    assert lease.admit("verify", 1, "r", "g1", pid=os.getpid()).n == 1
+    lease.box["foot"][os.getpid()] = 20  # the unit used 20% of its 100 estimate; 'available' did not move
+    second = lease.admit("verify", 2, "r", "g2", pid=os.getpid())
+    # 200 - (100-20) = 120 headroom -> one more fits, two do not
+    assert second.n == 1
+
+
+def test_remainder_clause_control(lease, monkeypatch):
+    """Count only measured memory (no remainder): the same scenario then admits two, so the test above is red."""
+    seed_ring(lease, "verify", [100])
+    lease.box["available"] = 400
+    lease.admit("verify", 1, "r", "g1", pid=os.getpid())
+    lease.box["foot"][os.getpid()] = 20
+    monkeypatch.setattr(lease, "remainder", lambda est, seen: 0)
+    assert lease.admit("verify", 2, "r", "g2", pid=os.getpid()).n == 2
+
+
+# ------------------------------------------------------------------------------------------ stale reclaim
+def _dead_pid():
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
+
+
+def _leases(lease):
+    d = pathlib.Path(lease.state_dir()) / "leases"
+    return sorted(p.name for p in d.glob("*.json")) if d.exists() else []
+
+
+def test_dead_pid_lease_is_reclaimed(lease):
+    seed_ring(lease, "verify", [100])
+    dead = lease.admit("verify", 1, "r", "g1", pid=_dead_pid())
+    lease.admit("verify", 1, "r", "g2", pid=os.getpid())
+    assert dead.id + ".json" not in _leases(lease)
+
+
+def test_expired_ttl_lease_is_reclaimed(lease):
+    seed_ring(lease, "verify", [100])
+    old = lease.admit("verify", 1, "r", "g1", pid=os.getpid(), ttl=1, now=1000.0)
+    lease.admit("verify", 1, "r", "g2", pid=os.getpid(), now=1000.0 + 5)
+    assert old.id + ".json" not in _leases(lease)
+
+
+def test_live_unexpired_lease_is_kept(lease):
+    seed_ring(lease, "verify", [100])
+    keep = lease.admit("verify", 1, "r", "g1", pid=os.getpid(), ttl=1000, now=1000.0)
+    lease.admit("verify", 1, "r", "g2", pid=os.getpid(), now=1001.0)
+    assert keep.id + ".json" in _leases(lease)
+
+
+def test_stale_clause_controls(lease, monkeypatch):
+    seed_ring(lease, "verify", [100])
+    monkeypatch.setattr(lease, "pid_alive", lambda pid: True)  # clause 'pid dead' removed
+    monkeypatch.setattr(lease, "expired", lambda rec, now: False)  # clause 'ttl' removed
+    dead = lease.admit("verify", 1, "r", "g1", pid=_dead_pid())
+    exp = lease.admit("verify", 1, "r", "g2", pid=os.getpid(), ttl=1, now=1000.0)
+    lease.admit("verify", 1, "r", "g3", pid=os.getpid(), now=1005.0)
+    left = _leases(lease)
+    assert dead.id + ".json" in left and exp.id + ".json" in left  # both survive -> the tests above would be red
+
+
+# ------------------------------------------------------------------------------------------ learned cost
+def test_ring_is_bounded_at_32_and_keeps_the_newest(lease):
+    for i in range(40):
+        lease.record_observation(lease.state_dir(), "verify", [i + 1])
+    ring = json.loads((pathlib.Path(lease.state_dir()) / "observed.json").read_text())["verify"]
+    assert len(ring) == 32 and ring[0] == 9 and ring[-1] == 40
+
+
+def test_p90_of_the_ring(lease):
+    assert lease.learned_cost(list(range(1, 11))) == 9
+    assert lease.learned_cost([]) is None
+    assert lease.learned_cost([7]) == 7
+
+
+def test_outlier_above_4x_median_is_excluded_and_logged(lease):
+    lease.record_observation(lease.state_dir(), "verify", [10, 10, 10, 12, 11])
+    lease.record_observation(lease.state_dir(), "verify", [500])
+    ring = json.loads((pathlib.Path(lease.state_dir()) / "observed.json").read_text())["verify"]
+    assert lease.learned_cost(ring) <= 12
+    events = (pathlib.Path(lease.state_dir()) / "events.jsonl").read_text().splitlines()
+    assert any(json.loads(line)["event"] == "outlier" for line in events)
+
+
+def test_no_observations_admits_exactly_one_unit_then_holds(lease):
+    first = lease.admit("verify", 4, "r", "g1", pid=os.getpid())
+    assert first.n == 1
+    second = lease.admit("verify", 4, "r", "g2", pid=os.getpid())
+    assert isinstance(second, lease.Hold) and "observ" in second.reason
+
+
+def test_no_observations_and_no_room_holds(lease):
+    lease.box["available"] = 150  # below the 200 reserve
+    assert isinstance(lease.admit("verify", 1, "r", "g1", pid=os.getpid()), lease.Hold)
+
+
+def test_release_records_the_peak_footprint(lease):
+    grant = lease.admit("verify", 1, "r", "g1", pid=os.getpid())
+    lease.box["foot"][os.getpid()] = 123
+    lease.release(grant.id)
+    ring = json.loads((pathlib.Path(lease.state_dir()) / "observed.json").read_text())["verify"]
+    assert ring == [123]
+    assert _leases(lease) == []
+
+
+def test_lease_whose_pid_was_reused_is_reclaimed(lease, monkeypatch):
+    """#1715: same pid, different process start time than the one recorded at admit -> stale."""
+    seed_ring(lease, "verify", [100])
+    starts = {"now": 5000.0}
+    monkeypatch.setattr(lease, "process_start", lambda pid: starts["now"])
+    old = lease.admit("verify", 1, "r", "g1", pid=os.getpid())
+    starts["now"] = 9000.0  # the pid now belongs to another process
+    lease.admit("verify", 1, "r", "g2", pid=os.getpid())
+    assert old.id + ".json" not in _leases(lease)
+
+
+def test_lease_with_unchanged_process_start_is_kept(lease, monkeypatch):
+    seed_ring(lease, "verify", [100])
+    monkeypatch.setattr(lease, "process_start", lambda pid: 5000.0)
+    keep = lease.admit("verify", 1, "r", "g1", pid=os.getpid())
+    lease.admit("verify", 1, "r", "g2", pid=os.getpid())
+    assert keep.id + ".json" in _leases(lease)
+
+
+def test_process_start_of_this_process_is_stable_and_none_when_unknown(lease):
+    first = lease.process_start(os.getpid())
+    assert first is None or first == lease.process_start(os.getpid())
+    assert lease.process_start(-1) is None
+
+
+def test_reclaiming_a_reused_pid_never_measures_the_foreign_process(lease, monkeypatch):
+    """#1722: a reused pid belongs to another process; its size must not reach the cost ring."""
+    seed_ring(lease, "verify", [100])
+    starts = {"now": 5000.0}
+    monkeypatch.setattr(lease, "process_start", lambda pid: starts["now"])
+    old = lease.admit("verify", 1, "r", "g1", pid=os.getpid())
+    path = pathlib.Path(lease.state_dir()) / "leases" / (old.id + ".json")
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), peak=0)))
+    lease.box["foot"][os.getpid()] = 99999
+    starts["now"] = 9000.0
+    asked = []
+    real = lease.take_footprint
+    monkeypatch.setattr(lease, "take_footprint", lambda pid: asked.append(pid) or real(pid))
+    lease.admit("verify", 1, "r", "g2", pid=os.getpid())
+    ring = json.loads((pathlib.Path(lease.state_dir()) / "observed.json").read_text())["verify"]
+    assert 99999 not in ring and ring == [100]
+    assert old.id + ".json" not in _leases(lease)
+
+
+def test_linux_process_start_is_converted_from_ticks_to_seconds(lease, monkeypatch):
+    stat = "42 (a b) S " + " ".join(["0"] * 18) + " 5000 0"  # starttime is field 22
+    monkeypatch.setattr(lease.sys, "platform", "linux")
+    monkeypatch.setattr(lease, "clock_ticks", lambda: 250)
+    import builtins
+    import io
+    real_open = builtins.open
+    monkeypatch.setattr(builtins, "open",
+                        lambda f, *a, **k: io.StringIO(stat) if str(f).startswith("/proc/") else real_open(f, *a, **k))
+    assert lease.process_start(42) == 20.0
+
+
+def test_clock_ticks_falls_back_to_100(lease, monkeypatch):
+    def boom(name):
+        raise OSError("no")
+    monkeypatch.setattr(lease.os, "sysconf", boom)
+    assert lease.clock_ticks() == 100
+
+
+def test_start_tolerance_compares_in_seconds(lease, monkeypatch):
+    monkeypatch.setattr(lease, "process_start", lambda pid: 101.5)
+    assert not lease.reused({"pid": 1, "pid_start": 100.0})
+    monkeypatch.setattr(lease, "process_start", lambda pid: 103.5)
+    assert lease.reused({"pid": 1, "pid_start": 100.0})
+
+
+def test_wait_applies_the_max_goals_cap(lease):
+    seed_ring(lease, "goal", [50])
+    lease.admit("goal", 1, "r", "g1", pid=os.getpid(), config={"max_goals": 1})
+    assert lease.wait(0, "goal", config={"max_goals": 1}) == lease.EXIT_HELD
+    assert lease.wait(0, "goal", config={"max_goals": 2}) == 0
+
+
+def test_wait_agrees_with_admit_under_pressure(lease, monkeypatch):
+    seed_ring(lease, "goal", [50])
+    monkeypatch.setattr(lease.guard.Limits, "admits", lambda self, kind, running=0: False)
+    assert isinstance(lease.admit("goal", 1, "r", "g1", pid=os.getpid()), lease.Hold)
+    assert lease.wait(0, "goal") == lease.EXIT_HELD
+    assert lease.wait(0, "session") == lease.EXIT_HELD
+
+
+def test_a_lease_record_without_a_goal_does_not_raise(lease):
+    seed_ring(lease, "goal", [50])
+    grant = lease.admit("goal", 1, "r", "g1", pid=os.getpid())
+    path = pathlib.Path(lease.state_dir()) / "leases" / (grant.id + ".json")
+    record = json.loads(path.read_text())
+    del record["goal"]
+    path.write_text(json.dumps(record))
+    assert lease.wait(0, "goal") in (0, lease.EXIT_HELD)
+    assert isinstance(lease.admit("goal", 1, "r", "g2", pid=os.getpid()), (lease.Grant, lease.Hold))
+
+
+def test_cli_wait_max_zero_on_a_temp_state_dir(tmp_path):
+    proc, took = cli(tmp_path, 800, "wait", "--max", "0")
+    assert proc.returncode == 0 and took < 4
+
+
+def test_wait_for_goal_holds_while_a_started_goals_verify_waits(lease):
+    pathlib.Path(lease.state_dir()).mkdir(parents=True, exist_ok=True)
+    seed = {"verify": [100], "goal": [50], "session": [30]}  # a learned session cost: wait now shares admit's unlearned-cost hold
+    (pathlib.Path(lease.state_dir()) / "observed.json").write_text(json.dumps(seed))
+    lease.admit("session", 1, "r", "g1", pid=os.getpid())
+    lease.box["available"] = 250
+    assert isinstance(lease.admit("verify", 1, "r", "g1", pid=os.getpid()), lease.Hold)
+    lease.box["available"] = 800
+    assert lease.wait(0, "goal") == lease.EXIT_HELD  # admit holds a new goal here; wait must agree
+    assert lease.wait(0, "session") == 0  # other kinds are unaffected
+    lease.admit("verify", 1, "r", "g1", pid=os.getpid())  # the waiter clears
+    assert lease.wait(0, "goal") == 0
+
+
+def test_release_of_a_lease_file_without_an_id_does_not_raise(lease):
+    leases = pathlib.Path(lease.state_dir()) / "leases"
+    leases.mkdir(parents=True)
+    (leases / "noid.json").write_text(json.dumps({"kind": "verify", "pid": os.getpid(), "start": 1.0,
+                                                   "ttl": 10.0, "est_mem": 0}))
+    assert lease.release("noid") is True
+    assert not (leases / "noid.json").exists()
+
+
+@pytest.mark.parametrize("bad", ["nan", "-1", "-0.5"])
+def test_cli_wait_max_rejects_nan_and_negative(tmp_path, bad):
+    proc, _ = cli(tmp_path, 800, "wait", "--max", bad)
+    assert proc.returncode == 2 and "--max" in proc.stderr and "Traceback" not in proc.stderr
+
+
+def test_wait_function_rejects_nan_and_negative(lease):
+    for bad in (float("nan"), -1.0):
+        with pytest.raises(ValueError):
+            lease.wait(bad, "goal")
+
+
+# ------------------------------------------------------------------------------------------ priority and floor
+def test_waiting_verify_blocks_a_new_goal_start(lease):
+    seed_ring(lease, "verify", [100])
+    seed = {"verify": [100], "goal": [50]}
+    (pathlib.Path(lease.state_dir()) / "observed.json").write_text(json.dumps(seed))
+    lease.admit("session", 1, "r", "g1", pid=os.getpid())  # g1 started: holds a lease
+    lease.box["available"] = 250  # headroom 50-... too little for a 100 verify
+    waiting = lease.admit("verify", 1, "r", "g1", pid=os.getpid())
+    assert isinstance(waiting, lease.Hold)
+    lease.box["available"] = 800  # plenty again, but g1's verify is still waiting
+    start = lease.admit("goal", 1, "r", "g2", pid=os.getpid())
+    assert isinstance(start, lease.Hold) and "verify" in start.reason
+    lease.admit("verify", 1, "r", "g1", pid=os.getpid())  # the verify gets in; the waiter clears
+    assert lease.admit("goal", 1, "r", "g2", pid=os.getpid()).n == 1
+
+
+def test_verify_with_room_for_one_worker_gets_one_not_hold(lease):
+    seed_ring(lease, "verify", [100])
+    lease.box["available"] = 330  # 330-200 = 130 -> one worker of 100
+    got = lease.admit("verify", 4, "r", "g1", pid=os.getpid())
+    assert got.n == 1
+
+
+def test_grants_the_largest_n_that_fits(lease):
+    seed_ring(lease, "verify", [100])
+    assert lease.admit("verify", 4, "r", "g1", pid=os.getpid()).n == 4  # 600 headroom, cost 100, share cap 600
+
+
+def test_critical_pressure_holds_everything(lease):
+    seed_ring(lease, "verify", [10])
+    lease.box["available"] = 50
+    assert isinstance(lease.admit("verify", 1, "r", "g1", pid=os.getpid()), lease.Hold)
+
+
+# ------------------------------------------------------------------------------------------ the lock
+def _admit_child(barrier_start, barrier_end, state, out):
+    os.environ["SIGMA_RESOURCE_DIR"] = state
+    module = load("resource_lease_child")
+    module.take_sample = lambda: fake_sample(module.guard, 500)  # headroom 300: fits exactly one 300-unit
+    module.take_footprint = lambda pid: None
+    barrier_start.wait(10)
+    got = module.admit("verify", 1, "r", "g%d" % os.getpid(), pid=os.getpid())
+    out.put(isinstance(got, module.Grant))
+    barrier_end.wait(10)  # stay alive so the other admit cannot reclaim our lease as a dead pid
+
+
+def test_two_processes_admitting_at_once_grant_exactly_one(tmp_path):
+    """Probabilistic (barrier-raced) smoke test; the deterministic seam control is the next test."""
+    ctx = multiprocessing.get_context("fork")
+    for i in range(50):
+        state = str(tmp_path / ("s%d" % i))
+        os.makedirs(state)
+        pathlib.Path(state, "observed.json").write_text(json.dumps({"verify": [300]}))
+        start, end, out = ctx.Barrier(2), ctx.Barrier(2), ctx.Queue()
+        procs = [ctx.Process(target=_admit_child, args=(start, end, state, out)) for _ in range(2)]
+        for p in procs:
+            p.start()
+        results = [out.get(timeout=20) for _ in procs]
+        for p in procs:
+            p.join(20)
+        assert sorted(results) == [False, True], "round %d: %r" % (i, results)
+
+
+def test_admit_inside_the_lock_is_exclusive(lease, monkeypatch):
+    """Deterministic: while the lock is held by someone else, admit does not run its body at all."""
+    import fcntl
+    seed_ring(lease, "verify", [100])
+    os.makedirs(lease.state_dir(), exist_ok=True)
+    handle = open(os.path.join(lease.state_dir(), "admit.lock"), "a+")
+    fcntl.flock(handle, fcntl.LOCK_EX)
+    try:
+        monkeypatch.setattr(lease, "LOCK_WAIT", 0.3)
+        started = time.monotonic()
+        got = lease.admit("verify", 1, "r", "g1", pid=os.getpid())
+        assert isinstance(got, lease.Hold) and "lock" in got.reason
+        assert time.monotonic() - started < 3
+        assert _leases(lease) == []
+    finally:
+        handle.close()
+
+
+# ------------------------------------------------------------------------------------------ CLI
+HARNESS = """
+import sys, os
+sys.path.insert(0, {scripts!r})
+import resource_lease as rl
+g = rl.guard
+rl.take_sample = lambda: g.Sample(total=1000, available={avail}, swap_used=0, swap_total=0, swapouts=0,
+                                  swapouts_at=0.0, pressure=1, cpu_count=8, load1=0.0)
+rl.take_footprint = lambda pid: None
+sys.exit(rl.main(sys.argv[1:]))
+"""
+
+
+def cli(tmp_path, avail, *args):
+    env = {k: v for k, v in os.environ.items() if k not in ("SIGMA_RESOURCE_DIR",)}
+    env["SIGMA_RESOURCE_DIR"] = str(tmp_path / "cli-state")
+    code = HARNESS.format(scripts=str(SCRIPTS), avail=avail)
+    started = time.monotonic()
+    proc = subprocess.run([sys.executable, "-c", code] + list(args), capture_output=True, text=True, env=env,
+                          timeout=30)
+    return proc, time.monotonic() - started
+
+
+def test_cli_scenario_admit_status_release(tmp_path):
+    pathlib.Path(tmp_path / "cli-state").mkdir()
+    (tmp_path / "cli-state" / "observed.json").write_text(json.dumps({"verify": [100]}))
+    proc, _ = cli(tmp_path, 700, "admit", "--kind", "verify", "--want", "2", "--goal", "g1", "--pid", str(os.getpid()))
+    assert proc.returncode == 0, proc.stderr
+    grant = json.loads(proc.stdout)
+    assert grant["n"] == 2 and grant["id"]
+    proc, _ = cli(tmp_path, 700, "status", "--json")
+    status = json.loads(proc.stdout)
+    assert proc.returncode == 0 and len(status["leases"]) == 1
+    assert status["p90"]["verify"] == 100 and "headroom" in status and "swapout_rate" in status
+    assert "hold" in status
+    proc, _ = cli(tmp_path, 700, "release", grant["id"])
+    assert proc.returncode == 0
+    proc, _ = cli(tmp_path, 700, "status", "--json")
+    assert json.loads(proc.stdout)["leases"] == []
+
+
+def test_cli_wait_exit_codes_within_four_seconds(tmp_path):
+    proc, took = cli(tmp_path, 800, "wait", "--max", "3")
+    assert proc.returncode == 0 and took < 4
+    (tmp_path / "cli-state").mkdir(exist_ok=True)  # 10 above the reserve is not room for a 100 unit
+    (tmp_path / "cli-state" / "observed.json").write_text(json.dumps({"goal": [100]}))
+    proc, took = cli(tmp_path, 210, "wait", "--max", "3")
+    assert proc.returncode == 10 and took < 4
+
+
+def test_cli_admit_hold_exits_10_and_status_reports_hold_age(tmp_path):
+    (tmp_path / "cli-state").mkdir()
+    (tmp_path / "cli-state" / "observed.json").write_text(json.dumps({"verify": [100]}))
+    proc, _ = cli(tmp_path, 250, "admit", "--kind", "verify", "--want", "1", "--goal", "g1", "--pid", str(os.getpid()))
+    assert proc.returncode == 10
+    hold = json.loads(proc.stdout)
+    assert hold["reason"] and hold["retry_after"] > 0
+    proc, _ = cli(tmp_path, 250, "status", "--json")
+    assert json.loads(proc.stdout)["hold"]["state"] == "hold"
+
+
+def test_cli_help_and_bad_usage():
+    proc = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True)
+    assert proc.returncode == 0 and "admit" in proc.stdout
+    proc = subprocess.run([sys.executable, str(SCRIPT), "nope"], capture_output=True, text=True)
+    assert proc.returncode == 2
+
+
+# ------------------------------------------------------------------------------------------ bounds
+def test_events_rotate_at_their_bound(lease, monkeypatch):
+    monkeypatch.setattr(lease, "EVENTS_MAX", 400)
+    for i in range(60):
+        lease.log_event(lease.state_dir(), {"event": "x", "i": i})
+    d = pathlib.Path(lease.state_dir())
+    assert (d / "events.jsonl.1").exists()
+    assert (d / "events.jsonl").stat().st_size <= 400 + 100
+    assert sorted(os.listdir(d)).count("events.jsonl.2") == 0  # one generation kept
+
+
+def test_source_has_no_byte_literal_of_a_mebibyte_or_more():
+    tree = ast.parse(SCRIPT.read_text())
+    big = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, int)
+           and not isinstance(n.value, bool) and n.value >= MIB]
+    assert big == []
+    assert not re.search(r"\b\d+\s*\*\s*(1024|GiB|MiB)", SCRIPT.read_text())
+
+
+def test_docs_name_the_lease_command():
+    assert "resource_lease.py" in DOC.read_text()
+
+
+<<<<<<< HEAD
+# ------------------------------------------------------------------------------------------ #1740 renew
+def _lease_record(lease, grant):
+    return json.loads((pathlib.Path(lease.state_dir()) / "leases" / (grant.id + ".json")).read_text())
+
+
+def test_renew_moves_start_forward(lease):
+    grant = lease.admit("session", 1, "r", "g1", pid=os.getpid(), ttl=100, now=1000.0)
+    assert lease.renew(grant.id, now=1050.0) is True
+    record = _lease_record(lease, grant)
+    assert record["start"] == 1050.0 and record["ttl"] == 100
+    assert not lease.expired(record, 1140.0)
+
+
+def test_renew_unknown_id_is_false(lease):
+    assert lease.renew("nosuchlease", now=1.0) is False
+
+
+def test_renew_does_not_resurrect_a_dead_pid(lease):
+    grant = lease.admit("session", 1, "r", "g1", pid=_dead_pid(), ttl=100, now=1000.0)
+    assert lease.renew(grant.id, now=1050.0) is False
+    assert _lease_record(lease, grant)["start"] == 1000.0
+=======
+# ------------------------------------------------------------------------------------------ #1733
+def _plant(lease, name, record):
+    d = pathlib.Path(lease.state_dir()) / "leases"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (name + ".json")).write_text(json.dumps(record))
+
+
+@pytest.mark.parametrize("drop", ["goal", "kind", "both"])
+def test_lease_without_goal_or_kind_is_reclaimed_not_raised(lease, drop):
+    seed_ring(lease, "goal", [50])
+    record = {"id": "x1", "kind": "goal", "goal": "g0", "pid": os.getpid(), "start": time.time(), "ttl": 1000,
+              "est_mem": 10, "workers": 1, "peak": 0}
+    for key in ("goal", "kind") if drop == "both" else (drop,):
+        del record[key]
+    _plant(lease, "x1", record)
+    got = lease.admit("goal", 1, "r", "g1", pid=os.getpid())
+    assert isinstance(got, lease.Grant)
+    assert "x1.json" not in _leases(lease)
+
+
+@pytest.mark.parametrize("kind", ["verify", "session", "goal"])
+@pytest.mark.parametrize("level", ["roomy", "tight", "critical", "pressure2", "nocost"])
+@pytest.mark.parametrize("max_goals", [None, 1])
+def test_wait_agrees_with_admit(lease, monkeypatch, kind, level, max_goals):
+    seed = {} if level == "nocost" else {"verify": [100], "goal": [50], "session": [30]}  # nocost: unlearned
+    pathlib.Path(lease.state_dir()).mkdir(parents=True, exist_ok=True)
+    (pathlib.Path(lease.state_dir()) / "observed.json").write_text(json.dumps(seed))
+    available, pressure = {"roomy": (800, 1), "tight": (250, 1), "critical": (150, 1), "pressure2": (800, 2), "nocost": (800, 1)}[level]
+    config = {"max_goals": max_goals} if max_goals else None
+    monkeypatch.setattr(lease, "take_sample", lambda: fake_sample(lease.guard, 800))
+    lease.admit("goal", 1, "r", "g0", pid=os.getpid(), config=config)  # one goal already running
+    monkeypatch.setattr(lease, "take_sample", lambda: fake_sample(lease.guard, available, pressure=pressure))
+    code = lease.wait(0, kind, config=config)
+    got = lease.admit(kind, 1, "r", "g9", pid=os.getpid(), config=config)
+    assert (code == 0) == isinstance(got, lease.Grant), (kind, level, max_goals, code, got)
+
+
+def test_wait_applies_pressure_to_a_session(lease, monkeypatch):
+    monkeypatch.setattr(lease, "take_sample", lambda: fake_sample(lease.guard, 800, pressure=2))
+    lease.admit("session", 1, "r", "g0", pid=os.getpid())
+    assert lease.wait(0, "session") == lease.EXIT_HELD
+
+
+def _cfg(tmp_path, text):
+    (tmp_path / ".sdlc").mkdir(exist_ok=True)
+    (tmp_path / ".sdlc" / "config.json").write_text(text)
+
+
+def cli_in(tmp_path, avail, *args, cwd=None):
+    env = {k: v for k, v in os.environ.items() if k != "SIGMA_RESOURCE_DIR"}
+    env["SIGMA_RESOURCE_DIR"] = str(tmp_path / "cli-state")
+    code = HARNESS.format(scripts=str(SCRIPTS), avail=avail)
+    return subprocess.run([sys.executable, "-c", code] + list(args), capture_output=True, text=True, env=env,
+                          timeout=30, cwd=str(cwd or tmp_path))
+
+
+def test_cli_reads_the_resource_block_from_config(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    _cfg(work, json.dumps({"resource": {"max_goals": 1}}))
+    (tmp_path / "cli-state").mkdir()
+    (tmp_path / "cli-state" / "observed.json").write_text(json.dumps({"goal": [50]}))  # a learned cost: only max_goals holds
+    first = cli_in(tmp_path, 800, "admit", "--kind", "goal", "--goal", "g1", "--pid", str(os.getpid()), cwd=work)
+    assert first.returncode == 0, first.stderr
+    second = cli_in(tmp_path, 800, "admit", "--kind", "goal", "--goal", "g2", "--pid", str(os.getpid()), cwd=work)
+    assert second.returncode == 10 and "max_goals" in second.stdout
+    assert cli_in(tmp_path, 800, "wait", "--max", "0", cwd=work).returncode == 10
+
+
+def test_cli_config_mode_observe_never_holds(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    _cfg(work, json.dumps({"resource": {"mode": "observe", "max_goals": 1}}))
+    for goal in ("g1", "g2"):
+        proc = cli_in(tmp_path, 800, "admit", "--kind", "goal", "--goal", goal, "--pid", str(os.getpid()), cwd=work)
+        assert proc.returncode == 0, proc.stdout
+
+
+def test_cli_corrupt_config_reads_as_derived_with_one_note(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    _cfg(work, "{not json")
+    proc = cli_in(tmp_path, 800, "status", "--json", cwd=work)
+    assert proc.returncode == 0 and json.loads(proc.stdout)["leases"] == []
+    notes = [line for line in proc.stderr.splitlines() if line.strip()]
+    assert len(notes) == 1 and "config" in notes[0]
+
+
+def test_cli_without_config_file_is_byte_identical(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    absent = cli_in(tmp_path, 800, "status", "--json", cwd=work)
+    _cfg(work, json.dumps({"other": 1}))  # a file with no resource block is the same as no file
+    no_block = cli_in(tmp_path, 800, "status", "--json", cwd=work)
+    assert absent.stderr == "" and no_block.stderr == ""
+    assert absent.stdout == no_block.stdout
+    assert absent.stdout == json.dumps(json.loads(absent.stdout), sort_keys=True) + "\n"
+
+
+def test_cli_scenario_through_main_with_config(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("SIGMA_RESOURCE_DIR", str(tmp_path / "state"))
+    work = tmp_path / "work"
+    work.mkdir()
+    _cfg(work, json.dumps({"resource": {"max_goals": 1}}))
+    monkeypatch.chdir(work)
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / "observed.json").write_text(json.dumps({"goal": [50]}))
+    module = load()
+    monkeypatch.setattr(module, "take_sample", lambda: fake_sample(module.guard, 800))
+    monkeypatch.setattr(module, "take_footprint", lambda pid: None)
+    assert module.main(["admit", "--kind", "goal", "--goal", "g1", "--pid", str(os.getpid())]) == 0
+    grant = json.loads(capsys.readouterr().out)
+    assert module.main(["admit", "--kind", "goal", "--goal", "g2", "--pid", str(os.getpid())]) == 10
+    assert "max_goals" in capsys.readouterr().out
+    assert module.main(["wait", "--max", "0"]) == 10
+    assert module.main(["status", "--json"]) == 0
+    assert len(json.loads(capsys.readouterr().out)["leases"]) == 1
+    assert module.main(["release", grant["id"]]) == 0
+>>>>>>> fork/feature/rulebook-learning
