@@ -230,6 +230,21 @@ def test_currency_after_number_for_compute_parks_as_spend():
         assert d.kind == "park" and "spend phrase" in d.reason, (text, d)
 
 
+def test_dollar_sign_and_more_codes_after_number_park_as_spend():
+    m = _mod()
+    for text in ("use 40$ of GPU time", "use 40 $ of GPU time", "use 40 AUD of GPU time",
+                 "use 500 JPY of GPU time"):
+        d = m.decide("tidy", text, {}, {})
+        assert d.kind == "park" and "spend phrase" in d.reason, (text, d)
+
+
+def test_dollar_sign_and_codes_near_misses_still_arm():
+    m = _mod()
+    for text in ("use 40 MB of GPU docs", "see log:\n```\nuse 40$ of GPU time\n```\ntidy the docs",
+                 "use 40 audits of GPU docs"):
+        assert m.decide("tidy", text, {}, {}).kind == "arm", text
+
+
 def test_currency_after_number_near_misses_still_arm():
     m = _mod()
     for text in ("We need 40\u20ac of flour.", "see log:\n```\ncost 40\u20ac gpu run\n```\ntidy the docs"):
@@ -315,6 +330,20 @@ def test_quoted_deny_word_after_an_action_verb_holds():
                  "The `force push` guard should refuse this", "Rename the `force push` rule",
                  "The first `force push` attempt failed", "We saw it again 'force push' in the log"):
         assert m.decide("Cleanup", text, {}, _cfg()).kind == "arm", text
+
+
+def test_quoted_deny_word_holds_unless_the_word_before_it_is_descriptive():
+    m = _mod()
+    for text in ("Later `force push` main", "Maybe `force push` main", "Yes `force push` main",
+                 "Go ahead `force push`", "Instead `force push` main", "Let us `force push` main",
+                 "I'd `force push` it", "We'd `force push` it"):
+        assert m.decide("c", text, {}, {}).kind == "park", text
+
+
+def test_quoted_deny_word_after_a_hand_off_that_is_also_a_determiner_holds():
+    m = _mod()
+    for text in ("Once ready, when `force push` main", "Please, if `force push` works do it", "If `force push` is needed"):
+        assert m.decide("c", text, {}, {}).kind == "park", text
 
 
 def test_protective_opener_does_not_clear_a_later_action():

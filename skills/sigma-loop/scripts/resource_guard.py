@@ -506,17 +506,29 @@ def _lease():
     return _LEASE["m"]
 
 
-def session_mode(config=None, env=None):
-    """enforce | observe | off for a model-session spawn: the config block, else SIGMA_RESOURCE_MODE, else off.
+#: #1759: the mode when neither SIGMA_RESOURCE_MODE nor `resource.mode` names one. Every surface reads it here.
+DEFAULT_MODE = "enforce"
 
-    Off by default on purpose: no config route reaches every spawn site yet, so the gate is the operator's opt-in
-    (SAFETY: nothing consumes or records anything unasked). off means no lease, no state, no sample.
+
+def resolve_mode(config=None, env=None):
+    """enforce | observe | off: the ONE rule for every surface (picker, verify, sessions, watcher, doctor, log).
+
+    Precedence: SIGMA_RESOURCE_MODE (a valid value), then `resource.mode`, then DEFAULT_MODE. `config` is the whole
+    config or its `resource` block. sigma-log keeps a documented copy of this rule (it imports nothing from here).
     """
     env = os.environ if env is None else env
-    mode = config.get("mode") if isinstance(config, dict) else None
-    if mode not in _MODES:
-        mode = env.get("SIGMA_RESOURCE_MODE")
-    return mode if mode in _MODES else "off"
+    forced = env.get("SIGMA_RESOURCE_MODE")
+    if forced in _MODES:
+        return forced
+    block = config.get("resource", config) if isinstance(config, dict) else None
+    mode = block.get("mode") if isinstance(block, dict) else None
+    return mode if mode in _MODES else DEFAULT_MODE
+
+
+def session_mode(config=None, env=None):
+    """enforce | observe | off for a model-session spawn: `resolve_mode` (#1759), the same answer as every surface.
+    off means no lease, no state, no sample."""
+    return resolve_mode(config, env)
 
 
 @contextlib.contextmanager

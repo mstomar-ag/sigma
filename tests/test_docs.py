@@ -2586,3 +2586,32 @@ def test_the_label_page_has_the_measurement_table_and_no_unmeasured_number():
     rows = [ln for ln in page.splitlines() if re.match(r"\|[^|]+\|\s*\d+\s*\|\s*\d+\s*\|\s*\d+\s*\|$", ln)]
     assert len(rows) >= 5, "the table lost rows"
     assert not [ln for ln in rows if "unmeasured" in ln.lower()], "a measured row says unmeasured"
+
+
+def _real_run_rows(page):
+    """Rows of the real-run table: a step name, then wall seconds, calls, reads and writes."""
+    head = "| step | wall seconds | calls | reads | writes |"
+    assert head in page, "the real-run measurement table is gone"
+    rows = []
+    for ln in page[page.index(head):].splitlines()[2:]:
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        if not ln.startswith("|") or len(cells) != 5:
+            break
+        rows.append(cells)
+    return rows
+
+
+def test_the_label_page_has_a_real_run_table_that_adds_up_and_claims_no_more():
+    """#1761: the measured run is on the page as numbers; each row's calls are its reads plus writes, no
+    number sits on a line that calls itself unmeasured, and what was not measured is named."""
+    page = _LABEL_PAGE.read_text(encoding="utf-8")
+    rows = _real_run_rows(page)
+    names = [r[0] for r in rows]
+    for step in ("plan", "arm --apply", "next --label, one pick", "next, no label, one pick"):
+        assert step in names, f"the real-run table has no row for {step!r}"
+    for name, secs, calls, reads, writes in rows:
+        assert float(secs) > 0 and int(calls) == int(reads) + int(writes), f"row {name!r} does not add up"
+    assert int(rows[names.index("plan")][4]) == 0, "plan must show no writes"
+    assert not [ln for ln in page.splitlines() if "unmeasured" in ln.lower() and re.search(r"\d+\.\d|\|\s*\d+\s*\|", ln)]
+    assert "Not measured:" in page, "the page must name what the run did not measure"
+    assert "no rate-limit figure was" in page and "one sample" in page

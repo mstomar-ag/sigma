@@ -81,11 +81,13 @@ def test_mode_off_takes_no_lease_and_writes_nothing(state):
     assert not state.exists()
 
 
-def test_unset_mode_is_off(state):
+def test_unset_mode_is_the_resolved_default_not_off(state):
+    """#1759: unset env and config resolve to the one default (enforce) on the session surface too."""
     guard = _load("resource_guard", "rg_t")
+    assert guard.session_mode({}, {}) == guard.DEFAULT_MODE == "enforce"
+    with_sample(guard)
     with guard.session_lease("judge", "1") as got:
-        assert got is None
-    assert not state.exists()
+        assert got is not None
 
 
 def test_renewer_default_interval_is_a_third_of_the_ttl(state, monkeypatch):
@@ -179,6 +181,7 @@ def test_judge_hold_returns_the_refusal_with_the_reason(state, judge, monkeypatc
 
 
 def test_judge_mode_off_creates_no_state(state, judge, monkeypatch):
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "off")
     monkeypatch.setattr(judge, "_run_group", lambda *a, **k: judge._Done("{}", 0))
     judge.ask_claude("p", {}, timeout_s=5)
     assert not state.exists()
@@ -239,6 +242,7 @@ def test_supervisor_hold_pauses_then_relaunches(state, daemon, monkeypatch, tmp_
 
 
 def test_supervisor_mode_off_creates_no_state(state, daemon, monkeypatch, tmp_path):
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "off")
     seen = tmp_path / "seen"
     monkeypatch.setenv("SIGMA_CLAUDE_CMD", stub_child(tmp_path, seen, state))
     monkeypatch.setenv("SIGMA_SUPERVISE_MAX_RUNS", "1")
@@ -301,7 +305,8 @@ def test_upkeep_hold_defers_the_unit_without_spend(state, rig, monkeypatch):
     assert result.charged_usd == 0.0 and rig.marker() is None
 
 
-def test_upkeep_mode_off_creates_no_state(state, rig):
+def test_upkeep_mode_off_creates_no_state(state, rig, monkeypatch):
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "off")
     result = rig.launcher.launch(rig.request())
     assert result.outcome == "ok" and not state.exists()
 
@@ -373,7 +378,8 @@ def test_reviewer_hold_is_a_failed_run_never_an_approval(state, reviewer, monkey
     assert leases(state) == []
 
 
-def test_reviewer_mode_off_creates_no_state(state, reviewer, tmp_path):
+def test_reviewer_mode_off_creates_no_state(state, reviewer, tmp_path, monkeypatch):
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "off")
     base, brief, scratch, seen = reviewer_rig(tmp_path, state, "print('VERDICT: ok')")
     assert reviewer.run_review(base, brief, [scratch]) == 0
     assert seen.read_text() == "0" and not state.exists()

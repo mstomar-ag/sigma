@@ -779,7 +779,12 @@ def admission_tail(config, now=None, env=None):
     `resource.mode` is "off" (a left-over file nobody refreshes must not read as a live hold)."""
     env = os.environ if env is None else env
     block = config.get("resource") if isinstance(config, dict) else None
-    mode = env.get("SIGMA_RESOURCE_MODE", (block or {}).get("mode") if isinstance(block, dict) else None)
+    # Copy of sigma-loop's `resource_guard.resolve_mode` (#1759): env, then config, then the default "enforce".
+    mode = env.get("SIGMA_RESOURCE_MODE")
+    if mode not in ("enforce", "observe", "off"):
+        mode = (block or {}).get("mode") if isinstance(block, dict) else None
+    if mode not in ("enforce", "observe", "off"):
+        mode = "enforce"
     if mode == "off":
         return ""
     base = env.get("SIGMA_RESOURCE_DIR")

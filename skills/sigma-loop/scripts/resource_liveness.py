@@ -35,11 +35,8 @@ def block(config):
 
 
 def effective_mode(config, env=None):
-    """enforce | observe | off. SIGMA_RESOURCE_MODE overrides the config key; null reads as the derived default."""
-    env = os.environ if env is None else env
-    forced = env.get("SIGMA_RESOURCE_MODE")
-    mode = forced if forced in ("enforce", "observe", "off") else block(config).get("mode")
-    return mode if mode in ("enforce", "observe", "off") else "enforce"
+    """enforce | observe | off: `resource_guard.resolve_mode`, the one rule for every surface (#1759)."""
+    return guard.resolve_mode(config, env)
 
 
 def alert_minutes(config):
