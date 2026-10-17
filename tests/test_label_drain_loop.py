@@ -341,3 +341,16 @@ def test_refusal_text_counts_real_open_questions(tmp_path, monkeypatch, capsys):
     out, ld, base, fk = _next_label(tmp_path, monkeypatch, capsys)
     n = len(ld.plan(base, A.LBL, run=fk)["questions"])
     assert n >= 1 and "%d open question(s)" % n in out.err
+
+
+# --- #1763: the unscoped terminal path never enters label drain -------------------------------------
+
+def test_unscoped_terminal_done_never_plans_a_label():
+    lp, stub = _loop(), Stub(members=[{"number": 1, "verdict": "unarmed", "reason": "unarmed"}])
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=[_issue(9)])
+        src = _Board([], live=[_issue(9)])           # nothing pickable, no label_scope
+        assert lp._next(base, src, _cfg(lp, base))[0] == "DONE"
+        assert lp._label_drained_note(base, src, _cfg(lp, base), set()) == "backlog-empty"
+    assert stub.plans == 0 and stub.pulls == []

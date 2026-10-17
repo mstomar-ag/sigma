@@ -392,6 +392,19 @@ def _pgid(pid):
         return None
 
 
+def note_waiting(goal, kind, now=None, env=None):
+    """Record `goal` as a waiting verify (same entry as admit's hold path), atomically under admit.lock."""
+    directory = state_dir(env)
+    now = time.time() if now is None else now
+    with _locked(directory) as got:
+        if not got:
+            return False
+        waiting = _waiting(directory, now)
+        waiting[goal] = {"kind": kind, "since": waiting.get(goal, {}).get("since", now), "until": now + WAIT_TTL}
+        _atomic_write(os.path.join(directory, "waiting.json"), waiting)
+        return True
+
+
 def release(lease_id, env=None):
     """Measure the unit, record it into its ring, remove its lease. False when unknown or the lock stayed busy."""
     directory = state_dir(env)
