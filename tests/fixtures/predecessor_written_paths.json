@@ -495,6 +495,7 @@
     "skills/sigma-loop/scripts/channel_notify.py::tick",
     "skills/sigma-loop/scripts/coexist.py::write_owner",
     "skills/sigma-loop/scripts/comment_watch.py::tick",
+    "skills/sigma-loop/scripts/dag_store.py::refresh_lock",
     "skills/sigma-loop/scripts/decision_import.py::_cache_save",
     "skills/sigma-loop/scripts/decision_import.py::classify_model",
     "skills/sigma-loop/scripts/drift_shadow.py::_save",
