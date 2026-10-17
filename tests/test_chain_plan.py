@@ -308,6 +308,10 @@ def test_json_flag_and_usage(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["goal"] == 1
     assert ch.main(["chain.py", "plan", base], run=_fake([])) == 2
     assert ch.main(["chain.py", "plan", base, "x"], run=_fake([])) == 2
+    capsys.readouterr()
+    for bad in ("\u00b2", "\u0663", "1\u0663"):   # superscript two (int raises), Arabic-Indic three (int accepts)
+        assert ch.main(["chain.py", "plan", base, bad], run=_fake([])) == 2
+        assert "usage: chain.py plan" in capsys.readouterr().err
     assert ch.main(["chain.py", "plan", base, "77"], run=_fake([])) == 2      # unreadable goal
     assert "#77" in capsys.readouterr().err
 

@@ -400,7 +400,7 @@ def main(argv, run=None, now=None):
         return 0
     as_json = "--json" in args
     args = [a for a in args if a != "--json"]
-    if len(args) != 3 or args[0] != "plan" or not args[2].isdigit():
+    if len(args) != 3 or args[0] != "plan" or not (args[2].isascii() and args[2].isdigit()):
         print(USAGE, file=sys.stderr)
         return 2
     try:
