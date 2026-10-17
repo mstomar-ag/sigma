@@ -70,6 +70,7 @@ LIBRARY_ONLY = {
     "conflict_state",
     "dag_store", "dag_collect", "dag_refresh",
     "dag_check",
+    "dag_chain",
     "feature_park",
     "qkind",
     "landing_preflight",
