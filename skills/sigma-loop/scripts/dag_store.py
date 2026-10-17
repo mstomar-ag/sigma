@@ -194,6 +194,8 @@ def _clean_node(n):
         out["in_corpus"] = bool(n["in_corpus"])
     if "updated_at" in n:
         out["updated_at"] = _ts(n["updated_at"])
+    if "read_at" in n:
+        out["read_at"] = _ts(n["read_at"])
     u = n.get("unit")
     if isinstance(u, str) and _UNIT.match(u):
         out["unit"] = u

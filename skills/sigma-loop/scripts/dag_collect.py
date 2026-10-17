@@ -147,7 +147,7 @@ def _unit(names):
 def _outside(run, repo, number, now):
     """`(node, ok)` for one number outside the lists. Unreadable is `unknown`, never a guess."""
     node = {"number": number, "kind": "issue", "state": "unknown", "life": "none", "prio": None,
-            "in_corpus": False}
+            "in_corpus": False, "read_at": _iso(now)}
     try:
         item = gh_api.view_issue(run, number, repo, comments="none")
     except Exception:                                   # noqa: BLE001 - unreadable is unknown
@@ -172,11 +172,16 @@ def _outside(run, repo, number, now):
 
 
 def _cached(previous, now):
-    h = (previous or {}).get("header") or {}
-    t = dag_store.parse_ts(h.get("last_ok_at"))
-    if t is None or not 0 <= now - t < CLOSED_TTL:
-        return {}
-    return {n["number"]: n for n in previous.get("nodes", []) if n.get("state") in _RESOLVED}
+    """Resolved nodes still inside their own TTL; the stamp is the node's `read_at`, never the
+    header's, so a carried-forward node cannot outlive the week by riding fresh refreshes."""
+    out = {}
+    for n in (previous or {}).get("nodes", []):
+        if n.get("state") not in _RESOLVED:
+            continue
+        t = dag_store.parse_ts(n.get("read_at"))
+        if t is not None and 0 <= now - t < CLOSED_TTL:
+            out[n["number"]] = n
+    return out
 
 
 def _handoff_edges(sdlc, config):
@@ -202,10 +207,11 @@ def collect(sdlc, config, run=None, now=None, previous=None, cap=LIST_CAP):
     prefix = _gh(config).get("priority_label_prefix", "priority:")
     aliases = _priority_aliases(config)
     rep = {"map": None, "calls": calls, "unread": [], "last_error": None, "partial": False}
-    items, partial = {}, False
+    items, partial, sizes = {}, False, {}
     try:
         for _name, label in label_sets(config):
             got = gh_api.list_issues(counted, repo, [label], cap)
+            sizes[_name] = len(got)
             partial = partial or len(got) >= cap
             for it in got:
                 if isinstance(it, dict) and isinstance(it.get("number"), int):
@@ -215,6 +221,9 @@ def collect(sdlc, config, run=None, now=None, previous=None, cap=LIST_CAP):
         return rep
     if not items:
         rep["last_error"] = "EmptyResult"
+        return rep
+    if not sizes.get("goal") and any(sizes.values()):   # PROVISIONAL (owner to ratify): goals never empty alone
+        rep["last_error"] = "EmptyList"
         return rep
     nodes, edges = {}, []
     for num, it in sorted(items.items()):

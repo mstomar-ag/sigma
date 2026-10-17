@@ -82,6 +82,18 @@ def _strings(obj):
             yield from _strings(v)
 
 
+def test_read_stamp_round_trips_and_a_bad_one_is_dropped(tmp_path):
+    """control: drop read_at from the node whitelist -> the round trip loses it."""
+    sdlc = _sdlc(tmp_path)
+    m = _map()
+    m["nodes"][0]["read_at"] = _iso(NOW - 5)
+    m["nodes"][1]["read_at"] = "yesterday-ish"
+    assert ds.save(sdlc, m)[0]
+    got, _ = ds.load(sdlc)
+    assert got["nodes"][0]["read_at"] == _iso(NOW - 5)
+    assert got["nodes"][1].get("read_at") is None
+
+
 def test_saved_file_holds_no_string_outside_the_closed_vocabulary(tmp_path):
     """Whatever the caller passes, the file carries only codes, numbers, timestamps, the repo name and
     the unit token. control: let `title` through the node whitelist; this goes red."""

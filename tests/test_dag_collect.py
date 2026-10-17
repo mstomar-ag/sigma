@@ -172,6 +172,72 @@ def test_resolved_outside_node_is_cached_seven_days(tmp_path):
     assert later["calls"]["read"] == 1
 
 
+def _prev_with(read_at, state="closed", header_ok=None):
+    """A saved map whose header is fresh at `header_ok` and whose node 9 was read at `read_at`."""
+    node = {"number": 9, "kind": "issue", "state": state, "life": "none", "prio": None,
+            "in_corpus": False}
+    if read_at:
+        node["read_at"] = read_at
+    h = {"repo": REPO, "built_at": header_ok, "refreshed_at": header_ok, "last_ok_at": header_ok,
+         "last_error": None, "partial": False, "cursor": None, "etag": None, "checked_at": None}
+    return {"header": h, "nodes": [node], "edges": []}
+
+
+def test_outside_node_stores_its_own_read_stamp(tmp_path):
+    """control: drop read_at from the outside node -> the stamp is absent."""
+    run = Fake([_issue(1, ["sdlc:goal"], "Blocked by: #9"), _issue(9, state="closed")])
+    rep = dc.collect(tmp_path, CONFIG, run, NOW)
+    assert _by_num(rep)[9]["read_at"] == dc._iso(NOW)
+
+
+def test_expiry_follows_the_node_not_the_header(tmp_path):
+    """A map refreshed a minute ago still re-reads a node last read 8 days ago.
+    control: _cached uses the header last_ok_at again -> zero reads, this goes red."""
+    now = NOW + 8 * 86400
+    prev = _prev_with(dc._iso(NOW), header_ok=dc._iso(now - 60))
+    run = Fake([_issue(1, ["sdlc:goal"], "Blocked by: #9"), _issue(9, state="closed")])
+    rep = dc.collect(tmp_path, CONFIG, run, now, prev)
+    assert rep["calls"]["read"] == 1
+
+
+def test_reopened_issue_is_seen_open_after_expiry(tmp_path):
+    """control: header-based expiry keeps the stale closed node -> state stays closed."""
+    now = NOW + 8 * 86400
+    prev = _prev_with(dc._iso(NOW), header_ok=dc._iso(now - 60))
+    run = Fake([_issue(1, ["sdlc:goal"], "Blocked by: #9"), _issue(9, state="open")])
+    rep = dc.collect(tmp_path, CONFIG, run, now, prev)
+    assert _by_num(rep)[9]["state"] == "open"
+
+
+def test_unexpired_node_is_carried_with_its_original_stamp(tmp_path):
+    """control: refresh read_at on carry-forward -> the stamp changes and expiry never fires."""
+    now = NOW + 3 * 86400
+    stamp = dc._iso(NOW)
+    prev = _prev_with(stamp, header_ok=dc._iso(now - 60))
+    run = Fake([_issue(1, ["sdlc:goal"], "Blocked by: #9"), _issue(9, state="closed")])
+    rep = dc.collect(tmp_path, CONFIG, run, now, prev)
+    assert rep["calls"]["read"] == 0 and _by_num(rep)[9]["read_at"] == stamp
+
+
+def test_node_without_a_read_stamp_is_read_again(tmp_path):
+    """An older saved file has no read_at: re-read once rather than trust it.
+    control: treat a missing stamp as fresh -> zero reads."""
+    prev = _prev_with(None, header_ok=dc._iso(NOW - 60))
+    run = Fake([_issue(1, ["sdlc:goal"], "Blocked by: #9"), _issue(9, state="closed")])
+    rep = dc.collect(tmp_path, CONFIG, run, NOW, prev)
+    assert rep["calls"]["read"] == 1 and _by_num(rep)[9]["read_at"] == dc._iso(NOW)
+
+
+def test_empty_goal_list_with_other_lists_non_empty_keeps_the_file(tmp_path):
+    """One list answering empty while the others do not is a short answer, not a repository state.
+    control: reduce the guard to the all-empty check -> the map is published without the goals."""
+    p, good = _published(tmp_path, _world())
+    only_parked = Fake([_issue(2, ["sdlc:parked"]), _issue(3, ["sdlc:followup"])])
+    rep = dc.refresh(tmp_path, CONFIG, only_parked, NOW + 10)
+    assert rep["status"] == "kept" and rep["last_error"] == "EmptyList"
+    assert p.read_bytes() == good
+
+
 def _published(tmp_path, run):
     rep = dc.refresh(tmp_path, CONFIG, run, NOW)
     assert rep["status"] == "saved"
