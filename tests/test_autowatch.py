@@ -998,3 +998,56 @@ def test_run_drive_launch_failure_never_calls_on_spawn():
         on_spawn=lambda pid: calls.append(pid))
     assert code == 1
     assert calls == []
+
+
+# ------------------------------------------------------------------ #1758: the drive takes an admission lease
+
+
+def _held_tick(tmp_path, monkeypatch, hold):
+    import contextlib
+    d = _sdlc(tmp_path, _config())
+    seen = []
+
+    class Spy:
+        @contextlib.contextmanager
+        def session_lease(self, kind, goal, **kw):
+            seen.append((kind, goal, kw.get("ttl")))
+            yield type("Hold", (), {"reason": "pressure: new work is held", "retry_after": 1.0})() if hold else None
+
+    monkeypatch.setattr(autowatch, "_guard", lambda: Spy())
+    calls = []
+    result = autowatch.tick(
+        d, issue="42",
+        run_drive=lambda cmd, prompt, cwd, env, timeout: (
+            calls.append(prompt) or _mark_done(d, "42") or (0, "{}")),
+        **_all_gates_pass_deps())
+    return d, result, calls, seen
+
+
+def test_a_hold_defers_the_tick_without_spawning(tmp_path, monkeypatch):
+    d, result, calls, seen = _held_tick(tmp_path, monkeypatch, hold=True)
+    assert result == "deferred: resource hold" and calls == []
+    assert seen[0][0] == "autowatch" and seen[0][1] == "42"
+    note = [e for e in _notes(d) if e["goal"] == "42"][0]
+    assert "deferred" in note["why"] and note.get("state") != "resolved"
+
+
+def test_no_hold_drives_under_the_lease(tmp_path, monkeypatch):
+    d, result, calls, seen = _held_tick(tmp_path, monkeypatch, hold=False)
+    assert result == "success" and len(calls) == 1 and len(seen) == 1
+
+
+def test_enforce_mode_with_no_headroom_defers_the_real_drive(tmp_path, monkeypatch):
+    monkeypatch.setenv("SIGMA_RESOURCE_DIR", str(tmp_path / "rs"))
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "enforce")
+    guard = autowatch._guard()
+    lease = guard._lease()
+    lease.take_sample = lambda: lease.guard.Sample(
+        total=16 << 30, available=1 << 20, swap_used=0, swap_total=0, swapouts=0, swapouts_at=0.0, pressure=4,
+        cpu_count=8, load1=0.0)
+    lease.take_footprint = lambda pid: None
+    d = _sdlc(tmp_path, _config())
+    calls = []
+    result = autowatch.tick(d, issue="42", run_drive=lambda *a, **k: calls.append(a) or (0, "{}"),
+                            **_all_gates_pass_deps())
+    assert result == "deferred: resource hold" and calls == []
