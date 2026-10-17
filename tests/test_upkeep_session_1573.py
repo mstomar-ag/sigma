@@ -254,6 +254,35 @@ def test_the_network_prefix_is_put_in_front_of_the_command(srig, tmp_path):
     assert marker.exists()
 
 
+def _recording_wall(tmp_path):
+    log = tmp_path / "wall-calls.jsonl"
+    wall = tmp_path / "wall.py"
+    wall.write_text("#!%s\nimport json, os, sys\nopen(%r, 'a').write(json.dumps(sys.argv[2:]) + '\\n')\nos.execv(sys.argv[1], sys.argv[1:])\n"
+                    % (sys.executable, str(log)))
+    wall.chmod(0o755)
+    return wall, log
+
+
+def test_1736_the_session_launch_itself_goes_through_the_wall_not_only_the_auth_preflight(srig, tmp_path):
+    wall, log = _recording_wall(tmp_path)
+    m, w, report, spy = run_session(srig, tmp_path, net_prefix=[str(wall)])
+    assert report["outcome"] == m.REBASED, report.get("why")
+    wrapped = [json.loads(l) for l in log.read_text().splitlines()]
+    assert any(a[:2] == ["auth", "status"] for a in wrapped), "the preflight is wrapped too"
+    sessions = [a for a in wrapped if "--permission-mode" in a]
+    assert len(sessions) == len(resolves(srig)) >= 1
+    assert any("Bash" in "".join(a) for a in sessions)
+
+
+def test_1736_with_no_wall_the_session_argv_has_no_bash_and_no_wrapper_ran(srig, tmp_path):
+    wall, log = _recording_wall(tmp_path)
+    m, w, report, spy = run_session(srig, tmp_path)
+    assert report["outcome"] == m.REBASED, report.get("why")
+    assert not log.exists()
+    for c in resolves(srig):
+        assert not any("Bash" in a for a in c["argv"]) and "--permission-mode" in c["argv"]
+
+
 def test_wall_per_platform_and_profile_text(tmp_path):
     launcher = base._load("feature_upkeep_launcher")
     have = lambda name: "/usr/bin/" + name  # noqa: E731
