@@ -190,9 +190,18 @@ def test_doctor_row_ok_and_not_ok(tmp_path, machine, key, config, setup, ok):
         assert row["fix"]
 
 
-def test_doctor_rows_are_silent_when_resource_guard_is_not_in_play(tmp_path, machine):
+def test_doctor_rows_are_silent_when_resource_guard_is_off(tmp_path, machine):
     base = _sdlc(tmp_path, {})
-    assert _doctor()._resource_rows({}, str(base), now=NOW, sampler=lambda: machine["sample"]) == []
+    off = {"resource": {"mode": "off"}}
+    assert _doctor()._resource_rows(off, str(base), now=NOW, sampler=lambda: machine["sample"]) == []
+    assert _doctor()._resource_rows({}, str(base), now=NOW, sampler=lambda: machine["sample"], env={"SIGMA_RESOURCE_MODE": "off"}) == []
+
+
+def test_doctor_rows_show_on_a_default_install(tmp_path, machine):
+    """#1786: an empty config resolves to enforce, so the rows appear."""
+    base = _sdlc(tmp_path, {})
+    names = [r["name"] for r in _doctor()._resource_rows({}, str(base), now=NOW, sampler=lambda: machine["sample"])]
+    assert "resource mode: enforce" in names
 
 
 def test_verify_row_names_the_workers_fix_and_the_env_lever_note(tmp_path, machine):

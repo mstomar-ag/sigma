@@ -1210,7 +1210,7 @@ def _landing_rows(base, cfg, run, which):
 
 def _resource_rows(cfg, sdlc_dir, now=None, sampler=None, env=None):
     """#1604 LIVENESS: seven rows on the resource guard, present only when it is in play (`parallel.goals.enabled`, or
-    `resource.mode` / SIGMA_RESOURCE_MODE names a mode), so a repo that never opted in sees no new row. Facts come
+    the resolved resource mode is not off, #1786), so a repo that turned the guard off sees no row. Facts come
     from sigma-loop's `resource_liveness` (the one reader of hold.json / last.json); this only words them. Age is the
     tell: a sampler that died reports no error, so row 4 reads the age of last.json against the watcher-derived
     bound while a loop heartbeat is fresh. `sampler` is DI for tests. Never raises."""
@@ -1218,11 +1218,9 @@ def _resource_rows(cfg, sdlc_dir, now=None, sampler=None, env=None):
     env = os.environ if env is None else env
     try:
         goals = _block(_block(cfg, "parallel"), "goals")
-        mode_key = _block(cfg, "resource").get("mode")
-        named = mode_key in ("enforce", "observe") or env.get("SIGMA_RESOURCE_MODE") in ("enforce", "observe")
-        if goals.get("enabled") is not True and not named:
-            return []
         live = _load_loop_script("resource_liveness")
+        if goals.get("enabled") is not True and live.effective_mode(cfg, env) == "off":     # #1786: the resolved mode
+            return []
         now = _time.time() if now is None else now
         rows = []
         try:
