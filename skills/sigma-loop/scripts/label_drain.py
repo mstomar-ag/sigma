@@ -1086,6 +1086,9 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
         """The one record + comment, through the shared writer. -> list of lines."""
         ids = q.get("unblocks") or []
         goal = int(q["target"]) if str(q["target"]).isdigit() else (min(ids) if ids else None)
+        if goal is None:                                # #1725: a recovered question has no members; the lowest open member carries it
+            nums = [r["number"] for r in p["members"] + p["outside"] if str(r.get("number", "")).isdigit()]
+            goal = min(nums) if nums else None
         if not dr.enabled(config):
             return []
         if dry_run:

@@ -164,6 +164,18 @@ def test_a_crash_between_the_label_write_and_the_record_writes_only_the_record(t
     assert not [a for a in fk.writes()[before:] if a[:2] == ["issue", "edit"]]
 
 
+def test_a_recovered_label_question_records_a_goal_and_posts_its_comment_once(tmp_path):
+    """#1725: the recovery lookup rebuilds the question with no members; the record must still carry a goal."""
+    ld, base, fk, _ = env(tmp_path, [issue(1, LBL), issue(2, LBL)])
+    ld.arm(base, LBL, apply=True, run=fk)
+    res = ask(ld, base, fk, {"label_set:" + LBL: "arm them"})
+    recs = records(base)
+    assert res["errors"] == [] and len(recs) == 1 and recs[0]["issue"] == 1
+    assert len(fk.comments()) == 1
+    ask(ld, base, fk, {"label_set:" + LBL: "arm them"})
+    assert len(records(base)) == 1 and len(fk.comments()) == 1
+
+
 # 3 -- parked member == the unpark path ----------------------------------------------------------
 
 @pytest.mark.parametrize("kind_comment,qid,option,decision,slot", [
