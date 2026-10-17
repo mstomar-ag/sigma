@@ -295,7 +295,7 @@ def test_next_batch_label_refuses_to_start(tmp_path, monkeypatch, capsys):
     base, fk, out = _next_batch_label(tmp_path, monkeypatch, capsys, A._issue(1, "sdlc:blocked", A.LBL))
     assert out.out.strip() == "DONE"
     assert "First run `label_drain.py arm %s %s --apply`, then start again" % (base, A.LBL) in out.err
-    assert "1 unarmed member(s), 0 open question(s); nothing was claimed or written" in out.err
+    assert "1 unarmed member(s)" in out.err and "nothing was claimed or written" in out.err
     assert fk.writes() == []
 
 
@@ -306,3 +306,38 @@ def test_parked_only_label_refuses_to_start(tmp_path, monkeypatch, capsys):
     assert "First run `label_drain.py plan %s %s` and answer the open questions with /sigma-unpark" % (
         base, A.LBL) in out.err
     assert fk.writes() == []
+
+
+# --- #1732: a recorded decision is honoured by the start check ------------------------------------
+
+import test_label_answer as LA
+
+
+def _next_label(tmp_path, monkeypatch, capsys, answers=None):
+    lp = _loop()
+    ld, base, fk, _ = LA.env(tmp_path, [LA.issue(1, "sdlc:blocked", A.LBL)])
+    if answers:
+        assert not ld.answer(base, A.LBL, answers, run=fk)["errors"]
+    cfg = lp.state.load_config(base)
+    monkeypatch.setattr(lp.sources, "get_source",
+                        lambda d, c: lp.sources.GitHubSource(c, run=fk, sdlc_dir=d))
+    for hook in ("_ensure_watcher", "_ensure_ledger_delivery", "_surface_inbox", "_warn_knowledge_graph"):
+        monkeypatch.setattr(lp, hook, lambda *a, **k: None)
+    assert lp.main(["loop.py", "next", base, "--label", A.LBL]) == 0
+    return capsys.readouterr(), ld, base, fk
+
+
+def test_next_label_starts_after_leave_them(tmp_path, monkeypatch, capsys):
+    out, *_ = _next_label(tmp_path, monkeypatch, capsys, {"label_set:" + A.LBL: "leave them"})
+    assert "is not ready" not in out.err and "label_drain.py arm" not in out.err
+
+
+def test_next_label_still_refuses_unarmed_without_a_decision(tmp_path, monkeypatch, capsys):
+    out, *_ = _next_label(tmp_path, monkeypatch, capsys)
+    assert "is not ready" in out.err and "label_drain.py arm" in out.err and "1 unarmed" in out.err
+
+
+def test_refusal_text_counts_real_open_questions(tmp_path, monkeypatch, capsys):
+    out, ld, base, fk = _next_label(tmp_path, monkeypatch, capsys)
+    n = len(ld.plan(base, A.LBL, run=fk)["questions"])
+    assert n >= 1 and "%d open question(s)" % n in out.err

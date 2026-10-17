@@ -109,9 +109,9 @@ def test_plan_shows_the_last_answer_on_this_label_then_counts_for_the_kind(tmp_p
     ld, base, fk, cfg = _world(tmp_path, _unarmed("run:a") + [issue(2, "run:b")])
     assert "history" not in _q(ld.plan(base, "run:a", config=cfg, run=fk))
     ld.answer(base, "run:a", {"label_set:run:a": LEAVE}, run=fk)
-    # the label is still unarmed, so its own question is asked again and shows its own history
-    own = _q(ld.plan(base, "run:a", config=cfg, run=fk))
-    assert own["history"] == "last time on this label: " + LEAVE
+    # #1732: the answered question is no longer asked on this label; the kind's history reaches other labels
+    assert not [q for q in ld.plan(base, "run:a", config=cfg, run=fk)["questions"]
+                if q["id"].startswith("label_set:")]
     other = _q(ld.plan(base, "run:b", config=cfg, run=fk))
     assert other["history"] == "on labels of this kind: %s 1" % LEAVE
     assert "history: on labels of this kind" in ld.render_plan(ld.plan(base, "run:b", config=cfg, run=fk))
@@ -186,9 +186,22 @@ def test_spend_is_never_recommended_and_stays_capped_at_level_two(tmp_path):
     assert "recommendation" not in q
     ds = _mod("decision_store")
     for _ in range(400):
-        ds.append(base, {"how": "human", "qkind": "irreversible", "area": "repo", "gesture": "ack",
-                         "choice": "go ahead", "answer": "go ahead"}, cfg)
-    assert _mod("autonomy").level(base, "irreversible", "repo", cfg) <= 2
+        ds.append(base, {"how": "human", "qkind": "irreversible", "area": "repo",
+                         "choice": "go ahead", "answer": "go ahead"}, cfg)   # counted answers, so only the cap holds it
+    for _ in range(400):
+        _mod("autonomy").record_watch(base, "irreversible", "repo", "go ahead", "go ahead", cfg)
+    assert _mod("autonomy").level(base, "irreversible", "repo", cfg) == 2
+
+
+def test_spend_answers_through_the_answer_path_never_raise_the_level(tmp_path):
+    body = "Paid step: runpodctl create pod for the render\n\n" + DW
+    paid = [issue(n, "sdlc:goal", "run:a", body=body) for n in range(1, 41)]
+    ld, base, fk, cfg = _world(tmp_path, paid, autonomy=True)
+    res = ld.answer(base, "run:a", {"irreversible:%d" % n: "go ahead" for n in range(1, 41)}, config=cfg, run=fk)
+    assert res["errors"] == []
+    recs = _mod("decision_store").list_by(base, cfg, qkind="irreversible")
+    assert len(recs) == 40 and {r["gesture"] for r in recs} == {"ack"}      # an ack is not a park answer
+    assert _mod("autonomy").level(base, "irreversible", "repo", cfg) == 0
 
 
 # 7 -- doctor ------------------------------------------------------------------------------------
