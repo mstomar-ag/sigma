@@ -75,3 +75,17 @@ def test_failed_line_matches_the_exact_node_id_not_a_prefix_name():
     assert rc._failed_line("FAILED tests/test_mod.py::test_a\n", "tests/test_mod.py::test_a")
     assert rc._failed_line("FAILED tests/test_mod.py::test_p[x] - boom\n", "tests/test_mod.py::test_p")
     assert not rc._failed_line("FAILED tests/other.py::test_a - boom\n", "tests/test_mod.py::test_a")
+
+
+def test_every_table_row_has_a_control_and_every_control_a_row():
+    """#1797: the runner covers each row of the controls table; each row names its control ids."""
+    import re
+    text = (ROOT / "docs" / "launch" / "evidence" / "resource-guard-controls.md").read_text()
+    rows = [l for l in text.splitlines() if l.startswith("| ") and "tests/test_" in l]
+    ids = {c["id"] for c in rc.load()}
+    seen = set()
+    for row in rows:
+        found = set(re.findall(r"--only ([\w-]+)", row))
+        assert found and found <= ids, row
+        seen |= found
+    assert seen == ids

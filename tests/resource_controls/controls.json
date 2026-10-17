@@ -1,25 +1,141 @@
 {
-  "_comment": "#1769: one deliberate break per row of docs/launch/evidence/resource-guard-controls.md. Each break is an exact-text patch (old must occur exactly once) applied to a temp copy; the named test must then fail.",
-  "controls": [
-    {"id": "shed-count", "clause": "shed: three consecutive critical samples",
-     "file": "skills/sigma-loop/scripts/resource_verify.py",
-     "old": "self.critical_run >= after and", "new": "self.critical_run >= 1 and",
-     "test": "tests/test_resource_shed_1602.py::test_one_critical_sample_does_nothing"},
-    {"id": "shed-off", "clause": "shed: off switch",
-     "file": "skills/sigma-loop/scripts/resource_verify.py",
-     "old": "shedding = resolved.get(\"shed\") != \"off\" and", "new": "shedding = True and",
-     "test": "tests/test_resource_shed_1602.py::test_shed_off_does_nothing_even_when_critical"},
-    {"id": "stop-file", "clause": "shed: stop file removed",
-     "file": "skills/sigma-loop/scripts/resource_verify.py",
-     "old": "            if stop_path:\n                try:\n                    os.unlink", "new": "            if False:\n                try:\n                    os.unlink",
-     "test": "tests/test_resource_shed_1602.py::test_the_stop_file_is_removed_after_a_shed_and_after_an_exception"},
-    {"id": "enforce-only", "clause": "shed: enforce mode only",
-     "file": "skills/sigma-loop/scripts/resource_verify.py",
-     "old": "(resolved.get(\"mode\") or \"enforce\") == \"enforce\"", "new": "True",
-     "test": "tests/test_resource_shed_1602.py::test_observe_mode_never_sheds"},
-    {"id": "shed-after-key", "clause": "shed: shed_after key is honoured",
-     "file": "skills/sigma-loop/scripts/resource_verify.py",
-     "old": "shed_after = resolved.get(\"shed_after\") or SHED_AFTER", "new": "shed_after = SHED_AFTER",
-     "test": "tests/test_resource_shed_1602.py::test_configured_shed_after_sets_the_critical_samples_before_a_shed"}
-  ]
+ "_comment": "#1769: one deliberate break per row of docs/launch/evidence/resource-guard-controls.md. Each break is an exact-text patch (old must occur exactly once) applied to a temp copy; the named test must then fail.",
+ "controls": [
+  {
+   "id": "shed-count",
+   "clause": "shed: three consecutive critical samples",
+   "file": "skills/sigma-loop/scripts/resource_verify.py",
+   "old": "self.critical_run >= after and",
+   "new": "self.critical_run >= 1 and",
+   "test": "tests/test_resource_shed_1602.py::test_one_critical_sample_does_nothing"
+  },
+  {
+   "id": "shed-off",
+   "clause": "shed: off switch",
+   "file": "skills/sigma-loop/scripts/resource_verify.py",
+   "old": "shedding = resolved.get(\"shed\") != \"off\" and",
+   "new": "shedding = True and",
+   "test": "tests/test_resource_shed_1602.py::test_shed_off_does_nothing_even_when_critical"
+  },
+  {
+   "id": "stop-file",
+   "clause": "shed: stop file removed",
+   "file": "skills/sigma-loop/scripts/resource_verify.py",
+   "old": "            if stop_path:\n                try:\n                    os.unlink",
+   "new": "            if False:\n                try:\n                    os.unlink",
+   "test": "tests/test_resource_shed_1602.py::test_the_stop_file_is_removed_after_a_shed_and_after_an_exception"
+  },
+  {
+   "id": "enforce-only",
+   "clause": "shed: enforce mode only",
+   "file": "skills/sigma-loop/scripts/resource_verify.py",
+   "old": "(resolved.get(\"mode\") or \"enforce\") == \"enforce\"",
+   "new": "True",
+   "test": "tests/test_resource_shed_1602.py::test_observe_mode_never_sheds"
+  },
+  {
+   "id": "shed-after-key",
+   "clause": "shed: shed_after key is honoured",
+   "file": "skills/sigma-loop/scripts/resource_verify.py",
+   "old": "shed_after = resolved.get(\"shed_after\") or SHED_AFTER",
+   "new": "shed_after = SHED_AFTER",
+   "test": "tests/test_resource_shed_1602.py::test_configured_shed_after_sets_the_critical_samples_before_a_shed"
+  },
+  {
+   "id": "reserve-share",
+   "clause": "reserve and share cap",
+   "file": "skills/sigma-loop/scripts/resource_guard.py",
+   "old": "return min(available - self.reserve - self.unmaterialised, self.share_cap - self.leased)",
+   "new": "return available - self.reserve - self.unmaterialised",
+   "test": "tests/test_resource_guard_limits.py::test_headroom_is_the_smaller_of_free_room_and_share_room"
+  },
+  {
+   "id": "cpu-reserve",
+   "clause": "CPU reserve",
+   "file": "skills/sigma-loop/scripts/resource_guard.py",
+   "old": "cfg[\"cpu_reserve_cores\"] or max(1, -(-sample.cpu_count // 8))",
+   "new": "cfg[\"cpu_reserve_cores\"] or 1",
+   "test": "tests/test_resource_guard_limits.py::test_cpu_reserve_scales_with_cores"
+  },
+  {
+   "id": "pressure-level",
+   "clause": "load and pressure level",
+   "file": "skills/sigma-loop/scripts/resource_guard.py",
+   "old": "goal_block=level >= 2 or",
+   "new": "goal_block=level >= 3 or",
+   "test": "tests/test_resource_guard_limits.py::test_pressure_two_blocks_goal_but_admits_one_verify_worker"
+  },
+  {
+   "id": "critical",
+   "clause": "critical",
+   "file": "skills/sigma-loop/scripts/resource_guard.py",
+   "old": "critical = level >= 4 or sample.available < reserve / 2",
+   "new": "critical = level >= 5 or sample.available < reserve / 2",
+   "test": "tests/test_resource_guard_limits.py::test_pressure_four_and_low_available_are_each_critical"
+  },
+  {
+   "id": "floor-one",
+   "clause": "floor of one unit",
+   "file": "skills/sigma-loop/scripts/resource_lease.py",
+   "old": "        return 1, 0",
+   "new": "        return 0, 0",
+   "test": "tests/test_resource_lease.py::test_no_observations_admits_exactly_one_unit_then_holds"
+  },
+  {
+   "id": "hysteresis-lowest",
+   "clause": "hysteresis: lowest of three",
+   "file": "skills/sigma-loop/scripts/resource_guard.py",
+   "old": "return min(values[-3:])",
+   "new": "return values[-1]",
+   "test": "tests/test_resource_guard_limits.py::test_lowest_of_three_clause"
+  },
+  {
+   "id": "hysteresis-median",
+   "clause": "hysteresis: resume median",
+   "file": "skills/sigma-loop/scripts/resource_guard.py",
+   "old": "return sorted(values[-3:])[min(1, len(values[-3:]) - 1)]",
+   "new": "return values[-1]",
+   "test": "tests/test_resource_guard_limits.py::test_resume_uses_higher_of_lowest_two"
+  },
+  {
+   "id": "hysteresis-consecutive",
+   "clause": "hysteresis: consecutive resume",
+   "file": "skills/sigma-loop/scripts/resource_guard.py",
+   "old": "return len(run) >= need and all(b - a >= gap for a, b in zip(run, run[1:]))",
+   "new": "return True",
+   "test": "tests/test_resource_guard_limits.py::test_resume_needs_consecutive_spaced_samples"
+  },
+  {
+   "id": "remainder",
+   "clause": "remainder of a lease",
+   "file": "skills/sigma-loop/scripts/resource_lease.py",
+   "old": "return max(0, est - seen)",
+   "new": "return 0",
+   "test": "tests/test_resource_lease.py::test_remainder_of_a_lease_is_reserved"
+  },
+  {
+   "id": "stale-pid",
+   "clause": "stale lease: dead pid",
+   "file": "skills/sigma-loop/scripts/resource_lease.py",
+   "old": "not pid_alive(record[\"pid\"]) or expired(record, now)",
+   "new": "expired(record, now)",
+   "test": "tests/test_resource_lease.py::test_dead_pid_lease_is_reclaimed"
+  },
+  {
+   "id": "stale-ttl",
+   "clause": "stale lease: expired ttl",
+   "file": "skills/sigma-loop/scripts/resource_lease.py",
+   "old": " or expired(record, now) or reused(record)",
+   "new": " or reused(record)",
+   "test": "tests/test_resource_lease.py::test_expired_ttl_lease_is_reclaimed"
+  },
+  {
+   "id": "learned-cost",
+   "clause": "learned cost is the measured footprint",
+   "file": "skills/sigma-loop/scripts/resource_verify.py",
+   "old": "total += got[0] if got else 0",
+   "new": "total += 0",
+   "test": "tests/test_resource_verify_1601.py::test_learned_cost_is_peak_tree_footprint_over_workers_within_20_percent"
+  }
+ ]
 }

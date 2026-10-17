@@ -26,3 +26,10 @@ def test_every_test_named_in_the_controls_table_exists():
     text = (EVID / "resource-guard-controls.md").read_text()
     for path, name in re.findall(r"(tests/test_\w+\.py)::(\w+)", text):
         assert ("def %s(" % name) in (ROOT / path).read_text(), (path, name)
+
+
+def test_no_controls_table_row_says_not_run():
+    """#1797: every row is covered by the runner or says why it cannot be patched."""
+    text = (EVID / "resource-guard-controls.md").read_text()
+    rows = [l for l in text.splitlines() if l.startswith("| ") and "tests/test_" in l]
+    assert rows and not [r for r in rows if "not run" in r.lower()]
