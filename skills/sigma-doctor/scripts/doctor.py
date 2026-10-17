@@ -1219,7 +1219,7 @@ def _resource_rows(cfg, sdlc_dir, now=None, sampler=None, env=None):
     try:
         goals = _block(_block(cfg, "parallel"), "goals")
         mode_key = _block(cfg, "resource").get("mode")
-        named = mode_key in ("enforce", "observe", "off") or env.get("SIGMA_RESOURCE_MODE") in ("enforce", "observe", "off")
+        named = mode_key in ("enforce", "observe", "off") or env.get("SIGMA_RESOURCE_MODE") in ("enforce", "observe")
         if goals.get("enabled") is not True and not named:
             return []
         live = _load_loop_script("resource_liveness")
