@@ -205,6 +205,20 @@ def test_money_amount_near_misses_still_arm():
         assert m.decide("cleanup", text, {}, _cfg()).kind == "arm", text
 
 
+def test_nationality_dollars_for_compute_park_as_spend():
+    m = _mod()
+    for text in ("use 40 US dollars of GPU time", "use 40 Canadian dollars of GPU", "spend forty US dollars on a cloud run",
+                 "budget 40 Australian dollars of compute", "pay 40 New Zealand dollars for cloud credits"):
+        d = m.decide("tidy", text, {}, _cfg())
+        assert d.kind == "park" and "spend phrase" in d.reason, (text, d)
+
+
+def test_nationality_dollars_near_misses_still_arm():
+    m = _mod()
+    for text in ("use 40 US dollars of docs", "see log:\n```\nuse 40 US dollars of GPU\n```\ntidy the docs"):
+        assert m.decide("tidy", text, {}, _cfg()).kind == "arm", text
+
+
 def test_euro_and_pound_amounts_for_compute_park_as_spend():
     m = _mod()
     for text in ("pay 100 euros for compute", "Spend about 50 EUR on cloud credits",
