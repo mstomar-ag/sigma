@@ -512,6 +512,7 @@
     "skills/sigma-loop/scripts/loop.py::_ensure_ledger_delivery",
     "skills/sigma-loop/scripts/loop.py::_merge_reconcile_lock",
     "skills/sigma-loop/scripts/loop.py::_next",
+    "skills/sigma-loop/scripts/loop.py::_next_untraced",
     "skills/sigma-loop/scripts/loop.py::_reconcile_awaiting_merges",
     "skills/sigma-loop/scripts/loop.py::_reconcile_stamp",
     "skills/sigma-loop/scripts/loop.py::_reconcile_sweep",
@@ -653,6 +654,7 @@
    "vetted_writers": [
     "skills/sigma-loop/scripts/loop.py::_ensure_claimed",
     "skills/sigma-loop/scripts/loop.py::_next",
+    "skills/sigma-loop/scripts/loop.py::_next_untraced",
     "skills/sigma-loop/scripts/loop.py::_try_acquire_claim_lock",
     "skills/sigma-loop/scripts/loop.py::next_batch",
     "skills/sigma-loop/scripts/loop.py::reclaim_stale_claim_lock",
@@ -678,6 +680,7 @@
    "verdict": "unsampled",
    "vetted_writers": [
     "skills/sigma-loop/scripts/loop.py::_next",
+    "skills/sigma-loop/scripts/loop.py::_next_untraced",
     "skills/sigma-loop/scripts/loop.py::_try_acquire_claim_lock",
     "skills/sigma-loop/scripts/loop.py::next_batch",
     "skills/sigma-loop/scripts/loop.py::reclaim_stale_claim_lock",
@@ -694,6 +697,7 @@
    "verdict": "unsampled",
    "vetted_writers": [
     "skills/sigma-loop/scripts/loop.py::_next",
+    "skills/sigma-loop/scripts/loop.py::_next_untraced",
     "skills/sigma-loop/scripts/loop.py::_try_acquire_claim_lock",
     "skills/sigma-loop/scripts/loop.py::next_batch",
     "skills/sigma-loop/scripts/loop.py::reclaim_stale_claim_lock",
@@ -888,6 +892,7 @@
    "verdict": "unsampled",
    "vetted_writers": [
     "skills/sigma-loop/scripts/loop.py::_next",
+    "skills/sigma-loop/scripts/loop.py::_next_untraced",
     "skills/sigma-loop/scripts/loop.py::_reconcile_stamp",
     "skills/sigma-loop/scripts/loop.py::_reconcile_sweep",
     "skills/sigma-loop/scripts/loop.py::next_batch"
@@ -912,6 +917,7 @@
    "vetted_writers": [
     "skills/sigma-loop/scripts/loop.py::_emit_run_stop_once",
     "skills/sigma-loop/scripts/loop.py::_next",
+    "skills/sigma-loop/scripts/loop.py::_next_untraced",
     "skills/sigma-loop/scripts/state.py::claim_run_stop"
    ]
   },
@@ -924,6 +930,7 @@
    "vetted_writers": [
     "skills/sigma-loop/scripts/loop.py::_emit_run_stop_once",
     "skills/sigma-loop/scripts/loop.py::_next",
+    "skills/sigma-loop/scripts/loop.py::_next_untraced",
     "skills/sigma-loop/scripts/state.py::claim_run_stop"
    ]
   },
@@ -936,6 +943,7 @@
     "skills/sigma-loop/scripts/loop.py::_claim",
     "skills/sigma-loop/scripts/loop.py::_ensure_claimed",
     "skills/sigma-loop/scripts/loop.py::_next",
+    "skills/sigma-loop/scripts/loop.py::_next_untraced",
     "skills/sigma-loop/scripts/loop.py::_reserve_goal_slot",
     "skills/sigma-loop/scripts/loop.py::_session_claim",
     "skills/sigma-loop/scripts/loop.py::begin_run",
