@@ -148,6 +148,7 @@ def _components_scc(g, start=None):
         return g._scc
     index, low, on_stack, stack = {}, {}, set(), []
     comp_of, comps, counter = {}, [], 0
+    succ_of = {}
     roots = _open(g)
     if start is not None and start in g.nodes and not g.resolved(start):
         roots = [start] + roots
@@ -159,7 +160,9 @@ def _components_scc(g, start=None):
         work = [(root, 0)]
         while work:
             node, i = work.pop()
-            succ = [b for b in g.blockers[node] if not g.resolved(b)]
+            succ = succ_of.get(node)
+            if succ is None:                                # once per node: a pop is not a rebuild
+                succ = succ_of[node] = [b for b in g.blockers[node] if not g.resolved(b)]
             if i < len(succ):
                 work.append((node, i + 1))
                 nxt = succ[i]

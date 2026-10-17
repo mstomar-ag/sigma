@@ -179,6 +179,22 @@ def test_wide_fan_no_recursion_error():
     assert len(dag.closure(g2, 1)) == m
 
 
+def test_cycles_on_a_node_with_fifty_thousand_blockers_does_not_recompute_its_successors():
+    """Review finding: the SCC walk rebuilt a node's unresolved-successor list on every pop, O(D squared)
+    for one goal blocked by D others. Counted in `resolved` calls, so it cannot flake."""
+    m = 50000
+    g = _g([(i, 1) for i in range(2, m + 2)])
+    calls = [0]
+    real = g.resolved
+
+    def counting(number):
+        calls[0] += 1
+        return real(number)
+    g.resolved = counting
+    assert dag.cycles(g) == []
+    assert calls[0] < 10 * m, calls[0]
+
+
 # ---- determinism ---------------------------------------------------------------------------------
 def test_shuffled_input_gives_identical_output():
     rng = random.Random(11)
