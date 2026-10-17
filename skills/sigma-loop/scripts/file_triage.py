@@ -174,10 +174,12 @@ def _quoted_holds(clause, at, span_at):
     if not before:
         return opener in _FILLER and opener not in _DETERMINER     # "Then/Just/Please `x`" holds; "The `x` guard" does not
     last = before[-1]
-    if last in _NAMING or last in _NOUN_HEAD or last in _NEGATION or last in _DETERMINER or last in _BE:
+    if last in _NAMING:
         return False
-    if last in _ACTION or last in _HANDOFF or last in _MODAL:
+    if last in _ACTION or last in _HANDOFF or last in _MODAL:     # before the determiners: "when" and "if" are both
         return True
+    if last in _NOUN_HEAD or last in _NEGATION or last in _DETERMINER or last in _BE:
+        return False
     return last not in _DESCRIBING     # an unrecognised word before the span holds (#1755)
 
 

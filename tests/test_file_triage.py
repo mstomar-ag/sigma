@@ -325,6 +325,12 @@ def test_quoted_deny_word_holds_unless_the_word_before_it_is_descriptive():
         assert m.decide("c", text, {}, {}).kind == "park", text
 
 
+def test_quoted_deny_word_after_a_hand_off_that_is_also_a_determiner_holds():
+    m = _mod()
+    for text in ("Once ready, when `force push` main", "Please, if `force push` works do it", "If `force push` is needed"):
+        assert m.decide("c", text, {}, {}).kind == "park", text
+
+
 def test_protective_opener_does_not_clear_a_later_action():
     m = _mod()
     for text in ("Redact keys to delete all rows", "Verify backups before you force push",
