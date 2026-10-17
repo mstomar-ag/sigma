@@ -350,8 +350,9 @@ def _brief_row(row, sdlc_dir, config, n, source, scrub, briefed, not_briefed, un
     return briefed + 1, unpark
 
 
-def plan(sdlc_dir, label, config=None, run=None):
-    """-> the full read-only plan dict. Raises `sources.LabelScopeError` or `ValueError` (too many
+def plan(sdlc_dir, label, config=None, run=None, hide_answered=True):
+    """-> the full read-only plan dict. A question with a recorded answer is dropped and `ready` follows
+    (#1732); `answer` passes hide_answered=False so it can still validate a repeated answer. Raises `sources.LabelScopeError` or `ValueError` (too many
     members) for the refusals the CLI turns into exit 2."""
     sources = _load("sources")
     state_mod = _load("state")
@@ -441,6 +442,9 @@ def plan(sdlc_dir, label, config=None, run=None):
     counts = collections.Counter(r["display"] for r in rows)
     paid = {i["number"]: i.get("body") or "" for i in member_issues}
     qs = _annotate(sdlc_dir, config, label, questions(label, rows, outside, paid, config))
+    if hide_answered and qs:
+        done = _recorded(sdlc_dir, config, label)
+        qs = [q for q in qs if not done.get(q["id"])]
     unread = [r["number"] for r in rows + outside if r.get("kind") in ("not-read", "unreadable")]
     return {"label": label, "repo": repo, "members": rows, "outside": outside,
             "questions": qs, "ready": not qs and not unread,
@@ -500,7 +504,10 @@ def _rec_qid(qid, label, config):
 
 def _history(sdlc_dir, config, label, q):
     """#1581: one line saying what was answered before on this label (or, failing that, on labels of its
-    kind); '' when nothing is on record. Only with the records part open."""
+    kind); '' when nothing is on record. Only with the records part open, and only for the label-set
+    question: a member-level question never shows another member's last answer."""
+    if q["kind"] != "label_set":
+        return ""
     try:
         scope, recs = _scope(label, config), _light("decision_store").list_by(sdlc_dir, config)
         mine = [r for r in recs if r.get("scope") == scope and r.get("qkind") == q["kind"]]
@@ -523,7 +530,7 @@ def _recommend(sdlc_dir, config, q):
     arming question is learnable; a spend question is never recommended. Never applied by itself."""
     try:
         rb = _light("rulebook")
-        if q["kind"] != "label_set" or not rb.enabled(config):
+        if q["kind"] != "label_set" or not rb.enabled(config) or not _light("decision_store").enabled(config):
             return None
         pre = rb.prefill(sdlc_dir, "label_set", q["area"], q["options"], config)
         return {"rule_id": pre["rule"], "option": pre["recommend"]} if pre else None
@@ -1070,7 +1077,7 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
     dr = unpark.decision_record
     config = config if config is not None else _load("state").load_config(sdlc_dir)
     base = run or sources._run_gh
-    p = plan(sdlc_dir, label, config=config, run=base)
+    p = plan(sdlc_dir, label, config=config, run=base, hide_answered=False)
     errors, good = _validate_answers(answers, p, label, config)
     out = {"label": label, "dry_run": bool(dry_run), "errors": errors, "results": [], "open": [], "ready": False}
     if errors:
@@ -1105,9 +1112,11 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
             rec["accepted"] = dr.key_of(rec) == shown["option"]
         res = dr.write_all(sdlc_dir, rec, config, source,
                            text="Run label %s: answered %r." % ("(name withheld)" if _public(config) else label,
-                                                                choice))
+                                                                choice),
+                           poster=None if goal is not None else (lambda number, body: None))   # #1751: no open member, no comment target
         return ["recorded decision %s" % (res["id"] or "(not stored)")] + (
-            [res["error"]] if res["error"] else [])
+            [res["error"]] if res["error"] else []) + (
+            ["no open member left: recorded without a comment"] if goal is None else [])
 
     for qid in sorted(good, key=lambda x: (order.index(x) if x in order else len(order), x)):
         q, choice = good[qid]
@@ -1163,7 +1172,7 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
             lines += record(q, kind if kind != "kind" else choice, choice)
         res["lines"] = lines
         answered.add(qid)
-    after = p if dry_run else plan(sdlc_dir, label, config=config, run=base)
+    after = p if dry_run else plan(sdlc_dir, label, config=config, run=base, hide_answered=False)
     skip = answered | {i for i, cs in _recorded(sdlc_dir, config, label).items() if i in order and cs}
     out["open"] = [q for q in after["questions"] if q["id"] not in skip]
     unread = [r for r in after["members"] + after["outside"] if r.get("kind") in ("not-read", "unreadable")]

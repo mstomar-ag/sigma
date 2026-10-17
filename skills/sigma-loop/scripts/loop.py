@@ -1556,6 +1556,14 @@ def _label_pull_holds(sdlc_dir, source, config, goal, hold):
                 goal, ref, label, res.get("reason") or res["result"], goal), file=sys.stderr)
 
 
+def _label_set_decided(sdlc_dir, config, label):
+    """#1732: True when a `label_set` decision is recorded for this label (records off -> False)."""
+    try:
+        return bool(_label_drain()._recorded(sdlc_dir, config, label).get("label_set:" + label))
+    except Exception:                           # noqa: BLE001
+        return False
+
+
 def _label_not_ready(sdlc_dir, source, config):
     """#1579: the one line to print when a `--label` run must not start yet, else None. Runs the
     read-only `plan` once, before the run's first claim, and refuses on unarmed members or open
@@ -1570,7 +1578,11 @@ def _label_not_ready(sdlc_dir, source, config):
               file=sys.stderr)
         return None
     unarmed = sum(1 for r in p["members"] if r["verdict"] == "unarmed")
-    asks = sum(1 for r in p["members"] if r["verdict"] == "parked")
+    # #1732: the plan's real open questions; a scope-hold, dependency or spend question still never blocks a start
+    asks = sum(1 for q in p.get("questions") or [] if q.get("kind") not in ("scope_hold", "dependency", "irreversible"))
+    if unarmed and not any(q.get("kind") == "label_set" for q in p.get("questions") or []) \
+            and _label_set_decided(sdlc_dir, config, label):
+        unarmed = 0                             # #1732: a recorded decision to leave them unarmed
     if not unarmed and not asks:
         return None
     verb = ("run `label_drain.py arm %s %s --apply`" % (sdlc_dir, label) if unarmed
@@ -5824,8 +5836,11 @@ def verify_goal(sdlc_dir, goal):
             "verify", list(commands), root, _verify_timeout_seconds(config), goal,
             config=config.get("resource"), repo=root)
         if guarded.hold is not None:
+            _what = ("the verify group Sigma started was stopped; no evidence, the goal is not failed; rerun when "
+                     "admission reopens" if getattr(guarded, "shed", False)
+                     else "the proving command was not run; nothing was killed")
             print(f"RESOURCE-HOLD exit=5 -- {guarded.hold.reason}; retry_after={guarded.hold.retry_after:g}s "
-                  "(the proving command was not run; nothing was killed)", file=sys.stderr)
+                  f"({_what})", file=sys.stderr)
             ledger.safe_append(sdlc_dir, "verify", goal, config=config, stream=ledger.EVENTS, exit=5)
             actionlog.safe_append(sdlc_dir, goal, "verify_run", exit=5)
             return 5
