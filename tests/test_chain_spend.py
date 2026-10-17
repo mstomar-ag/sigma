@@ -35,8 +35,16 @@ def _phase(goal, phase, at=SINCE + 10):
     return {"kind": "phase", "goal": str(goal), "phase": phase, "state": "end", "ts": _ts(at)}
 
 
+def _retro(goal, at=SINCE - 900):
+    return {"kind": "retro", "goal": str(goal), "grade": "achieved", "ts": _ts(at)}
+
+
 def _history(sdlc, costs):
-    _write(sdlc, [_spend(100 + i, c, at=SINCE - 1000) for i, c in enumerate(costs)])
+    """Earlier COMPLETED goals: a spend event and a recorded retro each (#1846)."""
+    rows = []
+    for i, c in enumerate(costs):
+        rows += [_spend(100 + i, c, at=SINCE - 1000), _retro(100 + i)]
+    _write(sdlc, rows)
 
 
 def test_estimate_basis(tmp_path):
@@ -47,7 +55,7 @@ def test_estimate_basis(tmp_path):
     _history(two, [100, 200])
     e = cs.estimate(two, ["1"])
     assert e["p50"] is None and e["p90"] is None and e["basis"] == 2
-    assert e["text"] == "no estimate: only 2 measured goals"
+    assert e["text"] == "no estimate: only 2 measured goals (a goal counts once its retro or merge is recorded)"
 
 
 def test_attribution(tmp_path):
@@ -146,3 +154,31 @@ def test_an_unparseable_stamp_on_a_phase_event_counts_as_an_unpriced_phase(tmp_p
     _write(tmp_path, [odd])
     ok, why = cs.admit(tmp_path, {"chain": {"max_usd": 1.0}}, {"members": ["1"], "approved_at": SINCE})
     assert ok is False and "capped" in why
+
+
+def test_a_fractional_cost_is_rounded_up_never_truncated(tmp_path):
+    """#1846. Control: `int(float(v))` again and 0.9 counts as 0 -> red."""
+    assert cs._cents("0.9") == 1 and cs._cents("1.2") == 2 and cs._cents(3) == 3 and cs._cents("0") == 0
+    assert cs._cents("-1") is None and cs._cents("1e999") is None and cs._cents("nan") is None
+    _write(tmp_path, [_spend(1, "0.4"), _spend(1, "0.4"), _spend(1, "0.4")])
+    assert cs.spent(tmp_path, ["1"], SINCE)[0] == 3
+
+
+def test_an_invalid_max_added_is_refused_like_the_other_caps(tmp_path):
+    """#1846. Control: fall back to the default again -> the `admit` below returns ok -> red."""
+    for bad in (-1, 2.5, "5", True, float("nan")):
+        ok, why = cs.admit(tmp_path, {"chain": {"max_added": bad}}, {"members": ["1"], "approved_at": SINCE})
+        assert ok is False and why.startswith("capped: invalid chain.max_added"), bad
+    ok, _ = cs.admit(tmp_path, {"chain": {"max_added": 0, "max_usd": 5.0}}, {"members": ["1"], "approved_at": SINCE})
+    assert ok is True
+    ok, _ = cs.admit(tmp_path, {"chain": {}}, {"members": ["1"], "approved_at": SINCE})
+    assert ok is True                              # absent stays the default
+
+
+def test_estimate_counts_only_goals_with_a_recorded_completion(tmp_path):
+    """#1846. Control: count every non-member goal with spend again -> basis 4 -> red."""
+    _history(tmp_path, [100, 200, 300])
+    _write(tmp_path, [_spend(777, 9999, at=SINCE - 1000)])              # spend but never completed
+    _write(tmp_path, [dict(_retro(888), kind="merge_observed"), _spend(888, 500, at=SINCE - 1000)])
+    e = cs.estimate(tmp_path, ["1"])
+    assert e["basis"] == 4 and e["p90"] == 500 and e["text"] == ""      # 777 is out, a merge counts
