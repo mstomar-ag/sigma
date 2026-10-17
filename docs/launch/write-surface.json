@@ -3882,6 +3882,14 @@
     },
     {
       "path": "skills/sigma-loop/scripts/dag_insert.py",
+      "function": "drop_unchecked",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "runs only after a refresh that saved the dependency map (discovery.dag.mode is not off); rewrites only the one file state/dag-unchecked.json under the runtime state directory, with the pairs that remain (numbers only), when a pair recorded during the refresh is still unexamined",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_insert.py",
       "function": "record_unchecked",
       "rule": "fs-write",
       "count": 2,
