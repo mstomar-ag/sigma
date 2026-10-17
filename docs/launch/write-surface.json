@@ -3866,6 +3866,14 @@
     },
     {
       "path": "skills/sigma-loop/scripts/dag_insert.py",
+      "function": "_unchecked_lock",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "discovery.dag.mode is not off (callers return before it) and only while record_unchecked or take_unchecked updates the unchecked list; creates only the runtime state directory and the lock file state/dag-unchecked.lock, holds a lock for at most 5 seconds, no content",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_insert.py",
       "function": "record_unchecked",
       "rule": "fs-write",
       "count": 2,
