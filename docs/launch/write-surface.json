@@ -3825,6 +3825,22 @@
       "risk": "low"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag_insert.py",
+      "function": "record_unchecked",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "discovery.dag.mode is not off (off returns before any write) and a GitHub Blocked by line was written with no cycle verdict (no usable map and the 25-read live walk undecided); creates only the runtime state directory and writes state/dag-unchecked.json by atomic replace, number pairs only, at most 200",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_insert.py",
+      "function": "take_unchecked",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "runs only after a refresh that saved the dependency map (discovery.dag.mode is not off); removes only the one file state/dag-unchecked.json under the runtime state directory, a list of number pairs the saved refresh has just examined",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/dag_store.py",
       "function": "refresh_lock",
       "rule": "fs-write",

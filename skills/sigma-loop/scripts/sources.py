@@ -3963,9 +3963,70 @@ class GitHubSource:
         former and this for the latter — two different audiences, two different channels."""
         # #895: the `["body"]` subscript is deliberate data-loss protection -- a degraded `{}` read
         # raises KeyError BEFORE `issue edit`, so a malformed read can never blank the body.
+        # #1616: a `Blocked by #N` marker is checked for a dependency cycle BEFORE anything is written
+        # (`CycleRefused` names the members; nothing is written), and its edge enters the stored map
+        # after the write. Mode `off`, no `.sdlc` directory, or a marker without `Blocked by` skip all
+        # of it: the write below is then exactly what it was.
+        dag, blockers = self._dag_blockers(goal, marker)
+        unchecked = []
+        for blocker in blockers:
+            members = dag.closing_members(self.sdlc_dir, self._hs_config, blocker, int(str(goal).lstrip("#")),
+                                          reader=self._dag_reader)
+            if members:
+                raise dag.CycleRefused(blocker, int(str(goal).lstrip("#")), members)
+            if members is None:
+                unchecked.append(blocker)
         body = self._read_issue(goal, ["body"])["body"]
         new_body = (body or "").rstrip() + "\n\n" + marker + "\n"
         self._issue_edit_body(goal, new_body)           # REST first (#895 slice 3a); RAISES as before
+        if blockers:
+            for blocker in unchecked:
+                dag.record_unchecked(self.sdlc_dir, blocker, int(str(goal).lstrip("#")), self._hs_config)
+            dag.insert(self.sdlc_dir, self._hs_config, int(str(goal).lstrip("#")), blockers=blockers)
+
+    def _dag_blockers(self, goal, marker):
+        """#1616: `(dag_insert module, blocker numbers)` for a marker that carries `Blocked by #N`, else
+        `(None, [])`. Loads `dag_insert` only when the map is in play (mode not `off`, a `.sdlc`
+        directory known); `discovery.dag.mode` is read here with `dag_store.mode`'s own rule (the exact
+        string `off`; anything else, including `OFF`, is `shadow`) so mode `off` imports nothing."""
+        try:
+            block = ((self._hs_config.get("discovery") or {}).get("dag") or {})
+            if not self.sdlc_dir or block.get("mode") == "off":
+                return None, []
+            if not re.search(r"blocked\s+by", str(marker), re.I):
+                return None, []
+            dag = self._dag_mod()
+            blockers = dag.blockers_in(marker, goal)
+            return (dag, blockers) if blockers else (None, [])
+        except Exception:                                   # noqa: BLE001 - the guard is an accelerator
+            return None, []
+
+    def _dag_mod(self):
+        dag = getattr(self, "_dag_insert_mod", None)
+        if dag is None:
+            dag = self._dag_insert_mod = _load("dag_insert")
+        return dag
+
+    def _dag_reader(self, number):
+        """The live walk's reader: the body of an open issue, `""` for any other state (#1616). It reads
+        through this source's own `_read_issue`, so the REST-first policy and the recording fakes see it."""
+        issue = self._read_issue(number, ["body", "state"])
+        return (issue.get("body") or "") if str(issue.get("state") or "").upper() == "OPEN" else ""
+
+    def _dag_insert_filed(self, number, body, labels, goal_label):
+        """#1616: the freshly filed issue enters the stored map at once. Never raises, never delays."""
+        try:
+            block = ((self._hs_config.get("discovery") or {}).get("dag") or {})
+            if not self.sdlc_dir or block.get("mode") == "off":
+                return
+            dag = self._dag_mod()
+            dag.insert(self.sdlc_dir, self._hs_config, int(number), body=body,
+                       life="goal" if goal_label else "none", prio=dag.prio_of(labels))
+        except Exception as exc:                            # noqa: BLE001
+            try:
+                sys.stderr.write("sigma: dependency map insert skipped (%s)\n" % type(exc).__name__)
+            except Exception:                               # noqa: BLE001
+                pass
 
     def issue_url(self, goal):
         return self._issue_url(goal)
@@ -4021,6 +4082,7 @@ class GitHubSource:
         number = self._create_issue(title, body, issue_labels)   # always unassigned -- see docstring
         if number is None:
             return None
+        self._dag_insert_filed(number, body, issue_labels, goal_label)     # #1616: in the stored map at once
         if assignee:
             try:
                 self._issue_add_assignees(number, assignee)       # REST; verifies the login was kept

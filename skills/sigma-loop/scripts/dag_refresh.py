@@ -42,6 +42,7 @@ def _load(name):
 dag_store = _load("dag_store")
 dag_collect = _load("dag_collect")
 dag_cycles = None                                       # #1615: loaded on first use after a saved refresh
+dag_insert = None                                       # #1616: loaded on first use after a saved refresh
 
 META = "dag-refresh.meta.json"
 RETRY_SECONDS = 300
@@ -161,6 +162,18 @@ def _post_cycles(sdlc_dir, config, run):
         pass
 
 
+def _clear_unchecked(sdlc_dir):
+    """#1616: edges written without a cycle verdict are examined by the map this refresh just saved (and
+    by `dag_cycles` after it), so the list is cleared; it cannot grow. Never raises."""
+    try:
+        global dag_insert
+        if dag_insert is None:
+            dag_insert = _load("dag_insert")
+        dag_insert.take_unchecked(sdlc_dir)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 def refresh_if_due(sdlc_dir, config, run=None, now=None, force=False):
     """Refresh the map when due (or `force`). Never raises. -> `{status, why, calls}` where status is
     `off`, `fresh` (not due, no read), `retry-wait`, `busy`, `kept`, `saved` or `error`."""
@@ -193,6 +206,7 @@ def refresh_if_due(sdlc_dir, config, run=None, now=None, force=False):
     _write_meta(sdlc_dir, {"last_attempt": now, "last_status": "error" if failed else "saved",
                            "last_error": err if failed else None, "errors": streak})
     if not failed:
+        _clear_unchecked(sdlc_dir)
         _post_cycles(sdlc_dir, config, counted)
     return {"status": "saved" if not failed else "kept", "why": why, "last_error": err}
 
