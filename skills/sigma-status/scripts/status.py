@@ -75,6 +75,21 @@ def _load_sources():
         return None
 
 
+def _stuck_lines(sdlc_dir):
+    """#1614: `["stuck chains: N", "  <root-cause line>", ...]` (top five) from the stored dependency
+    map, or `[]`. Local file only, no `gh`; mode `off`, no usable map or any failure gives `[]`, so the
+    status output is unchanged."""
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "dag_stuck", _HERE.parent.parent / "sigma-loop" / "scripts" / "dag_stuck.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        found = m.lines(sdlc_dir)
+    except Exception:
+        return []
+    return ["stuck chains: %d" % len(found)] + ["  " + t for t in found[:5]] if found else []
+
+
 _FENCE = re.compile(r"^---\n(.*?)\n---", re.DOTALL)
 
 
@@ -479,6 +494,8 @@ def main(argv):
     if cycles:                                  # #1615: silent unless a stored dependency cycle exists
         line += f" | {cycles}"
     print(line)
+    for extra in _stuck_lines(argv[1] if len(argv) > 1 else ".sdlc"):   # #1614: silent unless stuck
+        print(extra)
     return 0
 
 

@@ -2022,6 +2022,21 @@ def _held_release_note(gate, cycles=()):
                                                               else "closes")
 
 
+def _stuck_root_lines(sdlc_dir, config, subjects):
+    """#1614: the root-cause lines for a pick that found nothing pickable, or `[]` (today's text).
+    Nothing is loaded when `discovery.dag.mode` is `off` or no stored map exists; local file only,
+    never raises."""
+    try:
+        block = (((config or {}).get("discovery") or {}).get("dag"))
+        if isinstance(block, dict) and block.get("mode") == "off":
+            return []
+        if not (pathlib.Path(sdlc_dir) / "state" / "dag.json").is_file():
+            return []
+        return _load("dag_stuck").pick_lines(sdlc_dir, subjects) or []
+    except Exception:                                   # noqa: BLE001 - the old text is always safe
+        return []
+
+
 # --------------------------------------------------------------- #1962: the claim, in one place
 #: Verbs that are evidence work on a goal has BEGUN, and whose argv shape is uniformly
 #: (verb, sdlc_dir, goal, ...). `note` already takes a goal-scoped side effect keyed on exactly
@@ -2561,11 +2576,17 @@ def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, re
             # live trial read as a silent stall. The terminal tuple is unchanged (a caller's
             # contract, and the goals genuinely are not pickable right now); the operator is told.
             if held:
-                cyc = _held_cycles(sdlc_dir, config, held)    # #1615: [] unless a stored cycle holds one
+                # #1614: when EVERY held goal waits on a person's decision or a cycle (read from the
+                # stored map, a local file), say which; otherwise today's text, byte for byte.
+                root_lines = _stuck_root_lines(sdlc_dir, config, [h[0] for h in held])
+                cyc = [] if root_lines else _held_cycles(sdlc_dir, config, held)   # #1615: [] unless a stored cycle holds one
                 print("loop.py: nothing pickable — %d goal(s) are waiting on an open prerequisite "
                       "(%s). %s; nothing was written to them"
                       % (len(held), ", ".join("%s → %s" % h for h in held),
-                         _held_release_note(gate, cyc)), file=sys.stderr)
+                         "None of them moves until a person acts" if root_lines
+                         else _held_release_note(gate, cyc)), file=sys.stderr)
+                for text in root_lines:
+                    print("loop.py: stuck: %s" % text, file=sys.stderr)
                 for c in cyc:
                     print("loop.py: %s" % c, file=sys.stderr)
             # #1084: read ONCE, before anything below can touch `_last_read_degraded`

@@ -71,7 +71,7 @@ LIBRARY_ONLY = {
     "dag_store", "dag_collect", "dag_refresh",
     "dag_cycles",
     "dag_check",
-    "dag_chain",
+    "dag_chain", "dag_stuck",
     "feature_park",
     "qkind",
     "landing_preflight",
