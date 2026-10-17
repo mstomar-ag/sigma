@@ -5264,10 +5264,10 @@ class GitHubSource:
                 for ref, (new_rank, cause) in sorted(required.items()):
                     if budget[0] <= 0:
                         break
-                    budget[0] -= 1
                     if self._write_blocker_promotion(ref, item_of(ref), ranks[ref], new_rank, cause) is False:
                         out.setdefault("refused", []).append(ref)       # #1707: counted, so the doctor can say why
-                        continue    # #1468: skipped, not raised
+                        continue    # #1468: skipped, not raised; #1757: a refusal wrote nothing, so it spends no budget
+                    budget[0] -= 1
                     out["raised"].append(ref)
             finally:
                 self._no_field_writes = False

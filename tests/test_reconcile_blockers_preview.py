@@ -120,3 +120,37 @@ def test_doctor_names_an_ownership_refusal_and_does_not_blame_label_permission(t
     doc = base._mod("doctor", base.S / "sigma-doctor" / "scripts")
     row = doc._blocker_rank_row(cfg, str(tmp_path))
     assert row["ok"] and "not a Sigma issue" in row["name"] and "label" not in row["fix"].replace("Sigma labels", ""), row
+
+
+# ---- #1757: a refused foreign blocker spends none of the apply write budget ----
+
+def _crowded_board():
+    foreign = list(range(11, 23))                       # twelve unlabelled foreign issues, sorted before "8"
+    body = "; ".join("blocked by #%d" % n for n in [8] + foreign)
+    return ([base._issue(9, [GOAL, "priority:P0"], body=body), base._issue(8, [GOAL, "priority:P3"])]
+            + [base._issue(n, []) for n in foreign])
+
+
+def test_refusals_do_not_consume_the_write_budget_and_apply_raises_the_preview_list(tmp_path):
+    prev = _hs_src(base._runner(_crowded_board()), True).repair_blocker_ranks(preview=True)
+    assert [p["blocker"] for p in prev["plan"]] == ["8"] and len(prev["foreign"]) == 10, prev
+    res = _hs_src(base._runner(_crowded_board()), True, tmp_path).repair_blocker_ranks()
+    assert res["raised"] == ["8"] and len(res["refused"]) == 10, res
+
+
+def test_doctor_does_not_blame_the_watcher_when_only_foreign_blockers_remain(tmp_path):
+    import time
+    tick = base._mod("reconcile_tick", base.SL)
+    cfg = base._cfg("always")
+    cfg["rulebook"] = {"hard_stops": {"enabled": True}}
+    run = base._runner(_crowded_board())
+    tick._blocker_rank_repair(str(tmp_path), cfg, run=run, now=time.time() - 99999)     # raises the one Sigma-owned blocker
+    assert tick.read_repair_state(str(tmp_path)).get("last_repair"), "the first tick wrote nothing: refusals ate the budget"
+    after = _crowded_board()
+    after[1] = base._issue(8, [GOAL, "priority:P0"])                                     # what the first tick wrote
+    tick._blocker_rank_repair(str(tmp_path), cfg, run=base._runner(after), now=time.time() - 99998)
+    st = tick.read_repair_state(str(tmp_path))
+    assert st["refused"] == 10 and st["violations"] == 10, st
+    doc = base._mod("doctor", base.S / "sigma-doctor" / "scripts")
+    row = doc._blocker_rank_row(cfg, str(tmp_path))
+    assert row["ok"] and "not a Sigma issue" in row["name"], row
