@@ -122,3 +122,9 @@ def test_measured_scan(tmp_path):
         t = time.perf_counter()
         cs.spent(d, [str(i) for i in range(10)], SINCE)
         print("spent scan", n, "records: %.1f ms" % ((time.perf_counter() - t) * 1000))
+
+
+def test_infinite_cents_is_unpriced_not_a_crash(tmp_path):
+    _write(tmp_path, [_spend(1, "1e999"), _spend(1, 50)])
+    assert cs._cents("1e999") is None
+    assert cs.spent(tmp_path, ["1"], SINCE)[0] == 50

@@ -32,7 +32,7 @@ def _epoch(ts):
 def _cents(v):
     try:
         n = int(float(v))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return n if n >= 0 else None
 
