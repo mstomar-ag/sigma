@@ -34,7 +34,7 @@ All take the project's `.sdlc` directory and the label name.
 
 - `label_drain.py plan <sdlc_dir> <label> [--json]` lists every open member with a verdict, the open
   prerequisites outside the label (with depth), the questions a person must answer, and whether the
-  label is `ready`. It never writes. `status` is the same read with a shorter view.
+  label is `ready`. It never writes. `status` is the same read with a shorter view that also says which members are pickable now.
 - `label_drain.py arm <sdlc_dir> <label> [--apply]` is a dry run unless `--apply`. It arms the members
   `plan` calls unarmed: adds the goal label, removes a parked or blocked label, adds a priority label
   only when the issue has none, and assigns the configured assignee. It never creates a label and
@@ -111,16 +111,23 @@ is unmeasured.
 
 ## A drain, end to end
 
+Before step 1: run every command from the directory that holds `.sdlc`, with `python3` and the script
+path under `skills/sigma-loop/scripts/`. The repository comes from `discovery.github.repo` in
+`.sdlc/config.json` (or the current git remote), and `gh` must be signed in. `"$PPID"` in step 5 is the
+shell's parent process id, which marks the session that owns the claim; pass it as written.
+
 1. A person creates the label and puts it on the issues, for example `validation-run-1`.
 2. `label_drain.py plan .sdlc validation-run-1`. Read the verdicts, warnings and questions.
-3. Write an answers file and run `label_drain.py answer .sdlc validation-run-1 --answers answers.json --dry-run`,
+3. If `plan` printed no question, skip this step (an empty answers file is refused). Otherwise write an
+   answers file mapping each printed question id to one of its options, for example
+   `{"label_set:validation-run-1": "arm them"}`, and run `label_drain.py answer .sdlc validation-run-1 --answers answers.json --dry-run`,
    then again without `--dry-run`.
 4. `label_drain.py arm .sdlc validation-run-1`, read the dry run, then add `--apply`.
 5. `loop.py next .sdlc --label validation-run-1 --session-pid "$PPID"` (or start `/sigma-loop` with
    the flag). Repeat until it reports the stop.
 6. A person deletes the label.
 
-## What it costs: GitHub calls
+## What it costs: counted calls (fake transport)
 
 These are counts from a counting fake transport, the stateful fake that `tests/test_label_drain_arm.py`
 uses, driven by `tests/test_label_drain_calls.py`. They are call counts, not timings, and not rate-limit
@@ -144,5 +151,36 @@ label made five more reads than the pick without it. Both picks wrote ten times;
 break those writes down further. The two picks chose different goals, so they are a cost comparison,
 not an identical-work comparison.
 
-The run on a real scratch repository, with real rate limits and latency, is unmeasured. It is gated on
-the owner and recorded as an Awaiting note on the issue.
+## What it costs: one real run
+
+One run on a throwaway private repository, each verb run once through a thin `gh` wrapper that logged
+every call, so the counts are real GitHub calls and the times are wall-clock seconds for that one
+run. One run is one sample: it shows the shape of the cost, not a spread, and no rate-limit figure was
+taken. The repository state: five small issues. Members of the label: one armed and assigned, one
+unarmed, one armed and held by an open prerequisite. The fourth issue is that prerequisite, open and
+outside the label. The fifth is an unrelated armed goal outside the label.
+
+| step | wall seconds | calls | reads | writes |
+|---|---|---|---|---|
+| plan | 5.5 | 3 | 3 | 0 |
+| arm, dry run | 8.9 | 5 | 5 | 0 |
+| arm --apply | 18.1 | 10 | 7 | 3 |
+| answer (arming, apply) | 30.5 | 16 | 13 | 3 |
+| next --label, one pick | 41.4 | 24 | 23 | 1 |
+| next, no label, one pick | 20.6 | 12 | 11 | 1 |
+
+Reading it: `plan` never writes. `arm --apply` made the three writes for the one unarmed member
+(assign, goal label and priority label) and seven reads. The pick inside the label made twelve more
+reads than the pick without it and wrote once, the claim. Both picks took the same member, after the
+first claim was released. The label pick's time is that attempt only, after earlier attempts met the
+machine's own admission hold.
+
+Not measured: the call counts of a refused start, of a pick that pulls a prerequisite into the label,
+of a drain past the first pick, and anything on a repository of real size. The first table above is a
+call count from a counting fake transport and is a different thing from this run.
+
+## Second reader
+
+The page was followed once by a reader other than its author, who was given only this page and the
+throwaway repository. What that reader had to guess is recorded in the pull request that added this
+section, and each guess is fixed in the text above.
