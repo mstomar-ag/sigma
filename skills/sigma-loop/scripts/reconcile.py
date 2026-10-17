@@ -1217,6 +1217,8 @@ def blockers_cmd(sdlc_dir, config, run=None):
         print("  #%s  %s -> %s  (blocks #%s)" % (p["blocker"], p["current"], p["new"], p["cause"]))
     if not res.get("plan"):
         print("  no blocker ranks below what it blocks")
+    if res.get("foreign"):      # #1707: the repair refuses these (hard stops on), so they are not "to raise"
+        print("  would be skipped: not a Sigma issue: #%s" % ", #".join(res["foreign"]))
     outside = len(res.get("unwritable", [])) + int(res.get("unread", 0))
     print("blockers: %d to raise, cycles: %d%s, outside or unreadable blockers: %d"
           % (len(res.get("plan", [])), len(res.get("cycles", [])),
