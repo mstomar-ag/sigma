@@ -137,3 +137,48 @@ def test_fetch_flag_refreshes_the_tracking_refs(tmp_path):
     assert fresh["as_of"] == "fetched now"
     assert stale["outcome"] in ("current", "fast-forward", "clean rebase")
     assert _rows(fresh)["clean"]["outcome"] == "clean rebase"
+
+
+def _push_unregistered(world, name):
+    """A remote `feature/<name>` branch with no registry entry: the sweep cannot see it."""
+    branch = "feature/" + name
+    git(world.local, "checkout", "-q", "-b", branch, "main")
+    git(world.local, "push", "-q", "origin", branch)
+    git(world.local, "checkout", "-q", "main")
+    git(world.local, "fetch", "-q", "origin")
+
+
+def _with_include(*patterns):
+    cfg = base._cfg()
+    cfg["upkeep"] = {"units": {"include": list(patterns)}}
+    return cfg
+
+
+def test_an_include_entry_matching_no_registered_unit_adds_a_note(tmp_path):
+    world = _world(tmp_path)
+    _unit(world, "keep", [("k.txt", "k")])
+    result = base._mod().preview(str(world.sdlc), _with_include("keep", "demo"))
+    assert list(_rows(result)) == ["keep"]
+    named = [n for n in result["notes"] if "demo" in n]
+    assert len(named) == 1 and "upkeep.units.include" in named[0]
+    assert not any("'keep'" in n for n in result["notes"])
+    assert "feature/demo" not in named[0] and "/sigma-define" not in named[0]   # no remote branch to name
+
+
+def test_the_note_names_the_remote_branch_and_the_register_remedy(tmp_path):
+    world = _world(tmp_path)
+    _push_unregistered(world, "demo")
+    result = base._mod().preview(str(world.sdlc), _with_include("demo"))
+    assert result["units"] == []
+    named = [n for n in result["notes"] if "demo" in n]
+    assert len(named) == 1
+    assert "feature/demo" in named[0] and "/sigma-define" in named[0]
+
+
+def test_every_include_entry_matching_leaves_the_notes_unchanged(tmp_path):
+    world = _world(tmp_path)
+    _unit(world, "keep", [("k.txt", "k")])
+    plain = base._mod().preview(str(world.sdlc), base._cfg())
+    result = base._mod().preview(str(world.sdlc), _with_include("keep", "ke*"))
+    assert result["notes"] == plain["notes"] == []
+    assert list(_rows(result)) == ["keep"]

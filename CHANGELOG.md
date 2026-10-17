@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **`feature_rebase.py preview` says when an `upkeep.units.include` entry matches no registered unit (#1812).** It printed `"units": []` and no note, so a branch the person asked the sweep to keep current read as "nothing to do". One note per such entry now names any remote `feature/*` branch it matches and says to register it with `/sigma-define`; output with every entry matched is unchanged.
 - **The changelog layout duplicate-control test seeds its own repeated entry (#1828).** It no longer depends on the live Unreleased entries naming one issue.
 - **The `label-held` stop no longer lists goals filed before the drain as filed during it (#1809).** With no recorded run start the window began at the epoch, so every armed goal outside the label matched; with no start the line is now skipped.
 - **A held verify never advertises a retry sooner than the picker's 30 s floor, and the 1.0.16 whats-new sentence about the label-drain keys is corrected (#1813).** `RESOURCE-HOLD` printed `retry_after=4s` while `next` printed ~30 s; both now use `HOLD_RETRY_FLOOR`. The `label_drain` block ships with its defaults in the init template, so it is no longer listed as absent.
