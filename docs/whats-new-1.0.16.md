@@ -45,8 +45,9 @@ Steps 1 to 3 apply to everyone. Steps 4 to 7 apply only if you use the feature n
 What stays unchanged:
 
 - Your `.sdlc/config.json` is never rewritten by an update.
-- `rulebook.rules.auto_approve` is off by default (#1555), and the label-drain, `design.zones` and `quality.metrics`
-  keys are absent by default (#1540, #1635).
+- `rulebook.rules.auto_approve` is off by default (#1555), and the `design.zones` and `quality.metrics`
+  keys are absent by default (#1540, #1635); the `label_drain` block ships with its defaults (`default_priority`,
+  `arm_pulled_blockers`; `kinds` is optional and empty).
 - With the Rulebook gates closed, run-label output is unchanged (#1581, #1743).
 
 ## Resource guard

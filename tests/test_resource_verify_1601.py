@@ -308,6 +308,7 @@ def test_end_to_end_hold_gives_exit_5_no_evidence_events_and_done_still_refuses(
     assert loop.verify_goal(sdlc, goal) == 5
     err = capsys.readouterr().err
     assert "RESOURCE-HOLD" in err and "retry_after" in err
+    assert float(err.split("retry_after=")[1].split("s")[0]) >= loop.HOLD_RETRY_FLOOR     # #1813: the picker's floor
     assert not (pathlib.Path(sdlc) / "state" / "verify" / "0001.json").exists()
     events = (pathlib.Path(sdlc) / "state" / "verify")
     assert not events.exists() or not list(events.glob("*.json"))
