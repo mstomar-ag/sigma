@@ -110,6 +110,17 @@ def test_release_refuses_an_already_terminal_goal_leaving_it_untouched():
             assert f"status: {status}" in pathlib.Path(g).read_text(), status
 
 
+def test_release_never_moves_a_proposed_goal_to_pending():
+    """#1550: `proposed` is the human-promotion gate; release is a claim-undo, and a proposed goal
+    was never claimed, so release must not be the path that promotes it to `pending`."""
+    st = _state()
+    with tempfile.TemporaryDirectory() as d:
+        base, g = _sdlc(d)
+        pathlib.Path(g).write_text("---\nid: 0001\nstatus: proposed\n---\nbody\n")
+        assert st.release(base, g) is False
+        assert "status: proposed" in pathlib.Path(g).read_text()
+
+
 def test_queue_with_no_tier_omits_the_tier_line():
     """Direct test of `_queue()` itself (park()'s and fail()'s shared write path), not just through
     park() — `fail()` never passes a tier at all, so this pins that omitted-arg call shape too."""

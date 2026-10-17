@@ -410,6 +410,10 @@
       "role": "library"
     },
     {
+      "path": "skills/sigma-loop/scripts/quality_delta.py",
+      "role": "gesture"
+    },
+    {
       "path": "skills/sigma-loop/scripts/reconcile.py",
       "role": "gesture"
     },
@@ -432,6 +436,22 @@
     {
       "path": "skills/sigma-loop/scripts/render.py",
       "role": "gesture"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/resource_guard.py",
+      "role": "gesture"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/resource_lease.py",
+      "role": "gesture"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/resource_liveness.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/resource_verify.py",
+      "role": "library"
     },
     {
       "path": "skills/sigma-loop/scripts/retention.py",
@@ -571,6 +591,10 @@
     },
     {
       "path": "skills/sigma-loop/scripts/worktree_prune.py",
+      "role": "gesture"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/zones.py",
       "role": "gesture"
     },
     {

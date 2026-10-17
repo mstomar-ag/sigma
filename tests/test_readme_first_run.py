@@ -504,6 +504,10 @@ VERSION_ALLOW = {
     ("docs/whats-new-1.0.14.md", "1.0.13"): "the previous release, named as the baseline this page describes changes from",
     ("docs/whats-new-1.0.14.md", "1.0.14"): "the release this page documents, named before the version bump ships",
     ("docs/whats-new-1.0.15.md", "1.0.14"): "the previous release, named as the baseline this page describes changes from",
+    ("docs/whats-new-1.0.16.md", "1.0.15"): "the previous release, named as the baseline this page describes changes from",
+    ("docs/whats-new-1.0.15.md", "1.0.15"): "the release this page documents, named in its own title",
+    ("docs/configuration.md", "1.0.15"): "the shipped release that raised the classifier per-call default (#1471), "
+                                         "named as the boundary of the old value",
     ("contract/README.md", "1.0.0"): "the first plugin release the event contract was frozen in: a historical fact, not the current version",
     ("skills/sigma-init/templates/config.json.tmpl", "1.0.0"): "the first release that carries the documented default: a minimum, not the current version",
     ("contract/README.md", "1.3.0"): "the event contract's own semver (contract/VERSION)",

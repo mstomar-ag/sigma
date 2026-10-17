@@ -110,6 +110,27 @@ def next_pending(goals_dir, skip=(), order=DEFAULT_ORDER, aliases=None):
     return min(pending)[1]                             # (rank, path): filename breaks ties, as before
 
 
+def goal_index(goals_dir):
+    """#1550: `{key: [(path, status), ...]}` over every goal file (a `*.md` with a `status`, the
+    same goal rule as `next_pending`), for resolving a local `Blocked by` ref. Keys per file: its
+    stem, its leading filename digits as `str(int(...))`, and an all-digit frontmatter `id` the same
+    way. A key carrying two paths is AMBIGUOUS and the caller holds on it. Paths come from the same
+    glob as `next_pending`, so comparing one with a picked goal is a plain string compare. Cost: one
+    read per file, built at most once per pick and only when a candidate declares a ref."""
+    index = {}
+    for path in sorted(pathlib.Path(goals_dir).glob("*.md")):
+        text = path.read_text()
+        status = frontmatter.get(text, "status")
+        if not status:
+            continue
+        lead = path.name[:len(path.name) - len(path.name.lstrip("0123456789"))]
+        fid = str(frontmatter.get(text, "id") or "")
+        keys = {path.stem} | {str(int(v)) for v in (lead, fid) if v.isdigit()}
+        for key in keys:
+            index.setdefault(key, []).append((str(path), status))
+    return index
+
+
 #: Valid values for the `discovery.blocker_promotion.mode` config key. Resolving/validating the raw
 #: config value is sources.py's job (this module stays config-dict-free per the module docstring
 #: above) -- but the valid-values tuple and its safe default live here, next to the ranking domain

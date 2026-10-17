@@ -64,7 +64,7 @@ the next one. `work.py merge` already rebases a pull request that GitHub reports
 
 CI requires ONE check: job `test` of `.github/workflows/ci.yml` (no job `name:`, no matrix, so GitHub names it
 `test`). It runs a subset of the suite on macOS with Python 3.12 for pull requests and merges to main. The five
-launch-supported cells of `definition.md` run the full suite in job `full`, nightly and on demand; that job is not
+launch-supported cells of `definition.md` run the full suite in job `full`, weekly and on demand; that job is not
 required, so a break only it can see is found up to a day after the merge. The Windows workflow is an experimental cell and is not required. `tests/test_repo_settings_doc.py` derives the names from the workflow
 and fails if this list and the workflow disagree.
 

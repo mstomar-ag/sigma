@@ -53,3 +53,15 @@ If a run reports no entries, the feature is very likely just **off** — point t
 `action_log.enabled: true` (default `false`, matching every other opt-in feature in this kit)
 rather than treating it as an error. This skill needs no `gh`, no network access, and spends no LLM
 tokens beyond relaying its own plain-text output.
+
+## How often merged work is reverted or quickly fixed
+
+For **"how often does merged Sigma work get reverted or quickly fixed"** run
+`python3 "${CLAUDE_SKILL_DIR}/scripts/outcomes.py" report --window 30` from the repository root and
+relay its output verbatim. It is a **proxy**: line 1 says so, and it counts commits that look like
+reverts or fixes and touch a file a merged goal changed within 14 days. It never prints a rate, and
+prints `unmeasured` with the reason when the action log is off or unreadable, the clone is shallow,
+the window is 14 days or less (no goal can be mature), or fewer than 10 mature goals fall in it. The
+window cannot exceed the action log's own retention (`action_log.retention_days`, default 90).
+It is read-only (writes nothing, no `gh`, no network). Goals merged by a merge commit or a rebase
+carry no `(#PR)` marker, so they are counted as `unresolved`, never guessed at.

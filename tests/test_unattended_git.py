@@ -23,7 +23,9 @@ import pytest
 import unattended_support as support
 
 #: sha256 of the source text of the engine's default runner (feature_sync._run) before this change; it must not move.
-DEFAULT_RUNNER_SHA256 = "f99c25618cceeba86a6b1092b9b8d6fd2232fe376b99602beb984a8a94b92ee2"
+#: Re-pinned once, deliberately, for #1700: an optional `timeout` (default None, so a caller that passes none runs
+#: exactly as before) raising RunTimeout on overrun. Any other move is still a red here.
+DEFAULT_RUNNER_SHA256 = "9ac75bcac37c66991aa0f488eae1416cce13a68156f0d2e7ae0ebec5599925b2"
 FALSE = shutil.which("false") or "/usr/bin/false"
 HOSTILE = (("signing", "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = %s\n" % FALSE),
            ("push signing", "[push]\n\tgpgSign = true\n"),

@@ -265,6 +265,45 @@ def extract_refs(text, self_ref=None):
     return out
 
 
+#: #1550: the canonical marker line, `**Blocked by:** <value>` at line start (optionally a list
+#: item). The ONLY place a non-numeric goal-file stem is read as a ref: anywhere else a bare word
+#: after "blocked by" is prose, and in local mode an unresolvable ref HOLDS, so precision is the bar.
+_MARKER_LINE_RE = re.compile(r"(?im)^[ \t]*(?:[-*][ \t]+)?\*\*blocked by:\*\*[ \t]*(.*)$")
+#: One token, alphanumeric first: rejects prose (whitespace), paths (`/`), `#N` forms and `n/a`.
+_STEM_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+NULL_MARKER_VALUES = ("none", "nothing", "nil", "na", "tbd")
+
+
+def extract_local_refs(text):
+    """#1550: LOCAL-GOALS mode refs, as an ordered `(kind, ref)`-deduplicated list of
+    `{"phrase", "ref", "kind"}` with kind `id` (a local goal id, `str(int(N))` so `#0007` is `7`),
+    `stem` (a goal-file stem, only off `_MARKER_LINE_RE`) or `foreign` (`owner/repo#N`, never a
+    local goal). Same `_EXPLICIT_BLOCK_RE` and `strip_unpark_qa` as `extract_refs`, which is left
+    untouched: GitHub mode keeps its reader byte-for-byte. Self-reference is NOT dropped here; the
+    caller decides it after resolution, since `#7`, `0007` and `0007-x` name one file."""
+    t = strip_unpark_qa(text)
+    found = []
+    for m in _EXPLICIT_BLOCK_RE.finditer(t):
+        foreign = is_cross_repo(t, m)
+        found.append((m.group(1).lower(), "foreign" if foreign else "id",
+                      m.group(2) if foreign else str(int(m.group(2)))))
+    for m in _MARKER_LINE_RE.finditer(t):
+        for item in m.group(1).split(","):
+            item = item.strip().strip("`").strip()
+            item = item[:-1] if item.endswith(".") else item
+            item = item[:-3] if item.lower().endswith(".md") else item
+            if not _STEM_TOKEN_RE.fullmatch(item) or item.lower() in NULL_MARKER_VALUES:
+                continue
+            found.append(("blocked by", "id", str(int(item))) if item.isdigit()
+                         else ("blocked by", "stem", item))
+    out, seen = [], set()
+    for phrase, kind, ref in found:
+        if (kind, ref) not in seen:
+            seen.add((kind, ref))
+            out.append({"phrase": phrase, "ref": ref, "kind": kind})
+    return out
+
+
 def closed_state(state_str, state_reason):
     """Is a `Blocked by:` reference's live GitHub state actually RESOLVED (#2532)?
 

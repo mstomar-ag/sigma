@@ -146,11 +146,13 @@ def status(sdlc_dir, config, goal):
             elif v.get("verdict") not in approving:
                 ok, detail = False, f"last verdict is {v.get('verdict')!r}, not approving"
                 fix = "fix what the reviewer found, then run a fresh independent review and record it"
-            elif _load("reviewer").failed_receipt(sdlc_dir, goal, ph):
-                kind = _load("reviewer").failed_receipt(sdlc_dir, goal, ph)[0]
-                ok, detail = False, f"the independent reviewer failed after the approving verdict ({kind})"
+            elif (rv := _load("reviewer")) and (failed := rv.failed_receipt(sdlc_dir, goal, ph)):
+                ok, detail = False, f"the independent reviewer failed after the approving verdict ({failed[0]})"
                 fix = (f"park the goal (`--qkind reviewer_down`), fix the reviewer, and re-run `reviewer.py run` "
                        f"for {ph}; an earlier approval is not restored by a failed re-run")
+            elif live := rv.running_receipt(sdlc_dir, goal, ph):
+                ok, detail = False, "the independent reviewer is still running"
+                fix = f"wait for it: `{rv._wait_gesture(sdlc_dir, goal, ph, live.get('run_id'))}`"
             else:
                 detail = f"verdict {v.get('verdict')} via {v.get('route') or 'unknown'} route" + (
                     f", agent {v['agent_id']} ({v.get('verified') or 'unverified'})" if v.get("agent_id") else "")

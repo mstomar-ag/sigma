@@ -19,6 +19,7 @@ From those, extract:
 - the **boundaries + contracts** that cross modules (naming, interfaces, invariants);
 - where the **quality gates** live (tests, checks, CI);
 - any **existing violations** of the apparent rules (flag them, don't bury them).
+- candidate **legacy paths**: you may list them as a suggestion; never write `design.zones` (the owner declares it, see `docs/change-zones.md`).
 
 ## Turn it into rules
 Write **## Architecture** as a numbered, checkable list a plan can be judged against — e.g. "the UI

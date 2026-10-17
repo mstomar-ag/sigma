@@ -212,7 +212,8 @@ ENFORCEMENT_GATES = (
      "kind": "python-gate", "hosts": "all", "enabled_by": ("discovery.dependency_gate.mode",),
      "settings": (),
      "mechanism": "leaves a goal unclaimed (no label, no lock, no comment) while a prerequisite it "
-                  "declares is still open, instead of claiming it and parking",
+                  "declares is still open (GitHub) or not done (local goals, where a ref naming no "
+                  "single local goal also holds), instead of claiming it and parking",
      "condition": "any `mode` other than `off` reads as on, including an absent key or a typo "
                   "(`_dependency_gate_mode`)"},
     {"control": "Per-run budget: wall-clock and token ceilings", "function": "_budget_resource_reason",
@@ -1658,7 +1659,9 @@ def _dependency_gate_mode(config):
     really a dependency has no cheap per-goal escape at pick time, because the sanctioned dismissal
     (`backlog_check.dismiss_comment`) lives in a COMMENT and reading comments is exactly the
     per-candidate remote call this gate refuses to make. Editing the body is the per-goal fix; this
-    is the repo-wide one."""
+    is the repo-wide one. #1550: in local-goals mode an unresolvable ref HOLDS (fail-closed, named on
+    stderr), because it is checked against the goal files on disk, not an incomplete mirror; `off`
+    is the repo-wide lever there too."""
     block = ((config or {}).get("discovery") or {}).get("dependency_gate")
     value = block.get("mode") if isinstance(block, dict) else None
     return "off" if value == "off" else "on"
@@ -1818,7 +1821,10 @@ def _pick_dependency_hold(sdlc_dir, source, goal, config, cache):
         if mirror is None:
             mirror = cache["mirror"] = _load("mirror")
         if not mirror.is_github_mode(config):
-            return ""                      # local-files mode has no mirror; unchanged from before
+            if _is_local_source(source):   # #1550: local goals are checked against files on disk
+                cache["local"] = True
+                return _local_prerequisites_holding(source, goal, mirror, cache)
+            return ""                      # neither GitHub nor local files: nothing to read
         run = getattr(source, "_run", None)     # the source's own transport, so this stays hermetic
         if "by_ref" not in cache:               # in tests and reuses whatever auth the run is using
             cache["live"] = mirror.fetch_and_write(sdlc_dir, config=config,
@@ -1877,6 +1883,84 @@ def _pick_dependency_hold(sdlc_dir, source, goal, config, cache):
         print("loop.py: dependency gate failed non-fatally (%s) — claiming anyway" % exc,
               file=sys.stderr)
         return ""
+
+
+def _is_local_source(source):
+    """#1550: goals are files under `goals_dir`, read through `fetch_title_body`. Both halves are
+    required: GitHubSource has the reader but no `goals_dir`; a bare fake has neither."""
+    return (isinstance(getattr(source, "goals_dir", None), str)
+            and callable(getattr(source, "fetch_title_body", None)))
+
+
+#: #1550: prerequisite statuses no unattended pass moves to `done`, so a hold on one needs a human.
+_STUCK_STATUSES = ("parked", "failed", "proposed")
+
+
+def _local_prerequisites_holding(source, goal, mirror, cache):
+    """#1550: `_pick_dependency_hold` for a local-goals source -- the held items, or `""`.
+
+    Refs come off `blocker_scan.extract_local_refs` (the one vocabulary) and resolve against
+    `discovery.goal_index`, built lazily on the first candidate that declares a ref and kept in the
+    per-`_next` `cache`, so the next pass always re-reads disk: that is the whole release mechanism.
+    A ref resolving to a goal that is not `done` holds, its status shown. FAIL CLOSED where GitHub
+    mode fails open: a ref naming no local goal, several, or another repository HOLDS and is named
+    on its own stderr line, because files on disk are complete evidence, not a windowed mirror.
+    A ref whose only hit is the goal itself is dropped. No `gh` call is possible from here."""
+    refs = mirror.blocker_scan.extract_local_refs(source.fetch_title_body(goal).get("body") or "")
+    if not refs:
+        return ""                          # the common case: one file read, one regex scan
+    if "local_index" not in cache:
+        cache["local_index"] = sources.discovery.goal_index(source.goals_dir)
+    holding, unresolved = [], []
+    for r in refs:
+        shown = r["ref"] if r["kind"] == "stem" else "#" + r["ref"]
+        entries = cache["local_index"].get(r["ref"], [])
+        hits = sorted({h for h in entries if h[0] != str(goal)})
+        if r["kind"] == "foreign":
+            why = "another repository, not a local goal"
+        elif not entries:
+            why = "no such local goal"
+        elif not hits:
+            continue                       # a self-reference: a goal never blocks itself
+        elif len(hits) > 1:
+            why = "matches %d local goals" % len(hits)
+        elif hits[0][1] == "done":
+            continue
+        else:
+            holding.append("%s (%s — status: %s)" % (shown, r["phrase"], hits[0][1]))
+            cache["needs_human"] = cache.get("needs_human") or hits[0][1] in _STUCK_STATUSES
+            continue
+        holding.append("%s (%s — %s)" % (shown, r["phrase"], why))
+        unresolved.append(shown)
+    if unresolved:
+        cache["needs_human"] = True
+        print("loop.py: %s names prerequisite(s) %s that resolve to no single local goal under "
+              ".sdlc/goals — HOLDING it rather than ignoring them; fix the marker or file the goal "
+              "(or set discovery.dependency_gate.mode: off)"
+              % (pathlib.Path(goal).stem, ", ".join(unresolved)), file=sys.stderr)
+    return ", ".join(holding)
+
+
+def _hold_subject(source, goal):
+    """#1550: (subject, state) for the hold line. Any non-local source keeps today's exact bytes; a
+    local goal is named by its stem and its REAL status (local `next_pending` re-serves
+    `in_progress` too, so "pending" would be a guess)."""
+    if not _is_local_source(source):
+        return "#%s" % goal, "still sdlc:goal"
+    try:
+        status = sources.discovery.frontmatter.get(pathlib.Path(goal).read_text(), "status")
+    except OSError:
+        status = None
+    return pathlib.Path(goal).stem, "still status: %s" % status if status else "status unchanged"
+
+
+def _held_release_note(gate):
+    """#1550: the DONE summary must not promise self-release for a hold only a human can lift."""
+    if gate.get("needs_human"):
+        return ("At least one waits on a prerequisite that is parked, failed, proposed or names no "
+                "single local goal, which needs a human before it can move")
+    return "They become pickable by themselves when it %s" % ("is done" if gate.get("local")
+                                                              else "closes")
 
 
 # --------------------------------------------------------------- #1962: the claim, in one place
@@ -2389,9 +2473,9 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
             # contract, and the goals genuinely are not pickable right now); the operator is told.
             if held:
                 print("loop.py: nothing pickable — %d goal(s) are waiting on an open prerequisite "
-                      "(%s). They become pickable by themselves when it closes; nothing was written "
-                      "to them" % (len(held), ", ".join("#%s → %s" % h for h in held)),
-                      file=sys.stderr)
+                      "(%s). %s; nothing was written to them"
+                      % (len(held), ", ".join("%s → %s" % h for h in held),
+                         _held_release_note(gate)), file=sys.stderr)
             # #1084: read ONCE, before anything below can touch `_last_read_degraded`
             # (`_feature_drained_note` -> `pending_outside_feature` saves/restores it around its
             # own diagnostic probe, so reading first keeps this call's own verdict authoritative
@@ -2416,9 +2500,10 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
         # fail-open cases.
         hold = _pick_dependency_hold(sdlc_dir, source, goal, config, gate)
         if hold:
-            print("loop.py: not claiming #%s — open prerequisite %s. Left untouched (still "
-                  "sdlc:goal, no claim); taking the next candidate" % (goal, hold), file=sys.stderr)
-            held.append((goal, hold))
+            subject, still = _hold_subject(source, goal)
+            print("loop.py: not claiming %s — open prerequisite %s. Left untouched (%s, no claim); "
+                  "taking the next candidate" % (subject, hold, still), file=sys.stderr)
+            held.append((subject, hold))
             skip.add(goal)
             _label_pull_holds(sdlc_dir, source, config, goal, hold)   # #1579: --label only
             continue

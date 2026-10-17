@@ -1,23 +1,31 @@
 name: CI
 
-# Three jobs, three cadences:
-#   test  -- the ONLY required check. PRs and merges to main; macOS 3.12; the suite minus the
-#            heaviest files (SLOW below). Minutes, not an hour.
-#   full  -- nightly and on demand; the whole suite on every launch-supported leg.
+# Three tiers (owner decision 2026-10-16):
+#   PR       -- `test`: the ONLY required check. Every PR and merge to main; macOS 3.12; the SMOKE set in
+#               .github/smoke-tests.txt plus the fast gates. Target 5-10 minutes (measured, see the file).
+#   nightly  -- `nightly` + `onboarding-control`: once a day; macOS 3.12; what used to run on every PR
+#               (the suite minus the heaviest files, SLOW below), plus the onboarding control.
+#   weekly   -- `full`: once a week and on demand; the whole suite on every launch-supported leg.
 #   regression-control -- PRs, nightly and on demand; plants the catalogued regressions in a throwaway
 #            copy and demands each guard go red (evals/regression/README.md). Not a required check.
-#   onboarding-control -- PRs and merges to main; macOS 3.12, parallel to `test`; the plain onboarding control
-#            held to evals/regression/budget.json, then the planted regressions through it (#879). Not a required check.
-# Ceiling: a break that only the slow files, or an Ubuntu / older-Python leg, can see lands on
-# main and is found by the nightly run, up to a day later. Measured 2026-10-10: the six files
-# below are 6 of 311 files and 50% of suite test-seconds (12,969 tests, all green).
+# Ceiling: a break outside the smoke set lands on main and is found by the nightly run (up to a day);
+# one that only the slowest files, or an Ubuntu / older-Python leg, can see waits for the weekly run (up
+# to a week). Run any tier by hand: gh workflow run ci.yml -f tier=smoke|nightly|full
+# Measured 2026-10-10: the six SLOW files are 6 of 311 files and 50% of suite test-seconds.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      tier:
+        description: "Which tier to run by hand"
+        type: choice
+        options: [smoke, nightly, full]
+        default: full
   schedule:
-    - cron: "17 5 * * *"  # nightly full matrix
+    - cron: "17 5 * * *"  # nightly
+    - cron: "47 5 * * 0"  # weekly full matrix, Sundays
 
 permissions:
   contents: read
@@ -28,19 +36,9 @@ concurrency:
 
 jobs:
   test:
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tier == 'smoke') }}
     runs-on: macos-latest
-    # 90, not 60: measured macos-latest runs of this job took 15 to 48 minutes on main, and one
-    # 1.0.15 release run reached only 54% of pytest in 60 minutes with no single slow test (#1538)
-    timeout-minutes: 90
-    env:
-      SLOW: >-
-        --ignore=tests/test_readiness_drills.py
-        --ignore=tests/test_readiness_growth_audit.py
-        --ignore=tests/test_b6_463.py
-        --ignore=tests/test_mutation_sample.py
-        --ignore=tests/test_onboarding_control.py
-        --ignore=tests/test_shared_sdlc_paths.py
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: configure git identity for tests that create real commits
@@ -53,8 +51,8 @@ jobs:
       - run: python -m pip install --upgrade pip pytest pytest-xdist
       - name: per-skill smoke runner (prints its own wall time against evals/skills/budget.json, #1047)
         run: python3 evals/skills/smoke.py
-      - name: pytest (subset)
-        run: python -m pytest tests/ $SLOW -rs -q -n auto --durations=30
+      - name: pytest (smoke set, .github/smoke-tests.txt)
+        run: python -m pytest $(grep -v '^#' .github/smoke-tests.txt) -rs -q -n auto --durations=15
       - name: no retired skill prefix left in any tracked path or file (#523)
         if: ${{ !cancelled() }}
         run: python3 tools/rename_check.py
@@ -75,7 +73,7 @@ jobs:
           python -m pytest tests/test_skill_frontmatter_yaml.py -q
 
   full:
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '47 5 * * 0') || (github.event_name == 'workflow_dispatch' && inputs.tier == 'full') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -183,7 +181,7 @@ jobs:
     # regressions through the same gesture (#879). Its own job, parallel to `test`, so the required job
     # does not grow: measured on the PR's CI cell, the two steps cost about 6 minutes on top of a 29-35
     # minute pytest subset (three runs: 29m37s, 31m13s, 34m52s) (45 minute timeout). Ceiling: not a required check until the owner adds it.
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '17 5 * * *') || (github.event_name == 'workflow_dispatch' && inputs.tier == 'nightly') }}
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -202,3 +200,51 @@ jobs:
         run: |
           trap 'echo "planted-regression tests wall time: ${SECONDS}s"' EXIT
           python -m pytest tests/test_onboarding_control.py -k planted -q -n 2
+
+  nightly:
+    if: ${{ (github.event_name == 'schedule' && github.event.schedule == '17 5 * * *') || (github.event_name == 'workflow_dispatch' && inputs.tier == 'nightly') }}
+    runs-on: macos-latest
+    # 90, not 60: measured macos-latest runs of this job took 15 to 48 minutes on main, and one
+    # 1.0.15 release run reached only 54% of pytest in 60 minutes with no single slow test (#1538)
+    # 120: the 90-minute run on #1538 was cancelled at the limit (about 91 minutes) before pytest finished
+    timeout-minutes: 120
+    env:
+      SLOW: >-
+        --ignore=tests/test_readiness_drills.py
+        --ignore=tests/test_readiness_growth_audit.py
+        --ignore=tests/test_b6_463.py
+        --ignore=tests/test_mutation_sample.py
+        --ignore=tests/test_onboarding_control.py
+        --ignore=tests/test_shared_sdlc_paths.py
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: configure git identity for tests that create real commits
+        run: |
+          git config --global user.name "sigma-ci"
+          git config --global user.email "sigma-ci@users.noreply.github.com"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest pytest-xdist
+      - name: per-skill smoke runner (prints its own wall time against evals/skills/budget.json, #1047)
+        run: python3 evals/skills/smoke.py
+      - name: pytest (suite minus the heaviest files)
+        run: python -m pytest tests/ $SLOW -rs -q -n auto --durations=30
+      - name: no retired skill prefix left in any tracked path or file (#523)
+        if: ${{ !cancelled() }}
+        run: python3 tools/rename_check.py
+      - name: write-surface inventory ratchet
+        run: python3 tools/readiness/write_surface.py check . docs/launch/write-surface.json
+      - name: quality gate (Tier-1 behavioral drift vs baseline)
+        run: python3 evals/run.py
+      - name: safety check (secret shapes, sinks, hostile fixtures)
+        run: python3 evals/safety/check.py
+      - name: decision gate
+        run: |
+          python3 hooks/decision_gate.py validate .
+          python3 hooks/decision_gate.py check .
+      - name: SKILL.md frontmatter reads exactly as written (needs PyYAML)
+        if: ${{ !cancelled() }}
+        run: |
+          python -m pip install pyyaml
+          python -m pytest tests/test_skill_frontmatter_yaml.py -q

@@ -43,7 +43,8 @@ FALLBACK_ENV = frozenset({
 })
 #: Set by Sigma for its own child processes; read under the Sigma name only.
 INTERNAL_ENV = frozenset({"SIGMA_RUN_ID", "SIGMA_AUTOWATCH_HOP", "SIGMA_SESSION_GENERATION",
-                          "SIGMA_APPLIER_APPLYING", "SIGMA_UPKEEP_SWEEP_RUN"})
+                          "SIGMA_APPLIER_APPLYING", "SIGMA_UPKEEP_SWEEP_RUN",
+                          "SIGMA_QUALITY_FILES"})   # #1635: set for a metric command, never read from the operator
 #: Operator settings introduced AFTER the rename: the previous plugin never read them, so a
 #: previous-prefix spelling means nothing and is never consulted. `SIGMA_ALLOW_COEXIST` (#240) now
 #: only silences the one-line coexistence notice (#314) -- adopting it from a stale previous-prefix

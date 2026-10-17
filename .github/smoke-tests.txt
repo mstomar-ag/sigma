@@ -1,0 +1,20 @@
+# PR smoke set: the files `ci.yml`'s `test` job runs on every PR. One path per line; `#` lines are skipped.
+# Goal: "no major functionality is broken" in 5-10 minutes. Core = the merge/gate engine (test_work) and the loop
+# (test_loop); the rest are fast guards of CI itself and the shared plumbing.
+# Measured 2026-10-16 on a developer Mac, 3 workers (a GitHub macOS runner has 3 cores), another job running on
+# the same machine: these files total about 615 test-seconds, ~4 minutes of wall time; the non-pytest gates add
+# ~11 s. NOT yet measured on a GitHub runner: the first PR run reports it.
+# Left to the nightly run: test_doctor (383 test-seconds), test_phase_record_gate, test_phase_report, test_init_flow.
+tests/test_work.py
+tests/test_loop.py
+tests/test_hook.py
+tests/test_ledger.py
+tests/test_log.py
+tests/test_decision_gate.py
+tests/test_merge_queue.py
+tests/test_no_direct_gh.py
+tests/test_no_unsupervised_process_pause.py
+tests/test_skill_frontmatter_yaml.py
+tests/test_ci_matrix.py
+tests/test_regression_ci.py
+tests/test_launch_ci_cells.py

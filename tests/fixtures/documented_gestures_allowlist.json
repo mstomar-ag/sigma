@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "file": "docs/launch/evidence/resource-guard-linux-calibration.md",
+    "line_text_substring": "python3 /cal/cal.py /repo ",
+    "reason": "#1772 evidence record: cal.py is the calibration driver printed in full in resource-guard-macos-calibration.md, saved by the reader beside the checkout; it is not a shipped Sigma script."
+  },
+  {
+    "file": "docs/launch/evidence/resource-guard-macos-calibration.md",
+    "line_text_substring": "python3 cal.py . ",
+    "reason": "#1772 evidence record: cal.py is the calibration driver printed in full later on this page, saved by the reader; it is not a shipped Sigma script."
+  }
+]

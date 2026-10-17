@@ -5,6 +5,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import resource_mode  # noqa: E402
 import test_phase_record_gate as g  # noqa: E402
 
 
@@ -18,10 +19,10 @@ def test_done_on_an_inline_route_prints_a_loud_warning(tmp_path):
 def test_picking_a_goal_says_the_phase_record_is_enforced(tmp_path):
     p = g._project(tmp_path)
     (p / ".sdlc/goals/0001-x.md").write_text("---\nid: 0001\ntitle: x\nstatus: pending\n---\nbody\n")
-    r = g.run(p, "loop.py", "next", ".sdlc")
+    r = g.run(p, "loop.py", "next", ".sdlc", env=resource_mode.carry({}))    # #1759: g.ENV predates conftest
     assert r.stdout.strip().endswith("0001-x.md"), r.stdout + r.stderr
     assert "phase record is ENFORCED" in r.stderr and "OWN dispatched subagent" in r.stderr, r.stderr
     off = g._project(tmp_path / "off") if (tmp_path / "off").mkdir() is None else None
     (off / ".sdlc/config.json").write_text('{"action_log": {"enabled": true}}')       # key absent: off
     (off / ".sdlc/goals/0001-x.md").write_text("---\nid: 0001\ntitle: x\nstatus: pending\n---\nbody\n")
-    assert "ENFORCED" not in g.run(off, "loop.py", "next", ".sdlc").stderr
+    assert "ENFORCED" not in g.run(off, "loop.py", "next", ".sdlc", env=resource_mode.carry({})).stderr

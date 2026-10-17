@@ -26,6 +26,8 @@ import sys
 
 import pytest
 
+import resource_mode
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPTS = ROOT / "skills" / "sigma-init" / "scripts"
 FLOW = SCRIPTS / "init_flow.py"
@@ -234,6 +236,7 @@ def _world(tmp_path, issues=None, origin=GITHUB_URL, refuse=False, commit=True):
            "PYTHONDONTWRITEBYTECODE": "1", "FAKE_GH_STATE": str(state), "FAKE_GH_LOG": str(log),
            "FAKE_GH_UNHANDLED": str(unh),
            **{k: os.environ[k] for k in ("CLAUDE_CONFIG_DIR", "CODEX_HOME") if k in os.environ}}
+    resource_mode.carry(env)    # #1759: a scrubbed env must not let the picker sample the real machine
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main", env=env)

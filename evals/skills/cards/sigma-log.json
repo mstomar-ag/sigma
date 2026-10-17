@@ -8,6 +8,10 @@
     {
       "path": "skills/sigma-log/scripts/log.py",
       "role": "gesture"
+    },
+    {
+      "path": "skills/sigma-log/scripts/outcomes.py",
+      "role": "gesture"
     }
   ],
   "artifacts": [

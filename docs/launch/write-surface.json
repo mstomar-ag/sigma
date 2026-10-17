@@ -1665,6 +1665,14 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/quality_delta.py",
+      "function": "measure",
+      "rule": "fs-write",
+      "count": 3,
+      "gate": "opt-in; runs only when quality.metrics is set in the merge-base config and a person or a loop slot runs quality_delta.py <goal>; writes only under the main checkout's .sdlc/state/quality_delta/ (the state directory, created, one owner marker per scratch worktree, one changed-file list inside each scratch worktree), and the scratch worktrees and markers are removed through diff_revert.cleanup in a finally; a crash leaves them for the next run to reclaim by dead pid",
+      "risk": "medium"
+    },
+    {
       "path": "skills/sigma-loop/scripts/reconcile.py",
       "function": "_write",
       "rule": "fs-remove",

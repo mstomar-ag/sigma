@@ -1106,8 +1106,12 @@ def release(sdlc_dir, goal_path):
     a style choice. Returns True when it actually released a claim, False when it left an
     already-terminal goal untouched — see sources.py's LocalSource.release, the one caller, which
     uses this to journal an honest message either way instead of a misleading "released" note for a
-    no-op."""
-    if _status(goal_path) in _TERMINAL_STATUSES:
+    no-op.
+
+    #1550: it refuses `proposed` too. That status is a human-promotion gate, release is a
+    claim-undo, and a proposed goal was never claimed, so release must not be what promotes it."""
+    status = _status(goal_path)
+    if status in _TERMINAL_STATUSES or status == "proposed":
         return False
     _set_status(goal_path, "pending")
     return True

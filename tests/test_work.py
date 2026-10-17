@@ -11834,3 +11834,49 @@ def test_start_rechecks_the_cut_when_the_unit_lock_was_busy(tmp_path, monkeypatc
 def test_start_without_a_busy_lock_makes_no_recheck(tmp_path, monkeypatch):
     out, _ = _busy_start(tmp_path, monkeypatch, False)
     assert "RECUT" not in out
+
+
+# ---- work.ci_required: CI is optional (teams that run Jenkins etc. after the feature branch) -------
+NO_CI = {"work": {"enabled": True, "ci_required": False}}
+
+
+def test_ci_required_defaults_to_true_and_only_a_real_false_turns_it_off():
+    assert work.ci_required(ON) is True
+    assert work.ci_required({"work": {"ci_required": False}}) is False
+    for junk in (None, 0, "false", "no", []):          # not a boolean -> stay gated, never silently off
+        assert work.ci_required({"work": {"ci_required": junk}}) is True
+
+
+def test_gate_default_still_parks_on_a_failing_nonrequired_check(tmp_path):
+    d = _sdlc(tmp_path)
+    goal = _started(d)
+    ok, verdict, _ = work.gate(d, ON, goal, run=_runner(_mixed(("ci", "FAILURE"), status="UNSTABLE")),
+                               sleep=NOSLEEP)
+    assert not ok and "ci" in verdict
+
+
+def test_gate_with_ci_not_required_ignores_a_failing_nonrequired_check(tmp_path):
+    d = _sdlc(tmp_path)
+    goal = _started(d)
+    ok, verdict, _ = work.gate(d, NO_CI, goal, run=_runner(_mixed(("ci", "FAILURE"), status="UNSTABLE")),
+                               sleep=NOSLEEP)
+    assert ok, verdict
+
+
+def test_gate_with_ci_not_required_does_not_wait_on_a_pending_check(tmp_path):
+    d = _sdlc(tmp_path)
+    goal = _started(d)
+    run = _runner(_mixed(("jenkins", ""), status="UNSTABLE"))
+    ok, verdict, _ = work.gate(d, NO_CI, goal, run=run, sleep=NOSLEEP)
+    assert ok, verdict
+    assert _reads(run, STATUS_READ) == 1, "must not poll for a check nobody requires"
+
+
+def test_gate_with_ci_not_required_still_parks_when_the_host_blocks_on_a_check(tmp_path):
+    """A host-REQUIRED check shows as BLOCKED, and GitHub refuses that merge itself: Sigma cannot
+    and must not override branch protection, so this still parks and names the check."""
+    d = _sdlc(tmp_path)
+    goal = _started(d)
+    run = _runner(_mixed(("ci", "FAILURE"), status="BLOCKED"))
+    ok, verdict, _ = work.gate(d, NO_CI, goal, run=run, sleep=NOSLEEP)
+    assert not ok and "ci" in verdict

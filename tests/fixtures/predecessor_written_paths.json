@@ -103,7 +103,7 @@
   {
    "compatible": true,
    "pattern": ".sdlc/config.json",
-   "reason": "Key sets differ; each side's setup.py configure, run over a config the other side wrote, lost no top-level key in either order (probe).",
+   "reason": "Key sets differ; each side's setup.py configure, run over a config the other side wrote, lost no top-level key in either order (probe). Vetted #1604 and #1733: resource_guard.py::_record and resource_lease.py::load_config only READ config.json (open for reading, then json.loads/json.load); the literal backstop flags them for their sys.stdout.write / sys.stderr.write status lines. Neither writes config.json; _record's own state writes go through resource_liveness.refresh to the resource state directory.",
    "verdict": "different-format",
    "vetted_writers": [
     "skills/sigma-define/scripts/define.py::main",
@@ -115,6 +115,8 @@
     "skills/sigma-init/scripts/verify_detect.py::write_verify",
     "skills/sigma-loop/scripts/applier.py::_read_config",
     "skills/sigma-loop/scripts/decision_store.py::main",
+    "skills/sigma-loop/scripts/resource_guard.py::_record",
+    "skills/sigma-loop/scripts/resource_lease.py::load_config",
     "skills/sigma-setup/scripts/setup.py::write_cfg"
    ]
   },
@@ -144,11 +146,12 @@
   {
    "compatible": true,
    "pattern": ".sdlc/events",
-   "reason": "Directory creation only; the files inside carry their own entries.",
+   "reason": "Directory creation only; the files inside carry their own entries. Vetted #1697: handoff.py::_park is the park step moved out of the already vetted handoff.py::_triage_finish into a nested function; it makes the same single ledger.safe_append (stream EVENTS) call, now also for the evicted lowest-priority filing.",
    "verdict": "directory",
    "vetted_writers": [
     "skills/sigma-loop/scripts/comment_watch.py::tick",
     "skills/sigma-loop/scripts/drift_watch.py::sweep",
+    "skills/sigma-loop/scripts/handoff.py::_park",
     "skills/sigma-loop/scripts/handoff.py::_triage_finish",
     "skills/sigma-loop/scripts/ledger.py::append",
     "skills/sigma-loop/scripts/ledger.py::main",
@@ -170,11 +173,12 @@
    "compatible": false,
    "issue": "#515",
    "pattern": ".sdlc/events/*-*.*.jsonl",
-   "reason": "No sample reached this path and the writers differ; compatibility is unverified.",
+   "reason": "No sample reached this path and the writers differ; compatibility is unverified. Vetted #1697: handoff.py::_park is the park step moved out of the already vetted handoff.py::_triage_finish into a nested function; it makes the same single ledger.safe_append (stream EVENTS) call, now also for the evicted lowest-priority filing.",
    "verdict": "unsampled",
    "vetted_writers": [
     "skills/sigma-loop/scripts/comment_watch.py::tick",
     "skills/sigma-loop/scripts/drift_watch.py::sweep",
+    "skills/sigma-loop/scripts/handoff.py::_park",
     "skills/sigma-loop/scripts/handoff.py::_triage_finish",
     "skills/sigma-loop/scripts/ledger.py::append",
     "skills/sigma-loop/scripts/ledger.py::main",
@@ -368,11 +372,12 @@
   {
    "compatible": true,
    "pattern": ".sdlc/ledger/*",
-   "reason": "Directory creation only; the files inside carry their own entries.",
+   "reason": "Directory creation only; the files inside carry their own entries. Vetted #1697: handoff.py::_park is the park step moved out of the already vetted handoff.py::_triage_finish into a nested function; it makes the same single ledger.safe_append (stream EVENTS) call, now also for the evicted lowest-priority filing.",
    "verdict": "directory",
    "vetted_writers": [
     "skills/sigma-loop/scripts/comment_watch.py::tick",
     "skills/sigma-loop/scripts/drift_watch.py::sweep",
+    "skills/sigma-loop/scripts/handoff.py::_park",
     "skills/sigma-loop/scripts/handoff.py::_triage_finish",
     "skills/sigma-loop/scripts/ledger.py::append",
     "skills/sigma-loop/scripts/ledger.py::main",
@@ -394,11 +399,12 @@
    "compatible": false,
    "issue": "#515",
    "pattern": ".sdlc/ledger/*/*-*.*.jsonl",
-   "reason": "No sample reached this path and the writers differ; compatibility is unverified.",
+   "reason": "No sample reached this path and the writers differ; compatibility is unverified. Vetted #1697: handoff.py::_park is the park step moved out of the already vetted handoff.py::_triage_finish into a nested function; it makes the same single ledger.safe_append (stream EVENTS) call, now also for the evicted lowest-priority filing.",
    "verdict": "unsampled",
    "vetted_writers": [
     "skills/sigma-loop/scripts/comment_watch.py::tick",
     "skills/sigma-loop/scripts/drift_watch.py::sweep",
+    "skills/sigma-loop/scripts/handoff.py::_park",
     "skills/sigma-loop/scripts/handoff.py::_triage_finish",
     "skills/sigma-loop/scripts/ledger.py::append",
     "skills/sigma-loop/scripts/ledger.py::main",
@@ -420,11 +426,12 @@
    "compatible": false,
    "issue": "#515",
    "pattern": ".sdlc/ledger/TEAM.md",
-   "reason": "No sample reached this path and the writers differ; compatibility is unverified. Vetted #1152 (refs #1142): sync.py::_save_uncommitted names TEAM.md only to SKIP it (`rel != \"TEAM.md\"`); it copies other files aside under .sdlc/state/orphaned/, which the predecessor never writes, so it does not write TEAM.md and cannot clobber the predecessor's copy.",
+   "reason": "No sample reached this path and the writers differ; compatibility is unverified. Vetted #1152 (refs #1142): sync.py::_save_uncommitted names TEAM.md only to SKIP it (`rel != \"TEAM.md\"`); it copies other files aside under .sdlc/state/orphaned/, which the predecessor never writes, so it does not write TEAM.md and cannot clobber the predecessor's copy. Vetted #1697: handoff.py::_park is the park step moved out of the already vetted handoff.py::_triage_finish into a nested function; it makes the same single ledger.safe_append (stream EVENTS) call, now also for the evicted lowest-priority filing.",
    "verdict": "unsampled",
    "vetted_writers": [
     "skills/sigma-loop/scripts/comment_watch.py::tick",
     "skills/sigma-loop/scripts/drift_watch.py::sweep",
+    "skills/sigma-loop/scripts/handoff.py::_park",
     "skills/sigma-loop/scripts/handoff.py::_triage_finish",
     "skills/sigma-loop/scripts/ledger.py::append",
     "skills/sigma-loop/scripts/ledger.py::main",

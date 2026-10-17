@@ -13,6 +13,15 @@ Goals are markdown files under `.sdlc/goals/NNNN-slug.md`; the loop advances eac
 `status: pending → in_progress → done | parked`, in priority order and then filename (`discovery.order: "created"` for strict filename order).
 
 - **Add a goal:** copy `0001-example.md`, bump the number, fill `done_when` (a *checkable* condition).
+- **Order goals:** a goal whose body says `**Blocked by:** #N` (a goal id) or `**Blocked by:** <file
+  stem>` is not picked until that goal file is `status: done`; a ref naming no single local goal
+  holds it too, named on stderr (#1550). To split a goal into ordered children, file each with
+  `handoff.py track .sdlc "$goal" --area <area> --why "<child>" --queue queued --assignee same-area
+  --blocks no --title "<child>" --body-file <f>`, ending every child's body file after the first with
+  `**Blocked by:** #<id the previous track printed>` (a `duplicate_of` in its report is an older
+  sibling's id). Triage arms them `pending` (off: `proposed`, for a human); `ai_filed.max_per_goal`
+  (default 5) parks the excess. Never hand-write child files under `.sdlc/goals/`: that skips triage
+  and the caps, and a hand-chosen status is unpickable (`proposed`) or unordered (`pending`).
 - **Commit** `.sdlc/goals/`, `.sdlc/project.md`, `.sdlc/config.json`; **gitignore** `.sdlc/state/`
   (machine-written loop state — `/sigma-init` prints this tip).
 - **Parked** goals collect in `.sdlc/state/review-queue.md` — your "needs a human" list.

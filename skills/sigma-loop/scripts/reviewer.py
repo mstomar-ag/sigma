@@ -29,6 +29,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import signal
 import shutil
 import stat
@@ -36,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 #: What the SKILL prose branches on.
 MECHANISMS = ("subagent", "process", "command", "inline")
@@ -585,16 +587,135 @@ def configured_reviewer_unavailable(cfg, route):
     return host != "inline" and (host != "auto" or bool(str(review.get("command") or "").strip()))
 
 
+#: #1551 running-receipt bounds. A live run's receipt says `running`; a reader DERIVES its deadline as
+#: started_at + timeout_seconds + _RUN_GRACE (never stored, so never NaN, inf or forged larger). The grace
+#: covers the runner's post-reviewer work: `_stop_review_process` (<= 4 s) and, on `review`, `_content_key`'s
+#: four sequential git calls at `_KEY_SECONDS` each, plus the hashing tail and fsync.
+_RUN_GRACE = 4 * int(_KEY_SECONDS) + 60
+_MAX_RUN_SECONDS = 86400
+_CLOCK_SKEW = 60
+_MAX_PID = 2 ** 31 - 1              # os.kill raises OverflowError (not OSError) above this
+_FINDINGS_CAP = 32768               # encoded JSON bytes of the persisted findings
+#: Below the one measured Codex `exec_command` yield (30.2 s), so a `wait` call is not itself yielded.
+WAIT_DEFAULT_SECONDS = 20
+_MISSING_RETRY = 5                  # a wait issued at launch may arrive before the running write
+
+
+def _posix():
+    return os.name == "posix"
+
+
+def _pid_alive(pid):
+    """Whether `pid` exists on this machine. Off POSIX nothing is probed (the deadline bounds it). Fails
+    toward ALIVE on anything but "no such process": the derived deadline is the backstop. An unreaped
+    zombie runner reads alive until that deadline."""
+    if not _posix():
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _int(x):
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
+def _classify(got, now=None):
+    """A `running` receipt stays running only while its runner is provably live; otherwise it reads
+    `failed/not_completed`, KEEPING every other field (route, plan_sha256, content_key, run_id), so every
+    existing fail-closed path applies unchanged. Any other outcome is returned as written."""
+    if got.get("outcome") != "running":
+        return got
+    now = time.time() if now is None else now
+    pid, started, span = got.get("pid"), got.get("started_at"), got.get("timeout_seconds")
+    if not (_int(pid) and 0 < pid <= _MAX_PID and _int(started) and _int(span) and span <= _MAX_RUN_SECONDS
+            and started <= now + _CLOCK_SKEW):
+        detail = "malformed running receipt"
+    elif not now < started + span + _RUN_GRACE:
+        detail = "deadline passed"
+    elif not _pid_alive(pid):
+        detail = "runner pid %d gone" % pid
+    else:
+        return got
+    return {**got, "outcome": "failed", "failure": "not_completed", "detail": detail}
+
+
+def _wait_gesture(sdlc_dir, goal, phase, run_id):
+    return ("reviewer.py wait %s --goal %s --phase %s --max-seconds %d --run-id %s"
+            % (shlex.quote(str(sdlc_dir)), goal, phase, WAIT_DEFAULT_SECONDS, run_id))
+
+
+def _wait_text(sdlc_dir, goal, phase, receipt):
+    return ("reviewer still running for %s %s (pid %s): wait with `%s`; do not park"
+            % (goal, phase, receipt.get("pid"), _wait_gesture(sdlc_dir, goal, phase, receipt.get("run_id"))))
+
+
+def running_receipt(sdlc_dir, goal, phase):
+    """-> the LIVE running receipt for goal+phase when its route applies to the current one, else None.
+    Same shape of decision as `failed_receipt`: a gate seeing it says "wait", never approve, never park."""
+    cfg, unreadable = _config_state(sdlc_dir)
+    if not unreadable and not _independent_on(cfg):
+        return None
+    try:
+        state, got = _read_receipt(sdlc_dir, goal, phase)
+    except ValueError:
+        return None
+    if state == "ok" and got.get("outcome") == "running" and _route_applies(got, resolve(sdlc_dir)):
+        return got
+    return None
+
+
+def wait_review(sdlc_dir, goal, phase, max_seconds, run_id=None, sleep=time.sleep, clock=time.monotonic):
+    """Poll the receipt once a second for at most `max_seconds` -> (code, text): 0 FINISHED (any verdict;
+    finished is not approved), 1 FAILED, 2 usage / unreadable / another run / still missing after a short
+    retry, 3 RUNNING. The path is resolved once (it costs a state.py load); each poll is classified."""
+    try:
+        path = _receipt_path(sdlc_dir, goal, phase)
+    except ValueError as exc:
+        return 2, "reviewer wait: %s" % exc
+    start = clock()
+    while True:
+        state, got = _read_receipt_at(path)
+        elapsed = clock() - start
+        if state == "unreadable":
+            return 2, "reviewer wait: the receipt for %s %s is unreadable (%s)" % (goal, phase, got)
+        if state == "missing":
+            if elapsed >= min(_MISSING_RETRY, max_seconds):
+                return 2, "reviewer wait: no reviewer run is on record for %s %s" % (goal, phase)
+        elif run_id and got.get("run_id") != run_id:
+            return 2, "reviewer wait: a different run is on record: %s" % got.get("run_id")
+        elif got.get("outcome") == "ok":
+            return 0, ("FINISHED verdict=%s (finished is not approved; only verdict=approve is)\n%s"
+                       % (got.get("verdict"), got.get("findings") or ""))
+        elif got.get("outcome") != "running":
+            return 1, "FAILED %s: %s" % (got.get("failure") or got.get("outcome") or "unknown", got.get("detail") or "")
+        elif elapsed >= max_seconds:
+            now = time.time()
+            return 3, ("RUNNING pid=%s run_id=%s elapsed=%ds deadline_in=%ds"
+                       % (got["pid"], got.get("run_id"), now - got["started_at"],
+                          got["started_at"] + got["timeout_seconds"] + _RUN_GRACE - now))
+        sleep(1)
+
+
 def _read_receipt(sdlc_dir, goal, phase):
     """-> ("missing", None) | ("unreadable", why) | ("ok", dict) -- `ok` meaning a readable object,
-    whatever its outcome."""
+    whatever its outcome. The ONE door every reader uses, so a dead or expired `running` receipt reads
+    `failed/not_completed` everywhere (`_classify`)."""
+    return _read_receipt_at(_receipt_path(sdlc_dir, goal, phase))
+
+
+def _read_receipt_at(path):
     try:
-        got = json.loads(_receipt_path(sdlc_dir, goal, phase).read_text(encoding="utf-8"))
+        got = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return "missing", None
     except (OSError, ValueError) as exc:
         return "unreadable", str(exc)
-    return ("ok", got) if isinstance(got, dict) else ("unreadable", "not a JSON object")
+    return ("ok", _classify(got)) if isinstance(got, dict) else ("unreadable", "not a JSON object")
 
 
 def _route_tag(route):
@@ -632,12 +753,18 @@ def _failure_applies(receipt, route, stale_waiver=False):
     it was made under: another process/command host starts clean (its own run overwrites the receipt); the
     subagent route has its own proof (an agent id); INLINE needs the owner's recorded choice
     (`accept-inline`), never just a config edit. A receipt with no route (older) applies: fail closed."""
+    if receipt.get("outcome") == "waived_inline":
+        return stale_waiver and route.get("mechanism") == "inline"   # a waiver for other bytes no longer covers these
+    if receipt.get("outcome") in ("ok", "running"):   # a LIVE run is "wait", never a failure (#1551)
+        return False
+    return _route_applies(receipt, route)
+
+
+def _route_applies(receipt, route):
+    """Whether a receipt made under its tagged route bears on the CURRENT route: never on subagent (its own
+    proof); always on inline or for an untagged (older) receipt (fail closed); else only on a tag match."""
     tag = receipt.get("route")
     mech = route.get("mechanism")
-    if receipt.get("outcome") == "waived_inline":
-        return stale_waiver and mech == "inline"      # a waiver for other bytes no longer covers these
-    if receipt.get("outcome") == "ok":
-        return False
     if mech == "subagent":
         return False
     if mech == "inline" or not isinstance(tag, dict):
@@ -687,6 +814,8 @@ def subagent_transcript_refusal(sdlc_dir, goal, phase, verified):
         return None
     if state == "unreadable":
         kind = "unreadable receipt"
+    elif state == "ok" and got.get("outcome") == "running":     # route-agnostic, like the failure read
+        return _wait_text(sdlc_dir, goal, phase, got)
     elif state == "ok" and got.get("outcome") not in ("ok", "waived_inline"):
         kind = got.get("failure") or "unknown"
     else:
@@ -724,6 +853,8 @@ def accept_inline(sdlc_dir, goal, phase, reason):
         raise ValueError("the resolved route is %s, not inline: set review.host to `inline` first, or "
                          "re-run the reviewer" % route.get("mechanism"))
     state, got = _read_receipt(sdlc_dir, goal, phase)
+    if state == "ok" and got.get("outcome") == "running" and _route_applies(got, route):
+        raise ValueError("reviewer still running (pid %s): wait for it or kill it first" % got.get("pid"))
     if state != "ok" or got.get("outcome") == "ok":
         raise ValueError("nothing to accept: no failed independent run is on record for %s %s" % (goal, phase))
     binding = {}
@@ -747,6 +878,9 @@ def accept_inline(sdlc_dir, goal, phase, reason):
 def inline_review_refusal(sdlc_dir, goal, route):
     """For the PR-review generation path's inline branch: refuse an inline route the operator configured away from, or one after
     a failed code-review run for this goal, whatever the live route says. None otherwise."""
+    live = running_receipt(sdlc_dir, goal, "review")
+    if live:
+        return _wait_text(sdlc_dir, goal, "review", live)
     failed = failed_receipt(sdlc_dir, goal, "review")
     if failed:
         return ("the independent reviewer FAILED for %s (%s): an inline self-review does not replace it. "
@@ -806,6 +940,8 @@ def independent_run_refusal(sdlc_dir, goal, phase, plan_sha256=""):
         return None                      # bound by its own proof (an agent id), not by a process receipt
     if state == "unreadable":
         return "the reviewer run receipt for %s %s is unreadable (%s): re-run `%s`" % (goal, phase, receipt, gesture)
+    if state == "ok" and receipt.get("outcome") == "running" and _route_applies(receipt, route):
+        return _wait_text(sdlc_dir, goal, phase, receipt)
     stale = (state == "ok" and receipt.get("outcome") == "waived_inline" and mechanism == "inline"
              and not _waiver_valid(sdlc_dir, goal, phase, receipt, plan_sha256))
     applies = state == "ok" and _failure_applies(receipt, route, stale_waiver=stale)
@@ -848,18 +984,20 @@ def independent_run_refusal(sdlc_dir, goal, phase, plan_sha256=""):
     return None
 
 
-def run_review(sdlc_dir, brief_path, scratch_paths, goal=None, phase=None):
+def run_review(sdlc_dir, brief_path, scratch_paths, goal=None, phase=None, hint=False):
     """Execute a resolved process/command review with a real timeout and fresh process group.
 
     The operator-owned `review.command` retains its shell semantics. `process` commands remain
     argv lists. Unsupported platforms refuse before spawning: killing only a shell while its
     children keep consuming quota would be a silent half-guarantee.
 
-    With `goal` and `phase` it leaves the run receipt. The receipt is written PESSIMISTICALLY (failed)
-    only once the reviewer is about to LAUNCH, so a run refused beforehand (leak guard, shell policy,
-    a bad timeout) -- a maker's typo, not a reviewer failure -- never overwrites an earlier good one,
-    while a launched run that is killed or fails leaves a failure. The reviewer keeps the repo cwd: it
-    must read the repository.
+    With `goal` and `phase` it leaves the run receipt. A run refused beforehand (leak guard, shell
+    policy, a bad timeout) -- a maker's typo, not a reviewer failure -- never overwrites an earlier good
+    one. Past those refusals the receipt says `running` (this process's pid, started_at, timeout, a
+    run_id nonce) until the run's ONE final write replaces it (`_finish_receipt`); a crash in between is
+    finalised `not_completed`, and a SIGKILLed runner reads so via its dead pid (`_classify`). `hint`
+    (the CLI only) prints the bounded `wait` gesture to stderr; an in-process caller's captured errors
+    stay free of it. The reviewer keeps the repo cwd: it must read the repository.
     """
     if os.name != "posix" or not hasattr(os, "killpg"):
         print("reviewer run: process-tree timeout is unsupported on this platform", file=sys.stderr)
@@ -904,75 +1042,135 @@ def run_review(sdlc_dir, brief_path, scratch_paths, goal=None, phase=None):
     if not isinstance(timeout, int) or timeout <= 0:
         print("reviewer run: review.timeout_seconds must be positive", file=sys.stderr)
         return 2
+    if timeout > _MAX_RUN_SECONDS:
+        print("reviewer run: review.timeout_seconds must be at most %d" % _MAX_RUN_SECONDS, file=sys.stderr)
+        return 2
     command = route["command"]
 
     plan = _PLAN_SHA_LINE.search(brief)
     plan_sha = plan.group(1) if plan else None
+    run_id, key, finished = uuid.uuid4().hex, None, False
+
+    def finish(**fields):
+        """The run's ONE final receipt write, under its own nonce; False when it did not land."""
+        nonlocal finished
+        finished = True
+        return not receipt or _finish_receipt(sdlc_dir, goal, phase, run_id, route=_route_tag(route),
+                                              plan_sha256=plan_sha, content_key=key, **fields)
 
     def failed(kind, code, message, detail=""):
         print(message, file=sys.stderr)
-        if receipt:
-            _write_receipt(sdlc_dir, goal, phase, outcome="failed", failure=kind, detail=detail,
-                           route=_route_tag(route), plan_sha256=plan_sha, content_key=key)
+        finish(outcome="failed", failure=kind, detail=detail)
         return code
-    key = None
-    if receipt and phase == "review":
-        key, cause = _content_key(sdlc_dir, goal)
-        if key is None:
-            return failed("content_unbound", 1, "reviewer run: this checkout cannot be bound to the review: "
-                          "%s. Fix that and re-run (nothing was sent to the reviewer)" % cause, cause)
     if receipt:
-        _write_receipt(sdlc_dir, goal, phase, outcome="failed", failure="not_completed",
-                       route=_route_tag(route), plan_sha256=plan_sha, content_key=key)
-    with _guard().session_lease("reviewer", goal or "run", ttl=timeout * 2 + 60,
-                                config=_config(sdlc_dir).get("resource")) as lease:        # #1738
-        if lease is not None and hasattr(lease, "reason"):
-            # A hold is "could not run now": the existing failed outcome, nothing spawned, never a verdict.
-            return failed("held", 1, "reviewer run: a model session is held (%s); no verdict accepted"
-                          % lease.reason, str(lease.reason))
-        try:
-            proc = subprocess.Popen(command, shell=mechanism == "command", stdin=subprocess.PIPE,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                    start_new_session=True)
-        except OSError as exc:
-            return failed("start_failed", 1,
-                          f"reviewer run: could not start reviewer process ({type(exc).__name__})")
-        try:
-            output, _errors = proc.communicate(input=brief, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            _stop_review_process(proc)
-            return failed("timeout", 124,
-                          f"reviewer run: timed out after {timeout}s; reviewer process group stopped")
-        except BaseException:
-            _stop_review_process(proc)
-            raise
-    if proc.returncode != 0:
-        return failed("nonzero_exit", 1,
-                      f"reviewer run: reviewer exited with exit {proc.returncode}; no verdict accepted")
-    if not output.strip():
-        return failed("empty_output", 1, "reviewer run: reviewer returned empty output; no verdict accepted")
-    if key is not None:
-        after, cause = _content_key(sdlc_dir, goal)
-        if after != key:
-            return failed("content_changed_during_run", 1,
-                          "reviewer run: the checkout changed while the reviewer ran (%s); no verdict accepted. "
-                          "If the reviewer writes caches into the checkout, a re-run usually passes once those "
-                          "files exist (or git-ignore them)" % (cause or "files differ"), cause or "")
-    if receipt:
+        # Written BEFORE the pre-launch key step (it can take minutes on a large checkout), so a yielding
+        # host never reads the previous run's receipt as this one's; the hint names the exact wait gesture.
+        _write_receipt(sdlc_dir, goal, phase, outcome="running", pid=os.getpid(), started_at=int(time.time()),
+                       timeout_seconds=timeout, run_id=run_id, route=_route_tag(route), plan_sha256=plan_sha)
+        if hint:
+            print("reviewer run: running pid %d run_id %s, deadline in %ds. If this call yields, do NOT park: %s "
+                  "(exit 3 = still running; 0 = finished, read the verdict)"
+                  % (os.getpid(), run_id, timeout + _RUN_GRACE, _wait_gesture(sdlc_dir, goal, phase, run_id)),
+                  file=sys.stderr)
+    try:
+        if receipt and phase == "review":
+            key, cause = _content_key(sdlc_dir, goal)
+            if key is None:
+                return failed("content_unbound", 1, "reviewer run: this checkout cannot be bound to the review: "
+                              "%s. Fix that and re-run (nothing was sent to the reviewer)" % cause, cause)
+        with _guard().session_lease("reviewer", goal or "run", ttl=timeout * 2 + 60,
+                                    config=_config(sdlc_dir).get("resource")) as lease:        # #1738
+            if lease is not None and hasattr(lease, "reason"):
+                # A hold is "could not run now": the existing failed outcome, nothing spawned, never a verdict.
+                return failed("held", 1, "reviewer run: a model session is held (%s); no verdict accepted"
+                              % lease.reason, str(lease.reason))
+            try:
+                proc = subprocess.Popen(command, shell=mechanism == "command", stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                        start_new_session=True)
+            except OSError as exc:
+                return failed("start_failed", 1,
+                              f"reviewer run: could not start reviewer process ({type(exc).__name__})")
+            try:
+                output, _errors = proc.communicate(input=brief, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _stop_review_process(proc)
+                return failed("timeout", 124,
+                              f"reviewer run: timed out after {timeout}s; reviewer process group stopped")
+            except BaseException:
+                _stop_review_process(proc)
+                raise
+        if proc.returncode != 0:
+            return failed("nonzero_exit", 1,
+                          f"reviewer run: reviewer exited with exit {proc.returncode}; no verdict accepted")
+        if not output.strip():
+            return failed("empty_output", 1, "reviewer run: reviewer returned empty output; no verdict accepted")
+        if key is not None:
+            after, cause = _content_key(sdlc_dir, goal)
+            if after != key:
+                return failed("content_changed_during_run", 1,
+                              "reviewer run: the checkout changed while the reviewer ran (%s); no verdict accepted. "
+                              "If the reviewer writes caches into the checkout, a re-run usually passes once those "
+                              "files exist (or git-ignore them)" % (cause or "files differ"), cause or "")
         named = _BRIEF_HEADER.match(brief)
-        _write_receipt(sdlc_dir, goal, phase, outcome="ok", verdict=lone_verdict(output),
-                       brief_sha256=hashlib.sha256(brief.encode("utf-8")).hexdigest(),
-                       output_sha256=hashlib.sha256(output.encode("utf-8")).hexdigest(),
-                       plan_sha256=plan_sha,
-                       brief_phase=named.group(1) if named else None, content_key=key, route=_route_tag(route))
-    sys.stdout.write(output)
-    return 0
+        if not finish(outcome="ok", verdict=lone_verdict(output),
+                      brief_sha256=hashlib.sha256(brief.encode("utf-8")).hexdigest(),
+                      output_sha256=hashlib.sha256(output.encode("utf-8")).hexdigest(),
+                      brief_phase=named.group(1) if named else None, findings=_cap_findings(output)):
+            return 1
+        sys.stdout.write(output)
+        return 0
+    except BaseException:
+        # Anything after the running write (a Popen ValueError, a crash in the key step or the verdict
+        # parse, ^C) finalises not_completed -- unless the final write already landed (e.g. a broken stdout).
+        if not finished:
+            finish(outcome="failed", failure="not_completed", detail="the runner raised")
+        raise
+
+
+def _finish_receipt(sdlc_dir, goal, phase, run_id, **fields):
+    """Write a run's final receipt ONLY if the on-disk receipt is still this run's (`run_id`): a cleared
+    receipt (`work.py finish`) is not resurrected, and a newer run's is not clobbered. Reads the RAW file,
+    not `_classify`. -> whether it wrote. The check-then-replace window is one atomic rename, unlocked:
+    two concurrent runs for one goal+phase are not a supported flow."""
+    path = _receipt_path(sdlc_dir, goal, phase)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        print("reviewer run: the receipt was cleared while the reviewer ran; this outcome is not recorded",
+              file=sys.stderr)
+        return False
+    except (OSError, ValueError):
+        raw = None
+    if not isinstance(raw, dict) or raw.get("run_id") != run_id:
+        print("reviewer run: a different run (%s) is on record; this outcome is not recorded"
+              % (raw.get("run_id") if isinstance(raw, dict) else "unreadable"), file=sys.stderr)
+        return False
+    _write_receipt(sdlc_dir, goal, phase, run_id=run_id, **fields)
+    return True
+
+
+def _cap_findings(text):
+    """The reviewer's output, capped at `_FINDINGS_CAP` ENCODED bytes (as `_write_receipt` dumps it, with
+    `ensure_ascii`), keeping the head: findings precede the verdict line, and the verdict is stored apart."""
+    if len(json.dumps(text)) <= _FINDINGS_CAP:
+        return text
+    budget, n = _FINDINGS_CAP - 64, 0
+    for ch in text:
+        budget -= len(json.dumps(ch)) - 2
+        if budget < 0:
+            break
+        n += 1
+    return text[:n] + "...[truncated %d chars]" % (len(text) - n)
 
 
 USAGE = ("usage: reviewer.py resolve <sdlc_dir> | check <brief_path> [--scratch <path>]... | "
          "run <sdlc_dir> <brief_path> --scratch <path> [--scratch <path>]... "
          "[--goal <goal> --phase plan_review|review] | "
-         "accept-inline <sdlc_dir> --goal <goal> --phase plan_review|review --reason <text>")
+         "accept-inline <sdlc_dir> --goal <goal> --phase plan_review|review --reason <text> | "
+         "wait <sdlc_dir> --goal <goal> --phase plan_review|review [--max-seconds N] [--run-id ID] "
+         "(exit 0 finished, any verdict; 1 failed; 2 usage or another run; 3 still running. Without --run-id, "
+         "a wait issued before the new run's receipt is written reads the previous run's)")
 
 
 def main(argv):
@@ -1011,7 +1209,26 @@ def main(argv):
         pairs = [(options[i], options[i + 1]) for i in range(0, len(options), 2)]
         one = lambda flag: next((v for f, v in reversed(pairs) if f == flag), None)
         return run_review(argv[1], argv[2], [v for f, v in pairs if f == "--scratch"],
-                          goal=one("--goal"), phase=one("--phase"))
+                          goal=one("--goal"), phase=one("--phase"), hint=True)
+    if len(argv) >= 2 and argv[0] == "wait":
+        opts = argv[2:]
+        if len(opts) % 2 or any(opts[i] not in ("--goal", "--phase", "--max-seconds", "--run-id")
+                                for i in range(0, len(opts), 2)):
+            print(USAGE, file=sys.stderr)
+            return 2
+        flags = {opts[i]: opts[i + 1] for i in range(0, len(opts), 2)}
+        try:
+            bound = int(flags.get("--max-seconds", WAIT_DEFAULT_SECONDS))
+        except ValueError:
+            print("reviewer wait: --max-seconds must be an integer", file=sys.stderr)
+            return 2
+        if not flags.get("--goal"):
+            print(USAGE, file=sys.stderr)
+            return 2
+        code, text = wait_review(argv[1], flags["--goal"], flags.get("--phase"), max(1, min(bound, 3600)),
+                                 run_id=flags.get("--run-id"))
+        print(text, file=sys.stdout if code in (0, 3) else sys.stderr)
+        return code
     print(USAGE, file=sys.stderr)
     return 2
 

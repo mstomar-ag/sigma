@@ -184,7 +184,8 @@ goal-count ceiling) → STOP new claims, finish any live goal slots, and report 
 `DONE` does not always mean the backlog is empty. `next`/`next-batch` never hand back a goal
 whose own body declares a prerequisite (`**Blocked by:** #N`) that is still OPEN — it is left
 untouched, still `sdlc:goal`, never claimed and never parked, and becomes pickable by itself when
-the blocker closes (`discovery.dependency_gate`, on by default, github mode only). When that is
+the blocker closes (`discovery.dependency_gate`, on by default; local goals: `#N`, or a stem on the `**Blocked by:**`
+line, held until that file is `done`; an unresolvable ref holds too). When that is
 why a pass came back empty, stderr says so: `nothing pickable — N goal(s) are waiting on an open
 prerequisite (...)`. Report that line rather than "the backlog is drained", and do NOT `--skip`
 past it.

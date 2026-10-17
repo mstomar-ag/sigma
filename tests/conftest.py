@@ -40,6 +40,8 @@ import subprocess
 
 import pytest
 
+import resource_mode
+
 
 def _first_token(cmd):
     """The thing that would actually get exec'd, from either calling convention `subprocess.run`
@@ -97,8 +99,9 @@ def _no_host_leak_patterns(monkeypatch):
 @pytest.fixture(autouse=True)
 def _resource_guard_off_by_default(monkeypatch):
     """#1600: the picker's resource gate reads the real machine; a loaded developer machine must not
-    change an unrelated test's result. Tests of the gate itself set SIGMA_RESOURCE_MODE or the config key."""
-    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "off")
+    change an unrelated test's result. Tests of the gate itself set SIGMA_RESOURCE_MODE or the config key. A test that builds
+    its own subprocess env carries the mode with `resource_mode.carry(env)`."""
+    monkeypatch.setenv(resource_mode.KEY, resource_mode.DEFAULT)
 
 
 @pytest.fixture(autouse=True)

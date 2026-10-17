@@ -77,6 +77,8 @@ import textwrap
 
 import pytest
 
+import resource_mode
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SDLC_INIT = ROOT / "skills" / "sigma-init" / "scripts" / "sdlc_init.py"
 SETUP = ROOT / "skills" / "sigma-setup" / "scripts" / "setup.py"
@@ -860,7 +862,8 @@ def _read_state(state_path):
 
 def _make_env(bin_dir, home_dir, state_path, log_path, unhandled_path):
     py_dir = str(pathlib.Path(sys.executable).resolve().parent)
-    return {
+    # #1759: a scrubbed env must not let the picker sample the real machine
+    return resource_mode.carry({
         "PATH": os.pathsep.join([str(bin_dir), py_dir, "/usr/bin", "/bin"]),
         "HOME": str(home_dir),
         "GIT_CONFIG_GLOBAL": os.devnull,
@@ -873,7 +876,7 @@ def _make_env(bin_dir, home_dir, state_path, log_path, unhandled_path):
         "FAKE_GH_STATE": str(state_path),
         "FAKE_GH_LOG": str(log_path),
         "FAKE_GH_UNHANDLED": str(unhandled_path),
-    }
+    })
 
 
 def _make_repo_world(root, repo=FAKE_REPO):

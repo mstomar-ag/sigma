@@ -16,7 +16,7 @@ block added in a later release (`rulebook`, `upkeep`) does not appear in a repos
 from `skills/sigma-init/templates/config.json.tmpl` in the installed plugin, with every `enabled` left `false`, and
 open one gate at a time. Restart the session after updating, and stop any running watcher so the next trigger starts it
 on the new build (`touch .sdlc/state/watch.stop`). What each release changes by default is listed in the
-[CHANGELOG](../CHANGELOG.md); for 1.0.15 see [what's new in 1.0.15](whats-new-1.0.15.md). The two optional features are
+[CHANGELOG](../CHANGELOG.md); for 1.0.16 see [what's new in 1.0.16](whats-new-1.0.16.md). The two optional features are
 documented in [the Decision Rulebook](decision-rulebook.md) and [Upkeep](upkeep.md).
 
 ## From the pre-launch name

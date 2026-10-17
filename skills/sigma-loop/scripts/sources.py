@@ -553,7 +553,8 @@ class LocalSource:
         if released:
             text = note or "Released — claimed but not started"   # #2009: see GitHubSource.release
         else:
-            text = "Release requested, but this goal is already done/parked/failed — no change made"
+            text = ("Release requested, but this goal is already done/parked/failed/proposed — "
+                    "no change made")
         if reason:
             text += ": " + reason
         self.note(goal, text)

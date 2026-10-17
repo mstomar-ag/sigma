@@ -30,6 +30,11 @@ REGISTERED_CALLERS = (
     "skills/sigma-loop/scripts/feature_upkeep_review.py",
     "skills/sigma-loop/scripts/feature_upkeep_job.py",
     "skills/sigma-loop/scripts/feature_upkeep_sched.py",
+    # quality_delta.py (#1635): a standalone CLI that loads `bounded_run` by path to run the operator's own
+    # quality.metrics commands (argv, no shell, credential-filtered env). It arms no claim and loads nothing else.
+    # The gate is the operator-authored `quality.metrics` read from the MERGE-BASE config, never the head's, so a
+    # goal cannot add a command to itself; with none configured it starts no process.
+    "skills/sigma-loop/scripts/quality_delta.py",
 )
 #: Registered callers that run only behind the upkeep gate: `feature_upkeep_prove.py` is loaded by `feature_rebase.py`
 #: only after `gate.enabled(config)` and the `conflicts.resolve` level check pass (see `_level1_inputs`), so with the

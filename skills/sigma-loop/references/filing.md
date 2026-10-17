@@ -60,7 +60,7 @@ automatically — no flag needed, and this only ever engages when neither an inh
 explicit `--target-unit` exists. Pass `--target-unit <name>` yourself when *you* are confident this
 finding belongs to a specific, already-open unit that is not the one the filing goal inherits —
 that explicit choice always wins outright and classification is never even attempted once you give
-one.
+one. Ordered local children: `docs/backlog.md`.
 
 **What "classified automatically" actually resolves to today.** `handoff.create_tracked_issue`'s
 classification step (`feature_classify.classify_for_filing`, `docs/branching-model.md` §18) is

@@ -104,7 +104,10 @@ DEFAULTS = {"worktree_dir": ".sdlc/work", "branch_prefix": "sdlc/", "base": "",
             "max_review_cycles": 3,     # hard cap on the loop's review→fix→re-review loop before it parks
             # #465: opt-in. True lets `loop.py start` / `record done` sweep goal worktrees whose PR
             # provably merged (worktree_prune.py); it spends REST quota, so it is off by default.
-            "reclaim_merged_worktrees": False}
+            "reclaim_merged_worktrees": False,
+            # CI is optional: teams that run Jenkins (or any pipeline outside GitHub) after the
+            # feature branch is built set this false. Default true = today's behaviour exactly.
+            "ci_required": True}
 
 #: THE ENFORCEMENT REGISTRY (#2740). Every gate this module implements, one entry each, read (never
 #: imported) by skills/sigma-doctor/scripts/enforcement_table.py to render docs/enforcement.md.
@@ -1297,6 +1300,11 @@ _DIRECTIVE_RE = re.compile(r"^\s*" + legacy.MARKER_PREFIX_RE + r":(approve|block
 # any organisation member (can be broader than write access); this is not a substitute for branch
 # protection. Anything else, an absent or unknown value included, is ignored (never honoured).
 _TRUSTED_ASSOCIATIONS = ("OWNER", "MEMBER", "COLLABORATOR")
+
+
+def ci_required(config):
+    """False only for a real boolean `work.ci_required: false`; anything else keeps the CI gate on."""
+    return settings(config).get("ci_required") is not False
 
 
 def settings(config):
@@ -4260,6 +4268,11 @@ def gate(sdlc_dir, config, goal, run=None, sleep=time.sleep):
                          f"HEAD:{rec['branch']}`, then re-run `work.py merge {sdlc_dir} {goal}`"), data
       if status == BEHIND:
           return False, BEHIND, data
+      if status == "UNSTABLE" and not ci_required(config):
+          # UNSTABLE = only NON-required checks are failing or pending. With CI optional we neither
+          # wait for them nor park on them. BLOCKED (a host-required check or rule) still parks below:
+          # GitHub refuses that merge itself and Sigma never overrides branch protection.
+          return True, "clean and safe (work.ci_required is false: GitHub checks not waited on)", data
       if status != "CLEAN":
           rollup = data.get("statusCheckRollup") or []
           named = [(c.get("name") or c.get("context"), _check_verdict(c)) for c in rollup]

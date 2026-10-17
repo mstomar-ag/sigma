@@ -369,7 +369,7 @@ see which features are live for your config.
 | [Companion plugins](docs/companions.md) | the optional `code-review` plugin |
 | [Managed settings](docs/managed-settings.md) | enforce settings across an organisation |
 | [Zero-touch routines](docs/routines.md) | trigger the loop on a schedule |
-| [What is new in 1.0.15](docs/whats-new-1.0.15.md) | see every change in this release and what changes by default when you upgrade |
+| [What is new in 1.0.16](docs/whats-new-1.0.16.md) | see every change in this release and what changes by default when you upgrade |
 | [Decision Rulebook](docs/decision-rulebook.md) | record decisions, earn autonomy levels, add hard stops, import past decisions |
 | [Upkeep](docs/upkeep.md) | keep unit branches rebased on a 12-hour window, with backups |
 | [Configuration reference](docs/configuration.md) | see every flag and default |
@@ -389,7 +389,7 @@ see which features are live for your config.
 | Codex | Partially validated: install and first loop command run in a real session; a full goal through to merge has not yet been measured. |
 | Cursor | Experimental: scaffolding is unit-tested but has not been run in Cursor. |
 
-CI runs the full suite on Linux with Python 3.10, 3.11, 3.12, and 3.13, and on macOS with Python 3.12. That full matrix runs nightly and on demand; pull requests and merges to main run one macOS Python 3.12 leg (results: [Measured results](docs/launch/evidence/measured-results.md)).
+CI runs the full suite on Linux with Python 3.10, 3.11, 3.12, and 3.13, and on macOS with Python 3.12. That full matrix runs weekly and on demand; a nightly run covers the suite minus its heaviest files on macOS Python 3.12; pull requests and merges to main run a short smoke set (`.github/smoke-tests.txt`) on one macOS Python 3.12 leg (results: [Measured results](docs/launch/evidence/measured-results.md)).
 Details, including what each host has been measured to do: [docs/platform-support.md](docs/platform-support.md).
 
 ## Measured results and known limits

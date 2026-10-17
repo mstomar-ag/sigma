@@ -167,7 +167,10 @@ def test_a_run_refused_by_shell_policy_keeps_an_earlier_good_receipt(tmp_path):
 
 
 def test_a_killed_run_counts_as_failed_not_as_the_earlier_success(tmp_path, monkeypatch):
-    """Once the reviewer is LAUNCHED the receipt is pessimistic: an interrupted run leaves not_completed."""
+    """#1551: once launched the receipt says RUNNING (with the runner's pid), so an interrupted run must be
+    FINALISED to not_completed by the runner itself. The test process staying alive is the precondition, not
+    an assertion: with its pid live, only that finalise write (not the dead-pid read) can satisfy this. The
+    assertions read the RAW file, so `_read_receipt`'s classifier cannot stand in for the write."""
     p = _project(tmp_path)
     reviewer_script(p, APPROVE)
     assert run_reviewer(p).returncode == 0
@@ -183,6 +186,10 @@ def test_a_killed_run_counts_as_failed_not_as_the_earlier_success(tmp_path, monk
     with pytest.raises(KeyboardInterrupt):
         rv.run_review(str(p / ".sdlc"), str(p / "brief.md"), [str(p / "scratch")], goal=GOAL, phase="review")
     monkeypatch.undo()
+    raw = json.loads((p / ".sdlc/state/reviewer-runs/0001-x.review.json").read_text())
+    assert raw["outcome"] == "failed" and raw["failure"] == "not_completed", raw
+    assert "pid" not in raw, raw                       # the finalise replaced the running receipt
+    assert isinstance(raw.get("run_id"), str) and raw["run_id"], raw      # written under this run's nonce
     r = record_review(p)
     assert r.returncode == 2 and "not_completed" in r.stderr
 

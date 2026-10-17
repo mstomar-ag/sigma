@@ -62,9 +62,14 @@ def test_control_step_without_its_event_guard_is_rejected():
 
 
 def test_control_step_cannot_write_or_spend():
+    # The break ADDS a recording run beside the nightly one, so every earlier clause still holds and the
+    # `--record` clause is the one that fires. Rewriting the nightly line instead tripped the nightly-row
+    # clause first, and this passed only while pytest's repr of the job text happened to contain "--record".
     text = WORKFLOW.read_text(encoding="utf-8")
-    with pytest.raises(AssertionError, match="--record"):
-        validate_job(text.replace("control.py run\n", "control.py run --record\n"))
+    broken = text.replace("control.py run\n", "control.py run\n          python3 evals/regression/control.py run --record\n")
+    assert broken != text
+    with pytest.raises(AssertionError, match="must not write the matrix"):
+        validate_job(broken)
 
 
 def _control():
@@ -98,10 +103,13 @@ PLANTED_STEP = "python -m pytest tests/test_onboarding_control.py -k planted -q 
 
 def validate_onboarding_job(text):
     assert "\n  onboarding-control:" in text, "onboarding-control job missing"
-    j = text.split("\n  onboarding-control:", 1)[1]
-    assert "\n  regression-control:" not in j, "onboarding-control must be the last job"
+    j = text.split("\n  onboarding-control:", 1)[1].split("\n  nightly:", 1)[0]
+    assert "\n  regression-control:" not in j, "onboarding-control must come after regression-control"
     head = "\n".join(ln for ln in j.split("steps:", 1)[0].splitlines() if not ln.lstrip().startswith("#"))
-    assert "github.event_name == 'pull_request'" in head, "job does not run on pull_request"
+    # nightly tier: the daily cron, never a PR or a push (that tier is the smoke `test` job's)
+    assert "github.event.schedule == '17 5 * * *'" in head, "job does not run on the nightly cron"
+    assert "inputs.tier == 'nightly'" in head, "job cannot be run by hand as the nightly tier"
+    assert "pull_request" not in head and "'push'" not in head, "job must not run on pull_request or push"
     j = "\n".join(ln for ln in j.splitlines() if not ln.lstrip().startswith("#"))
     assert re.search(rf"^\s+run: {re.escape(BUDGET_STEP)}$", j, re.M), "onboarding job must run the budget step"
     assert PLANTED_STEP in j, "onboarding job must run the planted-regression tests"
@@ -132,10 +140,30 @@ def test_onboarding_job_without_the_planted_tests_is_rejected():
         validate_onboarding_job(broken)
 
 
-def test_onboarding_job_not_run_on_pull_request_is_rejected():
+def _onboarding_if(text):
+    return text.split("\n  onboarding-control:", 1)[1].split("\n    if: ", 1)[1].split("\n", 1)[0]
+
+
+def test_onboarding_job_moved_back_onto_pull_requests_is_rejected():
     text = WORKFLOW.read_text(encoding="utf-8")
-    broken = text.replace("    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}\n    runs-on: macos-latest\n    timeout-minutes: 30",
-                          "    if: ${{ github.event_name == 'schedule' }}\n    runs-on: macos-latest\n    timeout-minutes: 30")
+    cond = _onboarding_if(text)
+    broken = text.replace(cond, "${{ github.event_name == 'pull_request' || " + cond[len("${{ "):], 1)
     assert broken != text
-    with pytest.raises(AssertionError, match="pull_request"):
+    with pytest.raises(AssertionError, match="must not run on pull_request"):
+        validate_onboarding_job(broken)
+
+
+def test_onboarding_job_without_the_nightly_cron_is_rejected():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    broken = text.replace(_onboarding_if(text), "${{ inputs.tier == 'nightly' }}", 1)
+    assert broken != text
+    with pytest.raises(AssertionError, match="nightly cron"):
+        validate_onboarding_job(broken)
+
+
+def test_onboarding_job_that_cannot_be_run_by_hand_is_rejected():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    broken = text.replace(_onboarding_if(text), "${{ github.event.schedule == '17 5 * * *' }}", 1)
+    assert broken != text
+    with pytest.raises(AssertionError, match="by hand"):
         validate_onboarding_job(broken)
