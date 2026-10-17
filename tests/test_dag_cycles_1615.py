@@ -151,21 +151,39 @@ def test_with_a_stored_cycle_the_summary_no_longer_promises_self_release(capsys)
     err = capsys.readouterr().err
     assert src.marked == [] and src.released == []
     assert "become pickable by themselves" not in err
-    assert "never releases by itself" in err
+    assert "loop.py: stuck: #10, #11 wait on each other" in err      # the root-cause line (#1614) names both
 
 
 # ----------------------------------------------------------------- 2. every member, three surfaces
 
 def test_pick_output_names_every_member_of_each_distinct_cycle(capsys):
+    """Every held goal waits on a cycle: the root-cause lines (#1614) name every member of each cycle."""
     lp = _loop()
     with tempfile.TemporaryDirectory() as d:
         base = _sdlc(d)
         src = _Board(["10", "11", "20", "21", "22"], live=MIRROR)
         lp._next(base, src, _cfg(lp, base))
     err = capsys.readouterr().err
+    assert "become pickable by themselves" not in err
+    assert "#10, #11 wait on each other" in err and "#20, #21, #22 wait on each other" in err
+
+
+def test_pick_output_names_every_cycle_member_when_another_held_goal_waits_on_plain_work(capsys):
+    """A held goal that waits on ordinary open work is not a stuck root, so the #1614 lines do not apply;
+    the cycle lines of this change still name every member, and the old promise is not made for them."""
+    nodes = CYC_NODES + [_node(40), _node(41)]
+    edges = CYC_EDGES + [_edge(41, 40)]
+    mirror = MIRROR + [_blocked(40, 41), _issue(41)]
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        base = _sdlc(d, nodes=nodes, edges=edges, mirror=mirror)
+        src = _Board(["10", "11", "20", "21", "22", "40"], live=mirror)
+        lp._next(base, src, _cfg(lp, base))
+    err = capsys.readouterr().err
     assert "loop.py: dependency cycle: #10, #11" in err
     assert "loop.py: dependency cycle: #20, #21, #22" in err
     assert err.count("loop.py: dependency cycle") == 2
+    assert "never releases by itself" in err and "become pickable by themselves" not in err
 
 
 def test_status_names_every_member_of_each_distinct_cycle():
