@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **A pure dependency-graph core, `dag_core.py` (#1609).** One standard-library, no-I/O module builds the blocker graph as an object: unresolved closure, blocker-first order and waves, each blocking cycle reported once whichever node a walk starts at, depth, open dependents, components and leaves. Every walk is iterative, so a 5,000-deep chain needs no recursion limit; output is byte-identical for any input order. A merged pull request resolves, a closed-unmerged one does not, and an unknown state never resolves. A library module with no command yet; nothing calls it.
 - **Opt-in pick trace: where a pick's `gh` calls and seconds go (#1607).** `SIGMA_PICK_TRACE=1` or `loop.py next --trace` appends one JSON line per pick to `.sdlc/state/pick-trace.jsonl` (rotated at 1 MB) with per-stage call counts by class (list, read, write, graphql, project) and seconds, counted once at the single runner seam; `loop.py pick-trace-report <dir>` prints per-stage median and p90. Off by default: no file and no extra call. The private-clone measurement is owner-gated and not yet taken.
 - **The stored dependency map skips other-repository references (#1608).** `blocker_scan.extract_refs` now calls `is_cross_repo` for every match, so `owner/repo#N` and `repo#N` are no longer stored as local blocker edges; the board mirror schema is `board-mirror/v3`, so an existing mirror is refetched once.
 
