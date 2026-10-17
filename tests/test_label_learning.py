@@ -255,8 +255,13 @@ def test_rules_open_records_closed_plan_is_byte_identical_to_all_closed(tmp_path
 
 
 def test_history_is_for_the_label_set_question_only(tmp_path):
-    ld, base, fk, cfg = _world(tmp_path, _unarmed("run:a"))
-    ld.answer(base, "run:a", {"label_set:run:a": LEAVE}, run=fk)
-    q = {"kind": "quota", "area": "repo", "options": []}
+    paid = issue(1, "sdlc:goal", "run:a", body="Paid step: runpodctl create pod for the render\n\n" + DW)
+    ld, base, fk, cfg = _world(tmp_path, [paid])
+    # a member-level answer on the same label, through the answer path
+    res = ld.answer(base, "run:a", {"irreversible:1": "go ahead"}, config=cfg, run=fk)
+    assert res["errors"] == []
+    assert _mod("decision_store").list_by(base, cfg, qkind="irreversible")
+    q = {"kind": "irreversible", "area": "repo", "options": []}
     assert ld._history(base, cfg, "run:a", q) == ""
+    ld.answer(base, "run:a", {"label_set:run:a": LEAVE}, config=cfg, run=fk)
     assert ld._history(base, cfg, "run:a", dict(q, kind="label_set", area="label-kind:run")).startswith("last time")
