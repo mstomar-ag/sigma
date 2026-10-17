@@ -97,6 +97,7 @@ Decisions (3 open of 3):
 Writes that follow approval:
   - record each answer in .sdlc/state/chains/c1.json (numbers and labels only)
   - #2: the Q&A block and one comment through the unpark resolve path; its labels change only if the answer starts it again
+  - answers to an undeclared-kind or spend question are recorded here only: declaring the kind and writing the spend marker belong to a later slice
   - nothing else: arming and starting members belong to a later slice
 
 Nothing has been changed yet.

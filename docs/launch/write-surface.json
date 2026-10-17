@@ -493,7 +493,7 @@
       "function": "plan",
       "rule": "fs-write",
       "count": 1,
-      "gate": "one atomic write of the local chain record `.sdlc/state/chains/c<N>.json` (issue numbers, verdict words and labels only; no titles or bodies) after a plan was produced, never for a refusal; reached only by an explicit `chain.py plan` run; every GitHub call goes through a GET-only gate that raises on anything else, so it writes nothing to GitHub",
+      "gate": "one atomic write of the local chain record `.sdlc/state/chains/c<N>.json` (issue numbers, verdict words and labels only; no titles or bodies) after a plan was produced, never for a refusal; reached only by an explicit `chain.py plan` run; the plan and sheet GitHub calls go through a GET-only gate that raises on anything else (`chain.py answer` is the separate verb that reaches GitHub through the unpark resolve path with bank options only; the scanner does not see it)",
       "risk": "low"
     },
     {

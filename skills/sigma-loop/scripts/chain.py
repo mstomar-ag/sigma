@@ -5,9 +5,12 @@
     chain.py sheet <sdlc_dir> <chain>
     chain.py answer <sdlc_dir> <chain> --answers <file> | --defaults
 
-READ-ONLY toward GitHub. Every call goes through `_GetOnly`, which raises on anything that is not an
-explicit `gh api ... --method GET`: no `gh issue ...` verb, no GraphQL, no body flag. The one write is
-the local record `<sdlc_dir>/state/chains/c<N>.json` (issue numbers, verdict words and labels only; never
+`plan` and `sheet` are READ-ONLY toward GitHub. Every call they make goes through `_GetOnly`, which raises
+on anything that is not an explicit `gh api ... --method GET`: no `gh issue ...` verb, no GraphQL, no body
+flag. `answer` is the one verb that reaches GitHub: it hands a parked member's bank-option answer to
+`unpark.resolve` (the Q&A block, one comment, and a label change only if the answer starts the member
+again); it never posts free text, and the write-surface scanner does not see this path, so this paragraph
+and the sheet's own list of writes are its record. The local write is the record `<sdlc_dir>/state/chains/c<N>.json` (issue numbers, verdict words and labels only; never
 a title, a body, a comment or a question), written only for a plan that was produced, never for a refusal.
 
 CLOSURE. From the stored dependency map in one local read (`dag_chain`), bounded by `chain.max_members`
@@ -501,6 +504,8 @@ def _writes(rec, qs):
                 and (rows.get(int(tail)) or {}).get("verdict") == "parked":
             out.append("#%s: the Q&A block and one comment through the unpark resolve path; its labels change "
                        "only if the answer starts it again" % tail)
+    out.append("answers to an undeclared-kind or spend question are recorded here only: declaring the kind "
+               "and writing the spend marker belong to a later slice")
     out.append("nothing else: arming and starting members belong to a later slice")
     return out
 
