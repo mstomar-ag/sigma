@@ -115,13 +115,15 @@ def test_end_to_end_env_observe_does_not_end_shed(tmp_path, monkeypatch, capsys)
     t0 = time.time()
 
     def sample():
-        crit = time.time() - t0 > 1.0
+        crit = time.time() - t0 > 0.5
         return lease.guard.Sample(total=16 * GIB, available=(1 if crit else 12) * GIB, swap_used=0, swap_total=0,
                                   swapouts=0, swapouts_at=0.0, pressure=1, cpu_count=8, load1=0.0)
     monkeypatch.setattr(lease, "take_sample", sample)
     loop.verify_goal(sdlc, goal)
     assert "(shed)" not in capsys.readouterr().err
-    assert not list((pathlib.Path(os.environ["SIGMA_RESOURCE_DIR"]) / "shed").glob("*.stop")) if (pathlib.Path(os.environ["SIGMA_RESOURCE_DIR"]) / "shed").exists() else True
+    shed_dir = pathlib.Path(os.environ["SIGMA_RESOURCE_DIR"]) / "shed"
+    if shed_dir.exists():
+        assert not list(shed_dir.glob("*.stop"))
 
 
 @unix_only
@@ -191,7 +193,7 @@ def test_end_to_end_shed_gives_exit_5_shed_no_evidence_and_the_rerun_records_evi
     t0 = time.time()
 
     def sample():
-        crit = time.time() - t0 > 1.0
+        crit = time.time() - t0 > 0.5
         return lease.guard.Sample(total=16 * GIB, available=(1 if crit else 12) * GIB, swap_used=0, swap_total=0,
                                   swapouts=0, swapouts_at=0.0, pressure=1, cpu_count=8, load1=0.0)
     monkeypatch.setattr(lease, "take_sample", sample)

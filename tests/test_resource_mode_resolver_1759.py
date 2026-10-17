@@ -5,6 +5,7 @@ different precedence and the table goes red on that surface.
 """
 import importlib.util
 import json
+import threading
 import os
 import pathlib
 import sys
@@ -66,12 +67,11 @@ def _shed_mode(config, home, monkeypatch):
         total=32000, available=20000, swap_used=0, swap_total=0, swapouts=0, swapouts_at=0.0, pressure=1,
         cpu_count=8, load1=0.0))
     monkeypatch.setattr(rv, "_Meter", lambda lease_, id_, gap, shed: made.append(shed) or type(
-        "M", (), {"start": lambda s: None, "stop": lambda s, *a, **k: None, "__getattr__": lambda s, n: (lambda *a, **k: None)})())
-    try:
-        rv.run("verify", "true", str(home), 30, "g1", config=config)
-    except Exception:                                    # noqa: BLE001 - only whether a shed was armed matters
-        pass
-    return "enforce" if made and made[0] is not None else "off"
+        "M", (), {"start": lambda s: None, "stop": lambda s, *a, **k: None, "stop_event": threading.Event(), "peak": 0,
+                  "__getattr__": lambda s, n: (lambda *a, **k: None)})())
+    rv.run("verify", "true", str(home), 30, "g1", config=config)
+    assert made, "the meter was never built: the run failed before the shed decision, so this row proves nothing"
+    return "enforce" if made[0] is not None else "off"
 
 
 def _probe(surface, env_value, cfg_value, home, monkeypatch):
