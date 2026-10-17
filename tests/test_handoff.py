@@ -2890,10 +2890,11 @@ def test_higher_priority_filing_parks_the_newest_lowest_armed_one_1697(tmp_path)
 
 
 def test_open_forwards_requested_priority_past_the_goal_cap_1697(tmp_path):
+    sdlc = _project(tmp_path)               # hand_off reads <sdlc>/state; file the five there too
     for _ in range(5):
-        _file(tmp_path, None, priority="P2")
+        _file(sdlc, None, priority="P2")
     src = TriageSource()
-    rep = handoff.hand_off(_project(tmp_path), dict(ON), "42", "api", "blocking dependency",
+    rep = handoff.hand_off(sdlc, dict(ON), "42", "api", "blocking dependency",
                            priority="P1", source=src, priority_requested=True)
     assert rep["issue"] and src.parked == []
 

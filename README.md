@@ -329,8 +329,8 @@ across machines. Full guide, including how to turn it on step by step and what i
 **Upkeep.** Keeps long-lived unit branches (`feature/<name>`) rebased onto their base. On a 12-hour window, the first
 session start (or the watcher tick) starts one bounded background sweep of every unit that is behind; each rewrite
 keeps the old tip as a backup ref you can restore or prune; commits made directly on a unit branch are refused rather
-than overwritten. A changelog or append-only log conflict is unioned, and an optional agent conflict level stays off
-until both spend caps are set. It needs three opt-ins (`upkeep.enabled`, `ledger.enabled`, and `SIGMA_UPKEEP_JOB=1` on one machine).
+than overwritten. A changelog or append-only log conflict is unioned, and an optional agent conflict level is off by default;
+with no spend key set it runs with no spend limit. It needs three opt-ins (`upkeep.enabled`, `ledger.enabled`, and `SIGMA_UPKEEP_JOB=1` on one machine).
 Full guide: [docs/upkeep.md](docs/upkeep.md).
 
 ## Configuration

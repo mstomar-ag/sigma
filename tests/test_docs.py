@@ -2469,12 +2469,20 @@ def test_goal_design_py_exists_and_matches_the_contracts_own_numbers():
 
 # --- #1694: the upkeep pages say what the agent level does with unset spend keys -----------------------------------
 UPKEEP_PAGES = ("docs/upkeep.md", "docs/configuration.md", "docs/features.md", "docs/upkeep-part-b.md",
-                "docs/enforcement.md", "docs/running-unattended.md")
+                "docs/enforcement.md", "docs/running-unattended.md", "README.md")
 STALE_UPKEEP_PHRASES = ("both spend keys are set", "both spend caps are set", "behaves as `off` until",
                         "behaves as off until", "not available yet", "only a placeholder", "still the placeholder",
                         "is a placeholder")
 NO_LIMIT_SENTENCE = ("With no spend key set the agent level runs with no spend limit; set "
                      "`max_budget_usd_per_unit` (and optionally `spend_ceiling_usd_per_day`) to cap it.")
+
+
+def test_unreleased_changelog_has_no_duplicate_lines_1735():
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    block = text.split("## Unreleased", 1)[1].split("\n## ", 1)[0]
+    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+    dupes = sorted({ln[:80] for ln in lines if lines.count(ln) > 1})
+    assert not dupes, dupes
 
 
 @pytest.mark.parametrize("rel", UPKEEP_PAGES)
