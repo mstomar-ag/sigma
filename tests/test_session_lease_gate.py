@@ -380,7 +380,7 @@ def test_reviewer_mode_off_creates_no_state(state, reviewer, tmp_path):
 
 
 # ------------------------------------------------------------------------------------------ one helper, no re-implementation
-GATED = ("feature_judge.py", "supervise_daemon.py", "feature_upkeep_launcher.py", "reviewer.py")
+GATED = ("feature_judge.py", "supervise_daemon.py", "feature_upkeep_launcher.py", "reviewer.py", "autowatch.py")
 
 
 @pytest.mark.parametrize("name", GATED)
@@ -396,6 +396,7 @@ def test_each_site_uses_the_shared_helper_and_never_touches_the_table(name):
 SPAWN_SHAPES = (
     re.compile(r'"claude",\s*"-p"'),
     re.compile(r'"claude -p /'),
+    re.compile(r'"claude -p\b'),                    # #1758: a string command such as DEFAULT_DRIVE_CMD
     re.compile(r'BASE_ARGV\s*=\s*\("-p"'),
     re.compile(r'\[str\(executable\),\s*"exec"'),
     re.compile(r'\["cursor-agent",\s*"-p"'),
@@ -426,6 +427,11 @@ def test_every_spawn_file_is_gated_or_listed_with_a_reason():
     assert set(GATED) <= spawn_files(SCRIPTS)
     for name in NOT_GATED:
         assert name in spawn_files(SCRIPTS), "stale NOT_GATED entry: %s" % name
+
+
+def test_ratchet_goes_red_for_an_ungated_string_command_spawn(tmp_path):
+    (tmp_path / "strspawn.py").write_text('DEFAULT_CMD = "claude -p --output-format json"\n')
+    assert ungated(tmp_path) == ["strspawn.py"]
 
 
 def test_ratchet_goes_red_for_an_ungated_spawn(tmp_path):
