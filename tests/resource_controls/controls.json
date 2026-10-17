@@ -1,0 +1,25 @@
+{
+  "_comment": "#1769: one deliberate break per row of docs/launch/evidence/resource-guard-controls.md. Each break is an exact-text patch (old must occur exactly once) applied to a temp copy; the named test must then fail.",
+  "controls": [
+    {"id": "shed-count", "clause": "shed: three consecutive critical samples",
+     "file": "skills/sigma-loop/scripts/resource_verify.py",
+     "old": "self.critical_run >= after and", "new": "self.critical_run >= 1 and",
+     "test": "tests/test_resource_shed_1602.py::test_one_critical_sample_does_nothing"},
+    {"id": "shed-off", "clause": "shed: off switch",
+     "file": "skills/sigma-loop/scripts/resource_verify.py",
+     "old": "shedding = resolved.get(\"shed\") != \"off\" and", "new": "shedding = True and",
+     "test": "tests/test_resource_shed_1602.py::test_shed_off_does_nothing_even_when_critical"},
+    {"id": "stop-file", "clause": "shed: stop file removed",
+     "file": "skills/sigma-loop/scripts/resource_verify.py",
+     "old": "            if stop_path:\n                try:\n                    os.unlink", "new": "            if False:\n                try:\n                    os.unlink",
+     "test": "tests/test_resource_shed_1602.py::test_the_stop_file_is_removed_after_a_shed_and_after_an_exception"},
+    {"id": "enforce-only", "clause": "shed: enforce mode only",
+     "file": "skills/sigma-loop/scripts/resource_verify.py",
+     "old": "(resolved.get(\"mode\") or \"enforce\") == \"enforce\"", "new": "True",
+     "test": "tests/test_resource_shed_1602.py::test_observe_mode_never_sheds"},
+    {"id": "shed-after-key", "clause": "shed: shed_after key is honoured",
+     "file": "skills/sigma-loop/scripts/resource_verify.py",
+     "old": "shed_after = resolved.get(\"shed_after\") or SHED_AFTER", "new": "shed_after = SHED_AFTER",
+     "test": "tests/test_resource_shed_1602.py::test_configured_shed_after_sets_the_critical_samples_before_a_shed"}
+  ]
+}

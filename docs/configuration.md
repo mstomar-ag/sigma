@@ -61,6 +61,7 @@ The `resource` block holds the limits `resource_guard.py` derives from the machi
 | `resource.load_hold_ratio` | derived (1.0 per core) | one-minute load per core above which load is reported high; uncalibrated |
 | `resource.swapout_hold_mb_per_s` | derived (shown, never holds) | when set, a swap-out rate above it holds and resumes at a quarter of it; uncalibrated |
 | `resource.shed` | derived (`verify`; also `off`) | what is shed first under pressure; uncalibrated |
+| `resource.shed_after` | derived (3) | consecutive critical samples (2 seconds apart) before the shed stops the verify group; an integer of at least 1, anything else reads as 3 with a note; uncalibrated |
 | `resource.max_goals` | derived (no extra cap) | cap on concurrent goals; uncalibrated |
 | `resource.max_verify_workers` | derived (no extra cap) | cap on concurrent verify workers; uncalibrated |
 | `resource.hold_alert_minutes` | derived (no alert) | minutes a hold may last before it is reported; uncalibrated |

@@ -147,7 +147,7 @@ constant copied from a laptop, and nothing here ever pauses a process.
 - **Verify workers.** The granted worker count reaches the proving command as a `{workers}` token (replaced by an
   integer before the shell sees it), as `SIGMA_VERIFY_WORKERS`, and as `PYTEST_XDIST_AUTO_NUM_WORKERS` for
   `-n auto`. A literal `-n N` is never lowered: a warm cost record that cannot fit N holds instead.
-- **Shed.** With `resource.shed` at `verify` (the default) and `enforce`, three critical samples in a row stop the
+- **Shed.** With `resource.shed` at `verify` (the default) and `enforce`, `resource.shed_after` (default 3) critical samples in a row stop the
   verify process group Sigma itself started (TERM, a grace, then KILL). The result is `RESOURCE-HOLD (shed)`,
   exit 5, no evidence, the goal not failed; rerun once admission reopens. A session is never signalled.
 - **What the guard cannot cover.** Tests you run by hand outside the verify wrapper; memory used by other
