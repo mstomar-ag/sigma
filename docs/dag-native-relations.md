@@ -68,8 +68,9 @@ filter plus ETags. This is arithmetic from the measured one-request cost, not a 
 ## 5. How a native edge would enter the map
 
 The core takes `(blocker, blocked, source)` triples, and `source` today is the text phrase. A
-native edge is a triple whose source is the literal `native`, next to `body` and `ledger`. The
-stored map (schema `dag/1`) would need: `native` added to the closed list of edge sources; a header
+native edge is a triple whose source is the literal `native`. The store's closed edge-source list
+today is `body`, `comment`, `timeline` and `other`; an unlisted `native` would be stored as `other`.
+The stored map (schema `dag/1`) would need: `native` added to that closed list; a header
 field for the native change-check cursor; and `partial` set when a per-issue read fails.
 
 **Conflict rule.** The text marker wins. The map keeps the union of edges (a native edge with no
