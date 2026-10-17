@@ -700,3 +700,39 @@ def test_age_seconds_reports_the_mirror_age_and_None_when_there_is_none():
         assert m.age_seconds(str(base), now=900.0) is None       # a future timestamp is not an age
         (base / "state" / "board-mirror.meta.json").write_text("{not json")
         assert m.age_seconds(str(base)) is None
+
+
+# --- #1608: an other-repository reference is not a local blocker -----------------------------------
+
+def test_extract_refs_skips_an_other_repository_reference():
+    bs = _mod("blocker_scan")
+    both = "Blocked by: other-org/other-repo#41\nBlocked by: #42\n"
+    assert bs.extract_refs("Blocked by: other-org/other-repo#41") == []
+    assert [r["ref"] for r in bs.extract_refs("Blocked by: #42")] == ["42"]
+    assert [r["ref"] for r in bs.extract_refs(both)] == ["42"]
+
+
+import pytest
+
+
+@pytest.mark.parametrize("text,refs", [
+    ("blocked by repo#7", []),
+    ("blocked by other-org/other-repo#7", []),
+    ("blocked by my_repo#7", []),
+    ("blocked by #7", ["7"]),
+    ("blocked by repo#7 and depends on #9", ["9"]),
+])
+def test_extract_refs_cross_repo_forms(text, refs):
+    bs = _mod("blocker_scan")
+    assert [r["ref"] for r in bs.extract_refs(text)] == refs
+
+
+def test_a_v2_schema_mirror_is_refused_once_and_refetched():
+    m = _mod("mirror")
+    with tempfile.TemporaryDirectory() as d:
+        base = pathlib.Path(d) / ".sdlc"; (base / "state").mkdir(parents=True)
+        meta = base / m.META_REL
+        meta.write_text(json.dumps({"schema": "board-mirror/v2", "mirrored_at": 1000.0}))
+        assert m.is_fresh(str(base), 60, now=1030.0) is False
+        meta.write_text(json.dumps({"schema": m.SCHEMA, "mirrored_at": 1000.0}))
+        assert m.is_fresh(str(base), 60, now=1030.0) is True

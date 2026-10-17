@@ -256,7 +256,10 @@ def extract_refs(text, self_ref=None):
     apply — a goal can never be its own blocker.
     """
     out, seen = [], set()
-    for m in _EXPLICIT_BLOCK_RE.finditer(strip_unpark_qa(text)):
+    text = strip_unpark_qa(text)
+    for m in _EXPLICIT_BLOCK_RE.finditer(text):
+        if is_cross_repo(text, m):       # #1608: `owner/repo#N` is another repository's issue
+            continue
         ref = m.group(2)
         if ref in seen or (self_ref is not None and ref == str(self_ref)):
             continue

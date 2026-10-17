@@ -764,3 +764,15 @@ def test_the_hold_docstring_describes_the_live_read_of_an_unseen_prerequisite():
     doc = _mod("loop")._pick_dependency_hold.__doc__
     assert "_live_blocker_states" in doc
     assert "all three CLAIM" not in doc
+
+
+def test_an_other_repository_reference_does_not_hold_a_goal_on_a_same_numbered_local_ticket(capsys):
+    """#1608: the body names `other-org/other-repo#1594`; the local #1594 is open and in the mirror."""
+    lp = _loop()
+    live = [_issue(1595, body="context.\n\n**Blocked by:** other-org/other-repo#1594\n"), _issue(1594)]
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=live)
+        src = _Board(["1595"], live=live)
+        kind, goal = lp._next(base, src, _cfg(lp, base))
+    assert (kind, goal) == ("goal", "1595")
+    assert src.marked == ["1595"]
