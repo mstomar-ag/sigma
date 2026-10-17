@@ -102,7 +102,7 @@ def _spent_of(records, members, since):
         if r["kind"] != "spend" or str(r.get("goal")) not in mem:
             continue
         t = _epoch(r.get("ts"))
-        if t0 is not None and (t is None or t < t0):
+        if t0 is not None and t is not None and t < t0:       # an unparseable stamp counts: fail closed
             continue
         c = _cents(r.get("cost_cents"))
         if c is not None:
@@ -160,7 +160,7 @@ def admit(sdlc_dir, config, chain, now=None):
 
     def _after(r):
         t = _epoch(r.get("ts"))
-        return t0 is None or (t is not None and t >= t0)
+        return t0 is None or t is None or t >= t0         # an unparseable stamp counts: fail closed
 
     priced = {(str(r.get("goal")), r.get("phase")) for r in records if r["kind"] == "spend" and _after(r)}
     unpriced = {(str(r.get("goal")), r.get("phase")) for r in records

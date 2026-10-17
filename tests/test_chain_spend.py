@@ -128,3 +128,21 @@ def test_infinite_cents_is_unpriced_not_a_crash(tmp_path):
     _write(tmp_path, [_spend(1, "1e999"), _spend(1, 50)])
     assert cs._cents("1e999") is None
     assert cs.spent(tmp_path, ["1"], SINCE)[0] == 50
+
+
+def test_a_member_event_with_an_unparseable_stamp_counts_toward_the_cap(tmp_path):
+    """Fail closed: spend that cannot be dated is charged to the chain. Control: skip it again (the old
+    `t is None` continue) and this goes red."""
+    bad = dict(_spend(1, 700), ts="not a time")
+    _write(tmp_path, [bad, _spend(1, 50)])
+    assert cs.spent(tmp_path, ["1"], SINCE)[0] == 750
+    ok, why = cs.admit(tmp_path, {"chain": {"max_usd": 7.0}}, {"members": ["1"], "approved_at": SINCE})
+    assert ok is False and "capped" in why
+
+
+def test_an_unparseable_stamp_on_a_phase_event_counts_as_an_unpriced_phase(tmp_path):
+    _history(tmp_path, [100, 200, 300])
+    odd = dict(_phase(1, "implement"), ts="garbage")
+    _write(tmp_path, [odd])
+    ok, why = cs.admit(tmp_path, {"chain": {"max_usd": 1.0}}, {"members": ["1"], "approved_at": SINCE})
+    assert ok is False and "capped" in why
