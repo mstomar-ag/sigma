@@ -424,3 +424,44 @@ def test_a_subprocess_run_carries_the_resource_mode(sdlc):
     r = subprocess.run([sys.executable, str(S / "dag.py"), "history", "--month", "2026-03", "--sdlc", sdlc],
                        env=env, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr
+
+
+# ----------------------------------------------------------------- a partial map proves no deletion (review)
+
+def _partial(m):
+    m["header"]["partial"] = True
+    return m
+
+
+def test_a_partial_new_map_records_no_deletion_removal_or_chain_change():
+    """A map cut short by a read cap lacks nodes that still exist; recording them as deleted would put a false,
+    never-erasable record in an append-only file. Control: drop the partial guard and this goes red."""
+    old = _map([(1, OPEN), (2, OPEN), (3, OPEN)], [(1, 2), (2, 3)])
+    new = _partial(_map([(1, OPEN)], []))
+    recs = dag_history.diff(old, new, T)
+    assert not _ev(recs, "node-deleted") and not _ev(recs, "edge-removed")
+    assert not _ev(recs, "chain-superseded") and not _ev(recs, "chain-completed")
+
+
+def test_a_partial_new_map_still_records_additions_and_resolutions():
+    old = _map([(1, OPEN), (2, OPEN)], [(1, 2)])
+    new = _partial(_map([(1, DONE), (2, OPEN), (3, OPEN)], [(1, 2), (2, 3)]))
+    recs = dag_history.diff(old, new, T)
+    assert _ev(recs, "edge-added") == [{"t": T, "ev": "edge-added", "a": 2, "b": 3}]
+    assert _ev(recs, "node-resolved") == [{"t": T, "ev": "node-resolved", "n": 1}]
+
+
+def test_a_complete_map_after_a_partial_one_records_nothing_false():
+    partial = _partial(_map([(1, OPEN)], []))
+    full = _map([(1, OPEN), (2, OPEN)], [(1, 2)])
+    recs = dag_history.diff(partial, full, T)
+    assert not _ev(recs, "node-deleted") and not _ev(recs, "edge-removed")
+
+
+def test_a_partial_old_map_cannot_make_a_false_merge_record():
+    """Control: drop `old_short` from the chain guard and the merge below is recorded as superseding."""
+    old = _partial(_map([(1, OPEN), (2, OPEN), (5, OPEN), (6, OPEN)], [(1, 2), (5, 6)]))
+    new = _map([(n, OPEN) for n in (1, 2, 3, 5, 6)], [(1, 2), (2, 3), (3, 5), (5, 6)])
+    assert dag_history.diff(old, new, T) != []                                  # additions are recorded
+    assert not _ev(dag_history.diff(old, new, T), "chain-superseded")
+    assert _ev(dag_history.diff(_map([(n, OPEN) for n in (1, 2, 5, 6)], [(1, 2), (5, 6)]), new, T), "chain-superseded")

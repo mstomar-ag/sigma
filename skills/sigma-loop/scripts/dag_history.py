@@ -112,19 +112,26 @@ def diff(old, new, ts):
     if old is None or new is None:
         return []
     out = []
+    # A map cut short by a read cap lacks nodes and edges that still exist, so it proves no removal, no
+    # deletion and no chain change; history is append-only and a false record could never be erased.
+    cut_short = bool((new.get("header") or {}).get("partial"))
+    old_short = bool((old.get("header") or {}).get("partial"))
     e_old = {(e["blocker"], e["blocked"]) for e in old["edges"]}
     e_new = {(e["blocker"], e["blocked"]) for e in new["edges"]}
     for a, b in sorted(e_new - e_old):
         out.append({"t": ts, "ev": "edge-added", "a": a, "b": b})
-    for a, b in sorted(e_old - e_new):
-        out.append({"t": ts, "ev": "edge-removed", "a": a, "b": b})
+    if not cut_short:
+        for a, b in sorted(e_old - e_new):
+            out.append({"t": ts, "ev": "edge-removed", "a": a, "b": b})
     st_old, st_new = _states(old), _states(new)
     for n in sorted(st_new):
         if n in st_old and st_new[n] in RESOLVED and st_old[n] not in RESOLVED:
             out.append({"t": ts, "ev": "node-resolved", "n": n})
-    for n in sorted(set(st_old) - set(st_new)):
-        out.append({"t": ts, "ev": "node-deleted", "n": n})
-    out.extend(_chain_records(old, new, st_old, st_new, ts))
+    if not cut_short:
+        for n in sorted(set(st_old) - set(st_new)):
+            out.append({"t": ts, "ev": "node-deleted", "n": n})
+    if not (cut_short or old_short):
+        out.extend(_chain_records(old, new, st_old, st_new, ts))
     return out
 
 
