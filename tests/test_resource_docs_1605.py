@@ -26,3 +26,12 @@ def test_every_test_named_in_the_controls_table_exists():
     text = (EVID / "resource-guard-controls.md").read_text()
     for path, name in re.findall(r"(tests/test_\w+\.py)::(\w+)", text):
         assert ("def %s(" % name) in (ROOT / path).read_text(), (path, name)
+
+
+def test_parallelism_documents_the_cold_start_bound_and_the_seeding_lever():
+    """#1816: the cold-start behaviour and how an operator seeds a ring are written down."""
+    text = (ROOT / "docs" / "parallelism.md").read_text()
+    section = text[text.index("- **Cold start.**"):]
+    section = section[:section.index("- **What the guard cannot cover.**")]
+    for needle in ("divided by the derived session cost", "released when it ends", "observed.json", "SIGMA_RESOURCE_DIR"):
+        assert needle in section, needle

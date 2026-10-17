@@ -321,6 +321,56 @@ def sample(root="/"):
     raise Unsupported("no reader for platform %s" % sys.platform)
 
 
+def _darwin_children(pid):
+    lib = ctypes.CDLL("libproc.dylib", use_errno=True)
+    lib.proc_listchildpids.argtypes, lib.proc_listchildpids.restype = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int], ctypes.c_int
+    buf = (ctypes.c_int * 4096)()
+    got = lib.proc_listchildpids(pid, buf, ctypes.sizeof(buf))
+    return [buf[i] for i in range(max(got, 0) // ctypes.sizeof(ctypes.c_int)) if buf[i] > 0]
+
+
+def _linux_parents(root="/"):
+    """{pid: ppid} for every process /proc lists."""
+    parents = {}
+    try:
+        names = os.listdir(os.path.join(root, "proc"))
+    except OSError:
+        return parents
+    for name in names:
+        if not name.isdigit():
+            continue
+        text = _try(os.path.join(root, "proc", name, "stat"))
+        try:
+            parents[int(name)] = int(text[text.rindex(")") + 2:].split()[1])
+        except (AttributeError, ValueError, IndexError):
+            continue
+    return parents
+
+
+def descendants(pid, limit=512):
+    """Pids below `pid` (children, their children, ...), at most `limit`. Reads only; [] when unreadable. Never raises."""
+    try:
+        pid = int(pid)
+        if pid <= 0 or pid > 2 ** 31 - 1:
+            return []
+        if sys.platform.startswith("linux"):
+            parents = _linux_parents()
+            kids = lambda p: [c for c, pp in parents.items() if pp == p]  # noqa: E731
+        elif sys.platform == "darwin":
+            kids = _darwin_children
+        else:
+            return []
+        found, queue = [], [pid]
+        while queue and len(found) < limit:
+            for child in kids(queue.pop(0)):
+                if child not in found and child != pid:
+                    found.append(child)
+                    queue.append(child)
+        return found[:limit]
+    except (OSError, ValueError, OverflowError, AttributeError):
+        return []
+
+
 def footprint(pid):
     """(bytes, approx) for one process, or None if it cannot be read. Never raises."""
     try:

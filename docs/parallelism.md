@@ -150,6 +150,13 @@ constant copied from a laptop, and nothing here ever pauses a process.
 - **Shed.** With `resource.shed` at `verify` (the default) and `enforce`, `resource.shed_after` (default 3) critical samples in a row stop the
   verify process group Sigma itself started (TERM, a grace, then KILL). The result is `RESOURCE-HOLD (shed)`,
   exit 5, no evidence, the goal not failed; rerun once admission reopens. A session is never signalled.
+- **Cold start.** Until a kind's ring holds one measured unit, a `verify` or `goal` admits one unit at a time. A
+  model session admits up to the room above the reserve divided by the derived session cost, never fewer than one,
+  so several supervisors on one machine each get a session. A session lease is taken around each launched session
+  and released when it ends; the ring then gets one observation of the session tree (the supervisor, the model
+  process and what it started, without a verify that holds its own lease). To seed a ring by hand, write
+  `{"session": [<bytes>]}` into `observed.json` in the resource state directory (`SIGMA_RESOURCE_DIR`) while no
+  session is running; the bound then follows the measured size.
 - **What the guard cannot cover.** Tests you run by hand outside the verify wrapper; memory used by other
   programs; a host's own subagent fan-out; Windows (the guard refuses there rather than guess).
 - **Measured or not.** The macOS and Linux calibration runs are recorded in
