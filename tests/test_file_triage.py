@@ -346,6 +346,14 @@ def test_quoted_deny_word_after_a_hand_off_that_is_also_a_determiner_holds():
         assert m.decide("c", text, {}, {}).kind == "park", text
 
 
+def test_quoted_deny_word_after_a_pronoun_or_quantifier_holds():
+    m = _mod()
+    for text in ("Do it `force push`", "All `force push` main", "Run all `force push` now", "Then do it 'force push'"):
+        assert m.decide("c", text, {}, {}).kind == "park", text
+    for text in ("The `force push` guard", "All `force push` attempts are logged", "It `force push` is refused"):
+        assert m.decide("c", text, {}, {}).kind == "arm", text
+
+
 def test_protective_opener_does_not_clear_a_later_action():
     m = _mod()
     for text in ("Redact keys to delete all rows", "Verify backups before you force push",

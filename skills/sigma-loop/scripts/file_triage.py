@@ -160,6 +160,7 @@ _NOUN_HEAD = frozenset(("command commands word words phrase phrases term terms r
 _BE = frozenset("is are was were be being".split())
 _NEGATION = frozenset("not never no don't dont without doesn't isn't aren't".split())
 _DESCRIBING = frozenset("for of about first second third again other another same called named".split())
+_PRONOUN = frozenset("it all any some one".split())
 _MODAL = frozenset("should must will can could next now let's i'll we'll you'll ok okay afterwards afterward".split())
 
 
@@ -178,6 +179,8 @@ def _quoted_holds(clause, at, span_at):
         return False
     if last in _ACTION or last in _HANDOFF or last in _MODAL:     # before the determiners: "when" and "if" are both
         return True
+    if last in _PRONOUN and (len(before) == 1 or before[-2] in _ACTION | _HANDOFF | _MODAL | _FILLER):
+        return not (_PASSIVE.search(clause) or any(w in _COPULA for w in _WORD.findall(clause[at:])))   # "Do it `x`", "All `x` main" (#1785)
     if last in _NOUN_HEAD or last in _NEGATION or last in _DETERMINER or last in _BE:
         return False
     return last not in _DESCRIBING     # an unrecognised word before the span holds (#1755)
