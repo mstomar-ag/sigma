@@ -392,3 +392,19 @@ def test_the_cli_gesture_from_the_docs_runs_and_prints_usage_on_bad_input(tmp_pa
     r = subprocess.run([sys.executable, str(S / "label_drain.py"), "plan"], capture_output=True,
                        text=True, cwd=str(tmp_path))
     assert r.returncode == 2 and "usage" in r.stderr.lower()
+
+
+def test_a_sigma_answer_comment_is_never_the_park_reason(tmp_path, capsys):
+    """#1806: after an answer, plan and the label-held stop still show the park comment's reason."""
+    import test_label_answer as A
+    ld, base, fk, _ = A.env(tmp_path, [A.issue(1, "sdlc:parked", LBL, comments=[A.UNDECLARED_PARK],
+                                               assignees=("alice",))])
+    A.ask(ld, base, fk, {"kind:1": "needs_decision"})
+    assert any("sigma:unpark-qa" in c for c in fk.stored_comments(1))      # the answer comment is on the issue
+    row = _by(ld.plan(base, LBL, run=fk), 1)
+    assert "legacy column" in row["question"]
+    assert "sigma:unpark-qa" not in row["question"] and "\n" not in row["question"]
+    assert "Question kind set" not in row["question"]
+    rc = ld.main(["label_drain.py", "status", base, LBL, "--json"], run=fk)
+    reason = next(r["reason"] for r in json.loads(capsys.readouterr().out)["not_pickable"] if r["number"] == 1)
+    assert rc == 0 and "legacy column" in reason and "sigma:unpark-qa" not in reason and "\n" not in reason

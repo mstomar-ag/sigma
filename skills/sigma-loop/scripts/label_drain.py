@@ -631,7 +631,7 @@ def questions(label, rows, outside, paid_bodies, config):
         if kind == "undeclared":
             guess = unpark.loop._suggest_kind(r.get("question") or "")
             opts = [guess] + [k for k in unpark.qkind.QKINDS if k not in (guess, "label_set")]
-            add("kind:%d" % n, "undeclared", r.get("labels"), "Which kind of question is this?", opts,
+            add("kind:%d" % n, "kind", r.get("labels"), "Which kind of question is this?", opts,
                 [n] + deps[n])
         elif kind in unpark.QUESTIONS:
             refs = [str(x) for x in r["waiting_on"]]

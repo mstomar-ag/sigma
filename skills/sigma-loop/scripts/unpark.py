@@ -304,7 +304,10 @@ def _park_reason(comments):
         for prefix in sources.OFFBOARD_COMMENT_PREFIXES:
             if text.startswith(prefix):
                 return text[len(prefix):].strip(), True
-    return ((comments[-1].strip(), False) if comments else ("", False))
+    # #1806: a Sigma answer comment (unpark-qa span) or a kind declaration is never the park reason.
+    own = [t for t in (comments or []) if "<!-- sigma:unpark-qa:start -->" not in t
+           and not t.startswith(qkind.DECLARATION_PREFIX)]
+    return ((own[-1].strip(), False) if own else ("", False))
 
 
 def _fetch_issue(source, number):

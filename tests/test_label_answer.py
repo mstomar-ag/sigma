@@ -325,3 +325,36 @@ def test_ready_flips_in_plan_not_only_in_answer(tmp_path):
     assert [q["id"] for q in mid["questions"]] == ["irreversible:6"] and mid["ready"] is False
     ask(ld, base, fk, {"irreversible:6": "go ahead"})
     assert ld.plan(base, LBL, run=fk)["ready"] is True
+
+
+# 9 -- #1806: answering "which kind" declares the kind -----------------------------------------------
+
+UNDECLARED_PARK = "Sigma parked this goal: should the export keep the legacy column?"
+
+
+def _undeclared(tmp_path):
+    ld, base, fk, cfg = env(tmp_path, [issue(1, "sdlc:parked", LBL, comments=[UNDECLARED_PARK],
+                                             assignees=("alice",))])
+    q = next(q for q in ld.plan(base, LBL, run=fk)["questions"] if q["id"] == "kind:1")   # the plan's own question
+    return ld, base, fk, cfg, q
+
+
+def _declared(fk, n=1):
+    qk = _mod("qkind")
+    return qk.resolve([{"body": b, "authorAssociation": "OWNER"} for b in fk.stored_comments(n)], goal=n)
+
+
+def test_answering_which_kind_declares_that_kind_on_the_issue(tmp_path):
+    ld, base, fk, _, q = _undeclared(tmp_path)
+    assert _declared(fk) is None and "needs_decision" in q["options"]
+    res = ask(ld, base, fk, {q["id"]: "needs_decision"})
+    assert res["results"][0]["outcome"] == "applied"
+    assert _declared(fk) == "needs_decision"
+    assert any(c.startswith("Question kind set: needs_decision") for c in fk.stored_comments(1))
+
+
+def test_dry_run_of_which_kind_says_what_it_would_declare_and_writes_nothing(tmp_path):
+    ld, base, fk, _, q = _undeclared(tmp_path)
+    res = ask(ld, base, fk, {q["id"]: "needs_decision"}, dry_run=True)
+    assert "would declare kind needs_decision on #1" in ld.render_answer(res)
+    assert fk.writes() == [] and _declared(fk) is None

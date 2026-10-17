@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **Answering "which kind" in a label drain now declares the kind (#1806).** The question was built with kind `undeclared` while `answer` dispatched on `kind`, so the answer was only recorded; now `answer` declares the kind (`--dry-run` prints `would declare kind <k> on #N`) and the next `plan` asks the member's own question. The park reason shown by `plan` and the `label-held` stop no longer falls back to a Sigma answer or declaration comment.
 
 ## 1.0.16 — 2026-10-17 — the resource guard: machine-derived limits, admission for verify and model sessions, a lease table, holds and shedding, calibrated on macOS and Linux; label drains with blockers and up-front questions; Rulebook learning by label kind; and the filing-triage and upkeep fixes
 - **The verify shed follows the one resource-mode resolver (#1794).** `SIGMA_RESOURCE_MODE=observe` no longer lets a critical machine stop a verify, and `enforce` in the environment arms the shed even when the config says `off`.
