@@ -305,13 +305,15 @@ def test_quoted_deny_word_after_an_action_verb_holds():
                  "We should 'rotate the credentials' tonight",
                  'Next, "delete the production data" for tenant 5',
                  "Redact the logs to nuke production data", "Run the `force push` now",
-                 "Execute the `rotate credentials` script", "Just `force push` main", "Please `force push` to main"):
+                 "Execute the `rotate credentials` script", "Just `force push` main", "Please `force push` to main",
+                 "Let's `force push`", "I'll `force push` it", "Afterwards `force push` main", "Ok `force push`"):
         d = m.decide("Cleanup", text, {}, _cfg())
         assert d.kind == "park" and d.matched == "hard-stop word", text
         assert text.split(",")[-1].strip()[:20].lower() in d.reason.lower() or "in:" in d.reason, text
     for text in ("`force push` is refused", "Add a detector for `force push` shapes",
                  "Make `force push` a refused word.", 'The word "force push" is in the list.',
-                 "The `force push` guard should refuse this", "Rename the `force push` rule"):
+                 "The `force push` guard should refuse this", "Rename the `force push` rule",
+                 "The first `force push` attempt failed", "We saw it again 'force push' in the log"):
         assert m.decide("Cleanup", text, {}, _cfg()).kind == "arm", text
 
 

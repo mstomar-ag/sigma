@@ -155,7 +155,7 @@ _WORD = re.compile(r"[a-z']+")
 
 _NAMING = frozenset("make call name label term mention list rename".split())
 _FILLER = frozenset("the a an this that these those just please now also then".split())
-_MODAL = frozenset("should must will can could next now".split())
+_MODAL = frozenset("should must will can could next now let's i'll we'll you'll ok okay afterwards afterward".split())
 
 
 def _quoted_holds(clause, at, span_at):
