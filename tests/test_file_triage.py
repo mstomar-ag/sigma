@@ -317,6 +317,14 @@ def test_quoted_deny_word_after_an_action_verb_holds():
         assert m.decide("Cleanup", text, {}, _cfg()).kind == "arm", text
 
 
+def test_quoted_deny_word_holds_unless_the_word_before_it_is_descriptive():
+    m = _mod()
+    for text in ("Later `force push` main", "Maybe `force push` main", "Yes `force push` main",
+                 "Go ahead `force push`", "Instead `force push` main", "Let us `force push` main",
+                 "I'd `force push` it", "We'd `force push` it"):
+        assert m.decide("c", text, {}, {}).kind == "park", text
+
+
 def test_protective_opener_does_not_clear_a_later_action():
     m = _mod()
     for text in ("Redact keys to delete all rows", "Verify backups before you force push",
