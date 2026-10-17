@@ -74,7 +74,7 @@ USAGE = ("usage: label_drain.py plan|status <sdlc_dir> <label> [--json]\n"
          "       label_drain.py arm <sdlc_dir> <label> [--apply]\n"
          "       label_drain.py answer <sdlc_dir> <label> --answers <file.json> [--dry-run]\n"
          "  plan/status are read-only: they list the open issues carrying <label>, their open blockers,\n"
-         "  and a verdict for each. arm is a dry run unless --apply: it arms what plan calls unarmed.\n"
+         "  and a verdict for each. arm is a dry run unless --apply: it arms what plan calls unarmed and assigns what it calls unassigned.\n"
          "  answer applies a person's answers to the questions plan printed ({\"<question id>\": \"<option>\"}):\n"
          "  effect first, then one decision record; --dry-run prints every write and makes none.\n"
          "  Nothing here ever removes the label; the one body edit is the spend-approval marker line.")
@@ -291,7 +291,7 @@ class _Judge:
         if getattr(self.source, "assignee", None):
             me = self.login()
             if me and not logins:
-                return "assigned-elsewhere", "unassigned; the picker only takes issues assigned to %s" % me
+                return "unassigned", "unassigned; the picker only takes issues assigned to %s" % me
             if me and me.casefold() not in {x.casefold() for x in logins}:
                 return "assigned-elsewhere", "assigned to %s, not %s" % (", ".join(logins), me)
         held = self._gate(issue, names)
@@ -657,7 +657,7 @@ def questions(label, rows, outside, paid_bodies, config):
         elif own == "upper-tier":
             add("dependency:%d" % n, "dependency", r.get("labels"), slots["upper"]["ask"],
                 slots["upper"]["options"], deps[n])
-    unarmed = sorted(r["number"] for r in rows if r["verdict"] == "unarmed")
+    unarmed = sorted(r["number"] for r in rows if r["verdict"] in ("unarmed", "unassigned"))
     if unarmed:
         slot = unpark.route_slot("label_set")
         add("label_set:%s" % label, "label_set", [], slot["ask"], slot["options"], unarmed)
@@ -683,7 +683,7 @@ def _reason(row, in_progress, blocked_overlay):
     if v == "parked":
         q = row.get("question") or ""
         return "parked (%s)%s" % (row.get("kind") or "undeclared", ": " + q[:140] if q else "")
-    if v in ("unarmed", "assigned-elsewhere", "held-by-gate"):
+    if v in ("unarmed", "unassigned", "assigned-elsewhere", "held-by-gate"):
         return "%s: %s" % (v, row["detail"])
     if in_progress:
         return "in progress (claimed by a run)"
@@ -793,7 +793,8 @@ def _prepare(source, triage, gh_api, label, cfg, todo, refused, notes):
                             "assigned to %s, not %s" % (", ".join(sorted(map(str, state["assignees"]))), me)})
             continue
         item = {"issue": n}
-        if not any(l.startswith(prefix) for l in state["labels"]):
+        armed = source.goal_label in state["labels"]     # #1807: only the assignee is missing
+        if not armed and not any(l.startswith(prefix) for l in state["labels"]):
             name = prefix + cfg["default_priority"]
             if name not in label_ok:
                 try:
@@ -808,6 +809,8 @@ def _prepare(source, triage, gh_api, label, cfg, todo, refused, notes):
         got = triage.compute_actions({"picked": [item]}, {str(n): state}, mine or me, source.goal_label,
                                      source.parked_label, blocked_label=source.goal_blocked_label,
                                      proposed_label=source.proposed_label)
+        if armed:
+            got = [a for a in got if a["action"] == "assign"]
         for a in got:                  # compute_actions spells the prefix `priority:` unconditionally
             if a["action"] == "add-label" and a["detail"].startswith("priority:") and prefix != "priority:":
                 a["detail"] = prefix + a["detail"][len("priority:"):]
@@ -862,7 +865,7 @@ def arm(sdlc_dir, label, apply=False, config=None, run=None, only=None):
         v = r["own_verdict"] if outside else r["verdict"]
         if v in _REFUSED:
             refused.append({"issue": r["number"], "verdict": v, "reason": r["detail"] or v})
-        elif v == "unarmed":
+        elif v in ("unarmed", "unassigned"):
             if not outside:
                 todo.append((r["number"], None))
             elif cfg["arm_pulled_blockers"]:
@@ -907,10 +910,10 @@ def pull(sdlc_dir, label, ref, for_goal, config=None, run=None):
         return out("already")
     if verdict in _REFUSED:
         return out("refused", "%s: %s" % (verdict, detail or verdict))
-    if verdict == "unarmed" and not cfg["arm_pulled_blockers"]:
-        return out("refused", "unarmed and arm_pulled_blockers is off")
+    if verdict in ("unarmed", "unassigned") and not cfg["arm_pulled_blockers"]:
+        return out("refused", "%s and arm_pulled_blockers is off" % verdict)
     refused, notes = [], []
-    if verdict == "unarmed":
+    if verdict in ("unarmed", "unassigned"):
         prepared = _prepare(source, triage, gh_api, label, cfg, [(n, int(for_goal))], refused, notes)
         if refused:
             return out("refused", "%s: %s" % (refused[0]["verdict"], refused[0]["reason"]))
@@ -1136,7 +1139,7 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
                 only = None
                 if choice.startswith("arm only"):
                     only = {r["number"] for r in p["members"]
-                            if r["verdict"] == "unarmed" and not r["waiting_on"] and not r["unresolved"]}
+                            if r["verdict"] in ("unarmed", "unassigned") and not r["waiting_on"] and not r["unresolved"]}
                 armed = arm(sdlc_dir, label, apply=not dry_run, config=config, run=base, only=only)
                 lines = [l.strip() for l in render_arm(armed).splitlines()[1:]]
                 ok = not any(a["result"] == "failed" for a in armed["actions"])

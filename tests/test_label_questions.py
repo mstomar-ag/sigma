@@ -181,3 +181,11 @@ def test_after_a_declare_the_next_plan_asks_the_members_own_question_until_answe
     nxt = ld.plan(base, LBL, run=fk)
     assert _ids(nxt) == ["dependency:1"] and nxt["ready"] is False
     assert _q(nxt, "dependency:1")["kind"] == "dependency"
+
+
+def test_an_armed_unassigned_member_is_named_by_the_arming_question_and_holds_ready(tmp_path):
+    """#1807: it is not ready until the arming answer is recorded, and the question unblocks it."""
+    p = _plan(tmp_path, [_issue(1, LBL, "sdlc:goal", body=DONE), _g(2)])
+    q = _q(p, "label_set:" + LBL)
+    assert q["unblocks"] == [1]
+    assert p["ready"] is False
