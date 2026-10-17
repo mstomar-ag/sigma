@@ -296,7 +296,7 @@ def test_cli_wait_max_zero_on_a_temp_state_dir(tmp_path):
 
 def test_wait_for_goal_holds_while_a_started_goals_verify_waits(lease):
     pathlib.Path(lease.state_dir()).mkdir(parents=True, exist_ok=True)
-    seed = {"verify": [100], "goal": [50]}
+    seed = {"verify": [100], "goal": [50], "session": [30]}  # a learned session cost: wait now shares admit's unlearned-cost hold
     (pathlib.Path(lease.state_dir()) / "observed.json").write_text(json.dumps(seed))
     lease.admit("session", 1, "r", "g1", pid=os.getpid())
     lease.box["available"] = 250
@@ -499,3 +499,123 @@ def test_source_has_no_byte_literal_of_a_mebibyte_or_more():
 
 def test_docs_name_the_lease_command():
     assert "resource_lease.py" in DOC.read_text()
+
+
+# ------------------------------------------------------------------------------------------ #1733
+def _plant(lease, name, record):
+    d = pathlib.Path(lease.state_dir()) / "leases"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (name + ".json")).write_text(json.dumps(record))
+
+
+@pytest.mark.parametrize("drop", ["goal", "kind", "both"])
+def test_lease_without_goal_or_kind_is_reclaimed_not_raised(lease, drop):
+    seed_ring(lease, "goal", [50])
+    record = {"id": "x1", "kind": "goal", "goal": "g0", "pid": os.getpid(), "start": time.time(), "ttl": 1000,
+              "est_mem": 10, "workers": 1, "peak": 0}
+    for key in ("goal", "kind") if drop == "both" else (drop,):
+        del record[key]
+    _plant(lease, "x1", record)
+    got = lease.admit("goal", 1, "r", "g1", pid=os.getpid())
+    assert isinstance(got, lease.Grant)
+    assert "x1.json" not in _leases(lease)
+
+
+@pytest.mark.parametrize("kind", ["verify", "session", "goal"])
+@pytest.mark.parametrize("level", ["roomy", "tight", "critical", "pressure2", "nocost"])
+@pytest.mark.parametrize("max_goals", [None, 1])
+def test_wait_agrees_with_admit(lease, monkeypatch, kind, level, max_goals):
+    seed = {} if level == "nocost" else {"verify": [100], "goal": [50], "session": [30]}  # nocost: unlearned
+    pathlib.Path(lease.state_dir()).mkdir(parents=True, exist_ok=True)
+    (pathlib.Path(lease.state_dir()) / "observed.json").write_text(json.dumps(seed))
+    available, pressure = {"roomy": (800, 1), "tight": (250, 1), "critical": (150, 1), "pressure2": (800, 2), "nocost": (800, 1)}[level]
+    config = {"max_goals": max_goals} if max_goals else None
+    monkeypatch.setattr(lease, "take_sample", lambda: fake_sample(lease.guard, 800))
+    lease.admit("goal", 1, "r", "g0", pid=os.getpid(), config=config)  # one goal already running
+    monkeypatch.setattr(lease, "take_sample", lambda: fake_sample(lease.guard, available, pressure=pressure))
+    code = lease.wait(0, kind, config=config)
+    got = lease.admit(kind, 1, "r", "g9", pid=os.getpid(), config=config)
+    assert (code == 0) == isinstance(got, lease.Grant), (kind, level, max_goals, code, got)
+
+
+def test_wait_applies_pressure_to_a_session(lease, monkeypatch):
+    monkeypatch.setattr(lease, "take_sample", lambda: fake_sample(lease.guard, 800, pressure=2))
+    lease.admit("session", 1, "r", "g0", pid=os.getpid())
+    assert lease.wait(0, "session") == lease.EXIT_HELD
+
+
+def _cfg(tmp_path, text):
+    (tmp_path / ".sdlc").mkdir(exist_ok=True)
+    (tmp_path / ".sdlc" / "config.json").write_text(text)
+
+
+def cli_in(tmp_path, avail, *args, cwd=None):
+    env = {k: v for k, v in os.environ.items() if k != "SIGMA_RESOURCE_DIR"}
+    env["SIGMA_RESOURCE_DIR"] = str(tmp_path / "cli-state")
+    code = HARNESS.format(scripts=str(SCRIPTS), avail=avail)
+    return subprocess.run([sys.executable, "-c", code] + list(args), capture_output=True, text=True, env=env,
+                          timeout=30, cwd=str(cwd or tmp_path))
+
+
+def test_cli_reads_the_resource_block_from_config(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    _cfg(work, json.dumps({"resource": {"max_goals": 1}}))
+    (tmp_path / "cli-state").mkdir()
+    (tmp_path / "cli-state" / "observed.json").write_text(json.dumps({"goal": [50]}))  # a learned cost: only max_goals holds
+    first = cli_in(tmp_path, 800, "admit", "--kind", "goal", "--goal", "g1", "--pid", str(os.getpid()), cwd=work)
+    assert first.returncode == 0, first.stderr
+    second = cli_in(tmp_path, 800, "admit", "--kind", "goal", "--goal", "g2", "--pid", str(os.getpid()), cwd=work)
+    assert second.returncode == 10 and "max_goals" in second.stdout
+    assert cli_in(tmp_path, 800, "wait", "--max", "0", cwd=work).returncode == 10
+
+
+def test_cli_config_mode_observe_never_holds(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    _cfg(work, json.dumps({"resource": {"mode": "observe", "max_goals": 1}}))
+    for goal in ("g1", "g2"):
+        proc = cli_in(tmp_path, 800, "admit", "--kind", "goal", "--goal", goal, "--pid", str(os.getpid()), cwd=work)
+        assert proc.returncode == 0, proc.stdout
+
+
+def test_cli_corrupt_config_reads_as_derived_with_one_note(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    _cfg(work, "{not json")
+    proc = cli_in(tmp_path, 800, "status", "--json", cwd=work)
+    assert proc.returncode == 0 and json.loads(proc.stdout)["leases"] == []
+    notes = [line for line in proc.stderr.splitlines() if line.strip()]
+    assert len(notes) == 1 and "config" in notes[0]
+
+
+def test_cli_without_config_file_is_byte_identical(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    absent = cli_in(tmp_path, 800, "status", "--json", cwd=work)
+    _cfg(work, json.dumps({"other": 1}))  # a file with no resource block is the same as no file
+    no_block = cli_in(tmp_path, 800, "status", "--json", cwd=work)
+    assert absent.stderr == "" and no_block.stderr == ""
+    assert absent.stdout == no_block.stdout
+    assert absent.stdout == json.dumps(json.loads(absent.stdout), sort_keys=True) + "\n"
+
+
+def test_cli_scenario_through_main_with_config(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("SIGMA_RESOURCE_DIR", str(tmp_path / "state"))
+    work = tmp_path / "work"
+    work.mkdir()
+    _cfg(work, json.dumps({"resource": {"max_goals": 1}}))
+    monkeypatch.chdir(work)
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / "observed.json").write_text(json.dumps({"goal": [50]}))
+    module = load()
+    monkeypatch.setattr(module, "take_sample", lambda: fake_sample(module.guard, 800))
+    monkeypatch.setattr(module, "take_footprint", lambda pid: None)
+    assert module.main(["admit", "--kind", "goal", "--goal", "g1", "--pid", str(os.getpid())]) == 0
+    grant = json.loads(capsys.readouterr().out)
+    assert module.main(["admit", "--kind", "goal", "--goal", "g2", "--pid", str(os.getpid())]) == 10
+    assert "max_goals" in capsys.readouterr().out
+    assert module.main(["wait", "--max", "0"]) == 10
+    assert module.main(["status", "--json"]) == 0
+    assert len(json.loads(capsys.readouterr().out)["leases"]) == 1
+    assert module.main(["release", grant["id"]]) == 0
