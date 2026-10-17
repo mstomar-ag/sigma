@@ -154,7 +154,7 @@ constant copied from a laptop, and nothing here ever pauses a process.
   programs; a host's own subagent fan-out; Windows (the guard refuses there rather than guess).
 - **Measured or not.** The macOS and Linux calibration runs are recorded in
   `docs/launch/evidence/resource-guard-macos-calibration.md` and
-  `docs/launch/evidence/resource-guard-linux-calibration.md`; both say NOT RUN until a real run fills them in.
+  `docs/launch/evidence/resource-guard-linux-calibration.md`; the macOS record is a partial run (one verify, held by the memory gate on an already loaded host, no footprint measured) and the Linux record says NOT RUN.
   Every clause and the test that covers it is in `docs/launch/evidence/resource-guard-controls.md`.
 
 Two things genuinely grow with a repo's own lifetime and are worth knowing about:
