@@ -37,6 +37,7 @@ import math
 import mmap
 import os
 import sys
+import threading
 import time
 
 EXIT_UNSUPPORTED = 3
@@ -518,13 +519,16 @@ def session_mode(config=None, env=None):
 
 
 @contextlib.contextmanager
-def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None):
+def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None, renew_every=None, clock=time.time):
     """Hold one "session" lease around a model-session spawn. Yields None (mode off), a Grant, or a Hold.
 
     The caller treats a Hold as its own existing "could not start now" outcome. The lease is released in `finally`,
     so an exception or a timeout in the child never leaves one behind. Never raises for pressure, a busy lock or a
     table error. On a platform that cannot take a lease (or a table error): observe proceeds unguarded, enforce yields a
     Hold that says so (refuse loudly rather than a silent half-guarantee).
+
+    While a Grant is held a daemon thread renews the lease every `renew_every` seconds (default ttl/3), so a session
+    longer than the ttl keeps it; the thread is stopped and joined before release. Off, a Hold, an error: no thread.
     """
     mode = session_mode(config, env)
     if mode == "off":
@@ -541,9 +545,26 @@ def session_lease(kind, goal, repo=None, ttl=None, env=None, config=None):
             else "lease table error (%s)" % type(exc).__name__
         yield None if mode == "observe" else _Held(why)
         return
+    stop, thread = threading.Event(), None
+    if hasattr(got, "id"):
+        every = renew_every
+        if not _number(every) or every <= 0:
+            every = (ttl if _number(ttl) and ttl > 0 else lease.DEFAULT_TTL) / 3.0
+
+        def _renew():
+            while not stop.wait(every):
+                try:
+                    lease.renew(got.id, now=clock(), env=env)
+                except Exception:  # noqa: BLE001 - a missed renewal costs only the ttl margin
+                    pass
+        thread = threading.Thread(target=_renew, name="lease-renewer", daemon=True)
+        thread.start()
     try:
         yield got
     finally:
+        stop.set()
+        if thread is not None:
+            thread.join(timeout=5)
         if hasattr(got, "id"):
             try:
                 lease.release(got.id, env=env)
@@ -617,8 +638,35 @@ def run(kind, command, root, timeout, goal, **kwargs):
 
 
 USAGE = ("usage: resource_guard.py sample [--json]\n"
+         "       resource_guard.py sample --record <sdlc_dir>\n"
          "  sample    print one machine reading (exit 3 and one stderr line when the platform is unsupported)\n"
-         "  --json    print it as one JSON object\n")
+         "  --json    print it as one JSON object\n"
+         "  --record  the watcher's call (#1604): refresh last.json and hold.json and reclaim stale leases; prints\n"
+         "            one line while held, nothing when open or when resource.mode is off\n")
+
+
+def _record(sdlc_dir):
+    """`sample --record <sdlc_dir>` (#1604): resource_liveness.refresh under the config in <sdlc_dir>/config.json."""
+    import importlib.util as _util
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    spec = _util.spec_from_file_location("resource_liveness", os.path.join(here, "resource_liveness.py"))
+    module = _util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    try:
+        with open(os.path.join(sdlc_dir, "config.json"), "r") as handle:
+            config = json.loads(handle.read())
+    except (OSError, ValueError):
+        config = {}
+    try:
+        got = module.refresh(sdlc_dir, config)
+    except Unsupported as refusal:
+        sys.stderr.write("resource_guard: unsupported: %s\n" % refusal.reason)
+        return EXIT_UNSUPPORTED
+    if got is not None and got["state"] == "hold":      # silent when open: the tick prints nothing for an empty line
+        sys.stdout.write("resource: admission HELD (%s)\n" % got["reason"])
+    return 0
 
 
 def main(argv=None):
@@ -626,6 +674,8 @@ def main(argv=None):
     if not args or args[0] in ("-h", "--help"):
         sys.stdout.write(USAGE)
         return 0
+    if args[:2] == ["sample", "--record"] and len(args) == 3:
+        return _record(args[2])
     if args[0] != "sample" or set(args[1:]) - {"--json"}:
         sys.stderr.write(USAGE)
         return 2

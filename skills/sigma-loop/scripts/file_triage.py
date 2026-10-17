@@ -40,9 +40,10 @@ _PRIO = re.compile(r"P[0-4]")
 _FENCE = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
 _NUMWORD = (r"(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty"
             r"|ninety|hundred|thousand)")
-_AMOUNT = (r"(?:(?:\$|US\$|USD\s?|€|£|EUR\s?|GBP\s?)\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\b"
-           r"|\b\d[\d,]*(?:\.\d+)?\s*(?:dollars?|USD|bucks|euros?|EUR|GBP|pounds?(?:\s+sterling)?)\b"
-           r"|\b" + _NUMWORD + r"(?:[- ]" + _NUMWORD + r")*\s+(?:dollars?|bucks|euros?|pounds?(?:\s+sterling)?)\b)")
+_AMOUNT = (r"(?:(?:\$|US\$|USD\s?|€|£|¥|EUR\s?|GBP\s?|CHF\s?|CAD\s?|INR\s?)\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\b"
+           r"|\b\d[\d,]*(?:\.\d+)?\s*(?:dollars?|USD|bucks|euros?|EUR|GBP|CHF|CAD|INR|yen|quid|pounds?(?:\s+sterling)?)\b"
+           r"|\b\d[\d,]*(?:\.\d+)?\s?[kK]?\s?[€£¥]"
+           r"|\b" + _NUMWORD + r"(?:[- ]" + _NUMWORD + r")*\s+(?:dollars?|bucks|euros?|yen|quid|pounds?(?:\s+sterling)?)\b)")
 _COMPUTE = r"\b(?:GPUs?|instances?|clusters?|credits|compute|pods?|cloud|runs?|nodes?)\b"
 _AMOUNT_FOR_COMPUTE = re.compile(_AMOUNT + r"[^.\n]{0,60}" + _COMPUTE + "|" + _COMPUTE + r"[^.\n]{0,60}" + _AMOUNT,
                                  re.IGNORECASE)
@@ -154,7 +155,7 @@ _WORD = re.compile(r"[a-z']+")
 
 _NAMING = frozenset("make call name label term mention list rename".split())
 _FILLER = frozenset("the a an this that these those just please now also then".split())
-_MODAL = frozenset("should must will can could next now".split())
+_MODAL = frozenset("should must will can could next now let's i'll we'll you'll ok okay afterwards afterward".split())
 
 
 def _quoted_holds(clause, at, span_at):
@@ -208,21 +209,28 @@ def _quoted_deny(clause, w):
     return False
 
 
+def _flat(s):
+    """Hyphen and underscore read as a space, one for one (#1734)."""
+    return s.replace("-", " ").replace("_", " ")
+
+
 def _action_sentence(text, word):
     """-> the (trimmed) first clause holding `word` in action position, else None."""
-    w = word.lower()
+    w = _flat(word.lower())
     if not w:
         return None
     for clause in _CLAUSES.split(text):
+        shown = clause
+        clause = _flat(clause)  # same length, so the reported text below is the original clause
         if _quoted_deny(clause, w):
-            return " ".join(clause.split())[:100]
+            return " ".join(shown.split())[:100]
         low = _QUOTED.sub(" ", clause).lower()
         at = low.find(w)
         if at < 0:
             continue
         if _descriptive(low, at, w):
             continue
-        return " ".join(clause.split())[:100]
+        return " ".join(shown.split())[:100]
     return None
 
 

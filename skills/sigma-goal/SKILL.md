@@ -143,16 +143,18 @@ counterpart to the autonomous `/sigma-loop`).
 ## `--feature <unit>` — confine the run to one unit of work
 
 `/sigma-goal --feature voice-interview` is an ordinary interactive run with one constraint added to
-step 1, and nothing else changed. **Without the flag none of this section applies** — selection
-behaves exactly as it always has.
+step 1. **Without the flag none of this section applies** — selection is as before.
 
 > **While a `--feature` run is active, no goal outside that unit may be picked.**
 
-That sentence is the contract's, not this skill's. `docs/branching-model.md` §14 states it once,
-and `/sigma-loop --feature <unit>` quotes the same bytes (#1660, #1661) — **quote it, never reword
-it.** One wording, because "exclusive" said three slightly different ways is exactly how a flag ends
-up absolute on one path and preferential on another. And preferential is worth nothing here: the
-flag exists so that a focused session cannot wander onto adjacent work.
+That sentence is the contract's: `docs/branching-model.md` §14 states it once, and
+`/sigma-loop --feature <unit>` quotes the same bytes — **quote it, never reword it.** The flag exists
+so a focused session cannot wander onto adjacent work.
+
+`--label <name>`: run `label_drain.py plan`, ask every question in one pass, run `answer`, then loop
+(`docs/label-drain.md`):
+
+> **While a `--label` run is active, no goal outside that label may be picked, and an open prerequisite of a member is never skipped silently.**
 
 Three commitments ride with it, and none is optional:
 

@@ -403,6 +403,25 @@ def release(lease_id, env=None):
         return True
 
 
+def renew(lease_id, now=None, env=None):
+    """Push an existing lease's start to `now` so a long session outlives its ttl. False when it cannot be renewed.
+
+    Only a readable, well-formed lease whose pid is alive (and not reused) is renewed; the dead are left to the
+    pid check in admit. Done under the admit lock like every other table write.
+    """
+    directory = state_dir(env)
+    now = time.time() if now is None else now
+    path = os.path.join(directory, "leases", os.path.basename(str(lease_id)) + ".json")
+    with _locked(directory) as got:
+        if not got:
+            return False
+        record = dict(_load_leases(directory)).get(path) if os.path.exists(path) else None
+        if record is None or not pid_alive(record["pid"]) or reused(record):
+            return False
+        _atomic_write(path, dict(record, start=now))
+        return True
+
+
 def _load_one(path):
     record = _read_json(path, None)
     return record if isinstance(record, dict) and "kind" in record and "pid" in record else None

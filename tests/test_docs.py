@@ -2540,3 +2540,49 @@ def test_session_argv_constant_is_gone_and_the_doctor_uses_the_function():
     doctor = (ROOT / "skills/sigma-doctor/scripts/doctor.py").read_text(encoding="utf-8")
     assert "SESSION_ARGV" not in launcher and "SESSION_ARGV" not in doctor
     assert "session_argv(" in doctor
+
+
+# --- #1582: the `--label` guarantee, quoted in four places, and the page that explains it -------------
+
+#: The label run's guarantee, in ONE wording, the same way `_SCOPE_GUARANTEE` is one wording for units.
+_LABEL_GUARANTEE = ("While a `--label` run is active, no goal outside that label may be picked, and an "
+                    "open prerequisite of a member is never skipped silently.")
+_LABEL_PAGE = ROOT / "docs" / "label-drain.md"
+_LABEL_COPIES = (
+    ROOT / "skills" / "sigma-loop" / "SKILL.md",
+    ROOT / "skills" / "sigma-loop" / "references" / "picking.md",
+    ROOT / "skills" / "sigma-goal" / "SKILL.md",
+    _LABEL_PAGE,
+)
+
+
+def test_the_label_guarantee_is_one_sentence_in_all_four_places():
+    """Edit one copy and this goes red: a paraphrase is invisible to a test that only looks for the flag."""
+    for path in _LABEL_COPIES:
+        text = " ".join(path.read_text(encoding="utf-8").split())
+        assert _LABEL_GUARANTEE in text, (
+            f"{path.relative_to(ROOT)} does not carry the label guarantee byte for byte")
+
+
+def test_every_verb_and_flag_the_label_page_names_exists_in_the_code():
+    page = _LABEL_PAGE.read_text(encoding="utf-8")
+    drain = (_LOOP_SCRIPTS / "label_drain.py").read_text(encoding="utf-8")
+    usage = drain[drain.index("USAGE = "):drain.index("MAX_MEMBERS = ")]
+    loop_src = (_LOOP_SCRIPTS / "loop.py").read_text(encoding="utf-8")
+    for verb in ("plan", "status", "arm", "answer"):
+        assert re.search(r"label_drain\.py (?:[a-z]+\|)*%s\b" % verb, usage), f"`{verb}` is not in label_drain.py usage"
+        assert f"`{verb}`" in page or f"label_drain.py {verb}" in page, f"the page never names `{verb}`"
+    for flag in ("--label", "--apply", "--dry-run", "--json", "--answers"):
+        assert flag in page, f"the page does not name {flag}"
+        assert flag in usage or flag in loop_src, f"{flag} is named on the page and exists in neither script"
+    for flag in sorted(set(re.findall(r"`(--[a-z][a-z-]*)", page))):
+        assert flag in usage or flag in loop_src or flag in drain, f"the page names {flag}, which no script has"
+
+
+def test_the_label_page_has_the_measurement_table_and_no_unmeasured_number():
+    page = _LABEL_PAGE.read_text(encoding="utf-8")
+    assert "| what | calls | reads | writes |" in page, "the measurement table is gone"
+    assert "counting fake transport" in page
+    rows = [ln for ln in page.splitlines() if re.match(r"\|[^|]+\|\s*\d+\s*\|\s*\d+\s*\|\s*\d+\s*\|$", ln)]
+    assert len(rows) >= 5, "the table lost rows"
+    assert not [ln for ln in rows if "unmeasured" in ln.lower()], "a measured row says unmeasured"
