@@ -109,8 +109,7 @@ Then repeat until the helper says stop:
    slice under 3b), and does not carry between dispatch prompts: **say it in each one**. A phase wanting a checkpoint leaves the
    worktree DIRTY and says so in its handoff; it never stages or commits.
 
-   **Match the ceremony to the goal** — after Research, resolve the lane it measured. Either way an
-   unsized goal is **`medium`** — unknown gets more rigour, not less. **Plan-Review runs in full at
+   **Match the ceremony to the goal** — after Research, resolve the lane it measured. An unsized goal is **`medium`**. **Plan-Review runs in full at
    every lane.** **Park instead of forcing through** if you hit any of:
    - a hard checkpoint / a decision only the user can make,
    - an **irreversible or expensive action** (deploy, delete, overwrite, spend, migrate) — NEVER
@@ -126,13 +125,10 @@ Then repeat until the helper says stop:
    **3a. Register this goal, THEN cut the worktree if enabled.** Regardless of
    `config.work.enabled`, first register its worker:
    `python3 "${CLAUDE_SKILL_DIR}/scripts/loop.py" agent-start .sdlc "$goal" --pid $PPID`.
-   **A nonzero exit from `agent-start` means task ownership was not established — another live
-   agent may own this (goal, thread); STOP this goal before `work.py start` rather than proceed.** With `config.work.enabled` on: `python3 "${CLAUDE_SKILL_DIR}/scripts/work.py" start
+   **A nonzero `agent-start` exit means ownership was not established — another live agent may own this goal: STOP before `work.py start`.** With `config.work.enabled` on: `python3 "${CLAUDE_SKILL_DIR}/scripts/work.py" start
    .sdlc "$goal" --session-pid "$PPID"`. **Pass `--session-pid "$PPID"` — the same value you just
-   gave `agent-start --pid`, and the same one every `loop.py` call takes.** Read the line it prints — it
-   names the base it actually cut from. **If this command exits 4, STOP this goal and do NOT
-   `record` it** — it has already moved the goal out of the claimed state for you, and recording
-   anything on top of that would undo a transition that is already correct.
+   gave `agent-start --pid`, and the same one every `loop.py` call takes.** Read the line it prints (the base it cut from). **If this command exits 4, STOP this goal and do NOT
+   `record` it** — it already moved the goal out of the claimed state; recording would undo that.
    Do **every edit for this goal inside that worktree**; the human's checkout must never move, and
    never change branch (it would rewrite `.sdlc/goals/` underneath you). Bookkeeping is the
    exception and stays in the MAIN checkout. How `<base>` resolves: `references/running.md`.
