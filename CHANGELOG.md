@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **The verify shed's consecutive-sample rule and the rerun's smaller worker count are now tested (#1796).** A sampler that is critical but never `shed_after` samples in a row no longer stops the group, and a shed run's large measured footprint lowers the rerun's admitted workers; `docs/parallelism.md` says only that.
 - The controls runner now covers every row of the resource guard controls table (#1797): one exact-text break per remaining row, each making its named test red, and no row says "not run".
 - **The verify shed follows the one resource-mode resolver (#1794).** `SIGMA_RESOURCE_MODE=observe` no longer lets a critical machine stop a verify, and `enforce` in the environment arms the shed even when the config says `off`.
 - **Spend triage recognises a nationality before "dollars" (#1795).** `40 US dollars`, `40 Canadian dollars` and `forty US dollars` next to a compute word now park as a spend phrase; without a compute word, or inside a fenced block, they still arm.

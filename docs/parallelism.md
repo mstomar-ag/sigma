@@ -149,7 +149,8 @@ constant copied from a laptop, and nothing here ever pauses a process.
   `-n auto`. A literal `-n N` is never lowered: a warm cost record that cannot fit N holds instead.
 - **Shed.** With `resource.shed` at `verify` (the default) and `enforce`, `resource.shed_after` (default 3) critical samples in a row stop the
   verify process group Sigma itself started (TERM, a grace, then KILL). The result is `RESOURCE-HOLD (shed)`,
-  exit 5, no evidence, the goal not failed; rerun once admission reopens. A session is never signalled.
+  exit 5, no evidence, the goal not failed; rerun once admission reopens. The shed run's measured footprint is learned like any other run's, so when it
+  was large the rerun of the same goal is admitted with fewer workers; when it was small the count can be the same. A session is never signalled.
 - **What the guard cannot cover.** Tests you run by hand outside the verify wrapper; memory used by other
   programs; a host's own subagent fan-out; Windows (the guard refuses there rather than guess).
 - **Measured or not.** The macOS and Linux calibration runs are recorded in
