@@ -85,8 +85,8 @@ MAX_REASON_CHARS = 300
 Request = collections.namedtuple(
     "Request",
     "config unit base_sha head_sha tree_sha files pr_descriptions reread launch cap_usd resolver_cap_usd "
-    "resolver_model model catalog mechanism timeout now",
-    defaults=(None,) * 17)
+    "resolver_model model catalog mechanism timeout now dropped",
+    defaults=(None,) * 18)
 
 
 # ------------------------------------------------------------------------------------------ the verdict
@@ -160,7 +160,7 @@ def _cap(text, limit):
     return text if len(text) <= limit else text[:limit] + "\n[truncated]"
 
 
-def build_brief(files, pr_descriptions):
+def build_brief(files, pr_descriptions, dropped=None):
     """-> (prompt, blocks). `files` is a list of (path, base, ours, theirs, resolved). The resolver's transcript is not an
     input: nothing in the request could carry it."""
     prompt = ("You are an independent reviewer of a merge conflict resolution. For each file you are given the common base, "
@@ -178,10 +178,18 @@ def build_brief(files, pr_descriptions):
             blocks.append(("file%d-%s-%s" % (index, label, _label_safe(path)), body))
     for index, text in enumerate(list(pr_descriptions or ())[:MAX_PR_COUNT]):
         blocks.append(("pr%d" % index, _cap(text, MAX_PR_CHARS)))
+    if dropped:
+        prompt += (" Some files were deleted on purpose and the lines listed in the dropped-by-delete block are lost with them. "
+                   "Approve ONLY if you explicitly accept losing every listed line; otherwise block.")
+        blocks.append(("dropped-by-delete", _cap(_dropped_body(dropped), MAX_FILE_CHARS)))
     return prompt, blocks
 
 
-def truncation(files, pr_descriptions):
+def _dropped_body(dropped):
+    return "\n".join("dropped by delete: %s\n%s" % (name, "\n".join("  " + str(l) for l in lines)) for name, lines in sorted(dropped.items()))
+
+
+def truncation(files, pr_descriptions, dropped=None):
     """-> reasons the brief would be incomplete: a cap that cuts or drops input. A reviewer shown part of the material cannot
     approve the whole, so the entry point blocks on any reason here rather than launching on a partial brief."""
     files, prs, why, used = list(files or ()), list(pr_descriptions or ()), [], 0
@@ -199,6 +207,8 @@ def truncation(files, pr_descriptions):
         why.append("the brief was truncated: %d PR descriptions exceed the %d cap" % (len(prs), MAX_PR_COUNT))
     if any(len("" if t is None else str(t)) > MAX_PR_CHARS for t in prs[:MAX_PR_COUNT]):
         why.append("the brief was truncated: a PR description exceeds %d characters" % MAX_PR_CHARS)
+    if dropped and len(_dropped_body(dropped)) > MAX_FILE_CHARS:
+        why.append("the brief was truncated: the dropped-by-delete list exceeds %d characters" % MAX_FILE_CHARS)
     return list(dict.fromkeys(why))
 
 
@@ -339,10 +349,10 @@ def review(request, environ=None):
         return Review(REFUSED, ("the reviewer needs its own per-run cap, smaller than the resolver's",), VERIFIED)
     launcher = _sibling("feature_upkeep_launcher")
     model = pick_model(req.catalog, req.resolver_model, req.model)
-    cut = truncation(req.files, req.pr_descriptions)
+    cut = truncation(req.files, req.pr_descriptions, req.dropped)
     if cut:
         return _blocked(cut)
-    prompt, blocks = build_brief(req.files, req.pr_descriptions)
+    prompt, blocks = build_brief(req.files, req.pr_descriptions, req.dropped)
     ok, findings = _sibling("reviewer")._check_brief_text(brief_text(prompt, blocks), ())
     if not ok:
         return _blocked(["the brief failed the leak gate: " + "; ".join(findings)])

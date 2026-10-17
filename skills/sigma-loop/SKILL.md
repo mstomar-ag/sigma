@@ -14,11 +14,10 @@ empty path. Claude keeps its provided value.
 
 Detailed selection triggers: [selection](references/selection.md).
 
-Drive the backlog. Python owns state, budget, and the configured source: local goal files by default,
-or GitHub issues when `discovery.source: github` (requires `gh` authentication).
+Drive the backlog. Python owns state, budget, and the source: local goal files by default,
+or GitHub issues when `discovery.source: github` (needs `gh`).
 
-**Shared rules are here. Step procedures are under `${CLAUDE_SKILL_DIR}/references/`; open yours
-before running it:**
+**Shared rules are here; step procedures are under `${CLAUDE_SKILL_DIR}/references/`. Open yours first:**
 
 - `references/picking.md` — 1-2: batch dispatch, `DONE`/`BUDGET`, dependency gate, `--feature`, pre-checks.
 - `references/running.md` — 3: model tier, phase subagents, maker≠checker, lanes, worktree, slices.
@@ -35,8 +34,7 @@ Then repeat until the helper says stop:
 
 1. With subagents: `goals=$(python3 "${CLAUDE_SKILL_DIR}/scripts/loop.py" next-batch .sdlc
    --session-pid "$PPID")`. Without subagents: use `next` with the same arguments, run its one
-   goal's steps 2–7 inline, then pick again. Both paths stop at `HANDOFF` after 20 goals by
-   default; resume `/sigma-loop` in a fresh session. See `references/picking.md`.
+   goal's steps 2–7 inline, then pick again. Both paths stop at `HANDOFF` after 20 goals; resume `/sigma-loop` in a fresh session. See `references/picking.md`.
 
    **1a. With subagents, dispatch every goal — one line or many** — each in a fresh subagent
    running steps 2–7 for that ONE goal, at its resolved tier (`references/picking.md`) (Codex:
@@ -49,7 +47,8 @@ Then repeat until the helper says stop:
 2. Dispatch `goal` lines before a terminal line. If output is `DONE` (nothing pickable), `BUDGET` (iterations, wall-clock
    minutes, or reported tokens — each only when `config.json` sets it), or `HANDOFF` (a goal-count
    hand-off, on by default) → STOP, and report the stderr `BUDGET (...)`/`HANDOFF (...)` line, which
-   names which ceiling tripped.
+   names which ceiling tripped. `HOLD` is never `DONE` or a stop (no claim, no spend): run
+   `resource_lease.py wait --max 540`, then pick again.
 
    On a terminal line, stop claiming; record active slots before ending. `DONE` does not always mean the backlog is empty. `next`/`next-batch` never hand back a goal
    whose own body declares a prerequisite (`**Blocked by:** #N`) that is still OPEN. Report that
@@ -58,7 +57,7 @@ Then repeat until the helper says stop:
 
    > **While a `--feature` run is active, no goal outside that unit may be picked.**
 
-   Both in full: `references/picking.md`.
+   Full: `references/picking.md`.
 3. Otherwise, run the **opt-in pre-checks, in this order** — before spending a token. Each prints
    `OFF` (a no-op — feature disabled), `PROCEED`, or `PARKED <reason>`. On **`PARKED <reason>`**:
    **Do not research it: loop back to step 1** and take the next goal. (The park counts as one
@@ -74,7 +73,7 @@ Then repeat until the helper says stop:
    (never restore `sdlc:goal` by hand — **run `/sigma-unpark`**): `references/picking.md`.
 
    Then **recall prior art**: if the knowledge graph is enabled, run the `sigma-context` pre-flight
-   for a cited brief (no-op when the KG is off).
+   for a cited brief.
 
    **Match the model to the goal.** **Read the tier from the pick's own stderr** — a
    line shaped `sigma: model tier for <goal> resolved to <tier> (signal=<signal>)` — rather
@@ -103,8 +102,8 @@ Then repeat until the helper says stop:
 
    **No phase subagent commits — only `work.py commit` does, once, at step 6.** This binds every
    dispatched phase subagent (research, plan, plan-review, implement, review, retro, and each
-   slice under 3b), and does not carry between dispatch prompts: **say it in each one**. A phase that wants a local checkpoint leaves the
-   worktree DIRTY and says so in its own handoff; it never stages or commits anything itself.
+   slice under 3b), and does not carry between dispatch prompts: **say it in each one**. A phase wanting a checkpoint leaves the
+   worktree DIRTY and says so in its handoff; it never stages or commits.
 
    **Match the ceremony to the goal** — after Research, resolve the lane it measured. Either way an
    unsized goal is **`medium`** — unknown gets more rigour, not less. **Plan-Review runs in full at

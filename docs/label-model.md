@@ -1052,7 +1052,7 @@ leftovers, run `/sigma-promote migrate-confirmation` once.
    alone and the report says `covered N of M`; rerun to finish the rest (a second run changes nothing already done).
 4. Verify: after an apply the command re-reads the labelled set and prints the open issues that still carry the
    retired label. One inside the slice is a failure (non-zero exit); ones outside it are the next slice.
-5. Every `parked` result is a real decision for a person: run `/sigma-unpark` on it. Already-parked issues stay parked.
+5. Every `parked` result is a real decision for a person: run `/sigma-unpark` on it. Already-parked issues stay parked. A question title (`ai_filed.triage.question_patterns`) also parks.
 
 `/sigma-doctor` counts the open issues still carrying the retired label while the triage gate is on.
 

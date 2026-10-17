@@ -95,6 +95,13 @@ def _no_host_leak_patterns(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _resource_guard_off_by_default(monkeypatch):
+    """#1600: the picker's resource gate reads the real machine; a loaded developer machine must not
+    change an unrelated test's result. Tests of the gate itself set SIGMA_RESOURCE_MODE or the config key."""
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "off")
+
+
+@pytest.fixture(autouse=True)
 def _no_live_gh(request, monkeypatch):
     """#1495: fail loud, naming the call site, on any `subprocess.run` that would invoke the real
     `gh` CLI -- unless this test is marked `@pytest.mark.live_gh`."""

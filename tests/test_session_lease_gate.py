@@ -337,3 +337,61 @@ def test_every_spawn_file_is_gated_or_listed_with_a_reason():
 def test_ratchet_goes_red_for_an_ungated_spawn(tmp_path):
     (tmp_path / "newspawn.py").write_text('argv = ["claude", "-p", "hello"]\n')
     assert ungated(tmp_path) == ["newspawn.py"]
+
+
+# ------------------------------------------------------------------ #1737: the supervisor lease outlives a long session
+def _spy_guard(daemon, monkeypatch):
+    calls = []
+
+    class Spy:
+        def session_lease(self, kind, goal, **kw):
+            calls.append(kw)
+            import contextlib
+            return contextlib.nullcontext(None)
+    monkeypatch.setattr(daemon, "_guard", lambda: Spy())
+    return calls
+
+
+def test_supervisor_passes_its_ttl_at_the_claude_site(daemon, monkeypatch, tmp_path):
+    calls = _spy_guard(daemon, monkeypatch)
+    monkeypatch.setenv("SIGMA_CLAUDE_CMD", "%s -c pass" % sys.executable)
+    monkeypatch.setenv("SIGMA_SUPERVISE_MAX_RUNS", "1")
+    (tmp_path / ".sdlc").mkdir()
+    daemon.main(["x", str(tmp_path / ".sdlc")])
+    assert calls and all(c.get("ttl") == daemon.SESSION_LEASE_TTL for c in calls)
+
+
+def test_supervisor_passes_its_ttl_at_the_codex_site(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIGMA_HOST", "codex")
+    monkeypatch.setenv("SIGMA_SUPERVISE_SLEEP_SCALE", "0")
+    daemon = _load("supervise_daemon", "sd_t2")
+    calls = _spy_guard(daemon, monkeypatch)
+    import contextlib
+    fake = type("Rt", (), {
+        "lock_file": staticmethod(lambda path: contextlib.nullcontext()),
+        "detect_host": staticmethod(lambda: "codex"),
+        "installed_skill": staticmethod(lambda *a: ("codex", pathlib.Path(__file__))),
+        "codex_environment": staticmethod(lambda env: dict(env)),
+        "build_codex_command": staticmethod(lambda *a: ["codex", "x"])})
+    monkeypatch.setattr(daemon, "_codex_runtime", lambda: fake)
+    monkeypatch.setattr(daemon, "_capture_codex", lambda *a, **k: ("LOOP STOP: backlog-empty", 0, None))
+    monkeypatch.delenv("SIGMA_CODEX_CMD", raising=False)
+    free = type("Done", (), {"returncode": 0, "stdout": "FREE", "stderr": ""})()
+    monkeypatch.setattr(daemon.subprocess, "run", lambda *a, **k: free)
+    monkeypatch.setenv("SIGMA_SUPERVISE_MAX_RUNS", "1")
+    (tmp_path / ".sdlc").mkdir()
+    try:
+        daemon.main(["x", str(tmp_path / ".sdlc")])
+    except SystemExit:
+        pass
+    assert calls and all(c.get("ttl") == daemon.SESSION_LEASE_TTL for c in calls)
+
+
+def test_supervisor_lease_is_not_reclaimed_after_seven_hours(state, daemon, monkeypatch):
+    lease = with_sample(daemon._guard())
+    monkeypatch.setenv("SIGMA_RESOURCE_MODE", "observe")
+    got = lease.admit("session", 1, os.getcwd(), "supervisor:r", ttl=daemon.SESSION_LEASE_TTL, now=1000.0)
+    record = json.loads(leases(state)[0].read_text())
+    assert hasattr(got, "id") and not lease._stale(record, 1000.0 + 7 * 3600)
+    default = dict(record, ttl=lease.DEFAULT_TTL)
+    assert lease._stale(default, 1000.0 + 7 * 3600)  # the control: the 6h default would have gone
