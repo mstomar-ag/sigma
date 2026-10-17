@@ -3937,6 +3937,22 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/pick_trace.py",
+      "function": "_append",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "opt-in only (SIGMA_PICK_TRACE=1 or next --trace; never reached when off): appends one line with stage names, call counts and seconds, no issue text, to the pick-trace file under the runtime state directory; rotates it by rename at 1 MB",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/pick_trace.py",
+      "function": "_append",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "opt-in only (SIGMA_PICK_TRACE=1 or next --trace; never reached when off): appends one line with stage names, call counts and seconds, no issue text, to the pick-trace file under the runtime state directory; rotates it by rename at 1 MB",
+      "risk": "medium"
+    },
+    {
       "path": "tools/resource_controls.py",
       "function": "apply_break",
       "rule": "fs-write",
