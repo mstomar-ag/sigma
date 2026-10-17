@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 - **The label history line test now fails without its kind guard (#1798).** `test_history_is_for_the_label_set_question_only` records a member-level answer on the same label and asserts that question shows no history line, so removing the guard turns it red.
+- The doctor's observe wording, the `start` hold case and the doctor resource-row condition are now guarded by tests and the configuration page (#1799).
 - The controls runner now covers every row of the resource guard controls table (#1797): one exact-text break per remaining row, each making its named test red, and no row says "not run".
 
 ## 1.0.16 — 2026-10-17 — the resource guard: machine-derived limits, admission for verify and model sessions, a lease table, holds and shedding, calibrated on macOS and Linux; label drains with blockers and up-front questions; Rulebook learning by label kind; and the filing-triage and upkeep fixes

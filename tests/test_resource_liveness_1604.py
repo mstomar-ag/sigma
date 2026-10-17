@@ -444,6 +444,21 @@ def test_observe_mode_tail_says_not_enforced(machine):
     assert "not enforced" not in _log().admission_tail({"resource": {"mode": "enforce"}}, now=NOW)
 
 
+def test_doctor_admission_row_says_not_enforced_only_under_observe(tmp_path, machine):
+    """#1799: the doctor's own HELD row carries the observe wording, and enforce does not."""
+    _hold_json(machine["state"], since=NOW - 720)
+    _last_json(machine["state"], NOW - 5, hold=True, since=NOW - 720)
+    texts = {}
+    for mode in ("observe", "enforce"):
+        cfg = {"resource": {"mode": mode}}
+        base = _sdlc(tmp_path / mode, cfg)
+        _beat(base, NOW - 10)
+        rows = _doctor()._resource_rows(cfg, str(base), now=NOW, sampler=lambda: machine["sample"])
+        texts[mode] = [r["name"] for r in rows if r["name"].startswith("resource admission: HELD")][0]
+    assert "(observe: not enforced)" in texts["observe"]
+    assert "not enforced" not in texts["enforce"]
+
+
 def test_slots_reads_the_admission_tail_once(machine, tmp_path, monkeypatch):
     log = _log()
     calls = []

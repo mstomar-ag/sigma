@@ -2615,3 +2615,9 @@ def test_the_label_page_has_a_real_run_table_that_adds_up_and_claims_no_more():
     assert not [ln for ln in page.splitlines() if "unmeasured" in ln.lower() and re.search(r"\d+\.\d|\|\s*\d+\s*\|", ln)]
     assert "Not measured:" in page, "the page must name what the run did not measure"
     assert "no rate-limit figure was" in page and "one sample" in page
+
+
+def test_configuration_page_says_when_the_doctor_shows_the_resource_rows():
+    """#1799: the page states the doctor shows its resource rows whenever the resolved mode is not off."""
+    page = pathlib.Path(__file__).resolve().parent.parent.joinpath("docs", "configuration.md").read_text(encoding="utf-8")
+    assert "the doctor shows its resource rows whenever the resolved mode is not `off`" in page

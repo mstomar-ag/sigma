@@ -89,14 +89,8 @@ def test_hold_claims_nothing_and_exits_zero(verb, machine, tmp_path, capsys):
     assert snapshot(base) == before                  # no status flip, no cursor or claim change
 
 
-def test_start_registers_a_session_but_claims_nothing_under_hold(machine, tmp_path, capsys):
-    machine["sample"] = _sample(**LOW)
-    base = backlog(tmp_path)
-    goals = {k: v for k, v in snapshot(base).items() if k.startswith("goals")}
-    code, out, err = cli(capsys, "start", str(base))
-    assert code == 0 and len(out) == 1 and out != ["HOLD"]     # `start` prints its generation token only
-    assert "HOLD" not in err                           # and never consults the gate
-    assert {k: v for k, v in snapshot(base).items() if k.startswith("goals")} == goals
+# `start` has no admission gate (it only prints a generation token and claims nothing), so a start case
+# stays green with or without a gate and was removed (#1799).
 
 
 def test_hold_marker_keeps_its_since_across_calls(machine, tmp_path, capsys):
