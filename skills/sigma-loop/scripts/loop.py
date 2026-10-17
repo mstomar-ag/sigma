@@ -49,6 +49,7 @@ def _host_model_config(config):
 state = _load("state")
 sources = _load("sources")          # backlog source: local files or GitHub issues (config-selected)
 legacy = _load("legacy")            # #239: markers written under the plugin's previous name
+pick_trace = _load("pick_trace")    # #1607: opt-in call-count + stage-seconds trace of a pick
 ledger = _load("ledger")            # team record (config-gated, default OFF; every call is fail-open)
 work = _load("work")                # per-goal worktree/branch/PR (config-gated, default OFF)
 tamper_scan = _load("tamper_scan")  # #1937: diff parser; #1933 reuses changed_test_files()
@@ -2313,7 +2314,28 @@ def _resource_gate(config):
         return 1
 
 
+_TRACE_FORCED = [False]      # #1607: `next --trace` flips this for the process; `SIGMA_PICK_TRACE=1` needs no flip
+
+
 def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True, gate=True):
+    """One pick: `_next_untraced`, bracketed by the opt-in pick trace (#1607, `pick_trace.py`).
+    Off (the default) `rec` is the no-op `NULL`, the source's counter stays unset and nothing is
+    written, so the pick is byte-identical to `_next_untraced`."""
+    rec = pick_trace.begin(sdlc_dir, os.environ, _TRACE_FORCED[0])
+    hooked = rec.active and hasattr(source, "call_counter")
+    if hooked:
+        saved, source.call_counter = source.call_counter, rec.count_args
+    try:
+        return _next_untraced(sdlc_dir, source, config, extra_skip, session_pid, refresh_heartbeat,
+                              gate, rec)
+    finally:
+        if hooked:
+            source.call_counter = saved
+        rec.end()
+
+
+def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True,
+                   gate=True, rec=pick_trace.NULL):
     """(kind, goal_or_reason): 'goal' (+marks in_progress, the commit point — second element is
     the goal ref), 'DONE' (drained — second element None on a genuine empty read, or, #1084, a
     short degraded-read reason string when `source.read_degraded()` is True — mirrors BUDGET's own
@@ -2432,11 +2454,16 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
     refusal = _label_not_ready(sdlc_dir, source, config)       # #1579: --label only, claims nothing
     if refusal:
         return ("DONE", refusal)
+    rec.mark("reconcile")
     _reconcile_sweep(sdlc_dir, config)
+    rec.mark("auto_unpark")
     just_unparked = _auto_unpark_sweep(sdlc_dir, config)
+    rec.mark("reclaim")
     just_reclaimed = _auto_reclaim_stale_claims(sdlc_dir, source, config)
     if refresh_heartbeat:                  # #1531: a standalone pick; next_batch ran it in its prologue
+        rec.mark("release_unstarted")
         just_reclaimed = frozenset(just_reclaimed) | _release_held_unstarted(sdlc_dir, config)
+    rec.mark("other")
     # #1468 / #2521: only when this call could actually do work. `_budget_reason`/`_handoff_reason`
     # are both local cursor reads, and skipping the sweep on a halted run is what keeps "a run that
     # reports BUDGET or HANDOFF mutated nothing" true of THIS commit's own code, not only of the
@@ -2465,7 +2492,9 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
     gate = {}
     held = []       # ...and the goals it declined to claim, for the summary on the DONE path
     while True:
+        rec.mark("pending_fetch")
         goal = source.next_pending(skip=skip)
+        rec.mark("other")
         if goal is None:
             # #1499: `("DONE", None)` on a backlog where everything left is waiting on an open
             # prerequisite is technically true and practically misleading -- it is what made the
@@ -2498,7 +2527,9 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
         # discovered to be unworkable. Nothing above this line has touched the goal, so a hold
         # leaves it exactly as it was found. See `_pick_dependency_hold` for the cost and the
         # fail-open cases.
+        rec.mark("dependency_hold")
         hold = _pick_dependency_hold(sdlc_dir, source, goal, config, gate)
+        rec.mark("gates")
         if hold:
             subject, still = _hold_subject(source, goal)
             print("loop.py: not claiming %s — open prerequisite %s. Left untouched (%s, no claim); "
@@ -2657,6 +2688,7 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
         # #1962: the claim itself now lives in `_claim()`, so `next`, the `claim` verb and
         # `_ensure_claimed` share ONE implementation. Behaviour here is unchanged --
         # `test_next_still_emits_claimed_through_the_extracted_helper` is the characterisation lock.
+        rec.mark("claim_writes")
         _claim(sdlc_dir, source, goal, config, session_pid=session_pid)
         # #1472: the claim is durable and nothing has been BUILT yet — the one moment where learning
         # that a cross-repo unit cannot land in one of its repos still costs nothing. See
@@ -6519,7 +6551,8 @@ def _validate_event(kind, flags, kind_allowlist=None):
 
 
 USAGE = ("usage: loop.py start <dir> [--session-pid PID] | start-run <dir> [--session-pid PID] | "
-         "next <dir> [--skip a,b] [--feature NAME] [--label NAME] [--session-pid PID] | "
+         "next <dir> [--skip a,b] [--feature NAME] [--label NAME] [--session-pid PID] [--trace] | "
+         "pick-trace-report <dir> | "
          "next-batch <dir> [--skip a,b] [--feature NAME] [--label NAME] [--session-pid PID] | "
          "session-active <dir> | prune-state <dir> [--dry-run] [--keep-days N] [--limit N] | session-end <dir> [--session-pid PID] | "
          "claim <dir> <goal> [--session-pid PID] | "
@@ -6990,7 +7023,12 @@ def _dispatch(argv):
             print(f"nothing to reclaim for thread {thread!r}" if thread
                   else "nothing registered for this goal")
         return 1 if (not result["reclaimed"] and result["blocked"]) else 0
+    if len(argv) >= 3 and argv[1] == "pick-trace-report":     # #1607: read-only; reads one state file
+        sys.stdout.write(pick_trace.report(argv[2]))
+        return 0
     if len(argv) >= 3 and argv[1] == "next":
+        if "trace" in _flags(argv[3:]):                       # #1607: `next --trace` turns the pick trace on
+            _TRACE_FORCED[0] = True
         config = state.load_config(argv[2])
         # #1661: the source is built and scoped BEFORE the watchers and the inbox read below, so a
         # `--feature` this run cannot honour costs nothing at all -- no watcher spawned, no query

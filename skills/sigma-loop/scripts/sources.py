@@ -1139,6 +1139,7 @@ class GitHubSource:
         # distinguishes "not read yet" from "read, and it was empty/absent".
         self._feature_registry_cache = _UNRESOLVED
         self._raw_run = run or _run_gh
+        self.call_counter = None       # #1607: set by `loop._next` only while a pick trace is on
         self._labels_ready = False
         self._last_goal_raw_count = None   # #230: raw size of the last goal-label read, see census
         self._label_ids = None                   # {label name -> node id}, see `_label_node_ids`
@@ -1312,6 +1313,16 @@ class GitHubSource:
             self.feature, self.feature_label = saved_unit, saved_label
             self._last_read_degraded = saved_degraded
 
+    def _raw(self, args):
+        """#1607: the ONE place arguments reach the runner. When a pick trace is on, `call_counter`
+        records the call first (so a runner that raises is still counted, and a retry counts each
+        attempt); off, it is `None` and this is a plain call. It never adds or reorders a call."""
+        counter = self.call_counter
+        counter = self.call_counter
+        if counter is not None:
+            counter(args)
+        return self._raw_run(args)
+
     def _run(self, args):
         """Single chokepoint for every `gh` call. `project` subcommands are retried with bounded
         exponential backoff on transient API errors (e.g. the intermittent "unknown owner type") so a
@@ -1365,10 +1376,10 @@ class GitHubSource:
                 pass
             return ""
         if not args or args[0] != "project":
-            return self._raw_run(args)
+            return self._raw(args)
         for attempt in range(self._PROJECT_RETRIES):
             try:
-                out = self._raw_run(args)
+                out = self._raw(args)
                 self._project_refusals = 0         # #1402: any answered project call clears the streak
                 return out
             except Exception as e:

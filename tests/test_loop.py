@@ -7874,7 +7874,8 @@ def test_the_single_pick_path_also_sweeps(monkeypatch):
     apply -- a not-due call is one file read."""
     import inspect
     lp = _loop()
-    assert "_reconcile_sweep" in inspect.getsource(lp._next)
+    assert "_reconcile_sweep" in inspect.getsource(lp._next_untraced)   # #1607: `_next` wraps it
+    assert "_next_untraced" in inspect.getsource(lp._next)
     assert "_reconcile_sweep" in inspect.getsource(lp.next_batch)   # prologue call still there
 
 
