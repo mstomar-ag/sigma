@@ -39,6 +39,9 @@ All take the project's `.sdlc` directory and the label name.
   `plan` calls unarmed: adds the goal label, removes a parked or blocked label, adds a priority label
   only when the issue has none, and assigns the configured assignee. It never creates a label and
   never removes the run label.
+  A member that is already armed but has no assignee (verdict `unassigned`) gets only the configured
+  assignee, no other label change; with no assignee configured it is left alone. An issue assigned to
+  someone else stays `assigned-elsewhere` and is refused.
 - `label_drain.py answer <sdlc_dir> <label> --answers <file.json> [--dry-run]` applies a person's
   answers. The file maps question ids, exactly as `plan` prints them, to one of that question's
   options. An unknown id or an option outside the bank refuses the whole file with no write. Each
