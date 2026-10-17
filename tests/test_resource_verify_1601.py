@@ -109,11 +109,13 @@ def test_xdist_honours_the_auto_num_workers_variable(env, tmp_path):
     (tmp_path / "test_w.py").write_text(
         "import os\n\n\ndef test_a(worker_id):\n    pass\n\n\ndef test_b(worker_id):\n    pass\n\n\n"
         "def test_c(worker_id):\n    pass\n\n\ndef test_d(worker_id):\n    pass\n")
-    cmd = (sys.executable + " -m pytest -p no:cacheprovider -n auto -v test_w.py 2>&1 | grep -o 'gw[0-9]*' | sort -u")
+    cmd = (sys.executable + " -m pytest -p no:cacheprovider -n auto -v test_w.py 2>&1 | grep -o 'created: [0-9]*/[0-9]* workers'")
     done = subprocess.run(cmd, shell=True, cwd=tmp_path, capture_output=True, text=True,
                           env=dict({k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "XDIST"))},
                                     PYTEST_XDIST_AUTO_NUM_WORKERS="2", PYTHONDONTWRITEBYTECODE="1"))
-    assert xdist and done.stdout.split() == ["gw0", "gw1"], done.stdout + done.stderr
+    # the header names the worker count itself; counting the worker ids that ran tests depended on load (a replaced
+    # worker or an uneven spread showed a third id in a full suite run)
+    assert xdist and done.stdout.strip() == "created: 2/2 workers", done.stdout + done.stderr
 
 
 # ------------------------------------------------------------------------------------------ hold
