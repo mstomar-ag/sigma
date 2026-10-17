@@ -1,0 +1,9 @@
+HTTP/2.0 404 Not Found
+Content-Type: application/json; charset=utf-8
+X-Ratelimit-Limit: 5000
+X-Ratelimit-Remaining: 4836
+X-Ratelimit-Reset: 1792267833
+X-Ratelimit-Resource: core
+X-Ratelimit-Used: 164
+
+{"message":"Not Found","status":"404"}

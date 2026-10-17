@@ -1112,6 +1112,65 @@ def view_pr(run, number, repo=None):
     return _json(run, ["api", _endpoint(repo, "pulls/%d" % number), "--method", "GET"])
 
 
+_STATUS_LINE_RE = re.compile(r"^HTTP/\S+\s+(\d{3})")
+
+
+def _split_response(text):
+    """`(status|None, headers{lowercase}, body)` of a `gh api -i` stdout: status line, headers, a blank line, body."""
+    text = (text or "").replace("\r\n", "\n")
+    head, _sep, body = text.partition("\n\n")
+    lines = head.split("\n")
+    m = _STATUS_LINE_RE.match(lines[0]) if lines else None
+    headers = {}
+    for ln in lines[1:]:
+        k, colon, v = ln.partition(":")
+        if colon:
+            headers[k.strip().lower()] = v.strip()
+    return (int(m.group(1)) if m else None), headers, body
+
+
+def conditional_get(endpoint, etag=None, fields=None, run=None):
+    """#1617: one GET with `gh api -i` and an optional stored ETag -> `{status, etag, body, not_modified}`.
+
+    `run(args)` returns `(returncode, stdout, stderr)` (default `run_gh`; no new `gh` call site). Observed
+    on the real CLI (17 Oct 2026, fixtures under tests/fixtures/gh_api_include/): a 200 exits 0 with
+    headers then body on stdout and a WEAK ETag (`W/"..."`, sent back as stored); a 304 EXITS 1 with the
+    status line and headers on stdout, no body, and `gh: HTTP 304` on stderr; an error exits 1 with its
+    status line and a JSON body. So exit 1 plus a 304 status line is `not_modified`; every other non-zero
+    exit raises a classified `GhApiError`. `fields` are query parameters (`-f k=v` with `--method GET`)."""
+    args = ["api", endpoint, "--method", "GET", "-i"]
+    if etag:
+        args += ["-H", "If-None-Match: " + etag]
+    for k, v in (fields or {}).items():
+        args += ["-f", "%s=%s" % (k, v)]
+    try:
+        rc, out, err = (run or run_gh)(args)
+    except GhApiError:
+        raise
+    except Exception as exc:                          # noqa: BLE001 - wrap, keep text and hint
+        status, kind = classify(exc)
+        raise GhApiError(str(exc), getattr(exc, "hint", None), status, kind) from exc
+    status, headers, body = _split_response(out)
+    if status == 304:
+        return {"status": 304, "etag": headers.get("etag") or etag, "body": None, "not_modified": True}
+    if rc != 0 or status is None or status >= 300:
+        hint = (err or "").strip() or None
+        probe = RuntimeError(hint or "gh api failed")
+        probe.hint = hint
+        k_status, kind = classify(probe)
+        if status is not None and status >= 300:
+            k_status = status
+            kind = {429: "rate_limit", 401: "auth", 404: "not_found", 422: "invalid"}.get(
+                status, "server" if status >= 500 else kind)
+        raise GhApiError("gh api %s failed (exit %s)%s" % (endpoint, rc, ": " + hint if hint else ""),
+                         hint, k_status, kind, rc)
+    try:
+        parsed = json.loads(body or "null")
+    except (ValueError, TypeError) as exc:
+        raise GhApiError("unparseable gh api output for %s: %s" % (endpoint, str(body)[:120])) from exc
+    return {"status": status, "etag": headers.get("etag"), "body": parsed, "not_modified": False}
+
+
 def merge_pr(run, number, merge_method="squash", sha=None, repo=None):
     """PUT /pulls/{n}/merge. No auto-merge exists in REST; not emulated. `sha` guards against races."""
     args = ["api", _endpoint(repo, "pulls/%d/merge" % number), "--method", "PUT",

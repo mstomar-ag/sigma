@@ -495,6 +495,7 @@
     "skills/sigma-loop/scripts/channel_notify.py::tick",
     "skills/sigma-loop/scripts/coexist.py::write_owner",
     "skills/sigma-loop/scripts/comment_watch.py::tick",
+    "skills/sigma-loop/scripts/dag_check.py::check",
     "skills/sigma-loop/scripts/dag_collect.py::refresh",
     "skills/sigma-loop/scripts/dag_refresh.py::_write_meta",
     "skills/sigma-loop/scripts/dag_refresh.py::refresh_if_due",

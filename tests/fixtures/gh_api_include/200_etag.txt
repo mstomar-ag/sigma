@@ -1,0 +1,11 @@
+HTTP/2.0 200 OK
+Cache-Control: private, max-age=60, s-maxage=60
+Content-Type: application/json; charset=utf-8
+Etag: W/"cdabd6c2369e193d105096d0a09adb1f8d7303ddfe82fd8b9d0eca1512005a7d"
+X-Ratelimit-Limit: 5000
+X-Ratelimit-Remaining: 4839
+X-Ratelimit-Reset: 1792267833
+X-Ratelimit-Resource: core
+X-Ratelimit-Used: 161
+
+[{"number": 7, "state": "open", "title": "fixture issue", "labels": [{"name": "sdlc:goal"}], "body": "Blocked by #3", "updated_at": "2026-10-17T10:00:00Z", "pull_request": null}]

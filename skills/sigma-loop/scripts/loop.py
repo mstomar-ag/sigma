@@ -1199,6 +1199,22 @@ def _dag_first_pick(sdlc_dir, source, config):
         pass
 
 
+def _dag_check_pick(sdlc_dir, config, source):
+    """#1617: the cheap change check, once at the start of a pick (`dag_check.check`). Nothing happens, and
+    `dag_check` is not even loaded, when `discovery.dag.mode` is written `off` or no stored map exists, so
+    the pick path is unchanged in both cases. A failure prints one stderr line from the check; this guard
+    swallows anything else. Never raises."""
+    try:
+        block = (((config or {}).get("discovery") or {}).get("dag"))
+        if isinstance(block, dict) and block.get("mode") == "off":
+            return
+        if not (pathlib.Path(sdlc_dir) / "state" / "dag.json").is_file():
+            return
+        _load("dag_check").check(sdlc_dir, config, run=getattr(source, "_run", None))
+    except Exception:                       # noqa: BLE001 - a change check never stops a pick
+        pass
+
+
 def _reconcile_sweep(sdlc_dir, config, run=None, now=None):
     """#1391 step 5e: the throttled, opt-in reconciliation pass. Returns the swept issue refs (or an
     empty frozenset), and NEVER raises.
@@ -2475,6 +2491,7 @@ def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, re
         return ("DONE", refusal)
     rec.mark("reconcile")
     _dag_first_pick(sdlc_dir, source, config)
+    _dag_check_pick(sdlc_dir, config, source)
     _reconcile_sweep(sdlc_dir, config)
     rec.mark("auto_unpark")
     just_unparked = _auto_unpark_sweep(sdlc_dir, config)
@@ -2811,6 +2828,7 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
     # This prologue can be the only tick when reconciliation blocks or drains the batch.
     write_session_heartbeat(sdlc_dir, session_pid)
     _dag_first_pick(sdlc_dir, source, config)
+    _dag_check_pick(sdlc_dir, config, source)
     _reconcile_sweep(sdlc_dir, config)
     capped_by_config = max_concurrent is None      # #1531: free slots count only against the configured cap
     if max_concurrent is None:

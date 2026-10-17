@@ -69,6 +69,7 @@ LIBRARY_ONLY = {
     "feature_land_approval_prune",
     "conflict_state",
     "dag_store", "dag_collect", "dag_refresh",
+    "dag_check",
     "feature_park",
     "qkind",
     "landing_preflight",
