@@ -148,7 +148,9 @@ def inert_failures(tmp):
               "feature_upkeep_sched": {"scheduler_tick"},                  # #923
               "feature_upkeep_job": {"run_job", "run_sweep", "run_engine"}})   # #1387
     ws = tool("write_surface")
-    S.expect(bad, "the write-surface scanner sees no write site", ws.scan_paths(S.ROOT, module_paths()), [])
+    seen = [(r["path"].rsplit("/", 1)[-1], r["function"]) for r in ws.scan_paths(S.ROOT, module_paths())]
+    # #1842: the scanner reads state.atomic_write_text as a write site; the one site is registered in the inventory
+    S.expect(bad, "the write-surface scanner sees only the registered publish site", seen, [("feature_upkeep_state.py", "_publish")])
     for path in module_paths():
         src = path.read_text(encoding="utf-8")
         tree = ast.parse(src)
@@ -244,13 +246,13 @@ def test_fixture_unscanned_flag_is_required(tmp_path):
 
 def test_fixture_write_surface_sees_staged_writes(tmp_path):
     """The write-surface scanner reads names: a function that calls mkdir or os.replace is a site, and a call through the
-    shared helper `state.atomic_write_text` is not (which is why the new state module needs no inventory row)."""
+    shared helper `state.atomic_write_text` is too since #1842 (the state module's one site has an inventory row)."""
     ws = tool("write_surface")
     sample = tmp_path / "sample.py"
     sample.write_text("import os\n\ndef a(p):\n    p.mkdir()\n\ndef b(p, q):\n    os.replace(p, q)\n\ndef c(state, p):\n"
                       "    state.atomic_write_text(p, 'x')\n    state.refuse_symlinks(p, 'y', create_parents=True)\n", encoding="utf-8")
     rows = ws.scan_paths(tmp_path, [sample])
-    assert sorted((r["function"], r["rule"]) for r in rows) == [("a", "fs-write"), ("b", "fs-remove")]
+    assert sorted((r["function"], r["rule"]) for r in rows) == [("a", "fs-write"), ("b", "fs-remove"), ("c", "fs-write")]
 
 
 # --------------------------------------------------------------------------- #947: Level 1 on the unit path
