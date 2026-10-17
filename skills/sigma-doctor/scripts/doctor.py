@@ -1328,6 +1328,22 @@ def _awaiting_merge_row(sdlc_dir, now=None):
     return _chk(f"goals {line} -- {'; '.join(parts)}", False, fix)
 
 
+def _dag_cycles_row(cfg, sdlc_dir):
+    """#1615: `dag cycles: #A, #B; #C, #D, #E` -- every member of every distinct cycle in the stored map,
+    not OK, with the one fix. None when there is none, when `discovery.dag.mode` is `off`, or when the
+    map cannot be read. One file read, no network. Never raises."""
+    try:
+        dc = _load_loop_script("dag_cycles")
+        found = dc.find(sdlc_dir, cfg)
+        if not found:
+            return None
+        return _chk("dag cycles: " + "; ".join(dc.members(c) for c in found), False,
+                    "remove one `Blocked by` line in each cycle so one goal can be picked; the "
+                    "pick output and the comment on the lowest open member say the same")
+    except Exception:                        # noqa: BLE001
+        return None
+
+
 def _dag_map_row(cfg, sdlc_dir, now=None):
     """#1612 LIVENESS: the stored dependency map's row. Reads the config, the map file and the small
     refresh record; no network. Absent (None) when `discovery.dag.mode` is `off`, and when the operator
@@ -3833,6 +3849,9 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     _dm = _dag_map_row(cfg, sdlc_dir)  # #1612: absent when mode is off
     if _dm is not None:
         out.append(_dm)
+    _dcy = _dag_cycles_row(cfg, sdlc_dir)  # #1615: absent with no cycle or mode off
+    if _dcy is not None:
+        out.append(_dcy)
 
     out.extend(_ai_filed_rows(cfg, base))  # #1705
 
