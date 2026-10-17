@@ -230,6 +230,21 @@ def test_currency_after_number_for_compute_parks_as_spend():
         assert d.kind == "park" and "spend phrase" in d.reason, (text, d)
 
 
+def test_dollar_sign_and_more_codes_after_number_park_as_spend():
+    m = _mod()
+    for text in ("use 40$ of GPU time", "use 40 $ of GPU time", "use 40 AUD of GPU time",
+                 "use 500 JPY of GPU time"):
+        d = m.decide("tidy", text, {}, {})
+        assert d.kind == "park" and "spend phrase" in d.reason, (text, d)
+
+
+def test_dollar_sign_and_codes_near_misses_still_arm():
+    m = _mod()
+    for text in ("use 40 MB of GPU docs", "see log:\n```\nuse 40$ of GPU time\n```\ntidy the docs",
+                 "use 40 audits of GPU docs"):
+        assert m.decide("tidy", text, {}, {}).kind == "arm", text
+
+
 def test_currency_after_number_near_misses_still_arm():
     m = _mod()
     for text in ("We need 40\u20ac of flour.", "see log:\n```\ncost 40\u20ac gpu run\n```\ntidy the docs"):

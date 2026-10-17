@@ -41,8 +41,8 @@ _FENCE = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
 _NUMWORD = (r"(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty"
             r"|ninety|hundred|thousand)")
 _AMOUNT = (r"(?:(?:\$|US\$|USD\s?|€|£|¥|EUR\s?|GBP\s?|CHF\s?|CAD\s?|INR\s?)\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\b"
-           r"|\b\d[\d,]*(?:\.\d+)?\s*(?:dollars?|USD|bucks|euros?|EUR|GBP|CHF|CAD|INR|yen|quid|pounds?(?:\s+sterling)?)\b"
-           r"|\b\d[\d,]*(?:\.\d+)?\s?[kK]?\s?[€£¥]"
+           r"|\b\d[\d,]*(?:\.\d+)?\s*(?:dollars?|USD|bucks|euros?|EUR|GBP|CHF|CAD|INR|AUD|NZD|JPY|CNY|RMB|SEK|NOK|DKK|SGD|HKD|KRW|MXN|BRL|ZAR|PLN|AED|yen|quid|pounds?(?:\s+sterling)?)\b"
+           r"|\b\d[\d,]*(?:\.\d+)?\s?[kK]?\s?[€£¥$]"
            r"|\b" + _NUMWORD + r"(?:[- ]" + _NUMWORD + r")*\s+(?:dollars?|bucks|euros?|yen|quid|pounds?(?:\s+sterling)?)\b)")
 _COMPUTE = r"\b(?:GPUs?|instances?|clusters?|credits|compute|pods?|cloud|runs?|nodes?)\b"
 _AMOUNT_FOR_COMPUTE = re.compile(_AMOUNT + r"[^.\n]{0,60}" + _COMPUTE + "|" + _COMPUTE + r"[^.\n]{0,60}" + _AMOUNT,

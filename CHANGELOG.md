@@ -3,6 +3,7 @@
 All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
+- **Spend triage recognises a dollar sign and more currency codes after the number (#1756).** `40$`, `40 $`, `40 AUD`, `500 JPY` and similar three-letter codes next to a compute word now park as a spend phrase; non-money units such as `40 MB` and amounts inside a fenced block still arm.
 - **Label drains are documented and measured (#1582).** `docs/label-drain.md` covers the run label from arming to the stop, `--label` appears in the loop and goal skills with one pinned guarantee sentence, and the page's GitHub call counts come from a counting fake transport (the real scratch-repository run is unmeasured).
 - **The advisory reviewer spawn (cursor, codex, `review.command`) now takes a `session` lease first (#1738).** `reviewer.py run` uses `resource_guard.session_lease` like the other model-session sites; a hold records the existing failed run (`failure: held`), starts nothing and prints no verdict, so a hold can never read as an approval. Off unless `resource.mode` or `SIGMA_RESOURCE_MODE` is `observe` or `enforce`; off writes nothing.
 - **Label drain honours recorded decisions (#1732).** `label_drain.py plan` drops questions that already have a recorded answer and recomputes `ready`, so it agrees with `answer`; `loop.py next|next-batch --label` counts the plan's real open questions and no longer refuses on unarmed members once a `leave them` decision is recorded. With no recorded decision the output is unchanged.
