@@ -13,6 +13,12 @@ the issue from GitHub. Mode `off` touches nothing and creates no file. It never 
 failure prints ONE stderr line and returns `error`. `life=None` keeps an existing node's life and
 gives a new node `goal`.
 
+A node (blocker or goal) the usable map has never seen is `None`, not `[]`: absence is not a verdict.
+
+Without `fcntl` (Windows) the refresh lock yields `open`: `insert` then has NO mutual exclusion, so two
+interleaved inserts can each save a map built from the same read and the later save drops the earlier
+node. The file is still a valid map (every save is atomic) and the next refresh restores what was lost.
+
 `closing_members(sdlc, config, blocker, blocked, ...)` answers "would the edge (blocker, blocked)
 close a cycle?": the sorted member list when it would, `[]` when it would not (also in mode `off`,
 which reads nothing), `None` when it cannot be decided. With a usable stored map the answer is a walk
@@ -23,7 +29,10 @@ at most `LIVE_READ_CAP` reads. Reaching `blocked` is a cycle. The cap or a faile
 `CycleRefused(ValueError)` carries `.members`; its message names every member as `#N`.
 
 `record_unchecked` / `take_unchecked` keep `state/dag-unchecked.json`: number pairs only, at most
-`UNCHECKED_CAP` (oldest dropped), written atomically. `dag_refresh` clears it after a SAVED refresh,
+`UNCHECKED_CAP` (oldest dropped), written atomically. Each read-modify-write runs under its own lock
+(`state/dag-unchecked.lock`, never the refresh lock, so `insert` cannot deadlock with it), waited for at
+most `UNCHECKED_WAIT` seconds: two concurrent records keep both pairs and a pair recorded during a take
+lands in the taken list or the file, never neither. `dag_refresh` clears it after a SAVED refresh,
 because the refreshed map and `dag_cycles` then examine those edges; the file cannot grow past the cap.
 
 Scale: `insert` is one read and one rewrite of the whole map file, serialised on the refresh lock, so
@@ -31,6 +40,7 @@ at 100x (about 20,000 nodes, a few MB) a filing pays one parse and one write of 
 is at most 25 requests per `Blocked by` line, only while no usable map exists. Not measured against a
 live repository; the counts are arithmetic. Numbers are the only thing kept from any body read.
 """
+import contextlib
 import importlib.util
 import json
 import os
@@ -55,6 +65,8 @@ dag_core = _load("dag_core")
 LIVE_READ_CAP = 25
 UNCHECKED_CAP = 200
 UNCHECKED_FILE = "dag-unchecked.json"
+UNCHECKED_LOCK = "dag-unchecked.lock"           # its own file: never the refresh lock `insert` already holds
+UNCHECKED_WAIT = 5.0                            # seconds a record/take waits for a sibling, then goes unlocked
 _PRIO = re.compile(r"^priority:(P[0-4])$")
 
 
@@ -164,7 +176,7 @@ def _from_map(m, blocker, blocked):
                            n.get("prio")) for n in m["nodes"]]
     g = dag_core.build(nodes, [(e["blocker"], e["blocked"], e.get("source", "other")) for e in m["edges"]])
     if blocker not in g.nodes or blocked not in g.nodes:
-        return []
+        return None                                     # a node the map has never seen: undecided, not "no cycle"
     down = set(dag_core.open_dependents(g, blocked))
     if blocker not in down:
         return []
@@ -240,16 +252,46 @@ def _pairs(sdlc):
     return out
 
 
+@contextlib.contextmanager
+def _unchecked_lock(sdlc):
+    """Hold the unchecked-list lock (a blocking `flock` on its own file, polled for at most `UNCHECKED_WAIT`
+    seconds). Without `fcntl`, an unwritable directory or a sibling that never lets go it yields anyway:
+    a list update must not fail a filing. The lock dies with its holder."""
+    fd, fcntl = None, dag_store.fcntl
+    if fcntl is not None:
+        try:
+            p = _unchecked_path(sdlc).parent / UNCHECKED_LOCK
+            os.makedirs(p.parent, exist_ok=True)
+            fd = open(p, "a+")
+            end = time.monotonic() + UNCHECKED_WAIT
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= end:
+                        break
+                    time.sleep(0.01)
+        except OSError:
+            pass
+    try:
+        yield
+    finally:
+        if fd is not None:
+            fd.close()
+
+
 def record_unchecked(sdlc, blocker, blocked, config=None):
     """Remember an edge written without a cycle verdict. Numbers only; never raises; off writes nothing."""
     try:
         if dag_store.mode(_config(sdlc, config)) == "off":
             return False
         pair = [int(blocker), int(blocked)]
-        pairs = [p for p in _pairs(sdlc) if p != pair] + [pair]
         p = _unchecked_path(sdlc)
         os.makedirs(p.parent, exist_ok=True)
-        dag_store.state.atomic_write_text(p, json.dumps(pairs[-UNCHECKED_CAP:], separators=(",", ":")) + "\n")
+        with _unchecked_lock(sdlc):
+            pairs = [q for q in _pairs(sdlc) if q != pair] + [pair]
+            dag_store.state.atomic_write_text(p, json.dumps(pairs[-UNCHECKED_CAP:], separators=(",", ":")) + "\n")
         return True
     except Exception:                                   # noqa: BLE001
         return False
@@ -262,9 +304,13 @@ def unchecked(sdlc):
 
 def take_unchecked(sdlc):
     """Return the recorded pairs and clear the list. Never raises."""
-    pairs = _pairs(sdlc)
     try:
-        _unchecked_path(sdlc).unlink()
-    except OSError:
-        pass
-    return pairs
+        with _unchecked_lock(sdlc):
+            pairs = _pairs(sdlc)
+            try:
+                _unchecked_path(sdlc).unlink()
+            except OSError:
+                pass
+        return pairs
+    except Exception:                                   # noqa: BLE001
+        return []
