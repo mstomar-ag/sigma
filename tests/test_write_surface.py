@@ -308,3 +308,36 @@ def test_926_module_constant_and_enclosing_scope_still_resolve(tmp_path):
         '    inner()\n\ndef uses_module():\n    subprocess.run(["gh", *VERB])\n')
     rows = {(r["function"], r["rule"]) for r in _module().scan_paths(tmp_path, [source])}
     assert rows == {("inner", "gh-issue"), ("uses_module", "gh-pr")}
+
+
+def test_1842_atomic_write_text_is_an_fs_write_site(tmp_path):
+    source = tmp_path / "a.py"
+    source.write_text("import state\n\ndef record(p):\n    state.atomic_write_text(p, 'x')\n")
+    found = _module().scan_paths(tmp_path, [source])
+    assert {(f["function"], f["rule"], f["count"]) for f in found} == {("record", "fs-write", 1)}
+
+
+def test_1842_scan_of_the_repo_lists_chain_answer():
+    found = _module().scan_paths(ROOT, _module()._paths(ROOT))
+    chain = {(f["function"], f["rule"]) for f in found if f["path"] == "skills/sigma-loop/scripts/chain.py"}
+    assert ("answer", "fs-write") in chain and ("plan", "fs-write") in chain
+
+
+def test_1842_inventory_has_chain_answer_gate_naming_the_unpark_resolve_reach():
+    entries = json.loads((ROOT / "docs" / "launch" / "write-surface.json").read_text())["entries"]
+    row = [e for e in entries if e["path"].endswith("scripts/chain.py") and e["function"] == "answer"]
+    assert len(row) == 1 and row[0]["rule"] == "fs-write"
+    assert "unpark" in row[0]["gate"] and "resolve" in row[0]["gate"] and "GitHub" in row[0]["gate"]
+    plan = [e for e in entries if e["path"].endswith("scripts/chain.py") and e["function"] == "plan"][0]
+    assert "scanner does not see it" not in plan["gate"]
+
+
+def test_1842_dropping_the_chain_answer_entry_makes_the_ratchet_report_it():
+    data = json.loads((ROOT / "docs" / "launch" / "write-surface.json").read_text())
+    data["entries"] = [e for e in data["entries"] if not (e["path"].endswith("scripts/chain.py") and e["function"] == "answer")]
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        inv = Path(d) / "inv.json"
+        inv.write_text(json.dumps(data))
+        out = _module().ratchet(ROOT, inv)
+    assert any("new write site skills/sigma-loop/scripts/chain.py:answer fs-write" in x for x in out)

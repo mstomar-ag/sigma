@@ -372,8 +372,8 @@ def _rules_for_call(node, values):
         rules.add("fs-remove")
     elif name.startswith("os.") and name.split(".")[-1] in {"mkdir", "makedirs", "link", "symlink"}:
         rules.add("fs-write")
-    elif name.split(".")[-1] in _WRITE_METHODS:
-        rules.add("fs-write")
+    elif name.split(".")[-1] in _WRITE_METHODS or name.split(".")[-1] == "atomic_write_text":
+        rules.add("fs-write")    # state.atomic_write_text writes a computed path (#1842)
     return rules
 
 
