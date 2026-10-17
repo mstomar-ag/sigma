@@ -1,13 +1,14 @@
-"""File triage core (rulebook, slice 14, #999). Pure library, UNWIRED: nothing imports it yet.
+"""File triage core (rulebook, slice 14, #999). Pure library, wired into filing and the migration.
 
-`decide(title, body, flags, config) -> Decision(kind, priority, reason)` for one AI-filed issue.
+`decide(title, body, flags, config) -> Decision(kind, priority, reason, matched, qkind)` for one AI-filed issue.
 kind is `arm` (ready for the loop at `priority`), `park` (an ordinary park with `reason`), or `queue` (triage is
 switched off: the old behaviour, no priority). It is total: any error parks. Priority is P0-P4 or None, never
 a blocking value. The decision reads nothing about who filed it (login-free): `flags` is only inspected for
-`human_confirmed`, `priority` and `bucket`.
+`human_confirmed`, `priority`, `bucket` and `park` (a declared question kind, #1703).
 
 Order: triage off -> queue; invalid buckets -> park; deny-list -> park (it can only park, even for a
-human-confirmed filing); human-confirmed -> arm at its own plan priority; else a bucket -> arm at that bucket's
+human-confirmed filing); a declared `park` kind or a question title (`triage.question_patterns`, TITLE only, `[]`
+disables) -> park with that `qkind`; human-confirmed -> arm at its own plan priority; else a bucket -> arm at that bucket's
 priority. Deny-list: the hard-stop classifier (default classes forced on here), configurable words, spend phrases (`triage.spend_phrases`, [] disables), secret
 shapes, and a recorded-permission marker on the first body line (the existing first-line parser).
 
@@ -27,7 +28,8 @@ _HERE = pathlib.Path(__file__).resolve().parent
 
 #: `matched` (#1498): the deny-list class that parked the filing (`hard-stop word`, `spend phrase`, `secret`,
 #: `hard-stop class`, `permission marker`), else None. Callers declare a hard-stop kind from it.
-Decision = collections.namedtuple("Decision", "kind priority reason matched", defaults=(None,))
+#: `qkind` (#1703): the declared question kind of a park for a person (declared path or title detector), else None.
+Decision = collections.namedtuple("Decision", "kind priority reason matched qkind", defaults=(None, None))
 
 DEFAULT_BUCKETS = {"urgent": "P2", "routine": "P3", "unclear": "P4"}
 DEFAULT_HUMAN_PRIORITY = "P1"
@@ -51,8 +53,22 @@ _URGENT = re.compile(r"\b(unsafe|vulnerab\w*|exploit\w*|data corrupt\w*|deadlock
 _ROUTINE = re.compile(r"\b(tech.?debt|cleanup|edge case|polish|follow.?up|cosmetic|nice.to.have)\b", re.IGNORECASE)
 
 
-def _park(reason, matched=None):
-    return Decision("park", None, reason, matched)
+def _park(reason, matched=None, qkind=None):
+    return Decision("park", None, reason, matched, qkind)
+
+
+#: Default question titles (#1703): "Question", "Decide", "Should" at the start, or a trailing "?". Title only.
+DEFAULT_QUESTION_PATTERNS = (r"^\s*question\b", r"^\s*decide\b", r"^\s*should\b", r"\?\s*$")
+
+
+def _is_question(title, tri):
+    pats = tri.get("question_patterns")
+    if not (isinstance(pats, (list, tuple)) and all(isinstance(p, str) for p in pats)):
+        pats = DEFAULT_QUESTION_PATTERNS
+    try:
+        return any(re.search(p, title, re.IGNORECASE) for p in pats)
+    except re.error:
+        return any(re.search(p, title, re.IGNORECASE) for p in DEFAULT_QUESTION_PATTERNS)
 
 
 def _block(config):
@@ -278,6 +294,11 @@ def _decide(title, body, flags, config):
     if why:
         return _park(why[0], why[1])
     flags = flags if isinstance(flags, dict) else {}
+    declared = flags.get("park")
+    if isinstance(declared, str) and declared != "unknown" and declared in _load("qkind").QKINDS:
+        return _park("declared question", None, declared)
+    if _is_question(title, tri):
+        return _park("question for a person", None, "needs_decision")
     if flags.get("human_confirmed") is True:
         pri = flags.get("priority")
         if isinstance(pri, str) and _PRIO.fullmatch(pri):

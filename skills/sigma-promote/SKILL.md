@@ -15,7 +15,7 @@ empty path. Claude keeps its provided value.
 Detailed selection triggers: [selection](references/selection.md).
 
 There is no confirmation queue any more. Sigma files what it finds already decided: triage arms an
-AI-filed issue (`sdlc:goal`) or parks it with a declared question kind. The old
+AI-filed issue (`sdlc:goal`) or parks it with a declared question kind (a deny-list match, a cap, a question title or a declared `--needs-person`). The old
 `sdlc:needs-confirmation` label is legacy: nothing writes it unless `ai_filed.triage.enabled` is
 false, and a leftover one is inert.
 
