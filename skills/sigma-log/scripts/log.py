@@ -62,6 +62,7 @@ honest answer when it has nothing to say.
 """
 import calendar
 import json
+import math
 import os
 import pathlib
 import re
@@ -771,6 +772,30 @@ def loop_heartbeat_tail(sdlc_dir, now=None):
     return "" if newest is None else "loop heartbeat: " + _format_ago(now - newest)
 
 
+def _read_hold_record(base):
+    """The held record, else None. Copy of sigma-loop's `resource_liveness.hold_view` rule (#1808): `hold.json` when it
+    says hold; an explicit open `hold.json` is final; absent or unreadable falls back to `last.json` saying hold."""
+    def read(name):
+        try:
+            record = json.loads(pathlib.Path(base, name).read_text())
+        except (OSError, ValueError):
+            return None
+        return record if isinstance(record, dict) else None
+
+    def held(record):
+        since = record.get("since") if record else None
+        return bool(record) and record.get("state") == "hold" and not isinstance(since, bool) \
+            and isinstance(since, (int, float)) and math.isfinite(since)
+
+    record = read("hold.json")
+    if held(record):
+        return record
+    if record and record.get("state") == "open" and record.get("since") is not None:
+        return None
+    last = read("last.json")
+    return last if held(last) else None
+
+
 def admission_tail(config, now=None, env=None):
     """#1604: `admission HELD 12m: memory` while the resource guard holds new work, else an empty string.
 
@@ -791,20 +816,27 @@ def admission_tail(config, now=None, env=None):
     if not base:
         state = env.get("XDG_STATE_HOME") or os.path.join(env.get("HOME") or os.path.expanduser("~"), ".local", "state")
         base = os.path.join(state, "sigma", "resource")
-    try:
-        record = json.loads(pathlib.Path(base, "hold.json").read_text())
-        since = record["since"]
-        if record["state"] != "hold" or isinstance(since, bool) or not isinstance(since, (int, float)):
-            return ""
-    except (OSError, ValueError, KeyError, TypeError):
+    record = _read_hold_record(base)
+    if record is None:
         return ""
     now = time.time() if now is None else now
-    reason = record.get("reason")
+    since, reason = record["since"], record.get("reason")
     return "admission HELD %dm%s%s" % (max(0, now - since) // 60, ": %s" % reason if isinstance(reason, str) and reason else "",
                                        " (observe: not enforced)" if mode == "observe" else "")
 
 
 def slots(sdlc_dir, now=None, render_py=None):
+    """The `slots` answer; a held admission is named on every one of them (#1808), not only on a rendered Block A."""
+    now = time.time() if now is None else now
+    text = _slots(sdlc_dir, now=now, render_py=render_py)
+    state, _detail, config = action_log_state(sdlc_dir)
+    if state in (LOG_UNKNOWN, LOG_OFF) or "admission HELD" in text:
+        return text
+    admission = admission_tail(config, now)
+    return text + ("; " + admission if admission else "")
+
+
+def _slots(sdlc_dir, now=None, render_py=None):
     """The rendered `slots` output — a string, ready to print, in every state including the ones
     where it has nothing to render.
 
