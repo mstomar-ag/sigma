@@ -1344,6 +1344,25 @@ def _dag_cycles_row(cfg, sdlc_dir):
         return None
 
 
+def _dag_history_row(cfg, sdlc_dir, now=None):
+    """#1622: `dag history: <bytes> in <month>`, not OK above 1 MB in the current month (a burst; Sigma
+    never prunes history). None when `discovery.dag.mode` is `off` or no history exists. One `stat`,
+    no network. Never raises."""
+    try:
+        dh = _load_loop_script("dag_history")
+        h = dh.health(sdlc_dir, time.time() if now is None else now, cfg)
+        if h is None:
+            return None
+        name = "dag history: %d bytes in %s" % (h["bytes"], h["month"])
+        if not h["warn"]:
+            return _chk(name, True, "")
+        return _chk(name, False,
+                    "history is append-only and Sigma never deletes it; once the month is closed, compress "
+                    "or move `.sdlc/state/dag-history/%s.jsonl` out of the tree yourself" % h["month"])
+    except Exception:                        # noqa: BLE001
+        return None
+
+
 def _dag_map_row(cfg, sdlc_dir, now=None):
     """#1612 LIVENESS: the stored dependency map's row. Reads the config, the map file and the small
     refresh record; no network. Absent (None) when `discovery.dag.mode` is `off`, and when the operator
@@ -3858,6 +3877,10 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     _dcy = _dag_cycles_row(cfg, sdlc_dir)  # #1615: absent with no cycle or mode off
     if _dcy is not None:
         out.append(_dcy)
+
+    _dhr = _dag_history_row(cfg, sdlc_dir)  # #1622: absent with no history or mode off
+    if _dhr is not None:
+        out.append(_dhr)
 
     out.extend(_ai_filed_rows(cfg, base))  # #1705
 

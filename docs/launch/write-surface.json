@@ -3865,6 +3865,14 @@
       "risk": "low"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag_history.py",
+      "function": "_append",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "discovery.dag.mode is not off (dag_store.save returns before the call, append checks it); creates only the runtime state directory state/dag-history and appends one line per change record (numbers, event name, timestamp) to the file of the record's own month, open mode append; nothing in the module deletes, truncates or rewrites a history path",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/dag_insert.py",
       "function": "_unchecked_lock",
       "rule": "fs-write",

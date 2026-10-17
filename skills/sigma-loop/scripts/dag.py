@@ -9,6 +9,10 @@
   dag.py line [--sdlc DIR]      one line, the map's age and size; reads one file, no network, and
                                 prints nothing when mode is off or there is no map
 
+  dag.py history [--month YYYY-MM] [--sdlc DIR]
+                                that month's history records, one JSON line each (default: the current
+                                month); opens only that month's file, no network (#1622)
+
   dag.py chain GOAL [--json] [--verify] [--include-resolved] [--sdlc DIR]
                                 every unresolved transitive blocker of GOAL, in order (schema
                                 `dag-chain/1`, see dag_chain.py); read-only
@@ -98,6 +102,23 @@ def refresh(sdlc, force=False):
     return out, (1 if res["status"] in ("kept", "error") else 0)
 
 
+def history(sdlc, month=None):
+    """`(text, exit_code)`: one month's records, one JSON line each."""
+    import json
+    dh = _load("dag_history")
+    try:
+        config = dh._load("dag_store").state.load_config(sdlc)
+    except Exception:
+        config = {}
+    if dh._off(sdlc, config):
+        return "dag: off", 0
+    try:
+        recs = dh.read_month(sdlc, month or dh.month_of(time.time()))
+    except ValueError as exc:
+        return "dag history: %s" % exc, 2
+    return "\n".join(json.dumps(r, sort_keys=True, separators=(",", ":")) for r in recs), 0
+
+
 def _ids(nums):
     return ", ".join("#%d" % n for n in nums)
 
@@ -150,6 +171,9 @@ def main(argv=None):
     fp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     lp = sub.add_parser("line", help="print the map's age and size on one line (no network)")
     lp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
+    yp = sub.add_parser("history", help="print one month of the map's history records (no network)")
+    yp.add_argument("--month", default=None, help="YYYY-MM (default: the current month)")
+    yp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     cp = sub.add_parser("chain", help="every unresolved transitive blocker of a goal, in order")
     cp.add_argument("goal", type=int)
     cp.add_argument("--json", action="store_true", help="print the dag-chain/1 object")
@@ -168,6 +192,11 @@ def main(argv=None):
     if args.verb in ("chain", "chains", "stuck"):
         out, code = _query(args.verb, args, sdlc)
         print(out)
+        return code
+    if args.verb == "history":
+        out, code = history(sdlc, args.month)
+        if out:
+            print(out)
         return code
     if args.verb == "rebuild":
         line, code = rebuild(sdlc)

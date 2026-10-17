@@ -32,6 +32,10 @@ never changes the picker. With mode `off` nothing here reads or writes anything:
 optional argument of those three; left out, the project config is read from `sdlc`. A caller that
 holds the config should pass it.
 
+Every successful `save` also hands the map it replaced and the one it wrote to `dag_history.record_save`
+(#1622), which appends what changed to a monthly file and never fails the save; one extra read of the
+previous file per save.
+
 Scale: one file read and one parse per `load`, linear in nodes plus edges; at 10x (about 2,000
 nodes) the file is a few hundred KB, at 100x a few MB. `save` rewrites the whole file, one writer at
 a time by the lock, so the refresh is a serialised chokepoint by design. Nothing grows without bound:
@@ -44,6 +48,7 @@ import json
 import os
 import pathlib
 import re
+import sys
 import time
 
 try:                    # POSIX only; without it the refresh lock fails OPEN, as sync.py's does
@@ -232,10 +237,18 @@ def save(sdlc, m, config=None):
         doc["schema"] = SCHEMA
         p = path(sdlc)
         os.makedirs(p.parent, exist_ok=True)
+        try:                                    # the map being replaced, for the history (#1622)
+            before = load(sdlc, config)[0]
+        except Exception:
+            before = None
         state.atomic_write_text(p, json.dumps(doc, sort_keys=True, separators=(",", ":")) + "\n")
-        return True, "ok"
     except Exception:
         return False, "error"
+    try:                                        # a history failure never fails or delays a save
+        _load("dag_history").record_save(sdlc, config, before, doc, time.time())
+    except Exception as exc:
+        print("dag history: not recorded (%s)" % type(exc).__name__, file=sys.stderr)
+    return True, "ok"
 
 
 def load(sdlc, config=None):
