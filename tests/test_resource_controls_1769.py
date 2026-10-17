@@ -53,3 +53,15 @@ def test_every_listed_control_names_an_existing_test_and_an_applicable_patch(tmp
         assert (ROOT / control["test"].split("::")[0]).is_file(), control["id"]
         text = (ROOT / control["file"]).read_text(encoding="utf-8")
         assert text.count(control["old"]) == 1, control["id"]
+
+
+def test_a_control_whose_baseline_fails_is_rejected(tmp_path):
+    root = _fake_root(tmp_path)
+    (root / "skills" / "mod.py").write_text("VALUE = 5\n")
+    ok, detail = rc.run_control(_control(old="VALUE = 5", new="VALUE = 6"), root=root)
+    assert not ok and "baseline not green" in detail
+
+
+def test_a_break_that_errors_instead_of_failing_is_rejected(tmp_path):
+    ok, detail = rc.run_control(_control(new="VALUE = (\n"), root=_fake_root(tmp_path))
+    assert not ok and "no FAILED line" in detail

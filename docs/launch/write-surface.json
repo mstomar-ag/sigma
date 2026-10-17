@@ -3935,14 +3935,6 @@
       "count": 1,
       "gate": "resource guard controls runner (CI and by hand); writes only inside a temporary copy it creates, never the checkout",
       "risk": "medium"
-    },
-    {
-      "path": "tools/resource_controls.py",
-      "function": "run_control",
-      "rule": "fs-write",
-      "count": 1,
-      "gate": "resource guard controls runner (CI and by hand); writes only inside a temporary copy it creates, never the checkout",
-      "risk": "medium"
     }
   ]
 }

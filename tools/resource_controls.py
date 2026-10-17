@@ -37,23 +37,36 @@ def apply_break(copy_root, control):
     return None
 
 
+def _pytest(copy, test):
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    return subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-x", test],
+                          cwd=str(copy), env=env, capture_output=True, text=True, timeout=300)
+
+
+def _failed_line(out, test):
+    """True when pytest reported the named test as FAILED (not a collection/setup ERROR)."""
+    node = test.split("::")[-1].split("[")[0]
+    return any(line.startswith("FAILED ") and node in line for line in out.splitlines())
+
+
 def run_control(control, root=ROOT):
-    """-> (ok, detail). ok is True only when the break applied and the named test failed."""
+    """-> (ok, detail). ok only when the unbroken test passes AND, once broken, it reports a FAILED line."""
     with tempfile.TemporaryDirectory(prefix="sigma-controls-") as tmp:
         copy = pathlib.Path(tmp) / "copy"
-        copy.mkdir()
-        for part in ("skills", "tests"):
-            shutil.copytree(pathlib.Path(root) / part, copy / part, ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(pathlib.Path(root), copy,
+                        ignore=shutil.ignore_patterns(".git", ".sdlc", "__pycache__", ".pytest_cache"))
+        base = _pytest(copy, control["test"])
+        if base.returncode != 0:
+            return False, "baseline not green (pytest exit %d): %s" % (
+                base.returncode, (base.stdout + base.stderr)[-200:].strip())
         problem = apply_break(copy, control)
         if problem:
             return False, "did not apply: " + problem
-        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-        done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-x", control["test"]],
-                              cwd=str(copy), env=env, capture_output=True, text=True, timeout=300)
+        done = _pytest(copy, control["test"])
         if done.returncode == 0:
             return False, "test stayed green under the break"
-        if done.returncode != 1:
-            return False, "test did not run cleanly (pytest exit %d), not a red: %s" % (
+        if done.returncode != 1 or not _failed_line(done.stdout, control["test"]):
+            return False, "no FAILED line for the test (pytest exit %d), error not a red: %s" % (
                 done.returncode, (done.stdout + done.stderr)[-200:].strip())
         return True, "red as required"
 
