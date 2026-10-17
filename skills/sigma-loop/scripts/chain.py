@@ -4,13 +4,16 @@
     chain.py plan <sdlc_dir> <N> [--json]
     chain.py sheet <sdlc_dir> <chain>
     chain.py answer <sdlc_dir> <chain> --answers <file> | --defaults
+    chain.py approve <sdlc_dir> <chain>
+    chain.py arm <sdlc_dir> <chain> [--dry-run]
 
 `plan` and `sheet` are READ-ONLY toward GitHub. Every call they make goes through `_GetOnly`, which raises
 on anything that is not an explicit `gh api ... --method GET`: no `gh issue ...` verb, no GraphQL, no body
 flag. `answer` is the one verb that reaches GitHub: it hands a parked member's bank-option answer to
 `unpark.resolve` (the Q&A block, one comment, and a label change only if the answer starts the member
 again); it never posts free text, and the write-surface scanner does not see this path, so this paragraph
-and the sheet's own list of writes are its record. The local write is the record `<sdlc_dir>/state/chains/c<N>.json` (issue numbers, verdict words and labels only; never
+and the sheet's own list of writes are its record. `arm` is the verb that creates the label `chain:<root>`,
+adds it to the members and arms them: a new GitHub write path, reached only after approval (see ARM). The local write is the record `<sdlc_dir>/state/chains/c<N>.json` (issue numbers, verdict words and labels only; never
 a title, a body, a comment or a question), written only for a plan that was produced, never for a refusal.
 
 CLOSURE. From the stored dependency map in one local read (`dag_chain`), bounded by `chain.max_members`
@@ -47,8 +50,25 @@ is posted on a public repository. `--defaults` accepts the recommended (first) o
 except one that has none (the cap, a spend question). The state is `approved` only when no blocking
 question is open and the plan is complete. `--partial` is refused for now.
 
-Exit 0 planned/sheet printed/answers recorded, 2 refused or bad usage, 1 the record could not be written
-or a member's answer failed.
+APPROVE (#1587). A local state change only: sets the record's state to `approved` when no blocking question
+is open and the plan is complete, and refuses (naming the open ids) otherwise. No `gh` call.
+
+ARM (#1587). Refuses, before a single `gh` call of any kind, unless the record's state is `approved`, the
+plan is complete and no question is open: before approval no GitHub write exists in any verb. After it,
+`arm` (a) creates the label `chain:<root>` only when a read says it is missing (never removes or deletes it,
+never repaints it), (b) adds it to every open member, (c) for each unarmed member the answers allow
+(`label_set:c<N>` says `leave them`: none; `arm only the ones that can start`: those waiting on no member)
+posts ONE fixed comment (issue numbers only, no title or free text) and arms it through the label drain's
+own machinery (`label_drain._prepare`: keep an existing priority, otherwise the drain's default; assignee
+only when nobody is assigned, an issue assigned to someone else is left alone and reported; the body is never
+rewritten; a spend approval is never defaulted). An upper-tier, parked or gate-held member is labelled, never
+armed. It reads every member's CURRENT state, so a second `arm` computes zero actions. The comment goes before
+the arming writes of its member, whose goal-label write is the last, and is skipped when the fixed text is already there, so a crash at any write
+followed by a re-run completes with no duplicate label and no duplicate comment. `--dry-run` hands the source
+a read-only runner (a write is impossible, not skipped) and prints the same lines the sheet listed.
+
+Exit 0 planned/sheet printed/answers recorded/armed, 2 refused or bad usage, 1 the record could not be
+written or a member's answer or a write failed.
 """
 import collections
 import importlib.util
@@ -78,6 +98,12 @@ SCHEMA = "chain-plan/1"
 USAGE = ("usage: chain.py plan <sdlc_dir> <N> [--json]\n"
          "  Plan the chain of open prerequisites behind goal N, deepest first. Read-only toward GitHub;\n"
          "  writes only .sdlc/state/chains/c<N>.json (numbers and labels, no titles or bodies).")
+ARM_USAGE = ("usage: chain.py approve <sdlc_dir> <chain>\n"
+             "       chain.py arm <sdlc_dir> <chain> [--dry-run]\n"
+             "  `approve` marks a fully answered sheet approved (local only). `arm` refuses unless the chain is\n"
+             "  approved; then it creates the label chain:<root> if missing, adds it to every member and arms\n"
+             "  the unarmed ones with one comment each. --dry-run writes nothing and prints the same lines.")
+ARM_COMMENT = "Sigma is arming this issue as part of the chain for #%d."
 DEFAULT_MAX_MEMBERS = 100
 LIVE_MAX_MEMBERS = 50
 _UNPRIORITISED = dag_core.discovery.UNPRIORITISED
@@ -494,10 +520,34 @@ def _grouped(qs):
     return len([q for q in qs if not q["hidden"]]) > GROUP_OVER
 
 
-def _writes(rec, qs):
+def chain_label(goal):
+    return "chain:%d" % goal
+
+
+def _arm_scope(rec):
+    """-> the member numbers `arm` may arm, from the record: the unarmed ones the label question allows."""
+    ans = (rec.get("answers") or {}).get("label_set:c%d" % rec["goal"]) or ""
+    if ans == "leave them":
+        return set()
+    out = {r["number"] for r in rec["members"] if r["verdict"] == "unarmed"}
+    if ans.startswith("arm only"):
+        out = {r["number"] for r in rec["members"] if r["number"] in out and not r.get("waits_on")}
+    return out
+
+
+def _label_line(n, goal):
+    return "#%d: add label %s" % (n, chain_label(goal))
+
+
+def _arm_line(n):
+    return "#%d: arm it and add one comment" % n
+
+
+def _writes(rec, qs, config=None):
     unpark = _load("unpark")
+    goal = rec["goal"]
     rows = {r["number"]: r for r in rec["members"]}
-    out = ["record each answer in .sdlc/state/chains/c%d.json (numbers and labels only)" % rec["goal"]]
+    out = ["record each answer in .sdlc/state/chains/c%d.json (numbers and labels only)" % goal]
     for q in qs:
         tail = q["id"].split(":", 1)[1]
         if not q["hidden"] and q["kind"] in unpark.QUESTIONS and tail.isdigit() \
@@ -506,7 +556,15 @@ def _writes(rec, qs):
                        "only if the answer starts it again" % tail)
     out.append("answers to an undeclared-kind or spend question are recorded here only: declaring the kind "
                "and writing the spend marker belong to a later slice")
-    out.append("nothing else: arming and starting members belong to a later slice")
+    out.append("after approval, `chain.py arm` creates the label %s if it is missing" % chain_label(goal))
+    out += [_label_line(r["number"], goal) for r in rec["members"]]
+    out.append("arming, per member below: add sdlc:goal, priority %s only if it has none, assign you only if "
+               "nobody is assigned, never edit the body; one comment with issue numbers only"
+               % label_drain.arm_settings(config)["default_priority"])
+    scope = _arm_scope(rec)
+    out += [_arm_line(r["number"]) for r in rec["members"] if r["number"] in scope]
+    out.append("nothing else: an upper-tier, parked or assigned-elsewhere member is labelled, never armed; "
+               "starting the members belongs to a later slice")
     return out
 
 
@@ -562,7 +620,7 @@ def render_sheet(rec, now, config=None):
     for q in shown:
         if q["id"] not in grouped_ids:
             put(q["id"], q)
-    L += ["", "Writes that follow approval:"] + ["  - " + w for w in _writes(rec, qs)]
+    L += ["", "Writes that follow approval:"] + ["  - " + w for w in _writes(rec, qs, config)]
     L += ["", "Nothing has been changed yet."]
     return "\n".join(L) + "\n"
 
@@ -667,6 +725,152 @@ def render_answer(res):
     return "\n".join(L) + "\n"
 
 
+# --- approve and arm (#1587) -------------------------------------------------------------------------------
+
+def _require_approved(rec, config):
+    """Raise `ChainRefused` unless the chain is approved. Reads only the record: no `gh` call. Three clauses,
+    each alone enough to refuse: the state, the plan being complete, and no question left open."""
+    if rec.get("state") != "approved":
+        raise ChainRefused("chain #%d is not approved (state %s); answer the sheet, then approve; nothing was "
+                           "written" % (rec["goal"], rec.get("state", "planned")))
+    if not rec.get("complete"):
+        raise ChainRefused("chain #%d: the plan is INCOMPLETE; plan it again; nothing was written" % rec["goal"])
+    _qs, openq = open_questions(rec, config)
+    if openq:
+        raise ChainRefused("chain #%d: %d question(s) still open (%s); nothing was written"
+                           % (rec["goal"], len(openq), ", ".join(q["id"] for q in openq)))
+
+
+def approve(sdlc_dir, goal, config=None):
+    """Mark a fully answered, complete chain approved. Local only. -> {"goal", "state"}."""
+    state = _load("state")
+    config = config if config is not None else state.load_config(sdlc_dir)
+    path = _record_path(sdlc_dir, goal)
+    rec = _read_record(path)
+    _qs, openq = open_questions(rec, config)
+    if openq or not rec.get("complete"):
+        raise ChainRefused("chain #%d cannot be approved: %s" % (
+            goal, "%d question(s) open (%s)" % (len(openq), ", ".join(q["id"] for q in openq)) if openq
+            else "the plan is INCOMPLETE; plan it again"))
+    if rec.get("state") != "approved":
+        rec["state"] = "approved"
+        state.atomic_write_text(path, json.dumps(rec, indent=2, sort_keys=True) + "\n")
+    return {"goal": goal, "state": "approved"}
+
+
+def _goal_label_last(got, goal_label):
+    """The arming writes with the one that adds the goal label moved last. That label is what a re-run reads
+    as `armed`, so a crash before it leaves the member unarmed (the rest is recomputed and finished) rather
+    than armed with its priority or assignee missing and nothing left to notice it."""
+    def adds_goal(a):
+        return goal_label in (a.get("add") or ()) or (a["action"] == "add-label" and a["detail"] == goal_label)
+    return [a for a in got if not adds_goal(a)] + [a for a in got if adds_goal(a)]
+
+
+def _act(kind, n, detail):
+    return {"action": kind, "issue": str(n), "detail": detail, "result": None, "error": None}
+
+
+def arm(sdlc_dir, goal, dry_run=False, config=None, run=None):
+    """Label and arm an approved chain. -> {"label", "apply", "actions", "refused", "notes"}.
+    Raises `ChainRefused` before any `gh` call unless approved. See the module docstring (ARM)."""
+    state, sources, triage = _load("state"), _load("sources"), _load("triage")
+    gh_api = _load("gh_api")
+    config = config if config is not None else state.load_config(sdlc_dir)
+    rec = _read_record(_record_path(sdlc_dir, goal))
+    _require_approved(rec, config)
+    ld = label_drain
+    base = run or sources._run_gh
+    rd = ld._ReadOnly(base) if dry_run else base
+    source = sources.GitHubSource(config, run=rd)
+    cfg, label, repo = ld.arm_settings(config), chain_label(goal), None
+    repo = source.repo or None
+    try:
+        exists = bool(gh_api.label_exists(rd, label, repo))
+    except Exception as exc:        # noqa: BLE001 - fail closed: no write on a read that failed
+        raise ChainRefused("could not check whether the label %s exists (%s); nothing was written" % (label, exc))
+    judge, scope = ld._Judge(sdlc_dir, config, source), _arm_scope(rec)
+    refused, notes, per_member = [], [], []
+    for r in rec["members"]:
+        n = r["number"]
+        try:
+            issue = gh_api.view_issue(rd, n, repo, comments="all")
+        except Exception:           # noqa: BLE001 - say so rather than guess
+            refused.append({"issue": n, "verdict": "unreadable", "reason": "could not read its current state"})
+            continue
+        names = ld._names(issue)
+        verdict, detail = judge.verdict(issue)
+        if verdict == "closed":
+            notes.append("#%d is closed; left alone" % n)
+            continue
+        acts = []
+        if label not in names:
+            acts.append(_act("add-label", n, label))
+        if verdict == "unarmed" and n in scope:
+            got_refused = len(refused)
+            prepared = ld._prepare(source, triage, gh_api, label, cfg, [(n, None)], refused, notes)
+            if n in prepared and len(refused) == got_refused:
+                text = ARM_COMMENT % goal
+                if not any(isinstance(c, dict) and str(c.get("body") or "").strip() == text
+                           for c in issue.get("comments") or []):
+                    acts.append(_act("comment", n, text))
+                acts += _goal_label_last(prepared[n][1], source.goal_label)
+        elif verdict in ld._REFUSED:
+            refused.append({"issue": n, "verdict": verdict, "reason": detail or verdict})
+        per_member.append(acts)
+    actions = []
+    if not exists:
+        make = _act("create-label", "-", label)
+        if dry_run:
+            make["result"] = "would"
+        else:
+            try:
+                gh_api.create_label(base, label, repo)
+                make["result"] = "done"
+            except Exception as exc:    # noqa: BLE001 - nothing else is attempted without the label
+                make["result"], make["error"] = "failed", str(exc)
+        actions.append(make)
+        if make["result"] == "failed":
+            return {"label": label, "apply": not dry_run, "actions": actions,
+                    "refused": sorted(refused, key=lambda x: x["issue"]), "notes": notes}
+    for acts in per_member:
+        for a in acts:                  # one member: label, comment, then arming; stop at its first failure
+            done = triage.apply_actions(source, [a], not dry_run)[0]
+            actions.append(done)
+            if done["result"] == "failed":
+                break
+    return {"label": label, "apply": not dry_run, "actions": actions,
+            "refused": sorted(refused, key=lambda x: x["issue"]), "notes": notes}
+
+
+def render_arm(res):
+    goal = int(res["label"].split(":", 1)[1])
+    groups = collections.OrderedDict()
+    for a in res["actions"]:
+        if a["action"] == "create-label":
+            key, line = ("create",), "create label %s" % res["label"]
+        elif a["action"] == "add-label" and a["detail"] == res["label"]:
+            key, line = (a["issue"], "label"), _label_line(int(a["issue"]), goal)
+        else:
+            key, line = (a["issue"], "arm"), _arm_line(int(a["issue"]))
+        g = groups.setdefault(key, {"line": line, "results": [], "error": None})
+        g["results"].append(a["result"])
+        g["error"] = g["error"] or a.get("error")
+    out = ["arm %s (%s): %d write(s), %d refused" % (res["label"], "APPLIED" if res["apply"] else "DRY-RUN",
+                                                       len(res["actions"]), len(res["refused"]))]
+    for g in groups.values():
+        r = "failed" if "failed" in g["results"] else g["results"][-1]
+        out.append("  [%s] %s%s" % (r, g["line"], " -- %s" % g["error"] if r == "failed" and g["error"] else ""))
+    for r in res["refused"]:
+        out.append("  refused #%d (%s): %s" % (r["issue"], r["verdict"], r["reason"]))
+    out += ["  note: " + n for n in res["notes"]]
+    if not res["actions"]:
+        out.append("  no actions needed")
+    if not res["apply"]:
+        out.append("dry run: nothing was written; run without --dry-run to execute")
+    return "\n".join(out) + "\n"
+
+
 def _age(seconds):
     s = max(0, int(seconds or 0))
     for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
@@ -717,9 +921,12 @@ def main(argv, run=None, now=None):
     if args in (["-h"], ["--help"]):
         print(USAGE)
         print(SHEET_USAGE)
+        print(ARM_USAGE)
         return 0
     if args[:1] in (["sheet"], ["answer"]):
         return _main_sheet(args, run, now)
+    if args[:1] in (["approve"], ["arm"]):
+        return _main_arm(args, run)
     as_json = "--json" in args
     args = [a for a in args if a != "--json"]
     if len(args) != 3 or args[0] != "plan" or not (args[2].isascii() and args[2].isdigit()):
@@ -735,6 +942,29 @@ def main(argv, run=None, now=None):
         return 1
     print(json.dumps(p, indent=2, sort_keys=True) if as_json else render(p), end="" if not as_json else "\n")
     return 0
+
+
+def _main_arm(args, run):
+    verb, rest = args[0], args[1:]
+    dry = verb == "arm" and "--dry-run" in rest
+    rest = [a for a in rest if not (verb == "arm" and a == "--dry-run")]
+    if len(rest) != 2:
+        print(ARM_USAGE, file=sys.stderr)
+        return 2
+    try:
+        goal = _chain_arg(rest[1])
+        if verb == "approve":
+            print("chain #%d: %s" % (goal, approve(rest[0], goal)["state"]))
+            return 0
+        res = arm(rest[0], goal, dry_run=dry, run=run)
+    except ChainRefused as exc:
+        print("chain.py: %s" % exc, file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print("chain.py: could not write the record: %s" % exc, file=sys.stderr)
+        return 1
+    print(render_arm(res), end="")
+    return 1 if any(a["result"] == "failed" for a in res["actions"]) else 0
 
 
 def _main_sheet(args, run, now):

@@ -505,6 +505,14 @@
       "risk": "low"
     },
     {
+      "path": "skills/sigma-loop/scripts/chain.py",
+      "function": "arm",
+      "rule": "gh-api-write",
+      "count": 1,
+      "gate": "only `chain.py arm` on a chain whose record state is approved, complete and fully answered (the check runs before any GitHub call, so no earlier state reaches a write); creates the label chain:<N> only when missing, with a name and colour and no free text; the member label, comment and arming writes go through the label drain's arm helpers with its recorded defaults; --dry-run routes every call through a GET-only gate",
+      "risk": "medium"
+    },
+    {
       "path": "skills/sigma-loop/scripts/dag_refresh.py",
       "function": "_write_meta",
       "rule": "fs-write",

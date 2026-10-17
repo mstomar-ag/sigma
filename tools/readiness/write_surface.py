@@ -56,7 +56,8 @@ def _rest_verb(token):                # `-X DELETE`, `--method=DELETE`, `-XDELET
 
 
 _GH_API_WRITES = {"comment_issue", "add_labels", "remove_label", "create_issue", "close_issue", "edit_issue", "add_assignees",
-                  "create_pr", "merge_pr", "merge_pr_pinned", "create_pr_nondraft", "comment_pr", "merge_pr_gh", "close_pr_gh"}
+                  "create_pr", "merge_pr", "merge_pr_pinned", "create_pr_nondraft", "comment_pr", "merge_pr_gh", "close_pr_gh",
+                  "create_label"}
 
 
 def _is_gh_api_write_call(func):
