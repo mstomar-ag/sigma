@@ -467,6 +467,24 @@ def load_cursor(sdlc_dir):
             "run_codex_raw_tokens": _read_int(text, "run_codex_raw_tokens")}
 
 
+def load_label_checked(sdlc_dir):
+    """#1805: the `--label` run whose start check last passed in this checkout, "" when none.
+    Its own reader, not a `load_cursor` key, so the cursor's shape is unchanged for every other caller."""
+    f = pathlib.Path(sdlc_dir) / "state" / "STATE.md"
+    try:
+        text = f.read_text()
+    except FileNotFoundError:
+        return ""
+    m = re.search(r"^label_checked:[ \t]*(.*)$", text, re.MULTILINE)
+    return m.group(1).strip() if m else ""
+
+
+def set_label_checked(sdlc_dir, label):
+    """#1805: record the label the start check passed for, beside `run_iteration`, through the one
+    locked cursor writer. Every other writer edits its own lines by key, so this line survives them."""
+    _patch_cursor(sdlc_dir, lambda text: _set_line(text, "label_checked", label))
+
+
 def _set_line(text, key, value):
     line_re = re.compile(rf"^{re.escape(key)}:.*$", re.MULTILINE)
     new = f"{key}: {value}"

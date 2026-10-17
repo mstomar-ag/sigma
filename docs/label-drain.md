@@ -46,7 +46,10 @@ All take the project's `.sdlc` directory and the label name.
   prints every write and makes none.
 - `loop.py next <sdlc_dir> --label <name>` (and `next-batch`) is the pick. Before the first claim it
   runs `plan` once and refuses to start while members are unarmed or questions are open; the refusal
-  claims and writes nothing and names the command to run.
+  claims and writes nothing and names the command to run. The check is keyed to the label run, not to
+  the checkout: a passed check records its label in `state/STATE.md` (`label_checked`), and later picks skip
+  `plan` only while a run is started and that same label is the recorded one. Another label, or a
+  checkout with no started run, runs `plan` again, so a second label is never picked unchecked.
 
 ## Arming defaults
 
