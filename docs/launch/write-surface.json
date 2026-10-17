@@ -489,6 +489,14 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag_refresh.py",
+      "function": "_write_meta",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "one atomic write of the small refresh record under `.sdlc/state` after a real refresh attempt; reached only when `discovery.dag.mode` is written as shadow or on",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/dag_store.py",
       "function": "refresh_lock",
       "rule": "fs-write",

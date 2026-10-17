@@ -1328,6 +1328,47 @@ def _awaiting_merge_row(sdlc_dir, now=None):
     return _chk(f"goals {line} -- {'; '.join(parts)}", False, fix)
 
 
+def _dag_map_row(cfg, sdlc_dir, now=None):
+    """#1612 LIVENESS: the stored dependency map's row. Reads the config, the map file and the small
+    refresh record; no network. Absent (None) when `discovery.dag.mode` is `off`, and when the operator
+    never opted in and no map exists. Not OK in two separate cases: the last good stamp is over three
+    TTLs old while a watcher heartbeat or loop session is live (the refresh died quietly), or the last
+    two refreshes errored. Never raises."""
+    try:
+        dr = _load_loop_script("dag_refresh")
+        now = time.time() if now is None else now
+        if dr.dag_store.mode(cfg) == "off":
+            return None
+        if not dr.active(cfg) and dr.dag_store.load(sdlc_dir, cfg)[0] is None:
+            return None
+        live = False
+        try:
+            sync = _load_loop_script("sync")
+            bound = sync.stale_after_seconds(sync.watch_interval_seconds(cfg))
+            beat = _load_loop_script("resource_liveness").newest_heartbeat(sdlc_dir)
+            live = beat is not None and 0 <= now - beat <= bound
+            if not live:
+                live = 0 <= now - sync.heartbeat_path(pathlib.Path(sdlc_dir)).stat().st_mtime <= bound
+        except Exception:                    # noqa: BLE001 - no heartbeat to read is not live
+            pass
+        h = dr.health(sdlc_dir, cfg, now=now, live=live)
+        age = "no map yet" if h["age"] is None else "age %s" % dr._age(h["age"])
+        name = "dag map: mode %s, %s, %d nodes, %d edges, %d cycles" % (
+            h["mode"], age, h["nodes"], h["edges"], h["cycles"])
+        why = []
+        if h["stale"]:
+            why.append("last good refresh is over %d TTLs old while the loop or watcher is live" % dr.STALE_TTLS)
+        if h["erroring"]:
+            why.append("the last %d refreshes errored" % h["errors"])
+        if not why:
+            return _chk(name, True, "")
+        return _chk(name + " -- " + "; ".join(why), False,
+                    "run `python3 skills/sigma-loop/scripts/dag.py refresh --force --sdlc .sdlc` and read its "
+                    "last_error; the reconcile tick and the first pick retry on their own")
+    except Exception as exc:                 # noqa: BLE001 - a detector that cannot run says so
+        return _chk(f"dag map: could not check ({type(exc).__name__})", True, "")
+
+
 def _blocker_rank_row(cfg, sdlc_dir, now=None):
     """#1410: one row for blockers ranked below what they block. Reads only the small state file the
     reconcile tick writes (count, last repair, when the count first went above zero); no gh call.
@@ -3788,6 +3829,10 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     _br = _blocker_rank_row(cfg, sdlc_dir)
     if _br is not None:
         out.append(_br)
+
+    _dm = _dag_map_row(cfg, sdlc_dir)  # #1612: absent when mode is off
+    if _dm is not None:
+        out.append(_dm)
 
     out.extend(_ai_filed_rows(cfg, base))  # #1705
 

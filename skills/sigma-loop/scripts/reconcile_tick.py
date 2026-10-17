@@ -70,6 +70,7 @@ def tick(sdlc_dir, config=None, run=None, now=None):
     merged = loop._reconcile_awaiting_merges(sdlc_dir, config, run=run, now=now)
     backfilled = _board_backfill(sdlc_dir, config, run)
     repaired = _blocker_rank_repair(sdlc_dir, config, run, now)
+    mapped = _dag_refresh(sdlc_dir, config, run, now)
     parts = []
     if swept:
         parts.append("%d issue(s) reconciled — %s" % (
@@ -81,7 +82,24 @@ def tick(sdlc_dir, config=None, run=None, now=None):
         parts.append("%d board card(s) backfilled" % backfilled)
     if repaired:
         parts.append(repaired)
+    if mapped:
+        parts.append(mapped)
     return "; ".join(parts)
+
+
+def _dag_refresh(sdlc_dir, config, run=None, now=None):
+    """#1612: the dependency map's refresh duty, beside the board back-fill and the rank repair (so
+    `TICK_CALLS` keeps its eight entries). Runs only when the operator wrote `discovery.dag.mode` as
+    shadow or on; bounded and TTL-gated inside `dag_refresh`. Never raises: a map that cannot be
+    refreshed costs this tick nothing. -> a summary part ("dependency map refreshed") or ""."""
+    try:
+        dr = _load("dag_refresh")
+        if not dr.active(config):
+            return ""
+        res = dr.refresh_if_due(sdlc_dir, config, run=run, now=now)
+        return "dependency map refreshed" if res.get("status") == "saved" else ""
+    except Exception:                       # noqa: BLE001 - a watcher tick is never fatal
+        return ""
 
 
 STATE_NAME = "blocker-repair.meta.json"

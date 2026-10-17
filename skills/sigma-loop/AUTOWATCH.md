@@ -160,6 +160,8 @@ Either way, this is **no new config key**: it reuses `discovery.reconcile.mode` 
 no-op — no `gh` calls — until that gate is turned on, and a repeat call inside the TTL window costs
 one cheap watermark read.
 
+**The dependency map's refresh duty (#1612).** The same tick also carries one more duty, in `reconcile_tick.py` itself (so the watcher's tick keeps its eight calls in their documented order): `dag_refresh.refresh_if_due` refreshes the stored dependency map when it is older than `discovery.dag.ttl_minutes` plus a stable per-clone offset of up to 10 percent, within a call cap and a time budget derived from `SIGMA_WATCH_CALL_TIMEOUT`. It runs only when `discovery.dag.mode` is written as `shadow` or `on`, never fails the tick, and adds the summary part `dependency map refreshed`. Without a watcher the same refresh runs on the first pick of a process, or by hand: `python3 skills/sigma-loop/scripts/dag.py refresh [--force] --sdlc .sdlc`.
+
 ---
 
 ## Passive drift watcher + Slack (drift_tick.py, #2311)

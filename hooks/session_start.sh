@@ -99,6 +99,21 @@ if [ -z "${SIGMA_RUN_ID:-}" ] && [ -f "$PROJECT/.sdlc/config.json" ]; then
         fi
     fi
 fi
+# --- Dependency map age (#1612) -----------------------------------------------------------------
+# ACCELERATOR only: the line is Sigma's own `dag.py line`, available on a host without hooks. It reads
+# the config and one file and makes NO network call and starts nothing -- the refresh itself is the
+# watcher tick, the first pick and `dag.py refresh`, never this hook. Mode off, no map, any failure:
+# no output, so the hook is byte-identical to before. Rides with the notices above.
+if [ -z "${SIGMA_RUN_ID:-}" ] && [ -f "$PROJECT/.sdlc/config.json" ]; then
+    HOOK_DAG_LINE="$(python3 "$PLUGIN_ROOT/skills/sigma-loop/scripts/dag.py" line --sdlc "$PROJECT/.sdlc" 2>/dev/null)" || HOOK_DAG_LINE=""
+    if [ -n "$HOOK_DAG_LINE" ]; then
+        if [ -n "$HOOK_COEXIST_NOTICE" ]; then
+            HOOK_COEXIST_NOTICE="$HOOK_COEXIST_NOTICE"$'\n\n'"Sigma: $HOOK_DAG_LINE"
+        else
+            HOOK_COEXIST_NOTICE="Sigma: $HOOK_DAG_LINE"
+        fi
+    fi
+fi
 export HOOK_COEXIST_NOTICE
 
 # --- Guided setup wizard (issue #1560) ---------------------------------------------------------

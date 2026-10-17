@@ -3,6 +3,11 @@
 
   dag.py show [--sdlc DIR]      mode, age and counts of the stored map
   dag.py rebuild [--sdlc DIR]   read GitHub once, publish the map, print the call counts by class
+  dag.py refresh [--force] [--sdlc DIR]
+                                refresh the map when due (or always with --force), within the call cap
+                                and time budget derived from SIGMA_WATCH_CALL_TIMEOUT (#1612)
+  dag.py line [--sdlc DIR]      one line, the map's age and size; reads one file, no network, and
+                                prints nothing when mode is off or there is no map
 
 With `discovery.dag.mode` off, both verbs print `dag: off` and touch nothing. `rebuild` runs
 `dag_collect.refresh` (under the refresh lock; a failed or empty read leaves the old file as it was)
@@ -66,6 +71,22 @@ def rebuild(sdlc):
     return line, (0 if rep["status"] in ("saved", "busy") else 1)
 
 
+def refresh(sdlc, force=False):
+    """`(line, exit_code)` for the policy refresh (`dag_refresh.refresh_if_due`)."""
+    dr = _load("dag_refresh")
+    try:
+        config = dr.dag_store.state.load_config(sdlc)
+    except Exception:
+        config = {}
+    res = dr.refresh_if_due(sdlc, config, force=force)
+    if res["status"] == "off":
+        return "dag: off", 0
+    out = "dag refresh: %s (%s)" % (res["status"], res["why"])
+    if res.get("last_error"):
+        out += ", last_error %s" % res["last_error"]
+    return out, (1 if res["status"] in ("kept", "error") else 0)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="dag.py", description="The dependency map's command line.")
     sub = ap.add_subparsers(dest="verb", required=True)
@@ -73,12 +94,26 @@ def main(argv=None):
     sp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     rp = sub.add_parser("rebuild", help="read GitHub and publish the map; print call counts by class")
     rp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
+    fp = sub.add_parser("refresh", help="refresh the map when due (--force: now)")
+    fp.add_argument("--force", action="store_true", help="refresh even when the map is fresh")
+    fp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
+    lp = sub.add_parser("line", help="print the map's age and size on one line (no network)")
+    lp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     args = ap.parse_args(argv)
     sdlc = args.sdlc or os.path.join(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd(), ".sdlc")
     if args.verb == "rebuild":
         line, code = rebuild(sdlc)
         print(line)
         return code
+    if args.verb == "refresh":
+        out, code = refresh(sdlc, args.force)
+        print(out)
+        return code
+    if args.verb == "line":
+        out = _load("dag_refresh").line(sdlc)
+        if out:
+            print(out)
+        return 0
     print(show(sdlc))
     return 0
 
