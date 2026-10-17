@@ -80,6 +80,14 @@ def test_shed_off_does_nothing_even_when_critical(env, tmp_path):
 
 
 @unix_only
+def test_observe_mode_never_sheds(env, tmp_path):
+    """observe logs would-be actions only: sustained critical pressure stops nothing. Control: drop the mode clause."""
+    _critical_after_admission(env, 0.2)
+    out = env.run("verify", "sleep 1.5", str(tmp_path), 30, "g1", sample_gap=0.1, config={"mode": "observe"})
+    assert not out.shed and out.hold is None and out.returncode == 0
+
+
+@unix_only
 def test_a_non_critical_hold_level_does_nothing(env, tmp_path):
     """Pressure level 2 holds new goals but is not critical: the running verify is left alone."""
     def sample():

@@ -181,7 +181,9 @@ def run(kind, commands, root, timeout, goal, *, config=None, repo=None, env=None
         child_env = bounded.unattended_env(env)
         child_env[ENV_WORKERS] = str(n)
         child_env[ENV_XDIST] = str(n)
-        shedding = guard.resolve_config(config)[0].get("shed", "verify") != "off"
+        resolved = guard.resolve_config(config)[0]
+        # observe only logs would-be actions (#1600): the shed acts in enforce mode alone
+        shedding = resolved.get("shed") != "off" and (resolved.get("mode") or "enforce") == "enforce"
         stop_path = os.path.join(lease.state_dir(), "shed", admitted.id + ".stop") if shedding else None
         meter = _Meter(lease, admitted.id, sample_gap, (stop_path, config, shed_after) if shedding else None)
         meter.start()
