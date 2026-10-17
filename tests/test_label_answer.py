@@ -292,3 +292,22 @@ def test_scenario_through_main(tmp_path, capsys):
     assert fk.body(6) == PAID
     assert ld.main(["label_drain.py", "answer", base, LBL], run=fk) == 2          # --answers is required
     assert ld.main(["label_drain.py", "answer", base, LBL, "--answers", str(tmp_path / "none.json")], run=fk) == 2
+
+
+# 8 -- #1732: a later standalone plan agrees with answer --------------------------------------------
+
+def test_plan_after_answer_has_no_open_questions(tmp_path):
+    ld, base, fk, _ = env(tmp_path, [issue(1, LBL), _paid(6)])
+    ask(ld, base, fk, {"label_set:" + LBL: "leave them", "irreversible:6": "go ahead"})
+    p = ld.plan(base, LBL, run=fk)
+    assert p["questions"] == [] and p["ready"] is True
+
+
+def test_ready_flips_in_plan_not_only_in_answer(tmp_path):
+    ld, base, fk, _ = env(tmp_path, [issue(1, LBL), _paid(6)])
+    assert ld.plan(base, LBL, run=fk)["ready"] is False
+    ask(ld, base, fk, {"label_set:" + LBL: "leave them"})
+    mid = ld.plan(base, LBL, run=fk)
+    assert [q["id"] for q in mid["questions"]] == ["irreversible:6"] and mid["ready"] is False
+    ask(ld, base, fk, {"irreversible:6": "go ahead"})
+    assert ld.plan(base, LBL, run=fk)["ready"] is True

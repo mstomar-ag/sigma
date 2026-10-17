@@ -350,8 +350,9 @@ def _brief_row(row, sdlc_dir, config, n, source, scrub, briefed, not_briefed, un
     return briefed + 1, unpark
 
 
-def plan(sdlc_dir, label, config=None, run=None):
-    """-> the full read-only plan dict. Raises `sources.LabelScopeError` or `ValueError` (too many
+def plan(sdlc_dir, label, config=None, run=None, hide_answered=True):
+    """-> the full read-only plan dict. A question with a recorded answer is dropped and `ready` follows
+    (#1732); `answer` passes hide_answered=False so it can still validate a repeated answer. Raises `sources.LabelScopeError` or `ValueError` (too many
     members) for the refusals the CLI turns into exit 2."""
     sources = _load("sources")
     state_mod = _load("state")
@@ -441,6 +442,9 @@ def plan(sdlc_dir, label, config=None, run=None):
     counts = collections.Counter(r["display"] for r in rows)
     paid = {i["number"]: i.get("body") or "" for i in member_issues}
     qs = _annotate(sdlc_dir, config, label, questions(label, rows, outside, paid, config))
+    if hide_answered and qs:
+        done = _recorded(sdlc_dir, config, label)
+        qs = [q for q in qs if not done.get(q["id"])]
     unread = [r["number"] for r in rows + outside if r.get("kind") in ("not-read", "unreadable")]
     return {"label": label, "repo": repo, "members": rows, "outside": outside,
             "questions": qs, "ready": not qs and not unread,
@@ -1070,7 +1074,7 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
     dr = unpark.decision_record
     config = config if config is not None else _load("state").load_config(sdlc_dir)
     base = run or sources._run_gh
-    p = plan(sdlc_dir, label, config=config, run=base)
+    p = plan(sdlc_dir, label, config=config, run=base, hide_answered=False)
     errors, good = _validate_answers(answers, p, label, config)
     out = {"label": label, "dry_run": bool(dry_run), "errors": errors, "results": [], "open": [], "ready": False}
     if errors:
@@ -1163,7 +1167,7 @@ def answer(sdlc_dir, label, answers, dry_run=False, config=None, run=None):
             lines += record(q, kind if kind != "kind" else choice, choice)
         res["lines"] = lines
         answered.add(qid)
-    after = p if dry_run else plan(sdlc_dir, label, config=config, run=base)
+    after = p if dry_run else plan(sdlc_dir, label, config=config, run=base, hide_answered=False)
     skip = answered | {i for i, cs in _recorded(sdlc_dir, config, label).items() if i in order and cs}
     out["open"] = [q for q in after["questions"] if q["id"] not in skip]
     unread = [r for r in after["members"] + after["outside"] if r.get("kind") in ("not-read", "unreadable")]

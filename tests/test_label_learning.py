@@ -109,9 +109,9 @@ def test_plan_shows_the_last_answer_on_this_label_then_counts_for_the_kind(tmp_p
     ld, base, fk, cfg = _world(tmp_path, _unarmed("run:a") + [issue(2, "run:b")])
     assert "history" not in _q(ld.plan(base, "run:a", config=cfg, run=fk))
     ld.answer(base, "run:a", {"label_set:run:a": LEAVE}, run=fk)
-    # the label is still unarmed, so its own question is asked again and shows its own history
-    own = _q(ld.plan(base, "run:a", config=cfg, run=fk))
-    assert own["history"] == "last time on this label: " + LEAVE
+    # #1732: the answered question is no longer asked on this label; the kind's history reaches other labels
+    assert not [q for q in ld.plan(base, "run:a", config=cfg, run=fk)["questions"]
+                if q["id"].startswith("label_set:")]
     other = _q(ld.plan(base, "run:b", config=cfg, run=fk))
     assert other["history"] == "on labels of this kind: %s 1" % LEAVE
     assert "history: on labels of this kind" in ld.render_plan(ld.plan(base, "run:b", config=cfg, run=fk))
