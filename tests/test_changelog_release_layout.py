@@ -64,3 +64,28 @@ def test_the_old_window_pin_shape_goes_red_on_two_releases():
     once = simulate_release(base, "9.9.8", "2098-01-01")
     assert len(old_window(base)) == 1
     assert old_window(once) == []
+
+
+def _unreleased_lines(text):
+    return text.split("\n## Unreleased\n", 1)[1].split("\n## ", 1)[0].splitlines()
+
+
+def test_each_unreleased_entry_number_appears_on_one_line_only():
+    import collections
+    import re
+    seen = collections.Counter(n for line in _unreleased_lines(REAL) for n in set(re.findall(r"\(#(\d+)\)", line)))
+    assert [n for n, k in seen.items() if k > 1] == []
+
+
+def test_unreleased_names_the_lease_cli_and_renewer_entries():
+    lines = _unreleased_lines(REAL)
+    for number in ("(#1733)", "(#1740)"):
+        assert len([l for l in lines if number in l]) == 1, number
+
+
+def test_the_duplicate_control_goes_red_on_a_repeated_entry():
+    import collections
+    import re
+    doubled = REAL.replace("## Unreleased\n", "## Unreleased\n- A copy (#1733).\n", 1)
+    seen = collections.Counter(n for line in _unreleased_lines(doubled) for n in set(re.findall(r"\(#(\d+)\)", line)))
+    assert seen["1733"] == 2

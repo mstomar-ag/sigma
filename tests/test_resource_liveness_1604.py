@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import subprocess
+import time
 import sys
 
 import pytest
@@ -283,6 +284,23 @@ def test_tick_step_goes_through_the_timeout_runner(tmp_path, machine):
     assert argv[4:] == ["sample", "--record", "d"]
 
 
+def test_tick_itself_calls_the_resource_step(tmp_path, machine):
+    """Drive `tick`, not `resource_step`: dropping the call from the tick body must go red."""
+    wd = _wd()
+    seen = []
+    wd.run_call = lambda p, sdlc_dir, call_timeout, script, subcmd, mode: seen.append((script, subcmd)) or ""
+    wd.touch_heartbeat = lambda p: None
+    wd.scheduler_step = lambda *a, **k: None
+    wd.applier_step = lambda *a, **k: None
+    cfg = _cfg(mode="enforce")
+    base = _sdlc(tmp_path, cfg)
+    p = wd.paths(str(base))
+    p.state.mkdir(parents=True, exist_ok=True)
+    wd.tick(p, str(base), "120", 1, config=cfg)
+    assert seen[-1] == ("resource_guard.py", ("sample", "--record"))
+    assert [s for s in seen if s[0] == "resource_guard.py"] == [seen[-1]]
+
+
 def test_tick_step_runs_nothing_when_mode_is_off(tmp_path, machine):
     wd = _wd()
     seen = []
@@ -408,7 +426,8 @@ def test_log_hold_path_rule_matches_the_guard(machine, tmp_path, monkeypatch):
 
 def test_observe_mode_tail_says_not_enforced(machine):
     _hold_json(machine["state"], since=NOW - 720)
-    assert "not enforced" in _log().admission_tail({"resource": {"mode": "observe"}}, now=NOW)
+    observed = _log().admission_tail({"resource": {"mode": "observe"}}, now=NOW)
+    assert observed.endswith(" (observe: not enforced)")
     assert "not enforced" not in _log().admission_tail({"resource": {"mode": "enforce"}}, now=NOW)
 
 
@@ -417,7 +436,11 @@ def test_slots_reads_the_admission_tail_once(machine, tmp_path, monkeypatch):
     calls = []
     real = log.admission_tail
     monkeypatch.setattr(log, "admission_tail", lambda *a, **k: calls.append(1) or real(*a, **k))
-    d = tmp_path / "sdlc"
-    d.mkdir()
-    log.slots(d)
-    assert len(calls) <= 1
+    tl = _load(ROOT / "tests" / "test_log.py", "test_log_for_1604_once")
+    d = tl._sdlc(tmp_path)
+    tl._config(d, tl.GITHUB_ON)
+    tl._running_goal(d, "158", time.time(), title="Extract the coherence validator")
+    _hold_json(machine["state"], since=time.time() - 720)
+    out = log.slots(d)
+    assert "admission HELD" in out        # the directory is non-empty, so slots reached the tail
+    assert len(calls) == 1

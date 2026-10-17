@@ -12,6 +12,8 @@ import re
 import subprocess
 import sys
 
+import types
+
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -84,6 +86,26 @@ def test_unset_mode_is_off(state):
     with guard.session_lease("judge", "1") as got:
         assert got is None
     assert not state.exists()
+
+
+def test_renewer_default_interval_is_a_third_of_the_ttl(state, monkeypatch):
+    """No `renew_every` passed: the renewer waits ttl/3 between renewals (ttl*3 would outlive the lease)."""
+    guard = _load("resource_guard", "rg_t_every")
+    with_sample(guard)
+    waits = []
+
+    real = guard.threading
+
+    class SpyEvent(real.Event):
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            return True                       # the renewer thread exits at once
+
+    # a shim module: Thread keeps the real Event it uses internally
+    monkeypatch.setattr(guard, "threading", types.SimpleNamespace(Event=SpyEvent, Thread=real.Thread))
+    with guard.session_lease("judge", "1", ttl=30, config={"mode": "enforce"}) as got:
+        assert not is_hold(got)
+    assert waits and waits[0] == pytest.approx(10.0)
 
 
 def test_lease_is_held_inside_and_gone_after_even_on_exception(state):
