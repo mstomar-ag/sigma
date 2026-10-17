@@ -1219,7 +1219,7 @@ def _resource_rows(cfg, sdlc_dir, now=None, sampler=None, env=None):
     try:
         goals = _block(_block(cfg, "parallel"), "goals")
         mode_key = _block(cfg, "resource").get("mode")
-        named = mode_key in ("enforce", "observe", "off") or env.get("SIGMA_RESOURCE_MODE") in ("enforce", "observe")
+        named = mode_key in ("enforce", "observe") or env.get("SIGMA_RESOURCE_MODE") in ("enforce", "observe")
         if goals.get("enabled") is not True and not named:
             return []
         live = _load_loop_script("resource_liveness")
@@ -1257,7 +1257,15 @@ def _resource_rows(cfg, sdlc_dir, now=None, sampler=None, env=None):
         bound = live.sample_stale_after(cfg)
         beat = live.newest_heartbeat(sdlc_dir)
         at = snap["last_at"]
-        rows.append(_chk("resource sample age: %s" % ("never sampled" if at is None else "%dm" % max(0, (now - at) // 60)),
+        # The watcher's resource_step samples only for an EXPLICIT enforce/observe (same precedence: env, then key).
+        # Elsewhere last.json may never be written, so an age row there would be a permanent unfixable NOT OK.
+        forced = env.get("SIGMA_RESOURCE_MODE")
+        explicit = forced if forced in ("enforce", "observe", "off") else mode_key
+        if explicit not in ("enforce", "observe"):
+            if mode != "off":
+                rows.append(_chk("resource sample age: taken at admission points (resource.mode unset)", True, ""))
+        else:
+          rows.append(_chk("resource sample age: %s" % ("never sampled" if at is None else "%dm" % max(0, (now - at) // 60)),
                          live.sample_age_ok(at, beat, now, bound),
                          "the loop is running but the resource sampler has not run within %dm: start the watcher "
                          "(a loop trigger starts one) or run `python3 skills/sigma-loop/scripts/resource_guard.py sample "

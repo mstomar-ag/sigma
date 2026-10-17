@@ -153,8 +153,8 @@ ROW_CASES = [
     ("resource mode", _cfg(mode="off"), None, False),
     ("resource admission", _cfg(hold_alert_minutes=30), "short-hold", True),
     ("resource admission", _cfg(hold_alert_minutes=5), "long-hold", False),
-    ("resource sample age", _cfg(), "fresh-sample", True),
-    ("resource sample age", _cfg(), "old-sample", False),
+    ("resource sample age", _cfg(mode="enforce"), "fresh-sample", True),
+    ("resource sample age", _cfg(mode="enforce"), "old-sample", False),
     ("resource stale leases", _cfg(), None, True),
     ("resource stale leases", _cfg(), "stale-lease", False),
     ("resource max_concurrent", _cfg(), None, True),
@@ -226,24 +226,44 @@ def test_held_with_leases_names_the_count(tmp_path, machine):
 # ------------------------------------------------------------------------------- 4. stale sample
 def test_stale_sample_with_fresh_heartbeat_is_not_ok(tmp_path, machine):
     state = machine["state"]
-    base = _sdlc(tmp_path, _cfg())
+    base = _sdlc(tmp_path, _cfg(mode="enforce"))
     _beat(base, NOW - 10)
-    bound = live.sample_stale_after(_cfg())
+    bound = live.sample_stale_after(_cfg(mode="enforce"))
     _last_json(state, NOW - bound - 60)
-    rows = _doctor()._resource_rows(_cfg(), str(base), now=NOW, sampler=lambda: machine["sample"])
+    rows = _doctor()._resource_rows(_cfg(mode="enforce"), str(base), now=NOW, sampler=lambda: machine["sample"])
     old = {r["name"].split(":")[0]: r for r in rows}["resource sample age"]
     assert old["ok"] is False
     _last_json(state, NOW - 30)
-    rows = _doctor()._resource_rows(_cfg(), str(base), now=NOW, sampler=lambda: machine["sample"])
+    rows = _doctor()._resource_rows(_cfg(mode="enforce"), str(base), now=NOW, sampler=lambda: machine["sample"])
     assert {r["name"].split(":")[0]: r for r in rows}["resource sample age"]["ok"] is True
 
 
 def test_old_sample_is_fine_when_no_loop_runs(tmp_path, machine):
-    base = _sdlc(tmp_path, _cfg())
+    base = _sdlc(tmp_path, _cfg(mode="enforce"))
     _beat(base, NOW - 10 ** 6)                        # the loop heartbeat itself is old: nothing is expected to sample
     _last_json(machine["state"], NOW - 10 ** 6)
-    rows = _doctor()._resource_rows(_cfg(), str(base), now=NOW, sampler=lambda: machine["sample"])
+    rows = _doctor()._resource_rows(_cfg(mode="enforce"), str(base), now=NOW, sampler=lambda: machine["sample"])
     assert {r["name"].split(":")[0]: r for r in rows}["resource sample age"]["ok"] is True
+
+
+@pytest.mark.parametrize("cfg", [{"resource": {"mode": "off"}}, dict(_cfg(mode="off"))])
+def test_mode_off_fresh_heartbeat_no_last_json_has_no_sampler_row(tmp_path, machine, cfg):
+    base = _sdlc(tmp_path, cfg)
+    _beat(base, NOW - 10)
+    rows = _doctor()._resource_rows(cfg, str(base), now=NOW, sampler=lambda: machine["sample"])
+    assert not any(r["name"].startswith("resource sample age") for r in rows)
+    if cfg.get("parallel") is None:
+        assert rows == []
+    else:                       # goals on + off: only the deliberate mode warning may fail
+        assert [r["name"] for r in rows if not r["ok"]] == ["resource mode: off"]
+
+
+def test_mode_null_does_not_fail_on_missing_sample(tmp_path, machine):
+    base = _sdlc(tmp_path, _cfg())
+    _beat(base, NOW - 10)
+    rows = _doctor()._resource_rows(_cfg(), str(base), now=NOW, sampler=lambda: machine["sample"])
+    row = {r["name"].split(":")[0]: r for r in rows}["resource sample age"]
+    assert row["ok"] is True and "admission" in row["name"]
 
 
 # ------------------------------------------------------------------------------------ 5. watcher tick
