@@ -3217,6 +3217,14 @@
       "risk": "high"
     },
     {
+      "path": "tools/dag_miss_test.py",
+      "function": "_sdlc",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "writes only inside a scratch directory the tool just made under the system temp dir and removes with it; the live backend is reached only after the configured-clone check passed",
+      "risk": "low"
+    },
+    {
       "path": "tools/goal433_attack.py",
       "function": "main",
       "rule": "fs-write",
