@@ -115,6 +115,10 @@ OPTIONAL_FIELDS = ("area", "to", "issue", "priority", "why", "state", "ref", "pr
 
 ENTRIES, EVENTS = "entries", "events"
 STREAMS = (ENTRIES, EVENTS)
+#: the dependency map's history stream (#1623): `dag/YYYY-MM/<writer>.jsonl` on the ledger branch. Not
+#: in STREAMS: it is not an entries stream, nothing reads it through `read_all`, and `entries_dir`
+#: must keep refusing it.
+DAG = "dag"
 
 #: The event-stream analogue of KINDS. Deliberately separate from KINDS/SHARED_KINDS
 #: (untouched, per spec A.1) so the entries vocabulary a lead reads in TEAM.md can never
@@ -873,6 +877,28 @@ def entry_file(sdlc_dir, who, stream=ENTRIES, config=None):
     if config is None:
         config = _config_for(sdlc_dir)
     return base / f"{_safe_name(who)}-{_instance_token(config)}.jsonl"
+
+
+def dag_file(sdlc_dir, who, month, config=None):
+    """The history-stream file of this writer process for `month` (`YYYY-MM`): the same
+    `<actor>-<host>.<pid>.jsonl` name as `entry_file`, so the host alias and salt settings apply and the
+    raw host name never appears (#1623)."""
+    if config is None:
+        config = _config_for(sdlc_dir)
+    return ledger_dir(sdlc_dir) / DAG / month / f"{_safe_name(who)}-{_instance_token(config)}.jsonl"
+
+
+def dag_files_for(root, who):
+    """Every dag-stream file `who` wrote under the ledger worktree `root`, any month, as `files_for`
+    matches them: never another writer's."""
+    base = pathlib.Path(root) / DAG
+    if not base.is_dir():
+        return []
+    out = []
+    for month in sorted(base.iterdir()):
+        if month.is_dir():
+            out.extend(files_for(month, who))
+    return out
 
 
 def files_for(directory, who):
