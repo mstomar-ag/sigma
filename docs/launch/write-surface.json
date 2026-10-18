@@ -3241,6 +3241,14 @@
       "risk": "high"
     },
     {
+      "path": "tools/dag_miss_test.py",
+      "function": "_sdlc",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "writes only inside a scratch directory the tool just made under the system temp dir and removes with it; the live backend is reached only after the configured-clone check passed",
+      "risk": "low"
+    },
+    {
       "path": "tools/goal433_attack.py",
       "function": "main",
       "rule": "fs-write",
@@ -3886,6 +3894,14 @@
       "rule": "gh-api-write",
       "count": 1,
       "gate": "discovery.dag.mode is not off and discovery.dag.cycle_comment is true; runs only after a refresh that saved the map; one comment per distinct dependency cycle on its lowest-numbered open member, skipped when the member's comments already hold the cycle's marker; comments only, never a label, claim or board write; at most 20 cycles per call",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_history.py",
+      "function": "_mirror",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "discovery.dag.mode is not off and ledger.enabled is exactly true and the ledger worktree exists (sync.is_worktree); creates only dag/YYYY-MM under the ledger worktree and appends the same number-only change records to this writer process's own file there, open mode append; sync.publish stages only the actor's own files of that stream",
       "risk": "low"
     },
     {

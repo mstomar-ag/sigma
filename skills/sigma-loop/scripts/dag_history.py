@@ -25,6 +25,12 @@ prints one `dag history:` line to stderr on failure. No function here deletes, t
 history path; `tests/test_dag_history_1622.py` scans this file for that. History is never pruned by
 Sigma: the doctor warns when one month passes `WARN_BYTES` and says what a person may do.
 
+Ledger mirror (#1623): only when `ledger.enabled` is true and the ledger worktree exists, the same records
+are also appended to `<ledger worktree>/dag/YYYY-MM/<actor>-<host>.<pid>.jsonl` (`ledger.dag_file`; the host
+token honours `ledger.host_alias` and the salt setting). `sync.publish` stages only the actor's own files of
+that stream and pushes a change that is only there; `.gitattributes` carries `dag/**/*.jsonl merge=union`.
+One file per writing process, as for entries: a file a month per process, about 100 bytes a record.
+
 `record_save` is `diff` + `append`, called by `dag_store.save` after a successful write, loaded lazily
 and wrapped so a history failure never fails or delays a save. The same map saved twice diffs empty
 and appends nothing (headers are not compared). Cost: one extra read and parse of the previous map per
@@ -182,6 +188,31 @@ def _append(sdlc, records):
                 fh.write(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n")
 
 
+def _mirror(sdlc, config, records):
+    """Mirror `records` into the ledger branch's `dag/YYYY-MM/<writer>.jsonl` (#1623). Only when
+    `ledger.enabled` and the ledger worktree exists; otherwise nothing is written under `.sdlc/ledger`.
+    The file is this writer process's own (same name as an entries file, so the host alias and salt
+    settings apply); `sync.publish` stages only the actor's own. One write per line, the same bytes as
+    the local file. Never raises."""
+    try:
+        config = _config(sdlc, config)
+        ledger = _load("ledger")
+        if not ledger.enabled(config) or not _load("sync").is_worktree(sdlc):
+            return
+        who = ledger.actor(config)
+        by_month = {}
+        for r in records:
+            by_month.setdefault(_check_month(str(r["t"])[:7]), []).append(r)
+        for month in sorted(by_month):
+            p = ledger.dag_file(sdlc, who, month, config)
+            os.makedirs(p.parent, exist_ok=True)
+            with open(p, "a", encoding="utf-8") as fh:
+                for r in by_month[month]:
+                    fh.write(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n")
+    except Exception as exc:                            # noqa: BLE001 - the mirror never fails the local record
+        print("dag history: ledger mirror not written (%s)" % type(exc).__name__, file=sys.stderr)
+
+
 def append(sdlc, config, records):
     """Append `records`. Nothing when mode is `off` or there is nothing to add. Never raises."""
     if not records:
@@ -190,6 +221,7 @@ def append(sdlc, config, records):
         if _off(sdlc, config):
             return
         _append(sdlc, records)
+        _mirror(sdlc, config, records)
     except Exception as exc:                            # noqa: BLE001 - history never fails its caller
         print("dag history: not recorded (%s)" % type(exc).__name__, file=sys.stderr)
 
@@ -201,6 +233,7 @@ def record_save(sdlc, config, old_map, new_map, now):
         return
     try:
         _append(sdlc, recs)
+        _mirror(sdlc, config, recs)
     except Exception as exc:                            # noqa: BLE001
         print("dag history: not recorded (%s)" % type(exc).__name__, file=sys.stderr)
 
