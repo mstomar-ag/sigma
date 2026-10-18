@@ -39,6 +39,7 @@ doctor = _mod("doctor", ROOT / "skills" / "sigma-doctor" / "scripts")
 NOW = 1_800_000_000.0
 TTL = 60
 CONFIG = {"discovery": {"github": {"repo": "owner/repo"}, "dag": {"mode": "on"}}}
+GH = {"discovery": {"source": "github", "github": {"repo": "owner/repo"}, "dag": {"mode": "on"}}}
 
 
 def _iso(t):
@@ -235,10 +236,10 @@ def test_first_pick_refreshes_once_per_process(tmp_path):
     class Src:
         _run = staticmethod(run)
 
-    loop._dag_first_pick(d, Src, CONFIG)
+    loop._dag_first_pick(d, Src, GH)
     assert len(run.calls) == 5
     (d / "state" / "dag.json").unlink()
-    loop._dag_first_pick(d, Src, CONFIG)
+    loop._dag_first_pick(d, Src, GH)
     assert len(run.calls) == 5
 
 
@@ -391,3 +392,36 @@ def test_refresh_verb_mode_off_prints_off_and_touches_nothing(tmp_path, capsys):
     before = sorted(p.name for p in d.rglob("*"))
     assert dag_cli.main(["refresh", "--force", "--sdlc", str(d)]) == 0
     assert capsys.readouterr().out.strip() == "dag: off" and sorted(p.name for p in d.rglob("*")) == before
+
+
+# ------------------------------------------------------------------ #1851: local-goals makes no gh call
+
+@pytest.mark.parametrize("cfg", [
+    {"discovery": {"dag": {"mode": "on"}}},
+    {"discovery": {"source": "local-goals", "dag": {"mode": "on"}}},
+    {"discovery": {"source": "local-goals", "dag": {"mode": "shadow"}}},
+])
+def test_local_goals_first_pick_makes_no_runner_call(tmp_path, cfg):
+    """A first pick on a local-goals source (the default) makes zero runner calls even with the dag
+    mode written.
+    control: remove the `_dag_github_source` guard from `_dag_first_pick` -> 5 calls appear."""
+    d = _sdlc(tmp_path, cfg)
+    run = Repo()
+
+    class Src:
+        _run = staticmethod(run)
+
+    loop._dag_first_pick(d, Src, cfg)
+    assert run.calls == []
+
+
+def test_local_goals_change_check_never_loads_dag_check(tmp_path, monkeypatch):
+    """With a stored map and a local-goals source the cheap check is not even loaded.
+    control: remove the guard from `_dag_check_pick` -> the stub is loaded."""
+    cfg = {"discovery": {"source": "local-goals", "dag": {"mode": "on"}}}
+    d = _sdlc(tmp_path, cfg)
+    (d / "state" / "dag.json").write_text("{}")
+    loaded = []
+    monkeypatch.setattr(loop, "_load", lambda name: loaded.append(name))
+    loop._dag_check_pick(d, cfg, None)
+    assert loaded == []

@@ -162,14 +162,24 @@ def _post_cycles(sdlc_dir, config, run):
         pass
 
 
-def _clear_unchecked(sdlc_dir):
-    """#1616: edges written without a cycle verdict are examined by the map this refresh just saved (and
-    by `dag_cycles` after it), so the list is cleared; it cannot grow. Never raises."""
+def _read_unchecked(sdlc_dir):
+    """#1847: the pairs on file before collection starts; the saved map covers exactly these. []"""
     try:
         global dag_insert
         if dag_insert is None:
             dag_insert = _load("dag_insert")
-        dag_insert.take_unchecked(sdlc_dir)
+        return dag_insert.unchecked(sdlc_dir)
+    except Exception:                                   # noqa: BLE001
+        return []
+
+
+def _clear_unchecked(sdlc_dir, seen):
+    """#1616/#1847: edges written without a cycle verdict before this refresh began are examined by the
+    map it just saved (and by `dag_cycles` after it), so those are dropped; a pair recorded during the
+    refresh stays for the next one, so the list cannot grow without bound but nothing is lost. Never raises."""
+    try:
+        if seen:
+            dag_insert.drop_unchecked(sdlc_dir, seen)
     except Exception:                                   # noqa: BLE001
         pass
 
@@ -191,6 +201,7 @@ def refresh_if_due(sdlc_dir, config, run=None, now=None, force=False):
             return {"status": why if why == "retry-wait" else "fresh", "why": why}
     else:
         why = "forced"
+    seen = _read_unchecked(sdlc_dir)
     cap, budget = bounds()
     counted = _bounded(run, cap, budget)
     try:
@@ -206,7 +217,7 @@ def refresh_if_due(sdlc_dir, config, run=None, now=None, force=False):
     _write_meta(sdlc_dir, {"last_attempt": now, "last_status": "error" if failed else "saved",
                            "last_error": err if failed else None, "errors": streak})
     if not failed:
-        _clear_unchecked(sdlc_dir)
+        _clear_unchecked(sdlc_dir, seen)
         _post_cycles(sdlc_dir, config, counted)
     return {"status": "saved" if not failed else "kept", "why": why, "last_error": err}
 

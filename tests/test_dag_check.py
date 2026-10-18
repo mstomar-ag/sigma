@@ -480,7 +480,7 @@ def test_pick_hook_runs_a_check_when_a_map_exists(tmp_path, monkeypatch):
     class Src:
         _run = staticmethod(w)
 
-    loop._dag_check_pick(d, CONFIG, Src)
+    loop._dag_check_pick(d, dict(CONFIG, discovery=dict(CONFIG["discovery"], source="github")), Src)
     assert len(seen) == 1 and seen[0][0] == str(d) and seen[0][1]["run"] is Src._run
 
 

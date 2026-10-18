@@ -178,3 +178,16 @@ like any other fresh identity, since the old entries are dropped rather than kep
 possible return. The cap must also exceed the working corpus, or it never converges: a backlog even
 one issue bigger than the cap re-embeds the overflow (`corpus − cap` calls) on every run instead of
 settling down, so raise the cap rather than let it thrash.
+
+## Measuring a pick (opt-in, #1607)
+
+When a pick is slow, turn the trace on for it:
+`SIGMA_PICK_TRACE=1` in the environment, or `loop.py next .sdlc --trace`. Off by default, and
+off it writes nothing and adds no `gh` call. On, each pick appends one JSON line to
+`.sdlc/state/pick-trace.jsonl`: per named stage (reconcile sweep, auto-unpark sweep, stale-claim
+reclaim, release of unstarted claims, pending fetch, dependency hold, the unit/scope/owner gates,
+claim writes, and `other` for the rest) the number of `gh` calls by class (list, read, write,
+graphql, project) and the seconds. Calls are counted once, at the single transport seam, retries
+included; no issue text is recorded. The file rotates at 1 MB to `pick-trace.jsonl.1` (one
+generation, so about 2 MB at most). `loop.py pick-trace-report .sdlc` prints each stage's median and
+p90 calls and seconds across the recorded picks. The trace measures; it does not change a pick.

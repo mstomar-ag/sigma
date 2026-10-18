@@ -16,6 +16,7 @@ import time
 
 DEFAULT_MAX_ADDED = 5
 MIN_BASIS = 3
+COMPLETION_KINDS = ("retro", "merge_observed")      # #1846: a goal is "measured" once one of these is recorded
 OVERSHOOT_SENTENCE = ("The cap is checked before each claim, so it can be overshot by the cost of the "
                       "goals in flight.")
 
@@ -31,7 +32,7 @@ def _epoch(ts):
 
 def _cents(v):
     try:
-        n = int(float(v))
+        n = math.ceil(float(v))          # #1846: round UP, so fractional cents never undercount
     except (TypeError, ValueError, OverflowError):
         return None
     return n if n >= 0 else None
@@ -57,7 +58,7 @@ def _events(sdlc_dir):
                 r = json.loads(line)
             except (ValueError, RecursionError):
                 continue   # torn or garbage line
-            if isinstance(r, dict) and r.get("kind") in ("spend", "phase"):
+            if isinstance(r, dict) and r.get("kind") in ("spend", "phase", "retro", "merge_observed"):
                 out.append(r)
     return out, True
 
@@ -76,15 +77,17 @@ def estimate(sdlc_dir, members):
     goals gives no number: `text` carries the sentence and p50/p90 are None."""
     records, ok = _events(sdlc_dir)
     mem = {str(m) for m in members}
+    done = {str(r.get("goal")) for r in records if r["kind"] in COMPLETION_KINDS}      # #1846
     per = {}
     for r in records:
         c = _cents(r.get("cost_cents")) if r["kind"] == "spend" else None
-        if c is not None and str(r.get("goal")) not in mem:
+        if c is not None and str(r.get("goal")) not in mem and str(r.get("goal")) in done:
             per[str(r.get("goal"))] = per.get(str(r.get("goal")), 0) + c
     vals = sorted(per.values())
     if len(vals) < MIN_BASIS:
         return {"p50": None, "p90": None, "basis": len(vals), "ok": ok,
-                "text": "no estimate: only %d measured goals" % len(vals)}
+                "text": "no estimate: only %d measured goals (a goal counts once its retro or "
+                "merge is recorded)" % len(vals)}
     return {"p50": _rank(vals, 0.5), "p90": _rank(vals, 0.9), "basis": len(vals), "ok": ok, "text": ""}
 
 
@@ -137,7 +140,10 @@ def admit(sdlc_dir, config, chain, now=None):
             return False, "capped: invalid chain.%s (not a positive number)" % key
     members = list(chain.get("members") or [])
     added = block.get("max_added", DEFAULT_MAX_ADDED)
-    added = added if isinstance(added, int) and not isinstance(added, bool) and added >= 0 else DEFAULT_MAX_ADDED
+    if block.get("max_added") is not None and not (
+            isinstance(added, int) and not isinstance(added, bool) and added >= 0):
+        return False, "capped: invalid chain.max_added (not a non-negative whole number)"      # #1846
+    added = DEFAULT_MAX_ADDED if added is None else added
     if max_goals is None:
         max_goals = len(members) + added
     if len(members) > max_goals:
