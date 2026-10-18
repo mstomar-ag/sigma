@@ -1183,14 +1183,23 @@ def _reconcile_ttl_minutes(config):
 _DAG_PICKED = [False]          # #1612: the first pick of a process checks the dependency map once
 
 
+def _dag_github_source(config):
+    """#1851: the dependency map exists only for a GitHub source; local-goals makes no `gh` call."""
+    return ((((config or {}).get("discovery") or {}).get("source")) or "local-goals") == "github"
+
+
 def _dag_first_pick(sdlc_dir, source, config):
     """#1612: the first `_next` or `next_batch` of a process refreshes the dependency map once when it
     is stale (`dag_refresh.refresh_if_due`: TTL, offset, call cap and time budget inside). Opt-in:
     nothing happens unless `discovery.dag.mode` is written as shadow or on, and the flag is set before
-    anything else so a later pick of the same process never checks again. Never raises."""
+    anything else so a later pick of the same process never checks again. #1851: the map is read
+    through `gh`, so a source other than GitHub (the default is local-goals) makes no call at all.
+    Never raises."""
     if _DAG_PICKED[0]:
         return
     _DAG_PICKED[0] = True
+    if not _dag_github_source(config):
+        return
     try:
         dr = _load("dag_refresh")
         if dr.active(config):
@@ -1203,7 +1212,9 @@ def _dag_check_pick(sdlc_dir, config, source):
     """#1617: the cheap change check, once at the start of a pick (`dag_check.check`). Nothing happens, and
     `dag_check` is not even loaded, when `discovery.dag.mode` is written `off` or no stored map exists, so
     the pick path is unchanged in both cases. A failure prints one stderr line from the check; this guard
-    swallows anything else. Never raises."""
+    swallows anything else. #1851: nothing happens for a non-GitHub source. Never raises."""
+    if not _dag_github_source(config):
+        return
     try:
         block = (((config or {}).get("discovery") or {}).get("dag"))
         if isinstance(block, dict) and block.get("mode") == "off":
