@@ -52,7 +52,7 @@ def _prio(issue):
 
 
 def _map_of(issues, extra_nodes=(), extra_edges=(), checked=NOW - 60):
-    """The map a collector would have written for `issues` (open, goal-labelled ones are the corpus)."""
+    """The map the refresh would have written for `issues` (open, goal-labelled ones are the corpus)."""
     nodes, edges = {}, []
     for it in issues:
         n = it["number"]
