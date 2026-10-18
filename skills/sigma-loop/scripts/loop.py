@@ -2002,7 +2002,8 @@ def _hold_subject(source, goal):
 
 
 def _held_cycles(sdlc_dir, config, held):
-    """#1615: one line per stored-map dependency cycle that holds at least one of the held goals; `[]`
+    """#1615: one line per stored-map dependency cycle that holds at least one of the held goals (#1841: it
+    holds a goal that is in it or waits behind it); `[]`
     (and `dag_cycles` not even loaded) when `discovery.dag.mode` is written `off`. Never raises."""
     try:
         if config.get("discovery", {}).get("dag", {}).get("mode") == "off":
@@ -2015,7 +2016,7 @@ def _held_cycles(sdlc_dir, config, held):
         if not nums:
             return []
         dc = _load("dag_cycles")
-        return [dc.line(c) for c in dc.find(sdlc_dir, config) if nums & set(c)]
+        return [dc.line(c) for c in dc.holding(sdlc_dir, config, nums)]     # #1841: in OR behind a cycle
     except Exception:                       # noqa: BLE001 - the report is advice, never a failure
         return []
 
@@ -2024,7 +2025,7 @@ def _held_release_note(gate, cycles=()):
     """#1550: the DONE summary must not promise self-release for a hold only a human can lift.
     #1615: nor for a hold that is a dependency cycle, which no event ever releases."""
     if cycles:
-        return ("At least one is in a dependency cycle and never releases by itself; "
+        return ("At least one is in, or waits behind, a dependency cycle and never releases by itself; "
                 "someone has to remove one Blocked by line")
     if gate.get("needs_human"):
         return ("At least one waits on a prerequisite that is parked, failed, proposed or names no "
