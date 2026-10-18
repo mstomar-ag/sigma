@@ -14,7 +14,7 @@ ARGS = ("--longest", "--dry-run", "--cap-usd", "--parallel", "--no-grow", "--def
 
 def _code_keys():
     keys = set()
-    for name in ("chain.py", "chain_spend.py"):
+    for name in ("chain.py", "chain_spend.py", "chain_parallel.py"):
         text = (SCRIPTS / name).read_text(encoding="utf-8")
         keys |= set(re.findall(r'\b(?:block|chain_cfg|cfg\[?"?chain"?\]?)\.get\("(\w+)"', text))
         keys |= set(re.findall(r'_num\(block, "(\w+)"', text))
@@ -103,3 +103,14 @@ def test_comparison_fails_on_one_char_change():
     copy = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     i = copy.index(block) + 10
     assert not _carries(copy[:i] + ("X" if copy[i] != "X" else "Y") + copy[i + 1:], block)
+
+
+def test_parallel_and_lock_are_documented():
+    """#1865: the width keys, the lock file, the stale rule and its consequence are in the doc."""
+    text = DOC.read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    for key in ("`chain.parallel`", "`chain.max_active`", "parallel.goals.max_concurrent"):
+        assert key in flat, key
+    for phrase in (".sdlc/state/chain-active.json", "pid is dead AND its heartbeat is older than 900 seconds",
+                   "further apart than 900 seconds can be reclaimed", "Manual recovery"):
+        assert phrase in flat, phrase
