@@ -124,6 +124,7 @@ def _load(name):
 
 label_drain = _load("label_drain")
 dag_chain = _load("dag_chain")
+chain_parallel = _load("chain_parallel")
 dag_store = dag_chain.dag_store
 dag_core = dag_chain.dag_core
 
@@ -937,18 +938,20 @@ _DEFAULT_PICK_TIMEOUT = 900
 _NO_PICK = ("DONE", "BUDGET", "HANDOFF", "FULL", "HOLD")
 
 
-def pick_argv(sdlc_dir, label, session_pid=None, skip=()):
+def pick_argv(sdlc_dir, label, session_pid=None, skip=(), max_concurrent=None):
     """The default pick: the loop's own scoped batch pick, nothing else. Built, never run, by this function."""
     argv = [sys.executable, str(_HERE / "loop.py"), "next-batch", str(sdlc_dir), "--label", label,
             "--session-pid", str(session_pid if session_pid else os.getpid())]
     if skip:
         argv += ["--skip", ",".join(sorted(str(x) for x in skip))]
+    if max_concurrent:
+        argv += ["--max-concurrent", str(int(max_concurrent))]       # #1590: absent, the argv is unchanged
     return argv
 
 
-def _default_pick(sdlc_dir, label, session_pid, skip):
+def _default_pick(sdlc_dir, label, session_pid, skip, max_concurrent=None):
     """-> the goal numbers the pick claimed. The one process `run` starts. Raises on a failed pick."""
-    got = subprocess.run(pick_argv(sdlc_dir, label, session_pid, skip), capture_output=True, text=True,
+    got = subprocess.run(pick_argv(sdlc_dir, label, session_pid, skip, max_concurrent), capture_output=True, text=True,
                          timeout=_DEFAULT_PICK_TIMEOUT)
     if got.returncode != 0:
         raise RuntimeError("the pick exited %d: %s" % (got.returncode, (got.stderr or "").strip()[-200:]))
@@ -1046,6 +1049,13 @@ def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=
         return res
     label = chain_label(goal)
     recorded = [r["number"] for r in rec["members"]]
+    width, locked = 1, chain_parallel.engaged(config)
+    if locked:                  # #1590: before any write or claim; a refused cycle starts nothing
+        try:
+            chain_parallel.acquire(sdlc_dir, goal, recorded, config, _pid_of(session_pid), now)
+        except chain_parallel.ChainRefused as exc:
+            raise ChainRefused(str(exc))
+        width = chain_parallel.width(config)
     try:
         skip = frozenset(str(x) for x in ((sweep or _default_sweep)(sdlc_dir, config, run) or ()))
     except Exception:           # noqa: BLE001 - fail open, like the loop's own sweep
@@ -1062,6 +1072,8 @@ def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=
         rec["run"] = blk
         _save(sdlc_dir, goal, rec)
         res.update(state="capped", exit=3, reason="capped", detail=why)
+        if locked:
+            chain_parallel.release(sdlc_dir, goal)
         return res
     known = set(recorded) | set(blk.get("seen") or ())
     already = set(blk.get("closed") or ())
@@ -1079,14 +1091,25 @@ def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=
     blk["seen"] = sorted(known | open_now)
     if closed_new:
         blk["heartbeat"] = _iso(now)
-    try:
-        got = _numbers((pick or (lambda lab, sk: _default_pick(sdlc_dir, lab, session_pid, sk)))(label, skip))
-    except Exception as exc:    # noqa: BLE001 - a failed pick is a stuck cycle, not a crash
-        got, failure = set(), failure or exc
-    if got:
+    pick_kw, waiting, note = {}, None, ""
+    if width > 1 and p is not None and failure is None:
+        pick_kw, waiting, note = _width_plan(sdlc_dir, rec, cfg, p, open_now, recorded, width)
+    got = set()
+    if waiting is None:
+        try:
+            if pick is None:
+                got = _numbers(_default_pick(sdlc_dir, label, session_pid, skip, pick_kw.get("max_concurrent")))
+            else:
+                got = _numbers(pick(label, skip, **pick_kw))
+        except Exception as exc:    # noqa: BLE001 - a failed pick is a stuck cycle, not a crash
+            got, failure = set(), failure or exc
+    if waiting is not None:
+        blk.update(state="running", reason=None, stuck=None)
+        res.update(state="running", detail=waiting)
+    elif got:
         blk.update(state="running", heartbeat=_iso(now), reason=None, stuck=None,
                    picked=sorted(set(blk.get("picked") or ()) | got))
-        res.update(state="running", picked=sorted(got))
+        res.update(state="running", picked=sorted(got), detail=note)
     else:
         unconfirmed = known - open_now - set(blk["closed"])
         if failure is None and not open_now and not unconfirmed:
@@ -1100,7 +1123,46 @@ def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=
             res.update(state="stuck", exit=3, reason=reason, detail=detail)
     rec["run"] = blk
     _save(sdlc_dir, goal, rec)
+    if locked and res["state"] != "running":        # done or stuck: the pool is free for another chain
+        chain_parallel.release(sdlc_dir, goal)
     return res
+
+
+def _pid_of(session_pid):
+    try:
+        return int(session_pid) if session_pid else os.getpid()
+    except (TypeError, ValueError):
+        return os.getpid()
+
+
+def _width_plan(sdlc_dir, rec, cfg, p, open_now, recorded, width):
+    """#1590: -> (pick kwargs, waiting detail or None, note). Only called with a width past 1. Offers the
+    ready members (no open in-chain blocker, not in flight), widens only when the remaining cap covers the
+    goals that would be in flight at p90 (`chain_parallel.widen_ok`), else falls back to one at a time."""
+    cp, cs = chain_parallel, _load("chain_spend")
+    rows = p["members"]
+    in_flight = {r["number"] for r in rows if r.get("in_progress")}
+    waits = {r["number"]: r.get("waits_on") or [] for r in rec["members"]}
+    blockers = {r["number"]: [w for w in waits.get(r["number"], []) if w in open_now]
+                + (["outside"] if r.get("unresolved") else []) for r in rows}
+    ready = cp.ready_set([r["number"] for r in rows], blockers, in_flight, width)
+    if in_flight and not ready:
+        return {}, "%d in flight, none ready (width %d)" % (len(in_flight), width), ""
+    slots = max(1, len(ready))
+    note = ""
+    if len(in_flight) + slots > 1:
+        block = cfg.get("chain") if isinstance(cfg.get("chain"), dict) else {}
+        usd = block.get("max_usd")
+        remaining = None
+        if isinstance(usd, (int, float)) and not isinstance(usd, bool) and usd > 0:
+            cents, ok = cs.spent(sdlc_dir, recorded, rec.get("approved_at"))
+            remaining = max(0, usd * 100 - cents) if ok else 0
+        if not cp.widen_ok(remaining, len(in_flight) + slots, cs.estimate(sdlc_dir, recorded)["p90"]):
+            slots = max(0, 1 - len(in_flight))
+            note = "widening refused: the remaining cap does not cover the goals in flight at p90"
+            if slots == 0:
+                return {}, note, ""
+    return {"max_concurrent": slots}, None, note
 
 
 def stop(sdlc_dir, goal):
@@ -1108,6 +1170,7 @@ def stop(sdlc_dir, goal):
     rec = _read_record(_record_path(sdlc_dir, goal))
     rec["run"] = dict(rec.get("run") or {}, state="stopped")
     _save(sdlc_dir, goal, rec)
+    chain_parallel.release(sdlc_dir, goal)         # #1590: harmless when this chain holds no lock
     return {"goal": goal, "state": "stopped"}
 
 
