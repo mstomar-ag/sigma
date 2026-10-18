@@ -1649,9 +1649,15 @@ def _label_set_decided(sdlc_dir, config, label):
 def _label_not_ready(sdlc_dir, source, config):
     """#1579: the one line to print when a `--label` run must not start yet, else None. Runs the
     read-only `plan` once, before the run's first claim, and refuses on unarmed members or open
-    questions. Fail-open on a plan that cannot run: the picker's own posture."""
+    questions. Fail-open on a plan that cannot run: the picker's own posture.
+
+    #1805: `run_iteration` is per checkout, so it cannot say "this label's run has started". The
+    check is skipped only when a run is started AND this very label is the one it last passed for
+    (`label_checked`); a different label, or no started run, runs `plan` again. A refusal records nothing."""
     label = getattr(source, "label_scope", None)
-    if not label or state.load_cursor(sdlc_dir).get("run_iteration"):
+    if not label:
+        return None
+    if state.load_cursor(sdlc_dir).get("run_iteration") and state.load_label_checked(sdlc_dir) == label:
         return None
     try:
         p = _label_drain().plan(sdlc_dir, label, config=config, run=getattr(source, "_run", None))
@@ -1660,18 +1666,24 @@ def _label_not_ready(sdlc_dir, source, config):
               file=sys.stderr)
         return None
     unarmed = sum(1 for r in p["members"] if r["verdict"] == "unarmed")
+    unassigned = sum(1 for r in p["members"] if r["verdict"] == "unassigned")      # #1824
     # #1732: the plan's real open questions; a scope-hold, dependency or spend question still never blocks a start
     asks = sum(1 for q in p.get("questions") or [] if q.get("kind") not in ("scope_hold", "dependency", "irreversible"))
-    if unarmed and not any(q.get("kind") == "label_set" for q in p.get("questions") or []) \
+    if (unarmed or unassigned) and not any(q.get("kind") == "label_set" for q in p.get("questions") or []) \
             and _label_set_decided(sdlc_dir, config, label):
-        unarmed = 0                             # #1732: a recorded decision to leave them unarmed
-    if not unarmed and not asks:
+        unarmed = unassigned = 0                # #1732: a recorded decision to leave them unarmed
+    if not unarmed and not unassigned and not asks:
+        try:
+            state.set_label_checked(sdlc_dir, label)
+        except OSError as exc:                  # fail-open: an unrecorded pass only means a re-check
+            print("loop.py: label %r start check not recorded (%s); continuing" % (label, exc), file=sys.stderr)
         return None
-    verb = ("run `label_drain.py arm %s %s --apply`" % (sdlc_dir, label) if unarmed
+    verb = ("run `label_drain.py arm %s %s --apply`" % (sdlc_dir, label) if unarmed or unassigned
             else "run `label_drain.py plan %s %s` and answer the open questions with /sigma-unpark"
                  % (sdlc_dir, label))
-    return ("label %s is not ready: %d unarmed member(s), %d open question(s); nothing was claimed or "
-            "written. First %s, then start again" % (label, unarmed, asks, verb))
+    return ("label %s is not ready: %d unarmed member(s)%s, %d open question(s); nothing was claimed or "
+            "written. First %s, then start again"
+            % (label, unarmed, ", %d unassigned member(s)" % unassigned if unassigned else "", asks, verb))
 
 
 def _label_drained_note(sdlc_dir, source, config, skip):
@@ -1703,8 +1715,11 @@ def _label_drained_note(sdlc_dir, source, config, skip):
                   file=sys.stderr)
     try:
         since = state.load_cursor(sdlc_dir).get("run_started_at") or 0
-        filed = []
-        for i in sources.fetch_issues_rest(getattr(source, "_run"), source.repo, [source.goal_label], 200):
+        if not since and state.load_label_checked(sdlc_dir) == label:
+            since = state.load_label_checked_at(sdlc_dir)   # #1832: the documented gesture has no start-run
+        filed = []              # #1809: no recorded start means no window; never count from the epoch
+        for i in (sources.fetch_issues_rest(getattr(source, "_run"), source.repo, [source.goal_label], 200)
+                  if since else ()):
             made = calendar.timegm(time.strptime(i.get("created_at") or "", "%Y-%m-%dT%H:%M:%SZ"))
             if made >= since and label not in {(l.get("name") if isinstance(l, dict) else l)
                                                for l in i.get("labels") or []}:
@@ -2074,7 +2089,8 @@ def _hold_subject(source, goal):
 
 
 def _held_cycles(sdlc_dir, config, held):
-    """#1615: one line per stored-map dependency cycle that holds at least one of the held goals; `[]`
+    """#1615: one line per stored-map dependency cycle that holds at least one of the held goals (#1841: it
+    holds a goal that is in it or waits behind it); `[]`
     (and `dag_cycles` not even loaded) when `discovery.dag.mode` is written `off`. Never raises."""
     try:
         if config.get("discovery", {}).get("dag", {}).get("mode") == "off":
@@ -2087,7 +2103,7 @@ def _held_cycles(sdlc_dir, config, held):
         if not nums:
             return []
         dc = _load("dag_cycles")
-        return [dc.line(c) for c in dc.find(sdlc_dir, config) if nums & set(c)]
+        return [dc.line(c) for c in dc.holding(sdlc_dir, config, nums)]     # #1841: in OR behind a cycle
     except Exception:                       # noqa: BLE001 - the report is advice, never a failure
         return []
 
@@ -2096,7 +2112,7 @@ def _held_release_note(gate, cycles=()):
     """#1550: the DONE summary must not promise self-release for a hold only a human can lift.
     #1615: nor for a hold that is a dependency cycle, which no event ever releases."""
     if cycles:
-        return ("At least one is in a dependency cycle and never releases by itself; "
+        return ("At least one is in, or waits behind, a dependency cycle and never releases by itself; "
                 "someone has to remove one Blocked by line")
     if gate.get("needs_human"):
         return ("At least one waits on a prerequisite that is parked, failed, proposed or names no "
@@ -6125,12 +6141,13 @@ def verify_goal(sdlc_dir, goal):
         # runs nothing and writes no evidence, so `record done` still refuses.
         guarded = _load("resource_guard").run(
             "verify", list(commands), root, _verify_timeout_seconds(config), goal,
-            config=config.get("resource"), repo=root)
+            config=dict(config.get("resource") or {}, mode=_load("resource_guard").resolve_mode(config)),
+            repo=root)                                  # #1804: the one resolver, env > config > default
         if guarded.hold is not None:
             _what = ("the verify group Sigma started was stopped; no evidence, the goal is not failed; rerun when "
                      "admission reopens" if getattr(guarded, "shed", False)
                      else "the proving command was not run; nothing was killed")
-            print(f"RESOURCE-HOLD exit=5 -- {guarded.hold.reason}; retry_after={guarded.hold.retry_after:g}s "
+            print(f"RESOURCE-HOLD exit=5 -- {guarded.hold.reason}; retry_after={max(HOLD_RETRY_FLOOR, guarded.hold.retry_after):g}s "
                   f"({_what})", file=sys.stderr)
             ledger.safe_append(sdlc_dir, "verify", goal, config=config, stream=ledger.EVENTS, exit=5)
             actionlog.safe_append(sdlc_dir, goal, "verify_run", exit=5)

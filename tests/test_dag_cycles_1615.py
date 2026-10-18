@@ -186,6 +186,36 @@ def test_pick_output_names_every_cycle_member_when_another_held_goal_waits_on_pl
     assert "never releases by itself" in err and "become pickable by themselves" not in err
 
 
+def test_a_goal_held_behind_a_cycle_gets_the_cycle_sentence_not_the_promise(capsys):
+    """#1841: goal 50 waits on cycle member 10 but is not in the cycle, and goal 40 waits on plain work, so no
+    stuck-root line applies. Control: the old `nums & set(c)` test names no cycle and the promise returns."""
+    nodes = CYC_NODES + [_node(40), _node(41), _node(50)]
+    edges = CYC_EDGES + [_edge(41, 40), _edge(10, 50)]
+    mirror = MIRROR + [_blocked(40, 41), _issue(41), _blocked(50, 10)]
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        base = _sdlc(d, nodes=nodes, edges=edges, mirror=mirror)
+        src = _Board(["40", "50"], live=mirror)
+        lp._next(base, src, _cfg(lp, base))
+    err = capsys.readouterr().err
+    assert "loop.py: dependency cycle: #10, #11" in err
+    assert "never releases by itself" in err and "become pickable by themselves" not in err
+    assert "dependency cycle: #20" not in err                  # an unrelated cycle is not named
+
+
+def test_holding_returns_only_cycles_that_hold_a_given_goal():
+    dc = _cycles()
+    nodes = CYC_NODES + [_node(50), _node(51)]
+    edges = CYC_EDGES + [_edge(10, 50), _edge(50, 51)]
+    with tempfile.TemporaryDirectory() as d:
+        base = _sdlc(d, nodes=nodes, edges=edges)
+        cfg = json.loads((pathlib.Path(base) / "config.json").read_text())
+        assert dc.holding(base, cfg, {50}) == [(10, 11)]            # directly behind
+        assert dc.holding(base, cfg, {51}) == [(10, 11)]            # transitively behind
+        assert dc.holding(base, cfg, {30}) == []                    # independent
+        assert dc.holding(base, cfg, {11, 22}) == [(10, 11), (20, 21, 22)]
+
+
 def test_status_names_every_member_of_each_distinct_cycle():
     with tempfile.TemporaryDirectory() as d:
         base = _sdlc(d)
@@ -424,3 +454,31 @@ def test_a_saved_refresh_posts_the_cycle_comment_once():
         dr.dag_cycles = Boom
         dr.dag_collect.refresh = lambda *a, **k: {"status": "saved"}
         assert dr.refresh_if_due(base, cfg, run=Gh(), now=NOW, force=True)["status"] == "saved"
+
+
+# ----------------------------------------------------------------- #1841: the call cap and the next refresh
+
+def test_a_cap_exhausted_refresh_posts_nothing_and_does_not_raise():
+    dc = _cycles()
+    with tempfile.TemporaryDirectory() as d:
+        base = _sdlc(d)
+        cfg = json.loads((pathlib.Path(base) / "config.json").read_text())
+
+        def capped(args):
+            raise RuntimeError("call cap")
+        assert dc.post(base, cfg, capped) == []
+
+
+def test_a_cycle_left_without_a_comment_by_the_cap_is_posted_on_the_next_saved_refresh():
+    """Control: remember cycles as done after a failed attempt (e.g. a local 'tried' set) and this goes red."""
+    dc = _cycles()
+    with tempfile.TemporaryDirectory() as d:
+        base = _sdlc(d)
+        cfg = json.loads((pathlib.Path(base) / "config.json").read_text())
+
+        def capped(args):
+            raise RuntimeError("call cap")
+        assert dc.post(base, cfg, capped) == []
+        gh = Gh()
+        assert sorted(dc.post(base, cfg, gh)) == [10, 20]
+        assert len(gh.posts()) == 2

@@ -501,3 +501,55 @@ def test_supervisor_lease_is_not_reclaimed_after_seven_hours(state, daemon, monk
     assert hasattr(got, "id") and not lease._stale(record, 1000.0 + 7 * 3600)
     default = dict(record, ttl=lease.DEFAULT_TTL)
     assert lease._stale(default, 1000.0 + 7 * 3600)  # the control: the 6h default would have gone
+
+
+# ------------------------------------------------------------------ #1816 cold ring, per-session lease
+def test_two_supervisors_on_an_empty_ring_both_get_a_session(state):
+    guard = _load("resource_guard", "rg_cold")
+    lease = with_sample(guard)  # 8 GiB available of 16: room is many session costs
+    first = lease.admit("session", 1, os.getcwd(), "supervisor:a", pid=os.getpid(), now=1000.0)
+    second = lease.admit("session", 1, os.getcwd(), "supervisor:b", pid=os.getppid(), now=1001.0)
+    assert hasattr(first, "id") and hasattr(second, "id")
+
+
+def test_cold_ring_bound_follows_the_room(state):
+    guard = _load("resource_guard", "rg_cold2")
+    cost = TOTAL // 32
+    lease = with_sample(guard, available=int(TOTAL * 0.2) + cost * 2 + cost // 2)  # room for exactly two sessions
+    got = [lease.admit("session", 1, os.getcwd(), "supervisor:%d" % i, pid=os.getpid(), now=1000.0 + i)
+           for i in range(3)]
+    kinds = [hasattr(g, "id") for g in got]
+    assert kinds == [True, True, False] and "cold-start bound 2" in got[2].reason
+
+
+def test_cold_verify_stays_at_one_unit(state):
+    guard = _load("resource_guard", "rg_cold3")
+    lease = with_sample(guard)
+    assert hasattr(lease.admit("verify", 1, os.getcwd(), "g1", pid=os.getpid(), now=1000.0), "id")
+    held = lease.admit("verify", 1, os.getcwd(), "g2", pid=os.getppid(), now=1001.0)
+    assert "one unit is already running" in held.reason
+
+
+def test_session_lease_is_released_per_session_while_the_supervisor_lives(state):
+    guard = _load("resource_guard", "rg_cold4")
+    lease = with_sample(guard)
+    lease.take_footprint = lambda pid: (50 << 20, False)
+    for _ in range(2):
+        with guard.session_lease("supervisor", "r1") as got:
+            assert hasattr(got, "id") and len(leases(state)) == 1
+        assert leases(state) == []  # released at session end, the supervisor still running
+    ring = json.loads((pathlib.Path(state) / "observed.json").read_text())
+    assert len(ring["session"]) == 2
+
+
+def test_session_lease_samples_the_peak_while_the_session_runs(state):
+    import time
+    guard = _load("resource_guard", "rg_cold5")
+    lease = with_sample(guard)
+    size = {"v": 300 << 20}
+    lease.take_footprint = lambda pid: (size["v"], False)
+    with guard.session_lease("supervisor", "r2", sample_every=0.02, renew_every=5) as got:
+        time.sleep(0.3)
+        size["v"] = 10 << 20  # the tree has shrunk by the time the lease is released
+    ring = json.loads((pathlib.Path(state) / "observed.json").read_text())
+    assert ring["session"] == [300 << 20]

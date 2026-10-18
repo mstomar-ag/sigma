@@ -39,6 +39,9 @@ All take the project's `.sdlc` directory and the label name.
   `plan` calls unarmed: adds the goal label, removes a parked or blocked label, adds a priority label
   only when the issue has none, and assigns the configured assignee. It never creates a label and
   never removes the run label.
+  A member that is already armed but has no assignee (verdict `unassigned`) gets only the configured
+  assignee, no other label change; with no assignee configured it is left alone. An issue assigned to
+  someone else stays `assigned-elsewhere` and is refused.
 - `label_drain.py answer <sdlc_dir> <label> --answers <file.json> [--dry-run]` applies a person's
   answers. The file maps question ids, exactly as `plan` prints them, to one of that question's
   options. An unknown id or an option outside the bank refuses the whole file with no write. Each
@@ -46,7 +49,10 @@ All take the project's `.sdlc` directory and the label name.
   prints every write and makes none.
 - `loop.py next <sdlc_dir> --label <name>` (and `next-batch`) is the pick. Before the first claim it
   runs `plan` once and refuses to start while members are unarmed or questions are open; the refusal
-  claims and writes nothing and names the command to run.
+  claims and writes nothing and names the command to run. The check is keyed to the label run, not to
+  the checkout: a passed check records its label in `state/STATE.md` (`label_checked`), and later picks skip
+  `plan` only while a run is started and that same label is the recorded one. Another label, or a
+  checkout with no started run, runs `plan` again, so a second label is never picked unchecked.
 
 ## Arming defaults
 
@@ -82,8 +88,9 @@ the label (at most 50 per run) so it is picked first, and says so on stderr; one
 stays out with its reason and the member stays held. Nothing is skipped silently.
 
 Work filed during the drain does not carry the label, so it is not picked by this run. When the run
-stops, `loop.py` lists what was filed during the drain without the label, so a person can label it for
-a later run. The stop is `label-held` when open members remain that were not picked, with a reason
+stops, `loop.py` lists what was filed since the label's start check first passed (the drain start;
+`start-run` sets it too) without the label, so a person can label it for a later run. With no drain start
+recorded it lists nothing. The stop is `label-held` when open members remain that were not picked, with a reason
 per member, and `backlog-empty` when the label has no open members; then the label can be deleted
 by a person.
 

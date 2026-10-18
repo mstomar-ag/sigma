@@ -75,7 +75,7 @@ def test_full_scenario_yields_exactly_the_expected_questions(tmp_path):
     assert _q(p, "dependency:1")["options"] == ["wait for it", "work around it", "drop this"]
     assert _q(p, "dependency:1")["ask"].startswith("#50 is still open")
     k = _q(p, "kind:2")
-    assert k["kind"] == "undeclared" and "label_set" not in k["options"]
+    assert k["kind"] == "kind" and "label_set" not in k["options"]
     assert set(k["options"]) == set(_mod("qkind").QKINDS) - {"label_set"}
     assert _q(p, "dependency:60")["options"] == ["take it over", "leave it and wait"]
     assert _q(p, "dependency:60")["unblocks"] == [7]
@@ -168,3 +168,24 @@ def test_a_member_no_gate_can_classify_gets_the_gate_hold_question(tmp_path):
     p = _plan(tmp_path, [_g(8, body="Feature: billing\n\n" + DONE)])
     q = _q(p, "scope_hold:8")
     assert q["options"] == ["add the repository", "drop this"] and q["unblocks"] == [8]
+
+
+def test_after_a_declare_the_next_plan_asks_the_members_own_question_until_answered(tmp_path):
+    """#1806: answer the plan's own "which kind" question, then plan again."""
+    import test_label_answer as A
+    ld, base, fk, _ = A.env(tmp_path, [A.issue(1, "sdlc:parked", LBL, comments=[A.UNDECLARED_PARK],
+                                               assignees=("alice",))])
+    first = ld.plan(base, LBL, run=fk)
+    assert _ids(first) == ["kind:1"] and first["ready"] is False
+    A.ask(ld, base, fk, {"kind:1": "dependency"})
+    nxt = ld.plan(base, LBL, run=fk)
+    assert _ids(nxt) == ["dependency:1"] and nxt["ready"] is False
+    assert _q(nxt, "dependency:1")["kind"] == "dependency"
+
+
+def test_an_armed_unassigned_member_is_named_by_the_arming_question_and_holds_ready(tmp_path):
+    """#1807: it is not ready until the arming answer is recorded, and the question unblocks it."""
+    p = _plan(tmp_path, [_issue(1, LBL, "sdlc:goal", body=DONE), _g(2)])
+    q = _q(p, "label_set:" + LBL)
+    assert q["unblocks"] == [1]
+    assert p["ready"] is False

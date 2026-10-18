@@ -172,7 +172,7 @@ def test_assigned_elsewhere_and_held_by_gate(tmp_path):
 
 def test_unassigned_member_is_not_pickable_when_an_assignee_is_configured(tmp_path):
     p, _ = _plan(tmp_path, [_goal(1), _goal(2, assignees=["me-login"])], assignee="me-login")
-    assert _by(p, 1)["verdict"] == "assigned-elsewhere" and "unassigned" in _by(p, 1)["detail"]
+    assert _by(p, 1)["verdict"] == "unassigned" and "unassigned" in _by(p, 1)["detail"]
     assert _by(p, 2)["verdict"] == "armed"
     p, _ = _plan(tmp_path / "x", [_goal(1)])                 # no assignee configured: unchanged
     assert _by(p, 1)["verdict"] == "armed"
@@ -332,6 +332,18 @@ def test_cross_unit_cycle_and_missing_done_when_are_warned_with_numbers(tmp_path
     assert w["paid_step"] == [4]
 
 
+def test_a_one_item_or_multiline_done_when_is_warned_like_a_missing_one(tmp_path):
+    """#1811: acceptance refuses these lists, so a member carrying one cannot be verified once picked."""
+    issues = [
+        _goal(1, body="## Done when\n- [ ] only one\n"),
+        _goal(2, body="## Done when\n- [ ] a\n- [ ] b\n- [ ] c\n- [ ] d\n- [ ] e\n- [ ] f\n- [ ] g\n- [ ] h\n"),
+        _goal(3, body="## Done when\nprose, not a checklist\n"),
+        _goal(4),
+    ]
+    p, _ = _plan(tmp_path, issues)
+    assert p["warnings"]["no_done_when"] == [1, 2, 3]
+
+
 # --- status ---------------------------------------------------------------------------------------
 
 def test_status_gives_one_reason_per_open_member_and_is_not_drained(tmp_path, capsys):
@@ -392,3 +404,27 @@ def test_the_cli_gesture_from_the_docs_runs_and_prints_usage_on_bad_input(tmp_pa
     r = subprocess.run([sys.executable, str(S / "label_drain.py"), "plan"], capture_output=True,
                        text=True, cwd=str(tmp_path))
     assert r.returncode == 2 and "usage" in r.stderr.lower()
+
+
+def test_a_sigma_answer_comment_is_never_the_park_reason(tmp_path, capsys):
+    """#1806: after an answer, plan and the label-held stop still show the park comment's reason."""
+    import test_label_answer as A
+    ld, base, fk, _ = A.env(tmp_path, [A.issue(1, "sdlc:parked", LBL, comments=[A.UNDECLARED_PARK],
+                                               assignees=("alice",))])
+    A.ask(ld, base, fk, {"kind:1": "needs_decision"})
+    assert any("sigma:unpark-qa" in c for c in fk.stored_comments(1))      # the answer comment is on the issue
+    row = _by(ld.plan(base, LBL, run=fk), 1)
+    assert "legacy column" in row["question"]
+    assert "sigma:unpark-qa" not in row["question"] and "\n" not in row["question"]
+    assert "Question kind set" not in row["question"]
+    rc = ld.main(["label_drain.py", "status", base, LBL, "--json"], run=fk)
+    reason = next(r["reason"] for r in json.loads(capsys.readouterr().out)["not_pickable"] if r["number"] == 1)
+    assert rc == 0 and "legacy column" in reason and "sigma:unpark-qa" not in reason and "\n" not in reason
+
+
+def test_armed_member_with_no_assignee_is_unassigned_never_assigned_elsewhere(tmp_path):
+    """#1807: no assignee is its own verdict; an issue held by someone else keeps assigned-elsewhere."""
+    p, _ = _plan(tmp_path, [_goal(1), _goal(2, assignees=["other-person"])], assignee="me-login")
+    assert _by(p, 1)["verdict"] == "unassigned"
+    assert _by(p, 1)["verdict"] != "assigned-elsewhere"
+    assert _by(p, 2)["verdict"] == "assigned-elsewhere"

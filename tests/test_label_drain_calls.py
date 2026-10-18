@@ -19,6 +19,7 @@ PAGE = ROOT / "docs" / "label-drain.md"
 GOAL = "sdlc:goal"
 PRIORITY = "priority:P2"
 OUTSIDE = 9
+ME = ("alice",)         # the configured assignee of `_repo`: an armed member without one is `unassigned` (#1807)
 _PAID = "Paid step: render one clip.\n\n" + DW
 
 
@@ -27,12 +28,12 @@ def scenario():
     #4 parked, #5 a paid-step member held by an open prerequisite. #9 is that prerequisite, open
     and outside the label."""
     return [
-        _issue(1, GOAL, LBL, PRIORITY),
+        _issue(1, GOAL, LBL, PRIORITY, assignees=ME),
         _issue(2, LBL),
         _issue(3, LBL),
-        _issue(4, GOAL, LBL, PRIORITY, "sdlc:parked"),
-        _issue(5, GOAL, LBL, PRIORITY, body="Blocked by #%d\n\n%s" % (OUTSIDE, _PAID)),
-        _issue(OUTSIDE, GOAL, PRIORITY),
+        _issue(4, GOAL, LBL, PRIORITY, "sdlc:parked", assignees=ME),
+        _issue(5, GOAL, LBL, PRIORITY, body="Blocked by #%d\n\n%s" % (OUTSIDE, _PAID), assignees=ME),
+        _issue(OUTSIDE, GOAL, PRIORITY, assignees=ME),
     ]
 
 

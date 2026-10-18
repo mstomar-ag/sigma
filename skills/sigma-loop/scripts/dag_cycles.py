@@ -19,6 +19,12 @@ new comment. It is silent when the mode is `off` or `discovery.dag.cycle_comment
 `MAX_CYCLES` cycles per call, and never raises. The comment text is built from digits, commas, `#`
 and `INSTRUCTION`; nothing a person wrote can enter it.
 
+Limits (#1841): the poster runs after the refresh lock is released, so two clones refreshing in the same
+moment can both miss the marker and each post one comment for the same cycle (the cost is a duplicate
+comment, never a lost one). It shares the refresh's call cap and time budget: a refresh that nearly
+exhausts them posts nothing (the poster swallows the refusal), and nothing is remembered as tried, so the
+next saved refresh posts the cycles still without a comment.
+
 Cost: per cycle, one read of the member's comments (`1 + ceil(n/100)` requests for n comments) and, only
 when the marker is absent, one POST. At 20 cycles that is at most 20 posts and about 40 reads per
 refresh; it runs only after a refresh that saved a map, so once per TTL. A cycle already commented on
@@ -75,6 +81,23 @@ def find(sdlc, config=None):
     try:
         m, _config_ = _map(sdlc, config)
         return [] if m is None else list(_cycles_of(m)[0])
+    except Exception:                                   # noqa: BLE001 - a report that cannot be made is empty
+        return []
+
+
+def holding(sdlc, config, nums):
+    """#1841: the stored cycles that hold at least one goal of `nums`: a cycle the goal is IN, or one it
+    waits BEHIND (the goal is an open dependent of a member, however many hops away). Never raises."""
+    try:
+        m, _config_ = _map(sdlc, config)
+        if m is None or not nums:
+            return []
+        nodes = [dag_core.Node(n["number"], n["kind"], n["state"], n.get("life", ""), n.get("prio"))
+                 for n in m["nodes"]]
+        g = dag_core.build(nodes, [(e["blocker"], e["blocked"], e.get("source", "other")) for e in m["edges"]])
+        want = set(nums)
+        return [c for c in dag_core.cycles(g)
+                if want & set(c) or any(want & set(dag_core.open_dependents(g, n)) for n in c)]
     except Exception:                                   # noqa: BLE001 - a report that cannot be made is empty
         return []
 

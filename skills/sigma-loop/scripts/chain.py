@@ -6,6 +6,9 @@
     chain.py answer <sdlc_dir> <chain> --answers <file> | --defaults
     chain.py approve <sdlc_dir> <chain>
     chain.py arm <sdlc_dir> <chain> [--dry-run]
+    chain.py run <sdlc_dir> <chain> [--session-pid P]
+    chain.py stop <sdlc_dir> <chain>
+    chain.py resume <sdlc_dir> <chain> [--cap N]
 
 `plan` and `sheet` are READ-ONLY toward GitHub. Every call they make goes through `_GetOnly`, which raises
 on anything that is not an explicit `gh api ... --method GET`: no `gh issue ...` verb, no GraphQL, no body
@@ -67,8 +70,24 @@ the arming writes of its member, whose goal-label write is the last, and is skip
 followed by a re-run completes with no duplicate label and no duplicate comment. `--dry-run` hands the source
 a read-only runner (a write is impossible, not skipped) and prints the same lines the sheet listed.
 
-Exit 0 planned/sheet printed/answers recorded/armed, 2 refused or bad usage, 1 the record could not be
-written or a member's answer or a write failed.
+RUN, STOP, RESUME (#1588). A foreground driver, no daemon, no loop and no model call: one `run` is ONE cycle
+and is called again (by a person or a supervising loop) until it reports done. It refuses (exit 2, nothing
+written, no process) unless the record is approved and `armed_at` is set (`approve` and a finished `arm` stamp
+them), or the run was stopped. A cycle: the existing auto-unpark sweep; the spend cap
+(`chain_spend.admit`, before any claim; a refusal records `capped` and claims nothing); a read of the label's
+members to report what was added and what closed since the last cycle (reported, never acted on; a closed
+member is confirmed by reading the issue itself, so a lost label never reads as done); then ONE pick, the
+loop's own `loop.py next-batch --label chain:<root> --session-pid P`, the only process this verb starts, so
+nothing outside the label is ever claimed and the claim stays lease based. A non-empty pick is recorded
+(numbers only) with a heartbeat, exit 0. An empty pick is `done` only when every member is confirmed closed;
+otherwise it is STUCK, exit 3, with ONE reason: decision, held-gate, claimed, external, rate-limit,
+degraded-read. `stop` and `resume [--cap N]` change only the record's `run` block (local, no `gh` call); a
+stop does not release goals already claimed. The record is a local file with no lock: run one driver per
+chain. Not measured: a run against a live repository, and the cost of one cycle's reads beyond the fake's
+call counts.
+
+Exit 0 planned/sheet printed/answers recorded/armed/cycle picked or done, 2 refused or bad usage, 1 the record
+could not be written or a member's answer or a write failed, 3 the cycle ended capped or stuck.
 """
 import collections
 import importlib.util
@@ -76,6 +95,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import time
 
@@ -743,8 +763,18 @@ def _require_approved(rec, config):
                            % (rec["goal"], len(openq), ", ".join(q["id"] for q in openq)))
 
 
-def approve(sdlc_dir, goal, config=None):
-    """Mark a fully answered, complete chain approved. Local only. -> {"goal", "state"}."""
+def _iso(now):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+
+
+def _save(sdlc_dir, goal, rec):
+    """The one write of the run, stop, resume and arm stamps: the local chain record, atomically."""
+    _load("state").atomic_write_text(_record_path(sdlc_dir, goal), json.dumps(rec, indent=2, sort_keys=True) + "\n")
+
+
+def approve(sdlc_dir, goal, config=None, now=None):
+    """Mark a fully answered, complete chain approved and stamp `approved_at`. Local only.
+    -> {"goal", "state"}."""
     state = _load("state")
     config = config if config is not None else state.load_config(sdlc_dir)
     path = _record_path(sdlc_dir, goal)
@@ -754,8 +784,9 @@ def approve(sdlc_dir, goal, config=None):
         raise ChainRefused("chain #%d cannot be approved: %s" % (
             goal, "%d question(s) open (%s)" % (len(openq), ", ".join(q["id"] for q in openq)) if openq
             else "the plan is INCOMPLETE; plan it again"))
-    if rec.get("state") != "approved":
+    if rec.get("state") != "approved" or not rec.get("approved_at"):
         rec["state"] = "approved"
+        rec.setdefault("approved_at", _iso(time.time() if now is None else now))
         state.atomic_write_text(path, json.dumps(rec, indent=2, sort_keys=True) + "\n")
     return {"goal": goal, "state": "approved"}
 
@@ -773,7 +804,7 @@ def _act(kind, n, detail):
     return {"action": kind, "issue": str(n), "detail": detail, "result": None, "error": None}
 
 
-def arm(sdlc_dir, goal, dry_run=False, config=None, run=None):
+def arm(sdlc_dir, goal, dry_run=False, config=None, run=None, now=None):
     """Label and arm an approved chain. -> {"label", "apply", "actions", "refused", "notes"}.
     Raises `ChainRefused` before any `gh` call unless approved. See the module docstring (ARM)."""
     state, sources, triage = _load("state"), _load("sources"), _load("triage")
@@ -841,6 +872,9 @@ def arm(sdlc_dir, goal, dry_run=False, config=None, run=None):
             actions.append(done)
             if done["result"] == "failed":
                 break
+    if not dry_run and not any(a["result"] == "failed" for a in actions):
+        rec["armed_at"] = rec.get("armed_at") or _iso(time.time() if now is None else now)
+        _save(sdlc_dir, goal, rec)          # #1588: `run` starts only from a chain that finished arming
     return {"label": label, "apply": not dry_run, "actions": actions,
             "refused": sorted(refused, key=lambda x: x["issue"]), "notes": notes}
 
@@ -870,6 +904,227 @@ def render_arm(res):
         out.append("  no actions needed")
     if not res["apply"]:
         out.append("dry run: nothing was written; run without --dry-run to execute")
+    return "\n".join(out) + "\n"
+
+
+# --- run, stop, resume (#1588) -----------------------------------------------------------------------------
+
+RUN_USAGE = ("usage: chain.py run <sdlc_dir> <chain> [--session-pid P]\n"
+             "       chain.py stop <sdlc_dir> <chain>\n"
+             "       chain.py resume <sdlc_dir> <chain> [--cap N]\n"
+             "  `run` is ONE cycle of a foreground driver (no daemon): it claims the next goals of the approved,\n"
+             "  armed chain through the loop's own label-scoped pick, or says why it cannot (exit 3: capped or\n"
+             "  stuck). Call it again. `stop` and `resume` change only the local record.")
+STUCK_REASONS = ("decision", "held-gate", "claimed", "external", "rate-limit", "degraded-read", "capped")
+_DEFAULT_PICK_TIMEOUT = 900
+_NO_PICK = ("DONE", "BUDGET", "HANDOFF", "FULL", "HOLD")
+
+
+def pick_argv(sdlc_dir, label, session_pid=None, skip=()):
+    """The default pick: the loop's own scoped batch pick, nothing else. Built, never run, by this function."""
+    argv = [sys.executable, str(_HERE / "loop.py"), "next-batch", str(sdlc_dir), "--label", label,
+            "--session-pid", str(session_pid if session_pid else os.getpid())]
+    if skip:
+        argv += ["--skip", ",".join(sorted(str(x) for x in skip))]
+    return argv
+
+
+def _default_pick(sdlc_dir, label, session_pid, skip):
+    """-> the goal numbers the pick claimed. The one process `run` starts. Raises on a failed pick."""
+    got = subprocess.run(pick_argv(sdlc_dir, label, session_pid, skip), capture_output=True, text=True,
+                         timeout=_DEFAULT_PICK_TIMEOUT)
+    if got.returncode != 0:
+        raise RuntimeError("the pick exited %d: %s" % (got.returncode, (got.stderr or "").strip()[-200:]))
+    return [int(m.group(0)) for line in got.stdout.splitlines()
+            if (m := re.match(r"\d+", line.strip())) and line.strip() not in _NO_PICK]
+
+
+def _default_sweep(sdlc_dir, config, run):
+    """The loop's own fail-open auto-unpark sweep, by its existing entry. -> the goal refs it lifted."""
+    try:
+        if _load("sources")._auto_unpark(config) == "off":
+            return frozenset()
+        return frozenset(((_load("auto_unpark").sweep_unpark(sdlc_dir, config, apply=True, run=run)) or {})
+                         .get("unparked") or ())
+    except Exception:           # noqa: BLE001 - a background sweep never stops a run
+        return frozenset()
+
+
+def _numbers(items):
+    out = set()
+    for x in items or ():
+        m = re.fullmatch(r"#?(\d+)", str(x).strip())
+        if m:
+            out.add(int(m.group(1)))
+    return out
+
+
+def _confirm_closed(gh_run, config, numbers):
+    """-> the subset of `numbers` whose own issue reads closed (read-only, one GET each)."""
+    sources, gh_api = _load("sources"), _load("gh_api")
+    ro = _GetOnly(gh_run or sources._run_gh)
+    repo = sources.GitHubSource(config, run=ro).repo or None
+    closed = set()
+    for n in sorted(numbers):
+        try:
+            if str(gh_api.view_issue(ro, n, repo, comments="none").get("state") or "").lower() == "closed":
+                closed.add(n)
+        except Exception:       # noqa: BLE001 - unread is not closed
+            pass
+    return closed
+
+
+def _why_failed(exc):
+    return "rate-limit" if re.search(r"rate.?limit|\b429\b|secondary", str(exc), re.I) else "degraded-read"
+
+
+def _stuck(p, failure, unconfirmed):
+    """-> (reason, detail), ONE reason from STUCK_REASONS for an empty pick with members still open. Numbers
+    only in the detail. The order is the order a person would act in: a failed read first (nothing else can
+    be trusted), then what needs a person, then what only waits."""
+    if failure is not None:
+        return _why_failed(failure), "a read or the pick failed"
+    rows, outside = p["members"], p.get("outside") or []
+    if any(r.get("kind") in ("not-read", "unreadable") for r in rows + outside):
+        return "degraded-read", "a parked member could not be read"
+    parked = sorted(r["number"] for r in rows if r["verdict"] == "parked")
+    if parked:
+        return "decision", "#%d is parked and needs an answer" % parked[0]
+    held = sorted(r["number"] for r in rows if r["verdict"] == "held-by-gate")
+    if held:
+        return "held-gate", "#%d is held by a gate" % held[0]
+    claimed = sorted(r["number"] for r in rows if r.get("in_progress") or r["verdict"] == "assigned-elsewhere")
+    if claimed:
+        return "claimed", "#%d is in progress or assigned to someone else" % claimed[0]
+    ext = sorted({n for r in outside for n in [r["number"]]} | {r["number"] for r in rows if r.get("unresolved")})
+    if ext:
+        return "external", "#%d waits on an open prerequisite outside the chain" % ext[0]
+    needs = sorted(r["number"] for r in rows if r["verdict"] in ("unarmed", "upper-tier"))
+    if needs:
+        return "decision", "#%d is not armed and needs a person" % needs[0]
+    if unconfirmed:
+        return "degraded-read", "#%d could not be confirmed closed" % sorted(unconfirmed)[0]
+    return "claimed", "open members remain but none could be claimed this cycle (skipped or leased elsewhere)"
+
+
+def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=None, sweep=None):
+    """ONE cycle of the chain run, re-callable. -> {"goal", "state", "exit", "reason", "detail", "picked",
+    "added", "closed", "cycle"}. Raises `ChainRefused`, with nothing written and nothing started, unless the
+    record is approved, armed and not stopped. `pick(label, skip)` -> goal numbers and `sweep(sdlc_dir,
+    config, run)` -> refs are injectable; the defaults are the loop's own. See the module docstring (RUN)."""
+    state, sources = _load("state"), _load("sources")
+    now = time.time() if now is None else now
+    config = config if config is not None else state.load_config(sdlc_dir)
+    rec = _read_record(_record_path(sdlc_dir, goal))
+    if rec.get("state") != "approved" or not rec.get("armed_at"):
+        raise ChainRefused("chain #%d is not %s; nothing was started"
+                           % (goal, "armed (run `chain.py arm`)" if rec.get("state") == "approved"
+                              else "approved (state %s)" % rec.get("state", "planned")))
+    blk = dict(rec.get("run") or {})
+    if blk.get("state") == "stopped":
+        raise ChainRefused("chain #%d is stopped; `chain.py resume` first; nothing was started" % goal)
+    res = {"goal": goal, "state": blk.get("state"), "exit": 0, "reason": None, "detail": "", "picked": [],
+           "added": [], "closed": [], "cycle": int(blk.get("cycle") or 0)}
+    if blk.get("state") == "done":
+        return res
+    label = chain_label(goal)
+    recorded = [r["number"] for r in rec["members"]]
+    try:
+        skip = frozenset(str(x) for x in ((sweep or _default_sweep)(sdlc_dir, config, run) or ()))
+    except Exception:           # noqa: BLE001 - fail open, like the loop's own sweep
+        skip = frozenset()
+    cfg = json.loads(json.dumps(config))
+    if blk.get("cap"):
+        cfg.setdefault("chain", {})
+        cfg["chain"] = dict(cfg["chain"] if isinstance(cfg["chain"], dict) else {}, max_goals=blk["cap"])
+    blk["cycle"] = res["cycle"] = res["cycle"] + 1
+    ok, why = _load("chain_spend").admit(sdlc_dir, cfg, {"members": recorded, "approved_at": rec.get("approved_at")},
+                                         now=now)
+    if not ok:                  # before the claim: a refused cycle picks nothing
+        blk.update(state="capped", reason=why, stuck=None)
+        rec["run"] = blk
+        _save(sdlc_dir, goal, rec)
+        res.update(state="capped", exit=3, reason="capped", detail=why)
+        return res
+    known = set(recorded) | set(blk.get("seen") or ())
+    already = set(blk.get("closed") or ())
+    failure, p, open_now, confirmed = None, None, set(), set()
+    try:
+        p = label_drain.plan(sdlc_dir, label, config=config, run=run)
+        open_now = {r["number"] for r in p["members"]}
+        res["added"] = sorted(open_now - known)
+        confirmed = _confirm_closed(run, config, known - open_now - already)
+    except Exception as exc:    # noqa: BLE001 - reported as the stuck reason only if the pick finds nothing
+        failure = exc
+    closed_new = sorted(confirmed)
+    res["closed"] = closed_new
+    blk["closed"] = sorted(already | confirmed)
+    blk["seen"] = sorted(known | open_now)
+    if closed_new:
+        blk["heartbeat"] = _iso(now)
+    try:
+        got = _numbers((pick or (lambda lab, sk: _default_pick(sdlc_dir, lab, session_pid, sk)))(label, skip))
+    except Exception as exc:    # noqa: BLE001 - a failed pick is a stuck cycle, not a crash
+        got, failure = set(), failure or exc
+    if got:
+        blk.update(state="running", heartbeat=_iso(now), reason=None, stuck=None,
+                   picked=sorted(set(blk.get("picked") or ()) | got))
+        res.update(state="running", picked=sorted(got))
+    else:
+        unconfirmed = known - open_now - set(blk["closed"])
+        if failure is None and not open_now and not unconfirmed:
+            blk.update(state="done", reason=None, stuck=None)
+            res.update(state="done", detail="all %d members closed in %d cycle(s); %d claimed by this run"
+                       % (len(known), blk["cycle"], len(blk.get("picked") or ())))
+        else:
+            reason, detail = _stuck(p, failure, unconfirmed) if (p is not None or failure is not None) \
+                else ("degraded-read", "no read")
+            blk.update(state="stuck", reason=detail, stuck=reason)
+            res.update(state="stuck", exit=3, reason=reason, detail=detail)
+    rec["run"] = blk
+    _save(sdlc_dir, goal, rec)
+    return res
+
+
+def stop(sdlc_dir, goal):
+    """Mark the run stopped. Local only; goals already claimed stay claimed. -> {"goal", "state"}."""
+    rec = _read_record(_record_path(sdlc_dir, goal))
+    rec["run"] = dict(rec.get("run") or {}, state="stopped")
+    _save(sdlc_dir, goal, rec)
+    return {"goal": goal, "state": "stopped"}
+
+
+def resume(sdlc_dir, goal, cap=None):
+    """Clear a stopped, capped or stuck run back to `approved-running`, optionally with a new goal cap kept in
+    the record. Local only. Raises `ChainRefused` for a run that is not held, or a cap that is not a positive
+    whole number. -> {"goal", "state", "cap"}."""
+    rec = _read_record(_record_path(sdlc_dir, goal))
+    blk = dict(rec.get("run") or {})
+    if blk.get("state") not in ("stopped", "capped", "stuck"):
+        raise ChainRefused("chain #%d run is %s; there is nothing to resume" % (goal, blk.get("state") or "not started"))
+    if cap is not None and not (isinstance(cap, int) and not isinstance(cap, bool) and cap > 0):
+        raise ChainRefused("--cap must be a positive whole number")
+    if cap is not None:
+        blk["cap"] = cap
+    blk.update(state="approved-running", reason=None, stuck=None)
+    rec["run"] = blk
+    _save(sdlc_dir, goal, rec)
+    return {"goal": goal, "state": "approved-running", "cap": blk.get("cap")}
+
+
+def render_run(res):
+    head = "chain #%d: %s (cycle %d)" % (res["goal"], res["state"], res["cycle"])
+    out = [head]
+    if res["picked"]:
+        out.append("claimed: " + _ids(res["picked"]))
+    if res["added"]:
+        out.append("added to the label since the last cycle (not acted on): " + _ids(res["added"]))
+    if res["closed"]:
+        out.append("closed since the last cycle: " + _ids(res["closed"]))
+    if res["reason"]:
+        out.append("%s: %s" % (res["reason"], res["detail"]))
+    elif res["detail"]:
+        out.append(res["detail"])
     return "\n".join(out) + "\n"
 
 
@@ -947,13 +1202,16 @@ def _main_longest(args, as_json, now):
     return 0
 
 
-def main(argv, run=None, now=None):
+def main(argv, run=None, now=None, pick=None):
     args = list(argv[1:])
     if args in (["-h"], ["--help"]):
         print(USAGE)
         print(SHEET_USAGE)
         print(ARM_USAGE)
+        print(RUN_USAGE)
         return 0
+    if args[:1] in (["run"], ["stop"], ["resume"]):
+        return _main_run(args, run, now, pick)
     if args[:1] in (["sheet"], ["answer"]):
         return _main_sheet(args, run, now)
     if args[:1] in (["approve"], ["arm"]):
@@ -975,6 +1233,39 @@ def main(argv, run=None, now=None):
         return 1
     print(json.dumps(p, indent=2, sort_keys=True) if as_json else render(p), end="" if not as_json else "\n")
     return 0
+
+
+def _main_run(args, run, now, pick):
+    verb, rest = args[0], args[1:]
+    opts = {"run": "--session-pid", "resume": "--cap"}.get(verb)
+    val = None
+    if opts and opts in rest:
+        i = rest.index(opts)
+        val, rest = (rest[i + 1] if i + 1 < len(rest) else None), rest[:i] + rest[i + 2:]
+        if val is None or not val.isascii() or not val.isdigit() or int(val) < 1:
+            print(RUN_USAGE, file=sys.stderr)
+            return 2
+    if len(rest) != 2:
+        print(RUN_USAGE, file=sys.stderr)
+        return 2
+    try:
+        goal = _chain_arg(rest[1])
+        if verb == "stop":
+            print("chain #%d: %s" % (goal, stop(rest[0], goal)["state"]))
+            return 0
+        if verb == "resume":
+            r = resume(rest[0], goal, cap=int(val) if val else None)
+            print("chain #%d: %s%s" % (goal, r["state"], " (cap %d)" % r["cap"] if r["cap"] else ""))
+            return 0
+        res = globals()["run"](rest[0], goal, session_pid=val, pick=pick, now=now, run=run)
+    except ChainRefused as exc:
+        print("chain.py: %s" % exc, file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print("chain.py: could not write the record: %s" % exc, file=sys.stderr)
+        return 1
+    print(render_run(res), end="")
+    return res["exit"]
 
 
 def _main_arm(args, run):

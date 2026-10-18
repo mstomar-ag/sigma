@@ -2040,6 +2040,14 @@ def _list(run, gh_cfg, fields, labels, state="open", cap=200, sort="created", re
         return None
 
 
+_FENCED_BLOCK = re.compile(r"```.*?(?:```|\Z)", re.DOTALL)
+#: #1810: kinds a machine writes for its own park (a conflict, a failing check, ...). A deny word in such
+#: an issue is quoted log or diff text, not a request for an irreversible action.
+_MACHINE_PARK_KINDS = frozenset({"merge_conflict", "failing_check", "no_evidence", "dependency",
+                                 "review_cap", "quota", "reviewer_down", "review_post_ambiguous"})
+_REBASE_PARK_MARKER = "Rebase parked:"
+
+
 def _mis_kinded_hardstop_parks(cfg, gh_cfg, run, cap=20):
     """#1498: open parked issues whose title or body matches the filing deny-list (a hard stop) but whose
     declared kind is not a hard-stop kind. -> a list of issue numbers (empty = none), or None when the
@@ -2057,11 +2065,16 @@ def _mis_kinded_hardstop_parks(cfg, gh_cfg, run, cap=20):
             return None
         found = []
         for it in rows:
-            d = ft.decide(it.get("title") or "", it.get("body") or "", {}, {})
+            # #1810: fenced blocks are quoted output, not the filer's words; the upkeep marker is a machine park.
+            if (it.get("title") or "").startswith(_REBASE_PARK_MARKER):
+                continue
+            d = ft.decide(_FENCED_BLOCK.sub("", it.get("title") or ""), _FENCED_BLOCK.sub("", it.get("body") or ""), {}, {})
             if d.kind != "park" or not d.matched:
                 continue
             data = src._read_issue(it["number"], ["number", "comments", "state"])
             kind = qk.resolve(data.get("comments") or [], goal=it["number"])
+            if kind in _MACHINE_PARK_KINDS:
+                continue
             if not hs.is_hardstop_kind(kind, None, cfg) and not qk.resolve_hardstop(data.get("comments") or []):
                 found.append(it["number"])
             if len(found) >= cap:
@@ -3457,7 +3470,9 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
                 out.append(_chk("deny-list parks are declared a hard-stop kind", False,
                                 "parked issue(s) match the filing deny-list but are not declared a hard-stop kind: #"
                                 + ", #".join(str(n) for n in mk[:10])
-                                + " -- run `unpark.py declare .sdlc <issue> irreversible`."))
+                                + " -- review each; if it really is an irreversible action, declare it with "
+                                "`unpark.py declare .sdlc <issue> irreversible`; a machine park (conflict, "
+                                "failing check) needs no change."))
 
             # #389: NOT gated on backlog_check.enabled (nor on the `project` block above) -- a repo with
             # backlog_check OFF has zero auto-skip happening at all, so this is arguably more useful

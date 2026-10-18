@@ -39,7 +39,7 @@ TABLE = [
     (None, "bogus", "enforce"),
     ("", "off", "off"),
 ]
-SURFACES = ("resolver", "sessions", "liveness", "picker", "verify", "shed", "watcher", "doctor", "log")
+SURFACES = ("resolver", "sessions", "liveness", "picker", "verify", "verify admission", "shed", "watcher", "doctor", "log")
 
 
 def _config(value):
@@ -74,6 +74,25 @@ def _shed_mode(config, home, monkeypatch):
     return "enforce" if made and made[0] is not None else "off"
 
 
+def _admission_mode(config, home, monkeypatch):
+    """#1804: the mode `loop.py verify` hands the admission (the `config` block `resource_guard.run` receives)."""
+    loop = _load(SCRIPTS / "loop.py", "loop_1804")
+    seen = []
+    monkeypatch.setattr(loop, "_load", lambda name: type("G", (), {"resolve_mode": staticmethod(guard.resolve_mode), "run": staticmethod(
+        lambda *a, **k: seen.append((k.get("config") or {}).get("mode")) or (_ for _ in ()).throw(RuntimeError))})
+        if name == "resource_guard" else importlib.import_module(name))
+    monkeypatch.setattr(loop.shell_policy, "repository_shell_commands_allowed", lambda root: True)
+    sdlc = home / ".sdlc"
+    (sdlc / "goals").mkdir(parents=True, exist_ok=True)
+    (sdlc / "config.json").write_text(json.dumps(dict(config, verify={"command": "true"}, work={"enabled": False})))
+    (sdlc / "goals" / "0001.md").write_text("---\nid: 0001\nstatus: pending\n---\nx\n")
+    try:
+        loop.verify_goal(str(sdlc), "0001")
+    except Exception:                                     # noqa: BLE001 - only the mode handed over matters
+        pass
+    return seen[0] if seen else "off"
+
+
 def _probe(surface, env_value, cfg_value, home, monkeypatch):
     """-> the mode the surface acts on, read the way that surface exposes it."""
     config = _config(cfg_value)
@@ -89,13 +108,16 @@ def _probe(surface, env_value, cfg_value, home, monkeypatch):
     if surface == "verify":
         loop = _load(SCRIPTS / "loop.py", "loop_1759")
         return "enforce" if loop._resource_verify_on(config) else "off"
+    if surface == "verify admission":
+        return _admission_mode(config, home, monkeypatch)
     if surface == "shed":
         return _shed_mode(config, home, monkeypatch)
     if surface == "picker":
         loop = _load(SCRIPTS / "loop.py", "loop_1759p")
         seen = []
-        real = guard.resolve_mode
-        monkeypatch.setattr(guard, "resolve_mode", lambda *a, **k: seen.append(real(*a, **k)) or seen[-1])
+        live_guard = importlib.import_module("resource_guard")    # the module loop.py resolves, whatever other tests did to sys.modules
+        real = live_guard.resolve_mode
+        monkeypatch.setattr(live_guard, "resolve_mode", lambda *a, **k: seen.append(real(*a, **k)) or seen[-1])
         try:
             loop._resource_gate(config)
         except Exception:                                 # noqa: BLE001 - only the mode it resolved matters here

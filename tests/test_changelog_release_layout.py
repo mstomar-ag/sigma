@@ -100,7 +100,8 @@ def test_the_duplicate_control_goes_red_on_a_repeated_entry(name):
     import re
     text = _layouts()[name]
     heading = _current_heading(text)
-    doubled = text.replace("\n%s\n" % heading, "\n%s\n- A copy (#1733).\n" % heading, 1)
+    # Seed the repeated number ourselves: the live changelog's current entries must not matter.
+    doubled = text.replace("\n%s\n" % heading, "\n%s\n- A copy (#999991).\n- A copy (#999991).\n" % heading, 1)
     assert doubled != text
     seen = collections.Counter(n for line in _current_lines(doubled) for n in set(re.findall(r"\(#(\d+)\)", line)))
-    assert seen["1733"] == 2
+    assert seen["999991"] == 2
