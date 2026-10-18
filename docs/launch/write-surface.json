@@ -3913,6 +3913,22 @@
       "risk": "low"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag_pick.py",
+      "function": "_append",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "discovery.dag.mode is shadow or on (off and a missing stored map return before the call; only reached from the pick's shadow comparison); creates only the runtime state directory, appends one numbers-only line per compared candidate to state/dag-shadow.jsonl, and writes state/dag-shadow.meta.json once; never raises; the one removal is the rename of a full state/dag-shadow.jsonl (1 MiB) over state/dag-shadow.jsonl.1, which replaces only the previous rotated copy of the same log and touches no other path",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_pick.py",
+      "function": "_append",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "discovery.dag.mode is shadow or on (off and a missing stored map return before the call; only reached from the pick's shadow comparison); creates only the runtime state directory, appends one numbers-only line per compared candidate to state/dag-shadow.jsonl, and writes state/dag-shadow.meta.json once; never raises",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/dag_insert.py",
       "function": "_unchecked_lock",
       "rule": "fs-write",
