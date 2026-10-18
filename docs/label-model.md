@@ -802,6 +802,8 @@ boards were separated by **1.1 hours at minimum**, while a single operation take
 
 ## 6. The blocker chain — what the loop does on its own
 
+The `sdlc:blocked` and `sdlc:blocking` overlays are derived state, and so is the stored dependency map ([dag.md](dag.md)): the map reads text and labels and is never a label writer.
+
 This is the flow the labels exist to make possible, and it is **on by default**.
 
 A goal that hits a dependency does not stop. It files the work it needs, steps aside, and comes back
