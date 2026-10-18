@@ -517,7 +517,7 @@
       "function": "_save",
       "rule": "fs-write",
       "count": 1,
-      "gate": "one atomic write of the local chain record `.sdlc/state/chains/c<N>.json` (issue numbers, state words, timestamps and a cap number only; no titles, bodies or free text); reached only by an explicit `chain.py stop` or `resume` on a readable record, or `chain.py run` on an approved, armed, not stopped one (run refuses before any write otherwise), or by a finished non-dry `chain.py arm` stamping `armed_at`; no GitHub call of its own",
+      "gate": "one atomic write of the local chain record `.sdlc/state/chains/c<N>.json` (issue numbers, state words, timestamps and a cap number only; no titles, bodies or free text); reached only by an explicit `chain.py stop` or `resume` on a readable record, or `chain.py run` on an approved, armed, not stopped one (run refuses before any write otherwise), or by a finished non-dry `chain.py arm` stamping `armed_at`; `chain.py run` also records the growth fields (`joined`, `paused`, `delta`, `pauses`, `filed`: issue numbers, state words and question ids only) and, only when a new prerequisite needs no decision and is within chain.max_added and chain.max_goals (never under --no-grow or chain.freeze), pulls it through `label_drain.pull` (the chain label, the fixed comment and the drain's own arming, as `arm` does); no other GitHub call of its own",
       "risk": "low"
     },
     {
