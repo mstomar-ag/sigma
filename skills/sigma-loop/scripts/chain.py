@@ -1264,6 +1264,8 @@ def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=
         rec["run"] = blk
         _save(sdlc_dir, goal, rec)
         res.update(state="stuck", exit=3, reason="decision", detail=detail)
+        if locked:              # #1866: stuck is not running; the pool is free for another chain
+            chain_parallel.release(sdlc_dir, goal)
         return res
     skip = skip | frozenset(str(d) for d in held_back)
     known = set(recorded) | set(blk.get("seen") or ()) | set(blk.get("joined") or ())
@@ -1313,8 +1315,16 @@ def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=
                 res["detail"] += "; filed, not in the chain: " + _ids(blk["filed"])
         else:
             if failure is None and blk.get("paused"):
-                reason, detail = "decision", "%s held out of the chain and waiting for an answer" % _ids(
-                    sorted(int(k) for k in blk["paused"]))
+                said = rec.get("answers") or {}
+                left = sorted(int(k) for k in blk["paused"] if said.get("grow:%s" % k) == "leave it out")
+                open_ = sorted(int(k) for k in blk["paused"] if said.get("grow:%s" % k) != "leave it out")
+                parts = []
+                if open_:
+                    parts.append("%s held out of the chain and waiting for an answer" % _ids(open_))
+                if left:
+                    parts.append("%s declined (left out of the chain); work behind %s cannot run"
+                                 % (_ids(left), "it" if len(left) == 1 else "them"))
+                reason, detail = "decision", "; ".join(parts)
             else:
                 reason, detail = _stuck(p, failure, unconfirmed) if (p is not None or failure is not None) \
                     else ("degraded-read", "no read")

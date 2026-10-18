@@ -206,3 +206,33 @@ def test_no_growth_unchanged(tmp_path):
         raise RuntimeError("HTTP 500")
     res = _go(ch, base, fk, lambda l, s: [3], at=NOW + 1, closure=boom)
     assert ch.render_run(res) == "chain #1: running (cycle 2)\nclaimed: #3\n"
+
+
+# 9 -- #1866: a run that ends on max_reasks frees the pool; a declined prerequisite is not "waiting" -----------
+
+def test_reask_releases_lock(tmp_path):
+    import test_chain_parallel as tcp
+    ch, base, fk = tcp._armed(tmp_path)
+    cfg = tcp._cfg(ch, base, parallel=2, cap=3, freeze=True)
+    pick = tcp.Pick(fk, base)
+    for i in range(3):
+        res = tcp._go(ch, base, fk, pick, cfg, at=NOW + i, closure=_closure(base, [14, 15, 16][:i + 1]))
+        assert res["state"] == "running", (i, res)
+    assert "1" in json.loads(tcp._lockfile(base).read_text()), "the pool lock was not held while running"
+    res = tcp._go(ch, base, fk, pick, cfg, at=NOW + 9, closure=_closure(base, [14, 15, 16, 17]))
+    assert res["state"] == "stuck" and "max_reasks" in res["detail"], res
+    assert "1" not in json.loads(tcp._lockfile(base).read_text()), "the max_reasks stop left the pool lock held"
+
+
+def test_declined_detail(tmp_path):
+    ch, base, fk = tcr._armed(tmp_path)
+    _cfg(base, freeze=True)
+    res = _go(ch, base, fk, lambda l, s: [], closure=_closure(base, [4], [(4, 2)]))
+    assert "waiting for an answer" in res["detail"], res
+    assert not ch.answer(base, 1, {"grow:4": "leave it out"}, run=fk)["errors"]
+    res = _go(ch, base, fk, lambda l, s: [], at=NOW + 1, closure=_closure(base, [4], [(4, 2)]))
+    assert res["state"] == "stuck" and res["reason"] == "decision", res
+    assert "declined" in res["detail"] and "waiting for an answer" not in res["detail"], res["detail"]
+    assert "#4" in res["detail"]
+    res = _go(ch, base, fk, lambda l, s: [], at=NOW + 3, closure=_closure(base, [4, 5], [(4, 2)]))
+    assert "#5" in res["detail"] and "waiting for an answer" in res["detail"] and "declined" in res["detail"], res
