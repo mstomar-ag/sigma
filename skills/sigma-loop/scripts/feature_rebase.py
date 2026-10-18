@@ -3344,6 +3344,17 @@ def preview(sdlc_dir, config, run=None, fetch=False):
     listed, notes = sched.list_units_notes(sdlc_dir)
     out["notes"] += notes
     settings = gate.read(config).settings
+    heads = None
+    for pattern in settings["units.include"] or []:
+        if sched.selected(listed, [pattern], []):
+            continue
+        if heads is None:
+            heads = sched.unregistered_heads(sdlc_dir, remote, cwd, registered=listed)
+        branches = sorted("feature/" + h for h in heads if sched.selected([h], [pattern], []))
+        note = "upkeep.units.include entry %r matches no registered unit" % str(pattern)
+        if branches:
+            note += "; remote branch %s exists but is not registered (register it with /sigma-define)" % ", ".join(branches)
+        out["notes"].append(note)
     for unit in sched.selected(listed, settings["units.include"], settings["units.exclude"]):
         out["units"].append(_preview_unit(sdlc_dir, config, unit, run, cwd, remote, base))
     return out

@@ -227,6 +227,38 @@ def test_refused_issue_is_reported_and_receives_no_write(tmp_path, issue, verdic
     assert res["refused"][0]["reason"] and res["actions"] == [] and fk.writes() == []
 
 
+# --- an armed member with no assignee (#1807) -----------------------------------------------------
+
+def _armed_unassigned(n=1, *extra):
+    return _issue(n, LBL, "sdlc:goal", *extra)
+
+
+def test_armed_unassigned_member_is_not_refused_and_gets_only_the_assignee(tmp_path):
+    ld, base, fk, res = _arm(tmp_path, [_armed_unassigned(1)], apply=True)
+    assert res["refused"] == []
+    assert _acts(res, 1) == [("assign", "alice")]
+    assert [a for a in fk.writes() if a[0] == "api" and "labels" in a[1]] == []
+    assert fk._names(1) == {LBL, "sdlc:goal"}
+    assert [a["login"] for a in fk.by[1]["assignees"]] == ["alice"]
+
+
+def test_armed_unassigned_member_dry_run_writes_nothing(tmp_path):
+    ld, base, fk, res = _arm(tmp_path, [_armed_unassigned(1)])
+    assert _acts(res, 1) == [("assign", "alice")] and fk.writes() == []
+
+
+def test_armed_unassigned_member_is_left_alone_when_no_assignee_is_configured(tmp_path):
+    ld, base, fk, res = _arm(tmp_path, [_armed_unassigned(1)], apply=True, assignee=None)
+    assert res["refused"] == [] and res["actions"] == [] and fk.writes() == []
+
+
+def test_a_second_apply_on_an_armed_unassigned_member_writes_nothing(tmp_path):
+    ld, base, fk, res = _arm(tmp_path, [_armed_unassigned(1)], apply=True)
+    n = len(fk.writes())
+    res2 = ld.arm(base, LBL, apply=True, run=fk)
+    assert res2["actions"] == [] and len(fk.writes()) == n
+
+
 # --- priority config -------------------------------------------------------------------------------
 
 def test_existing_priority_is_kept(tmp_path):

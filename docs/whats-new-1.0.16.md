@@ -45,8 +45,9 @@ Steps 1 to 3 apply to everyone. Steps 4 to 7 apply only if you use the feature n
 What stays unchanged:
 
 - Your `.sdlc/config.json` is never rewritten by an update.
-- `rulebook.rules.auto_approve` is off by default (#1555), and the label-drain, `design.zones` and `quality.metrics`
-  keys are absent by default (#1540, #1635).
+- `rulebook.rules.auto_approve` is off by default (#1555), and the `design.zones` and `quality.metrics`
+  keys are absent by default (#1540, #1635); the `label_drain` block ships with its defaults (`default_priority`,
+  `arm_pulled_blockers`; `kinds` is optional and empty).
 - With the Rulebook gates closed, run-label output is unchanged (#1581, #1743).
 
 ## Resource guard
@@ -126,7 +127,7 @@ A run label confines a run to the goals that carry it. See [label drain](label-d
   label and that label, across units, and each goal is still based on its own unit branch. A missing, reserved,
   unknown or `--feature`-combined label is refused with exit 2 before any backlog read.
 - **`label_drain.py plan|status <sdlc_dir> <label>` (#1576, #1578).** Read-only. It lists the open members with a
-  verdict each (armed, unarmed, parked with its kind and question, upper-tier, assigned-elsewhere, held-by-gate). It
+  verdict each (armed, unarmed, unassigned, parked with its kind and question, upper-tier, assigned-elsewhere, held-by-gate). It
   pulls their open blockers transitively (depth 8, at most 50 reads; a pull request, another repository or an
   unreadable ref counts as unresolved), warns on cross-unit edges, cycles, a missing `## Done when` and a declared
   paid step, prints the number of calls made, and refuses more than 200 members. `plan` also returns `questions` and

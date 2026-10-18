@@ -2615,3 +2615,21 @@ def test_the_label_page_has_a_real_run_table_that_adds_up_and_claims_no_more():
     assert not [ln for ln in page.splitlines() if "unmeasured" in ln.lower() and re.search(r"\d+\.\d|\|\s*\d+\s*\|", ln)]
     assert "Not measured:" in page, "the page must name what the run did not measure"
     assert "no rate-limit figure was" in page and "one sample" in page
+
+
+def test_whats_new_label_drain_sentence_matches_the_init_template():
+    """#1813: the template ships the label-drain block with its defaults; the sentence must not call it absent."""
+    template = (ROOT / "skills" / "sigma-init" / "templates" / "config.json.tmpl").read_text(encoding="utf-8")
+    note = (ROOT / "docs" / "whats-new-1.0.16.md").read_text(encoding="utf-8")
+    assert '"label_drain": {' in template
+    assert "the label-drain, `design.zones` and `quality.metrics`" not in note
+    assert "label_drain` block ships with its defaults" in note and "kinds" in note.split("label_drain` block ships")[1][:200]
+
+
+def test_label_drain_page_describes_the_filed_during_the_drain_window_1832():
+    page = " ".join(_LABEL_PAGE.read_text(encoding="utf-8").split())
+    assert "filed since the label's start check first passed" in page
+    assert "With no drain start recorded it lists nothing" in page
+def test_whats_new_1_0_16_lists_the_unassigned_verdict_1824():
+    page = " ".join((ROOT / "docs" / "whats-new-1.0.16.md").read_text(encoding="utf-8").split())
+    assert "armed, unarmed, unassigned, parked" in page

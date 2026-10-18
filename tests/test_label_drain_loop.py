@@ -7,6 +7,7 @@ stateful fake `gh` of the arm tests. Nothing here touches a network or a model.
 """
 import os
 import tempfile
+import time
 
 import pytest
 
@@ -211,6 +212,20 @@ def test_pull_refuses_without_writing_anything(tmp_path, issue, ref, word):
     assert fk.writes() == []
 
 
+def test_pull_labels_comments_and_assigns_an_outside_armed_unassigned_blocker(tmp_path):
+    """#1824: an armed blocker with no assignee is `unassigned`; pull gives it the label, the comment and the assignee."""
+    fk, res = _pull(tmp_path, [A._issue(7, "sdlc:goal")])
+    assert res["result"] == "pulled"
+    assert A.LBL in fk._names(7) and len(fk.comments()) == 1
+    assert [a["login"] for a in fk.by[7]["assignees"]] == ["alice"]
+
+
+def test_pull_never_takes_an_outside_issue_assigned_to_someone_else(tmp_path):
+    fk, res = _pull(tmp_path, [A._issue(7, "sdlc:goal", assignees=("bob",))])
+    assert res["result"] == "refused" and "assigned" in res["reason"]
+    assert fk.writes() == [] and fk.by[7]["assignees"] == [{"login": "bob"}]
+
+
 def test_pull_leaves_closed_and_already_labelled_issues_alone(tmp_path):
     fk, res = _pull(tmp_path, [A._issue(7, "sdlc:goal", state="closed")])
     assert res["result"] == "closed" and fk.writes() == []
@@ -241,7 +256,8 @@ def test_next_label_refuses_to_start_on_an_unarmed_member(tmp_path, monkeypatch,
 
 def _set_run_iteration(base, n):
     p = os.path.join(base, "state", "STATE.md")
-    open(p, "w").write("iteration: 0\nrun_iteration: %d\nlast_run: none\n" % n)
+    text = open(p).read() if os.path.exists(p) else "iteration: 0\nlast_run: none\n"
+    open(p, "w").write(_loop().state._set_line(text, "run_iteration", n))   # keeps every other line
 
 
 def test_same_ref_held_by_two_goals_is_pulled_once():
@@ -263,6 +279,120 @@ def test_start_check_runs_only_before_the_first_claim():
         assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 1
         _set_run_iteration(base, 1)                  # a claim has been made in this run
         assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 1
+
+
+def _scoped_to(label):
+    class S(Scoped):
+        label_scope = label
+    return S
+
+
+def test_a_second_label_is_checked_after_the_first_label_run_started():
+    """#1805: run_iteration is per checkout, so a label change must re-run the start check."""
+    lp, stub = _loop(), Stub(members=[{"number": 1, "verdict": "unarmed", "reason": "unarmed"}])
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        a = _scoped_to("label-a")(["1"], live=CHAIN_OPEN)
+        stub.members = []                            # label A is ready
+        assert lp._label_not_ready(base, a, _cfg(lp, base)) is None and stub.plans == 1
+        _set_run_iteration(base, 1)                  # A's first pick claimed a goal
+        stub.members = [{"number": 1, "verdict": "unarmed", "reason": "unarmed"}]
+        b = _scoped_to("label-b")(["1"], live=CHAIN_OPEN)
+        refusal = lp._label_not_ready(base, b, _cfg(lp, base))
+    assert refusal and "label-b is not ready" in refusal and "nothing was claimed or written" in refusal
+    assert stub.plans == 2
+
+
+def test_a_run_started_with_no_recorded_label_is_checked_again():
+    """#1805: the no-run-started clause: run_iteration alone (no recorded label) never skips."""
+    lp, stub = _loop(), Stub()
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        _set_run_iteration(base, 3)                  # a run is on, but no check ever passed here
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None
+    assert stub.plans == 1
+
+
+def test_a_recorded_label_with_no_run_started_is_checked_again():
+    """#1805: the recorded label alone (run_iteration 0, e.g. after start-run) never skips."""
+    lp, stub = _loop(), Stub()
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 1
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None and stub.plans == 2
+
+
+def test_start_run_clears_the_recorded_label():
+    """#1823: a new run starts with no check passed, so start-run drops `label_checked`."""
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        lp.state.set_label_checked(base, "label-a")
+        assert lp.state.load_label_checked(base) == "label-a"
+        lp.state.start_run(base, now=5.0)
+        assert lp.state.load_label_checked(base) == ""
+
+
+def test_start_run_leaves_every_other_line_byte_identical():
+    """#1823: only `label_checked` goes; with or without it, the rest of STATE.md matches a run that never had it."""
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        with_label, without = _base(d + "/a", mirror=CHAIN_OPEN), _base(d + "/b", mirror=CHAIN_OPEN)
+        lp.state.set_label_checked(with_label, "label-a")
+        lp.state.start_run(with_label, now=5.0)
+        lp.state.start_run(without, now=5.0)
+        read = lambda b: open(os.path.join(b, "state", "STATE.md")).read()
+        assert "label_checked" not in read(with_label)
+        assert read(with_label) == read(without)
+
+
+def test_next_label_refuses_after_start_run_even_when_a_pick_raised_the_iteration():
+    """#1823: A passes, start-run, an unscoped pick raises run_iteration, A is no longer ready -> refused."""
+    lp, stub = _loop(), Stub()
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        a = _scoped_to("label-a")(["1"], live=CHAIN_OPEN)
+        assert lp._label_not_ready(base, a, _cfg(lp, base)) is None and stub.plans == 1
+        lp.state.start_run(base, now=5.0)
+        _set_run_iteration(base, 1)                  # an unscoped pick in the new run
+        stub.members = [{"number": 1, "verdict": "unarmed", "reason": "unarmed"}]
+        refusal = lp._label_not_ready(base, a, _cfg(lp, base))
+    assert refusal and "label-a is not ready" in refusal
+    assert stub.plans == 2
+
+
+def test_a_refusal_does_not_record_the_label():
+    lp, stub = _loop(), Stub(members=[{"number": 1, "verdict": "unarmed", "reason": "unarmed"}])
+    lp._label_drain = lambda: stub
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        assert lp._label_not_ready(base, src, _cfg(lp, base))
+        _set_run_iteration(base, 1)
+        assert lp._label_not_ready(base, src, _cfg(lp, base))   # still refused: nothing was recorded
+    assert stub.plans == 2
+
+
+def test_next_batch_label_b_refuses_after_label_a_ran(tmp_path, monkeypatch, capsys):
+    lp = _loop()
+    base = A._repo(tmp_path, "alice")
+    lp.state.set_label_checked(base, "other-label")
+    _set_run_iteration(base, 2)
+    fk = A.Fake([A._issue(1, "sdlc:blocked", A.LBL)])
+    monkeypatch.setattr(lp.sources, "get_source",
+                        lambda d, c: lp.sources.GitHubSource(c, run=fk, sdlc_dir=d))
+    for hook in ("_ensure_watcher", "_ensure_ledger_delivery", "_surface_inbox", "_warn_knowledge_graph"):
+        monkeypatch.setattr(lp, hook, lambda *a, **k: None)
+    assert lp.main(["loop.py", "next-batch", base, "--label", A.LBL]) == 0
+    out = capsys.readouterr()
+    assert out.out.strip() == "DONE" and "1 unarmed member(s)" in out.err
+    assert fk.writes() == []
 
 
 def test_unscoped_next_never_calls_label_drain():
@@ -354,3 +484,92 @@ def test_unscoped_terminal_done_never_plans_a_label():
         assert lp._next(base, src, _cfg(lp, base))[0] == "DONE"
         assert lp._label_drained_note(base, src, _cfg(lp, base), set()) == "backlog-empty"
     assert stub.plans == 0 and stub.pulls == []
+
+
+# --- the "filed during the drain" line (#1809) ---------------------------------------------------
+
+def _note(monkeypatch, capsys, started_at, created):
+    lp = _loop()
+    stub = Stub(members=[{"number": 5, "verdict": "armed", "reason": "in progress (claimed by a run)"}])
+    lp._label_drain = lambda: stub
+    lp._LABEL_PULLED.clear()
+    outside = dict(_issue(7), created_at=created)
+    monkeypatch.setattr(lp.state, "load_cursor", lambda sdlc_dir: {"run_started_at": started_at})
+    monkeypatch.setattr(lp.sources, "fetch_issues_rest", lambda *a, **k: [outside])
+    src = Scoped([], live=[])
+    src._run = object()
+    with tempfile.TemporaryDirectory() as d:
+        assert lp._label_drained_note(d, src, {}, ()) == "label-held"
+    return capsys.readouterr().err
+
+
+def test_a_goal_filed_before_the_drain_is_not_listed_when_no_run_start_is_recorded(monkeypatch, capsys):
+    err = _note(monkeypatch, capsys, 0.0, "2026-10-01T00:00:00Z")
+    assert "has 1 open member" in err and "filed during the drain" not in err
+
+
+def test_a_goal_filed_after_the_recorded_drain_start_is_listed(monkeypatch, capsys):
+    err = _note(monkeypatch, capsys, 1791590400.0, "2026-10-17T00:00:00Z")
+    assert "filed during the drain, not in the label: #7" in err
+
+
+def test_a_goal_filed_before_the_recorded_drain_start_is_not_listed(monkeypatch, capsys):
+    err = _note(monkeypatch, capsys, 1791590400.0, "2026-10-01T00:00:00Z")
+    assert "filed during the drain" not in err
+
+
+# --- the drain start under the documented gesture (#1832) ----------------------------------------
+
+def _stamp(offset):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + offset))
+
+
+def _documented_gesture_stop(monkeypatch, capsys, made):
+    """No `start-run`: the start is recorded only by the start check, which `_label_not_ready` runs."""
+    lp = _loop()
+    stub = Stub(members=[{"number": 5, "verdict": "armed", "reason": "in progress (claimed by a run)"}])
+    lp._label_drain = lambda: stub
+    lp._LABEL_PULLED.clear()
+    monkeypatch.setattr(lp.sources, "fetch_issues_rest",
+                        lambda *a, **k: [dict(_issue(7), created_at=made)])
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        src = Scoped(["1"], live=CHAIN_OPEN)
+        src._run = object()
+        stub.members = []
+        assert lp._label_not_ready(base, src, _cfg(lp, base)) is None       # the start check passes
+        assert lp.state.load_cursor(base)["run_started_at"] == 0.0           # and no run start exists
+        stub.members = [{"number": 5, "verdict": "armed", "reason": "in progress (claimed by a run)"}]
+        assert lp._label_drained_note(base, src, _cfg(lp, base), ()) == "label-held"
+    return capsys.readouterr().err
+
+
+def test_documented_gesture_lists_a_goal_filed_after_the_first_pick(monkeypatch, capsys):
+    err = _documented_gesture_stop(monkeypatch, capsys, _stamp(+3600))
+    assert "filed during the drain, not in the label: #7" in err
+
+
+def test_documented_gesture_does_not_list_a_goal_filed_before_the_first_pick(monkeypatch, capsys):
+    err = _documented_gesture_stop(monkeypatch, capsys, _stamp(-3600))
+    assert "has 1 open member" in err and "filed during the drain" not in err
+
+
+def test_a_repeated_pass_keeps_the_first_start_and_a_new_label_gets_its_own():
+    lp = _loop()
+    with tempfile.TemporaryDirectory() as d:
+        base = _base(d, mirror=CHAIN_OPEN)
+        lp.state.set_label_checked(base, "label-a", now=1000.0)
+        lp.state.set_label_checked(base, "label-a", now=2000.0)
+        assert lp.state.load_label_checked_at(base) == 1000.0
+        lp.state.set_label_checked(base, "label-b", now=3000.0)
+        assert lp.state.load_label_checked_at(base) == 3000.0
+        lp.state.set_label_checked(base, "label-b", now=4000.0)
+        lp.state.start_run(base, now=5000.0)
+        assert lp.state.load_label_checked_at(base) == 0.0 and lp.state.load_label_checked(base) == ""
+def test_readiness_refusal_names_unassigned_members_in_its_count(tmp_path, monkeypatch, capsys):
+    """#1824: an armed member with no assignee is `unassigned`, counted beside the unarmed ones."""
+    base, fk, out = _next_batch_label(tmp_path, monkeypatch, capsys, A._issue(1, "sdlc:goal", A.LBL))
+    assert out.out.strip() == "DONE"
+    assert "0 unarmed member(s), 1 unassigned member(s), 1 open question(s)" in out.err
+    assert "First run `label_drain.py arm %s %s --apply`, then start again" % (base, A.LBL) in out.err
+    assert fk.writes() == []
