@@ -1397,7 +1397,7 @@ def _dag_shadow_row(cfg, sdlc_dir, now=None):
         c = st["causes"]
         return _chk("dag shadow: %d compared picks, %d disagreements (pr %d, comment-only %d, "
                     "cross-repo %d, unknown %d), %d days in shadow, flip criterion %s (needs >=%d "
-                    "days, >=%d picks, 0 unknown)"
+                    "days, >=%d distinct picks, 0 unknown)"
                     % (st["compared"], st["disagreements"], c["pr"], c["comment-only"],
                        c["cross-repo"], c["unknown"], st["days"],
                        "met" if st["flip"] else "not met", dp.FLIP_DAYS, dp.FLIP_PICKS), True, "")
