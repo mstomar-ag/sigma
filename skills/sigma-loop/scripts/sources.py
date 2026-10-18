@@ -1098,6 +1098,8 @@ class GitHubSource:
         # already spell its own severity scheme differently, and a hard-coded prefix would silently
         # rank every one of their issues as unprioritised.
         self.order = _order(config)
+        # #1620: set per pick batch by loop.py (a dag_order.ChainRanks); None keeps today's order.
+        self.dag_chain_ranks = None
         self.priority_prefix = gh.get("priority_label_prefix", "priority:")
         self.priority_aliases = _priority_aliases(config)
         # #900: opt-in blocker-priority promotion. Resolved once here, matching priority_aliases
@@ -2302,7 +2304,7 @@ class GitHubSource:
                 is_blocking = (self.blocking_priority_override
                               and self.blocking_label in names)
                 ready.append((self._card_rank(it), 0 if is_blocking else 1,
-                             self._board_feature_rank(names), pos, int(n)))
+                             self._board_feature_rank(names), self._chain_rank(n), pos, int(n)))
             elif it.get("status") not in in_flight:
                 names = set(it.get("labels") or [])
                 if self.goal_label in names and not (names & not_eligible):
@@ -2314,7 +2316,7 @@ class GitHubSource:
         if not ready and stranded and not seen_ready:
             self._warn_unseeded(stranded)
         ready.sort()
-        return [n for _, _, _, _, n in ready], carded
+        return [n for _, _, _, _, _, n in ready], carded
 
     def _board_feature_rank(self, names):
         """feature_rank for a BOARD card (#2264, D-9/BR-9 of design #2253): the SAME
@@ -2932,12 +2934,23 @@ class GitHubSource:
             # mixing 3- and 4-element tuples in one `sorted()` call compares a tied prefix as
             # "shorter is less", which would silently reintroduce a priority-shaped signal into a
             # mode whose whole contract is that none exists.
-            return (discovery.UNPRIORITISED, discovery.UNPRIORITISED, 0, issue["number"])
+            return (discovery.UNPRIORITISED, discovery.UNPRIORITISED, (0, 0), 0, issue["number"])
         names = [l.get("name") or "" for l in (issue.get("labels") or [])]
         not_a_bug = 0 if "bug" in names else 1
         ranks = [discovery.priority_rank(n, self.priority_aliases) for n in names if n.startswith(self.priority_prefix)]
         return (min(ranks) if ranks else discovery.UNPRIORITISED, self._feature_rank(issue),
-                not_a_bug, issue["number"])
+                self._chain_rank(issue["number"]), not_a_bug, issue["number"])
+
+    def _chain_rank(self, number):
+        """#1620: `(-open_dependents, -depth)` from the stored dependency map, right after the unit rank;
+        `(0, 0)` for every goal when no map-backed ranks were set for this batch or `order` is `created`."""
+        ranks = self.dag_chain_ranks
+        if ranks is None or self.order == "created":
+            return (0, 0)
+        try:
+            return ranks.get(number)
+        except Exception:                 # noqa: BLE001 - a rank failure never stops a pick
+            return (0, 0)
 
     def _feature_rank(self, issue):
         """feature_rank (#2262, D-3/D-2 of design #2253): `discovery.priority_rank`
