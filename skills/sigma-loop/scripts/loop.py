@@ -2910,6 +2910,15 @@ def goals_parallel(config):
     return (block.get("enabled") is True, max(1, cap))
 
 
+def clamp_batch_width(config, requested):
+    """#1590: `next-batch --max-concurrent N` -> N, never above the configured goal-level cap, and 1 when
+    goal-level parallelism (or the worktree setting it needs) is off. Never raises the configured cap."""
+    enabled, cap = goals_parallel(config)
+    if not (enabled and work.enabled(config)):
+        return 1
+    return max(1, min(int(requested), cap))
+
+
 def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), session_pid=None):
     """Up to `max_concurrent` goals to dispatch AS CONCURRENT WORKTREE SUBAGENTS this pass
     (F10.5-3/#375) — repeatedly calls `_next()`, accumulating each pick on top of `extra_skip` so
@@ -6741,7 +6750,7 @@ def _validate_event(kind, flags, kind_allowlist=None):
 USAGE = ("usage: loop.py start <dir> [--session-pid PID] | start-run <dir> [--session-pid PID] | "
          "next <dir> [--skip a,b] [--feature NAME] [--label NAME] [--session-pid PID] [--trace] | "
          "pick-trace-report <dir> | "
-         "next-batch <dir> [--skip a,b] [--feature NAME] [--label NAME] [--session-pid PID] | "
+         "next-batch <dir> [--skip a,b] [--feature NAME] [--label NAME] [--session-pid PID] [--max-concurrent N] | "
          "session-active <dir> | prune-state <dir> [--dry-run] [--keep-days N] [--limit N] | session-end <dir> [--session-pid PID] | "
          "claim <dir> <goal> [--session-pid PID] | "
          "agent-start <dir> <goal> --pid PID [--thread T] | agent-reclaim <dir> <goal> [--thread T] | "
@@ -7255,7 +7264,14 @@ def _dispatch(argv):
         session_pid = _flags(argv[3:]).get("session-pid")   # #1239 review finding 1, same gap as `next`
         session_pid = None if session_pid in (None, "true") else session_pid
         _arm_run_id(session_pid)                            # #889: attribute a bare session
-        for kind, payload in next_batch(argv[2], source, config, extra_skip=skip, session_pid=session_pid):
+        asked = _flags(argv[3:]).get("max-concurrent")      # #1590: absent, the call is today's
+        if asked is not None:
+            if not str(asked).isdigit() or int(asked) < 1:
+                print("loop: --max-concurrent needs a positive whole number", file=sys.stderr)
+                return 2
+            asked = clamp_batch_width(config, asked)
+        for kind, payload in next_batch(argv[2], source, config, max_concurrent=asked, extra_skip=skip,
+                                        session_pid=session_pid):
             _print_pick(kind, payload)
             _phase_gate_notice(argv[2], config, kind, payload)
         return 0
