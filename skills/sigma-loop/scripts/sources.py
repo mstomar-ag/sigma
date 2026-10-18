@@ -943,6 +943,7 @@ BOARD_COLUMNS = (("backlog", "Backlog"), ("ready", "Ready"), ("in_progress", "In
 class GitHubSource:
     """Goals are open GitHub issues labelled `goal_label`, ordered by issue number. Status via labels;
     done closes the issue; parked labels + comments it. Talks to GitHub through `run` (default _run_gh)."""
+    call_counter = None  # #1849: class default, so an instance built via __new__ (no __init__) still runs `_run`
     # #1140: `proposed_label` (sdlc:needs-confirmation) is retired from init: it is not bootstrapped
     # here. It is created ON DEMAND (`ensure_label`) when a queued proposal is filed by
     # `handoff.create_tracked_issue`. A repo that already has it keeps it; it is never removed.
