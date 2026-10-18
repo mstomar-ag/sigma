@@ -312,6 +312,26 @@ def _is_exempt(raw_comments):
     return legacy.has_marker("\n".join(raw_comments or []), KEEP_PARKED_MARKER)
 
 
+def _map_still_waiting(sdlc_dir, config, number, cache):
+    """#1625: True only when the stored dependency map says goal `number` still has an open explicit
+    blocker, so the caller may skip the comment read and the state reads for it. Acts only when
+    `discovery.dag.mode` is written exactly `on` (shadow, off, a typo or a missing key: False, and
+    `dag_pick` is never loaded). An unusable or stale map, an unknown goal, an empty hold list or any
+    exception: False, so today's full check runs. The map only ever skips, never resumes. `cache` is
+    one dict per compute call, so the map loads once. Never raises."""
+    try:
+        block = (((config or {}).get("discovery") or {}).get("dag"))
+        if not (isinstance(block, dict) and block.get("mode") == "on"):
+            return False
+        dp = cache.get("dag_pick_mod")
+        if dp is None:
+            dp = cache["dag_pick_mod"] = _load("dag_pick")
+        held, _why = dp.map_hold(sdlc_dir, config, number, cache)
+        return bool(held)
+    except Exception:                                   # noqa: BLE001 - the full check is always safe
+        return False
+
+
 def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cache=None):
     """(actions, resolved) over every issue in `issues` (already known to carry `parked_label` OR
     `goal_blocked_label` -- see `_fetch_parked_issues`, #1358). `actions` is the enact-shaped,
@@ -351,8 +371,13 @@ def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cach
     in this module) is exactly the prior, unshared behaviour."""
     actions, resolved = [], {}
     open_cache = open_cache if open_cache is not None else {}
+    map_cache = {}
     for it in issues:
         n = str(it.get("number"))
+        names0 = _label_names(it)
+        if (source.goal_blocked_label in names0 and source.parked_label not in names0
+                and _map_still_waiting(sdlc_dir, config, n, map_cache)):
+            continue                                    # #1625: the map shows an open blocker -- no reads
         goal_doc = {"ref": n, "raw": (it.get("title") or "") + "\n" + (it.get("body") or "")}
         raw_comments = backlog_check._fetch_scrubbed_comments(sdlc_dir, config, goal_doc, run=run)
         if _is_exempt(raw_comments):

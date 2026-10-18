@@ -1220,9 +1220,10 @@ def blockers_cmd(sdlc_dir, config, run=None):
     if res.get("foreign"):      # #1707: the repair refuses these (hard stops on), so they are not "to raise"
         print("  would be skipped: not a Sigma issue: #%s" % ", #".join(res["foreign"]))
     outside = len(res.get("unwritable", [])) + int(res.get("unread", 0))
-    print("blockers: %d to raise, cycles: %d%s, outside or unreadable blockers: %d"
+    print("blockers: %d to raise, cycles: %d%s, outside or unreadable blockers: %d%s"
           % (len(res.get("plan", [])), len(res.get("cycles", [])),
-             (" (#%s)" % ", #".join(res["cycles"])) if res.get("cycles") else "", outside))
+             (" (#%s)" % ", #".join(res["cycles"])) if res.get("cycles") else "", outside,
+             " (other-repository notes not counted on the map path)" if res.get("map") else ""))   # #1859
     return 0
 
 
