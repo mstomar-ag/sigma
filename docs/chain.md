@@ -56,7 +56,7 @@ change in membership is bounded by `chain.max_added` (below).
 The cap is checked before each claim, so it can be overshot by the cost of the goals in flight. With no cap
 configured nothing reads the spend ledger; with one set, an unreadable ledger fails closed.
 
-Not available yet: a `status` verb, `--parallel`, `--no-grow`, and a `--cap-usd` flag (set `chain.max_usd`).
+Not available yet: a `status` verb, `--parallel`, and a `--cap-usd` flag (set `chain.max_usd`).
 `resume --cap N` caps the number of goals, not dollars. Not measured: a run against a live repository, and
 two drivers on one chain (the record has no lock; run one).
 
@@ -69,6 +69,7 @@ Keys under `chain` in the project config.
 | `chain.max_members` | 100 | Largest closure `plan` accepts; over it the plan is refused with its count, never truncated. |
 | `chain.max_goals` | members plus `chain.max_added` | Most goals the chain may hold. |
 | `chain.max_added` | 5 | Goals the chain may grow by when `chain.max_goals` is unset. |
+| `chain.freeze` | false | When true (or `run --no-grow`), nothing joins by itself: each new prerequisite is asked on a delta sheet. A fourth such pause (max_reasks, default 3) ends the run stuck. |
 | `chain.max_usd` | unset | Dollar cap on spend attributed to members since approval. |
 | `chain.max_minutes` | unset | Minutes cap measured from the approval stamp. |
 | `chain.auto_longest` | reserved | Documented only: nothing reads it yet. |
