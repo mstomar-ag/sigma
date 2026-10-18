@@ -352,6 +352,10 @@ moving the branch, and finishes the cleanup if it stopped after.
 what the re-root already pushed. It also removes from the worktree any file committed since that the
 old tip lacks; those files are still on the remote.
 
+### DAG.md — the dependency map's history, rolled up
+
+When the ledger is on and `discovery.dag.mode` is not `off`, the dependency map's change history is mirrored to `dag/YYYY-MM/<writer>.jsonl` on the ops branch, and `sync.publish` regenerates a `DAG.md` at the branch root from every writer's files, in the same commit as `TEAM.md`. It is a pure function of those records (the latest observation of an edge wins), lists ticket numbers only (`#N`, never a title or a name), and has sections for stuck chains (most freeing first), active chains, cycles, goals completed this month and counts. Like `TEAM.md` it is never hand-edited; after a rebase conflict it is rewritten from the merged files. `python3 skills/sigma-loop/scripts/dag.py history --all` prints every writer's records, skipping corrupt lines, and `/sigma-doctor` shows `dag ledger: N writers, newest record <age>`. With the ledger or the map off, nothing is generated and the row is absent.
+
 ### The watcher — so a mention actually reaches you
 
 ```bash
