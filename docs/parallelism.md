@@ -157,6 +157,10 @@ constant copied from a laptop, and nothing here ever pauses a process.
   process and what it started, without a verify that holds its own lease). To seed a ring by hand, write
   `{"session": [<bytes>]}` into `observed.json` in the resource state directory (`SIGMA_RESOURCE_DIR`) while no
   session is running; the bound then follows the measured size.
+- **The ring unit.** A ring value is bytes per sizeable process of the run: the lease's peak divided by the larger of
+  its workers and the most processes of its tree whose footprint was at least a quarter of the largest (a heuristic,
+  so helpers do not count). A `verify` admission is also bounded by 1.5 times the largest whole-run peak, kept in the
+  ring `verify_run`; with no `verify_run` data the bound is absent.
 - **What the guard cannot cover.** Tests you run by hand outside the verify wrapper; memory used by other
   programs; a host's own subagent fan-out; Windows (the guard refuses there rather than guess).
 - **Measured or not.** The macOS and Linux calibration runs are recorded in

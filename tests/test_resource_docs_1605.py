@@ -35,3 +35,13 @@ def test_parallelism_documents_the_cold_start_bound_and_the_seeding_lever():
     section = section[:section.index("- **What the guard cannot cover.**")]
     for needle in ("divided by the derived session cost", "released when it ends", "observed.json", "SIGMA_RESOURCE_DIR"):
         assert needle in section, needle
+
+
+def test_parallelism_documents_the_ring_unit_and_the_verify_run_bound():
+    """The ring unit is per sizeable process of the run, and a verify admission is bounded by the whole-run peak."""
+    text = (ROOT / "docs" / "parallelism.md").read_text()
+    section = text[text.index("- **The ring unit.**"):]
+    section = section[:section.index("- **What the guard cannot cover.**")]
+    for needle in ("per sizeable process", "a quarter of the largest", "1.5 times the largest whole-run peak",
+                   "`verify_run`"):
+        assert needle in " ".join(section.split()), needle

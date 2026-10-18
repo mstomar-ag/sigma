@@ -698,3 +698,58 @@ def test_real_descendants_are_all_found():
         for k in kids:
             k.kill()
             k.wait()
+
+
+# ------------------------------------------------------------------ #1858 a verify ring unit is per sizeable process
+def _ring(lease):
+    return json.loads((pathlib.Path(lease.state_dir()) / "observed.json").read_text())
+
+
+def test_ring_unit_is_bytes_per_sizeable_process_of_the_run(lease, monkeypatch):
+    """A workers=1 lease whose tree holds 5 sizeable processes records at most peak/5, and the whole run beside it."""
+    monkeypatch.setattr(lease, "take_descendants", lambda pid: [101, 102, 103, 104, 105] if pid == 100 else [])
+    lease.box["foot"].update({100: 500, 101: 500, 102: 480, 103: 520, 104: 500, 105: 1})  # 105 is a tiny helper
+    got = lease.admit("verify", 1, "r", "g1", pid=os.getpid(), now=1000.0)
+    path = pathlib.Path(lease.state_dir()) / "leases" / (got.id + ".json")
+    path.write_text(json.dumps(dict(json.loads(path.read_text()), pid=100)))
+    monkeypatch.setattr(lease, "pid_alive", lambda pid: True)
+    assert lease.note_peak(got.id) is True
+    assert json.loads(path.read_text())["procs"] == 5
+    lease.release(got.id)
+    ring = _ring(lease)
+    assert ring["verify"] == [500 // 5]
+    assert ring["verify_run"] == [500]
+
+
+def test_verify_admission_is_bounded_by_the_largest_whole_run_peak(lease):
+    """The skewed ring: unit p90 100, workers wanted 5, largest whole run 98. 5 x 100 is not granted."""
+    path = pathlib.Path(lease.state_dir()) / "observed.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"verify": [100] * 5, "verify_run": [90, 98, 95]}))
+    lease.box["available"] = 800  # room for 5 x 100 without the bound
+    got = lease.admit("verify", 5, "r", "g1", pid=os.getpid(), now=1000.0)
+    record = json.loads((pathlib.Path(lease.state_dir()) / "leases" / (got.id + ".json")).read_text())
+    assert got.n == 1
+    assert record["est_mem"] <= lease.RUN_MARGIN * 98
+
+
+def test_run_bound_removed_control(lease, monkeypatch):
+    """With the margin made huge the bound is gone and the skewed ring grants the multiple: the test above is red."""
+    monkeypatch.setattr(lease, "RUN_MARGIN", 1000)
+    path = pathlib.Path(lease.state_dir()) / "observed.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"verify": [100] * 5, "verify_run": [98]}))
+    got = lease.admit("verify", 5, "r", "g1", pid=os.getpid(), now=1000.0)
+    assert got.n > 1
+
+
+def test_without_verify_run_or_for_other_kinds_admission_is_unchanged(lease):
+    seed_ring(lease, "verify", [100])
+    lease.box["available"] = 400
+    first = lease.admit("verify", 5, "r", "g1", pid=os.getpid(), now=1000.0)
+    assert getattr(first, "n", first) == 2
+    lease.release(first.id)
+    lease.box["available"] = 800
+    path = pathlib.Path(lease.state_dir()) / "observed.json"
+    path.write_text(json.dumps({"goal": [100], "verify_run": [10]}))
+    assert lease.admit("goal", 1, "r", "g2", pid=os.getpid(), now=1000.0).n == 1
