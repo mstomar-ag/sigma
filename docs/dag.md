@@ -21,9 +21,10 @@ titles, no label text, no author and no comment text.
 
 The root-cause line is the map's answer to "why is nothing pickable?". When a pick finds nothing, the
 summary names the person-decision that holds the most work, one line per root, most freeing first. The
-shape (numbers in angle brackets are issue numbers): `<a>, <b> wait on <root>'s parked; /sigma-unpark <root>`
-for a parked root, `... /sigma-promote <root>` for an unarmed one, and `<a>, <b> wait on each other`
-for a cycle.
+shape (each number is written with a hash sign and the issue number): `<a>, <b> wait on <root>'s decision; /sigma-unpark <root>`
+for a parked root, `... /sigma-promote <root>` for an unarmed or unmanaged one, `... PR <root> is open`
+for a pull-request root, and `<a>, <b> wait on each other` for a cycle. The word is "decision" for every
+cause of a hold.
 
 ## Modes and keys
 
@@ -140,8 +141,9 @@ author or a comment phrase handed to the writer never reaches disk. Where things
 
 ## What a refresh costs
 
-Measured: graph build, closure and components on one laptop-class Mac, a single run of each, in
-seconds.
+Measured by the author of the graph core and recorded as a comment on the dependency-map epic (the
+recorded measurement; it is not a test or a file in this repository): graph build, closure and components
+on one laptop-class Mac, a single run of each, in seconds.
 
 | Nodes | Chain | Fan-in | Fan-out | Dense random with cycles |
 |---|---|---|---|---|

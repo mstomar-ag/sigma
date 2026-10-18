@@ -59,3 +59,12 @@ def test_every_backticked_path_exists():
 
 def test_no_issue_numbers():
     assert not re.search(r"#\d", _page())
+
+
+def test_root_cause_line_shape_matches_code():
+    """The page's quoted shape uses the word the code emits, not the old wording."""
+    page = (ROOT / "docs" / "dag.md").read_text()
+    code = (ROOT / "skills" / "sigma-loop" / "scripts" / "dag_stuck.py").read_text()
+    assert "wait on %s's decision" not in page and "'s decision; " in page
+    assert "'s decision; " in code
+    assert "'s parked" not in page
