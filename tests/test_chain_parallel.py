@@ -293,7 +293,7 @@ def test_default_unchanged(tmp_path):
     pick = TwoArg(fk, base)
     res = tcr._run(ch, base, fk, pick)
     assert res == {"goal": 1, "state": "running", "exit": 0, "reason": None, "detail": "", "picked": [3],
-                   "added": [], "closed": [], "cycle": 1}, res
+                   "added": [], "closed": [], "cycle": 1, "joined": [], "paused": [], "delta": "", "filed": []}, res
     assert not _lockfile(base).exists(), "the lock was written with chain.parallel unset"
     assert seen == [("chain:1", [])]
     a = ch.pick_argv(base, "chain:1", 5, ())
