@@ -9,6 +9,7 @@
     chain.py run <sdlc_dir> <chain> [--session-pid P]
     chain.py stop <sdlc_dir> <chain>
     chain.py resume <sdlc_dir> <chain> [--cap N]
+    chain.py status <sdlc_dir> [<chain>] [--json] [--rebuild [--answers <file>]] [--leftovers]
 
 `plan` and `sheet` are READ-ONLY toward GitHub. Every call they make goes through `_GetOnly`, which raises
 on anything that is not an explicit `gh api ... --method GET`: no `gh issue ...` verb, no GraphQL, no body
@@ -86,6 +87,17 @@ stop does not release goals already claimed. The record is a local file with no 
 chain. Not measured: a run against a live repository, and the cost of one cycle's reads beyond the fake's
 call counts.
 
+STATUS (#1594). Reads the local records only (`chain_status`, no `gh` call): per chain a closed state (planned,
+approved, running, stuck(<reason>), paused(decision), capped, done, stopped), the age of its last progress
+(the run heartbeat) and `running STALE` when a running chain's last progress is older than `chain.stale_minutes`
+(default 30; only a running chain is ever stale). A stopped or stuck chain adds ONE root-cause line, for a
+decision `#2, #3 wait on #4's decision; /sigma-unpark #4`. `--rebuild <chain>` regenerates the record from the
+chain's plan (members and edges) and re-applies the recorded answers (the old record's, plus `--answers <file>`)
+through `answer`; approval stamps and the run block are NOT regenerated, so re-approve and re-arm. PROVISIONAL
+(owner to ratify): the issue names no other Q&A store. `--leftovers` lists chain labels (from the records)
+whose members are all closed, through the label drain's read-only wrapper; removing a label is the person's step. Not measured:
+the stale threshold (a default) and a rebuild against a live repository.
+
 Exit 0 planned/sheet printed/answers recorded/armed/cycle picked or done, 2 refused or bad usage, 1 the record
 could not be written or a member's answer or a write failed, 3 the cycle ended capped or stuck.
 """
@@ -126,6 +138,10 @@ ARM_USAGE = ("usage: chain.py approve <sdlc_dir> <chain>\n"
              "  `approve` marks a fully answered sheet approved (local only). `arm` refuses unless the chain is\n"
              "  approved; then it creates the label chain:<root> if missing, adds it to every member and arms\n"
              "  the unarmed ones with one comment each. --dry-run writes nothing and prints the same lines.")
+STATUS_USAGE = ("usage: chain.py status <sdlc_dir> [<chain>] [--json] [--rebuild [--answers <file>]] [--leftovers]\n"
+                "  Print each chain's state and the age of its last progress (read-only); a stopped or stuck chain\n"
+                "  adds one root-cause line. --rebuild regenerates a chain's record from its label and recorded\n"
+                "  answers. --leftovers lists chain labels with no open member (read-only).")
 ARM_COMMENT = "Sigma is arming this issue as part of the chain for #%d."
 DEFAULT_MAX_MEMBERS = 100
 LIVE_MAX_MEMBERS = 50
@@ -1272,7 +1288,10 @@ def main(argv, run=None, now=None, pick=None):
         print(SHEET_USAGE)
         print(ARM_USAGE)
         print(RUN_USAGE)
+        print(STATUS_USAGE)
         return 0
+    if args[:1] == ["status"]:
+        return _main_status(args[1:], run, now)
     if args[:1] in (["run"], ["stop"], ["resume"]):
         return _main_run(args, run, now, pick)
     if args[:1] in (["sheet"], ["answer"]):
@@ -1390,6 +1409,135 @@ def _main_sheet(args, run, now):
         return 2
     print(render_answer(res), end="")
     return 1 if any(r["outcome"] == "failed" for r in res["results"]) else 0
+
+
+# --- status, rebuild, leftovers (#1594) ---------------------------------------------------------------------------
+
+def rebuild(sdlc_dir, goal, answers=None, config=None, run=None, now=None):
+    """Regenerate the record of `goal` from its plan and the recorded answers. -> {"goal", "state", "applied",
+    "dropped"}. The old record's answers and `answers` are re-applied through `answer`; an id no longer asked
+    is dropped (named, never fatal). The approval stamps and the run block are not regenerated."""
+    state = _load("state")
+    config = config if config is not None else state.load_config(sdlc_dir)
+    path = _record_path(sdlc_dir, goal)
+    try:
+        want = dict(_read_record(path).get("answers") or {})
+    except ChainRefused:
+        want = {}
+    want.update(answers or {})
+    rec = plan(sdlc_dir, goal, config=config, run=run, now=now)
+    qs, _open = open_questions(rec, config)
+    asked = {q["id"] for q in qs if not q["hidden"]}
+    have = dict(rec.get("answers") or {})
+    pending = {k: v for k, v in want.items() if k in asked and k not in have}
+    dropped = sorted(k for k in want if k not in asked and k not in have)
+    out = {"goal": goal, "state": rec["state"], "applied": sorted(pending), "dropped": dropped}
+    if pending:
+        res = answer(sdlc_dir, goal, pending, config=config, run=run)
+        if res["errors"]:
+            raise ChainRefused("; ".join(res["errors"]))
+        out["state"] = res["state"]
+    elif want:
+        saved = _read_record(path)
+        still = [q for q in open_questions(saved, config)[1]]
+        saved["answers"] = {k: v for k, v in want.items() if k in have or k in asked}
+        saved["state"] = "approved" if not still and saved.get("complete") else "awaiting-answers"
+        _save(sdlc_dir, goal, saved)
+        out["state"] = saved["state"]
+    return out
+
+
+def leftovers(sdlc_dir, config=None, run=None):
+    """Chain labels, from the local records, with no open member. Read only: the label drain's own read-only wrapper
+    refuses every write (it also needs one GraphQL read for the label, which the GET-only gate refuses)."""
+    config = config if config is not None else _load("state").load_config(sdlc_dir)
+    out = []
+    for path in sorted((pathlib.Path(sdlc_dir) / "state" / "chains").glob("c*.json")):
+        try:
+            goal = _read_record(path)["goal"]
+        except ChainRefused:
+            continue
+        label = chain_label(goal)
+        try:
+            members = label_drain.plan(sdlc_dir, label, config=config, run=run)["members"]
+        except Exception as exc:            # noqa: BLE001 - an unreadable label is not claimed as a leftover
+            if type(exc).__name__ != "LabelScopeError":     # (classes differ per module load: match the name)
+                continue
+            members = []                    # the label is gone: nothing open under it
+        if not members:
+            out.append(label)
+    return out
+
+
+def _records(sdlc_dir):
+    """-> [(path, record or None)] for every chain record file; None marks one that cannot be read."""
+    out = []
+    for path in sorted((pathlib.Path(sdlc_dir) / "state" / "chains").glob("c*.json")):
+        try:
+            out.append((path, _read_record(path)))
+        except ChainRefused:
+            out.append((path, None))
+    return out
+
+
+def _main_status(rest, run, now):
+    cs = _load("chain_status")
+    as_json, rebuild_, left = "--json" in rest, "--rebuild" in rest, "--leftovers" in rest
+    answers_file = None
+    args = [a for a in rest if a not in ("--json", "--rebuild", "--leftovers")]
+    if "--answers" in args:
+        i = args.index("--answers")
+        answers_file, args = (args[i + 1] if i + 1 < len(args) else None), args[:i] + args[i + 2:]
+        if answers_file is None:
+            print(STATUS_USAGE, file=sys.stderr)
+            return 2
+    if not args or len(args) > 2 or (answers_file and not rebuild_) or (rebuild_ and len(args) != 2):
+        print(STATUS_USAGE, file=sys.stderr)
+        return 2
+    sdlc = args[0]
+    now = time.time() if now is None else now
+    try:
+        config = _load("state").load_config(sdlc)
+    except Exception:                       # noqa: BLE001 - status needs no config; defaults apply
+        config = {}
+    try:
+        if rebuild_:
+            given = None
+            if answers_file:
+                try:
+                    given = json.loads(pathlib.Path(answers_file).read_text())
+                except (OSError, ValueError) as exc:
+                    print("chain.py: could not read the answers file: %s" % exc, file=sys.stderr)
+                    return 2
+            res = rebuild(sdlc, _chain_arg(args[1]), given, config=config, run=run, now=now)
+            print("chain #%d: record rebuilt (%s); applied %s; dropped %s; re-approve and re-arm"
+                  % (res["goal"], res["state"], ", ".join(res["applied"]) or "none", ", ".join(res["dropped"]) or "none"))
+            return 0
+        if left:
+            labels = leftovers(sdlc, config=config, run=run)
+            print("\n".join(labels) if labels else "no leftover chain labels")
+            return 0
+        recs = _records(sdlc) if (pathlib.Path(sdlc) / "state" / "chains").is_dir() else []
+        if len(args) == 2:
+            want = _chain_arg(args[1])
+            recs = [(p, r) for p, r in recs if r is not None and r["goal"] == want]
+            if not recs:
+                raise ChainRefused("no readable chain record for #%d; run `chain.py plan` first" % want)
+    except ChainRefused as exc:
+        print("chain.py: %s" % exc, file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print("chain.py: could not write the record: %s" % exc, file=sys.stderr)
+        return 1
+    rows = [cs.status_of(r, config, now) for _p, r in recs if r is not None]
+    if as_json:
+        print(json.dumps(rows, indent=2, sort_keys=True))
+        return 0
+    for p, r in recs:
+        print("%s: unreadable chain record" % p.name if r is None else cs.render_status(cs.status_of(r, config, now)), end="" if r is not None else "\n")
+    if not recs:
+        print("no chains")
+    return 0
 
 
 if __name__ == "__main__":

@@ -1383,6 +1383,21 @@ def _dag_ledger_row(cfg, sdlc_dir, now=None):
         return None
 
 
+def _chain_row(cfg, sdlc_dir, now=None):
+    """#1594 LIVENESS: `chain: #N <state> (<age of last progress>)` from the local chain records
+    (`.sdlc/state/chains/`), no network. Informational ok, except a STALE running chain or a stuck one, which
+    fails with the fix. None when no readable record exists. Never raises."""
+    try:
+        got = _load_loop_script("chain_status").doctor_summary(sdlc_dir, cfg, now)
+        if got is None:
+            return None
+        text, ok = got
+        return _chk(text, ok, "run `python3 skills/sigma-loop/scripts/chain.py status .sdlc` for the "
+                              "root cause; a stale chain has no live driver, a stuck one needs the named decision")
+    except Exception:                        # noqa: BLE001
+        return None
+
+
 def _dag_shadow_row(cfg, sdlc_dir, now=None):
     """#1619: the pick-time shadow comparison between the board mirror and the stored map. Local files
     only (`state/dag-shadow.jsonl` and its rotated `.1`). Absent (None) when `discovery.dag.mode` is
@@ -3945,6 +3960,10 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     _dlr = _dag_ledger_row(cfg, sdlc_dir)  # #1624: absent with the ledger or the map off, or no dag file
     if _dlr is not None:
         out.append(_dlr)
+
+    _chr = _chain_row(cfg, sdlc_dir)  # #1594: absent when no chain record exists
+    if _chr is not None:
+        out.append(_chr)
 
     out.extend(_ai_filed_rows(cfg, base))  # #1705
 
