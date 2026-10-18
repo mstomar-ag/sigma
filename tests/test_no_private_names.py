@@ -143,7 +143,7 @@ _PATTERNS = [
     # entry, whose branch-context matches `_scan_file` exempts through `_sdlc_ledger_disposition`.
     (r"\b" "loop" "smith" r"\b", "retired brand token"),
     (r"(?-i:" "LOOP" "SMITH" r"_[A-Z_]*)", "retired env-var prefix"),
-    (r"sdlc-(align|audit|brainstorm|context|contract-check|debug|decide|define|doctor|dossier"
+    (r"sdlc-(align|audit|brainstorm|chain|context|contract-check|debug|decide|define|doctor|dossier"
      r"|goal-design|goal-review|goal|implement|init|kg|log|loop|migration-check|model|plan-review"
      r"|plan|prd-intake|promote|radar|rebase|release-check|research|retro|review|scope|security-review|setup"
      r"|slack|status|time|triage|unpark|velocity|verify|vision|wizard)\b", "retired skill name"),

@@ -5399,8 +5399,9 @@ class GitHubSource:
         as today; a corpus blocker beyond it keeps its map rank. Hand-off edges come from the ledger, as today.
         Other-repository notes are not produced (the map holds no text). -> the tail's inputs."""
         corpus = {ref: {"number": int(ref), "labels": []} for ref in mp["corpus"]}
-        edges = [e for e in mp["edges"] if e[1] in corpus]
-        blocker_refs = set(mp["blocker_refs"])
+        parked = set(mp.get("parked") or ())               # #1859: parked stands alone, never raised or stripped
+        edges = [e for e in mp["edges"] if e[1] in corpus and e[0] not in parked]
+        blocker_refs = set(mp["blocker_refs"]) - parked
         if self.sdlc_dir:
             try:
                 for h in ledger.outstanding(ledger.read_all(self.sdlc_dir)):
@@ -5418,11 +5419,17 @@ class GitHubSource:
         confirmed = self._confirmed_refs_known()
         newest = lambda r: (-int(r), r) if str(r).isdigit() else (0, r)         # noqa: E731
         outside = sorted((({b for b, _ in edges} - set(corpus)) - set(known_closed)) - set(confirmed), key=newest)
-        inside = sorted(blocker_refs & set(corpus), key=newest)
         open_outside = [r for r in outside if mp["states"].get(r) != "closed"]
-        reads = open_outside + inside
+        # #1859: a legacy label on a corpus blocker is seen only by a read, so the corpus blockers are read
+        # stalest first (never-read first, ties newest ref first) and keep at least half the cap when there are
+        # that many; outside blockers take the rest, as before. Over passes this reaches every one of them.
+        stamped = self._inside_read_known()
+        inside = sorted(blocker_refs & set(corpus), key=lambda r: (stamped.get(r, 0), newest(r)))
+        cap = self._BLOCKER_READ_CAP
+        outside_n = min(len(open_outside), cap - min(len(inside), cap // 2))
+        reads = open_outside[:outside_n] + inside[:cap - outside_n]
         live = {}
-        for ref in reads[:self._BLOCKER_READ_CAP]:
+        for ref in reads:
             try:
                 data = self._read_issue(ref, ["number", "state", "labels", "isPullRequest"])
             except Exception as exc:
@@ -5436,15 +5443,17 @@ class GitHubSource:
                 proposed[ref] = data
             elif ref not in corpus:
                 ext[ref] = live[ref]
-        for ref in open_outside[self._BLOCKER_READ_CAP:]:
+        for ref in open_outside[outside_n:]:
             out["unread"] = out.get("unread", 0) + 1
             cross_repo.append("#%s not read (more than %d outside blockers this pass)" % (ref, self._BLOCKER_READ_CAP))
+        out["map"] = True                                  # #1859: the preview row names what this path leaves out
         if apply:
+            self._remember_inside_read(stamped, [r for r in reads if r in corpus])
             self._remember_closed_refs(known_closed, newly_closed + [r for r in outside if mp["states"].get(r) == "closed"])
         for ref in corpus:
             if ref in live:
                 corpus[ref] = live[ref]
-        skipped_outside = set(open_outside[self._BLOCKER_READ_CAP:]) | set(newly_closed) | \
+        skipped_outside = set(open_outside[outside_n:]) | set(newly_closed) | \
             {r for r in outside if mp["states"].get(r) == "closed"} | set(proposed)
         edges = [(b, d) for b, d in edges
                  if (b in corpus and b not in proposed and b not in newly_closed)
@@ -5462,6 +5471,36 @@ class GitHubSource:
             live[ref] = {"number": int(ref), "labels": data.get("labels") or []}
             return live[ref]
         return corpus, cross_repo, blocker_refs, ext, proposed, known_closed, confirmed, item_of, ranks, edges
+
+    _INSIDE_READ_CACHE = "blocker-inside-read.json"
+    _INSIDE_READ_MAX = 500      # #1859: {ref: epoch} of corpus blockers read by an apply pass; newest kept
+
+    def _inside_read_known(self):
+        """{ref: epoch} of corpus blockers a map-path apply pass read (0 = never). No expiry: it only orders reads.
+        Empty without a state folder or on any read problem."""
+        try:
+            data = json.loads((pathlib.Path(self.sdlc_dir) / "state" / self._INSIDE_READ_CACHE).read_text(encoding="utf-8"))
+            return {str(r): t for r, t in data.items() if isinstance(t, (int, float)) and not isinstance(t, bool)}
+        except Exception:                       # noqa: BLE001
+            return {}
+
+    def _remember_inside_read(self, known, new):
+        """Stamp refs just read. Bounded (newest kept); a write failure costs only the read order."""
+        if not self.sdlc_dir or not new:
+            return
+        try:
+            now = time.time()
+            merged = dict(known)
+            merged.update({str(r): now for r in new})
+            if len(merged) > self._INSIDE_READ_MAX:
+                merged = dict(sorted(merged.items(), key=lambda kv: kv[1])[-self._INSIDE_READ_MAX:])
+            path = pathlib.Path(self.sdlc_dir) / "state" / self._INSIDE_READ_CACHE
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".%d.tmp" % __import__("os").getpid())
+            tmp.write_text(json.dumps(merged, sort_keys=True), encoding="utf-8")
+            __import__("os").replace(str(tmp), str(path))
+        except Exception:                       # noqa: BLE001
+            pass
 
     _CONFIRMED_CACHE = "blocker-confirmed.json"
     _CONFIRMED_TTL = 600        # #1706 (PROVISIONAL): seconds a read-and-fine outside blocker is not read again

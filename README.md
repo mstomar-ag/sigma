@@ -272,6 +272,7 @@ Everyday commands:
 | `/sigma-promote` | Approve an issue the loop filed, so it can be picked up. |
 | `/sigma-scope <idea>` | Turn a rough idea into planned, prioritised issues. |
 | `/sigma-triage` | Plan a dependency-ordered run over the backlog. |
+| `/sigma-chain <N>` | Solve the whole chain of open blockers behind one goal: plan, ask once, arm, run. |
 | `/sigma-doctor` | Check the setup and print the exact fix for anything wrong. |
 | `/sigma-audit` · `/sigma-align` | Audit the codebase's health, or check shipped work against your strategy. |
 

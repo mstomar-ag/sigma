@@ -1236,11 +1236,13 @@ def _dag_check_pick(sdlc_dir, config, source):
         pass
 
 
-def _dag_order_pick(sdlc_dir, config, source):
+def _dag_order_pick(sdlc_dir, config, source, cache=None):
     """#1620: sets `source.dag_chain_ranks` for this pick (biggest chain first, from the stored map), or
     clears it to None so the order is exactly today's. Set only for a GitHub source whose `discovery.order`
     is `priority`, `discovery.dag.mode` is not `off` and `state/dag.json` exists; otherwise `dag_order`
-    is not even loaded. Runs after `_dag_check_pick` so the change check it gates on is this pick's. Never raises."""
+    is not even loaded. Runs after `_dag_check_pick` so the change check it gates on is this pick's.
+    #1621: `cache` is the dict `dag_pick._entry` keeps the loaded map in; `next_batch` passes one dict
+    for the whole batch so the pick-time hold reuses this load. None is a fresh dict. Never raises."""
     try:
         source.dag_chain_ranks = None
         if not _dag_github_source(config):
@@ -1253,7 +1255,7 @@ def _dag_order_pick(sdlc_dir, config, source):
             return
         if not (pathlib.Path(sdlc_dir) / "state" / "dag.json").is_file():
             return
-        source.dag_chain_ranks = _load("dag_order").chain_ranks(sdlc_dir, config, {})
+        source.dag_chain_ranks = _load("dag_order").chain_ranks(sdlc_dir, config, {} if cache is None else cache)
     except Exception:                       # noqa: BLE001 - an order term never stops a pick
         pass
 
@@ -2489,7 +2491,8 @@ def _resource_gate(config):
 _TRACE_FORCED = [False]      # #1607: `next --trace` flips this for the process; `SIGMA_PICK_TRACE=1` needs no flip
 
 
-def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True, gate=True):
+def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True, gate=True,
+          batch=None):
     """One pick: `_next_untraced`, bracketed by the opt-in pick trace (#1607, `pick_trace.py`).
     Off (the default) `rec` is the no-op `NULL`, the source's counter stays unset and nothing is
     written, so the pick is byte-identical to `_next_untraced`."""
@@ -2499,7 +2502,7 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
         saved, source.call_counter = source.call_counter, rec.count_args
     try:
         return _next_untraced(sdlc_dir, source, config, extra_skip, session_pid, refresh_heartbeat,
-                              gate, rec)
+                              gate, rec, batch)
     finally:
         if hooked:
             source.call_counter = saved
@@ -2507,7 +2510,7 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
 
 
 def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True,
-                   gate=True, rec=pick_trace.NULL):
+                   gate=True, rec=pick_trace.NULL, batch=None):
     """(kind, goal_or_reason): 'goal' (+marks in_progress, the commit point — second element is
     the goal ref), 'DONE' (drained — second element None on a genuine empty read, or, #1084, a
     short degraded-read reason string when `source.read_degraded()` is True — mirrors BUDGET's own
@@ -2627,12 +2630,21 @@ def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, re
     if refusal:
         return ("DONE", refusal)
     rec.mark("reconcile")
-    _dag_first_pick(sdlc_dir, source, config)
-    _dag_check_pick(sdlc_dir, config, source)
-    _dag_order_pick(sdlc_dir, config, source)
-    _reconcile_sweep(sdlc_dir, config)
+    # #1621: with a `batch` dict (only `next_batch` passes one) its prologue already ran the four
+    # steps below and the map is cached in `batch["map"]`; the auto-unpark sweep runs on the FIRST
+    # slot call only, and its result is folded into every slot's skip. `batch=None` is the old path.
+    if batch is None:
+        _dag_first_pick(sdlc_dir, source, config)
+        _dag_check_pick(sdlc_dir, config, source)
+        _dag_order_pick(sdlc_dir, config, source)
+        _reconcile_sweep(sdlc_dir, config)
     rec.mark("auto_unpark")
-    just_unparked = _auto_unpark_sweep(sdlc_dir, config)
+    if batch is None:
+        just_unparked = _auto_unpark_sweep(sdlc_dir, config)
+    else:
+        if batch.get("unparked") is None:
+            batch["unparked"] = frozenset(_auto_unpark_sweep(sdlc_dir, config) or ())
+        just_unparked = batch["unparked"]
     rec.mark("reclaim")
     just_reclaimed = _auto_reclaim_stale_claims(sdlc_dir, source, config)
     if refresh_heartbeat:                  # #1531: a standalone pick; next_batch ran it in its prologue
@@ -2665,6 +2677,8 @@ def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, re
     # refetch when a hold is about to be reported, and `_pick_dependency_hold` does the same when
     # the goal itself is absent, so this is read once plus AT MOST ONE refresh per call.
     gate = {}
+    if batch is not None and "dag_pick" in batch["map"]:
+        gate["dag_pick"] = batch["map"]["dag_pick"]            # #1621: the batch's one map load
     held = []       # ...and the goals it declined to claim, for the summary on the DONE path
     while True:
         rec.mark("pending_fetch")
@@ -2713,6 +2727,8 @@ def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, re
         # fail-open cases.
         rec.mark("dependency_hold")
         hold = _map_dependency_hold(sdlc_dir, source, goal, config, gate)
+        if batch is not None and "dag_pick" in gate:
+            batch["map"].setdefault("dag_pick", gate["dag_pick"])
         rec.mark("gates")
         if hold:
             subject, still = _hold_subject(source, goal)
@@ -2976,7 +2992,8 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
     write_session_heartbeat(sdlc_dir, session_pid)
     _dag_first_pick(sdlc_dir, source, config)
     _dag_check_pick(sdlc_dir, config, source)
-    _dag_order_pick(sdlc_dir, config, source)
+    batch = {"map": {}, "unparked": None}          # #1621: one map load, one unpark sweep per batch
+    _dag_order_pick(sdlc_dir, config, source, cache=batch["map"])
     _reconcile_sweep(sdlc_dir, config)
     capped_by_config = max_concurrent is None      # #1531: free slots count only against the configured cap
     if max_concurrent is None:
@@ -3037,12 +3054,18 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
             slots -= held
     for _ in range(slots):
         kind, goal = _next(sdlc_dir, source, config, extra_skip=skip, session_pid=session_pid,
-                           refresh_heartbeat=False, gate=False)
+                           refresh_heartbeat=False, gate=False, batch=batch)
         if kind != "goal":
             picks.append((kind, goal))
             break
         picks.append(("goal", goal))
         skip.add(goal)
+        ranks = getattr(source, "dag_chain_ranks", None)
+        if ranks is not None:
+            try:
+                ranks.mark_in_flight(goal)
+            except Exception:                   # noqa: BLE001 - an order term never stops a batch
+                pass
     return picks
 
 
