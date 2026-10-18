@@ -67,7 +67,7 @@ PUSH_ATTEMPTS = 5
 #: line in their own `.gitattributes`; that is harmless (it matches nothing new) and deliberately
 #: NOT cleaned up — see `BRANCH_README` and the CHANGELOG. Removing a line here is not retroactive:
 #: `_ensure_gitattributes` below is additive by design and never deletes.
-GITATTRIBUTES_LINES = (f"{ledger.ENTRIES}/*.jsonl merge=union",)
+GITATTRIBUTES_LINES = (f"{ledger.ENTRIES}/*.jsonl merge=union", f"{ledger.DAG}/**/*.jsonl merge=union")
 BRANCH_README = """\
 # SDLC ledger — ops branch
 
@@ -1012,7 +1012,10 @@ def publish(sdlc_dir, config, run=None, attempts=PUSH_ATTEMPTS, channel=LEDGER):
     try:
         who = ledger.actor(config)
         mine = _staged_paths(path, ledger.ENTRIES, who)
-        if not mine:
+        # #1623: the dependency map's history stream rides along. A change that is only there must
+        # still push, so the early return waits for both.
+        dag_mine = [str(p.relative_to(path)) for p in ledger.dag_files_for(path, who)]
+        if not mine and not dag_mine:
             return "nothing to publish"
         # #2574/S1-G3: THE EVENTS STREAM IS NO LONGER STAGED. It used to be
         # `to_stage += _staged_paths(path, ledger.EVENTS, who)`, which published a machine's events to
@@ -1020,7 +1023,7 @@ def publish(sdlc_dir, config, run=None, attempts=PUSH_ATTEMPTS, channel=LEDGER):
         # publishing: the journal is local-only, at `.sdlc/events/`, which is not in this worktree at
         # all. Nothing already on the branch is removed — a teammate's clone still pulls it, and it is
         # still read for one release.
-        to_stage = list(mine)
+        to_stage = list(mine) + dag_mine
         if _ensure_gitattributes(path):
             to_stage.append(".gitattributes")
         _write_team(sdlc_dir, path)
