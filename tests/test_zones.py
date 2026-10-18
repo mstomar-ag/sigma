@@ -872,3 +872,56 @@ def test_doc_states_the_nfd_and_case_limits_and_refusals():
     for term in ("Unicode normalisation", "NFD", "NFC", "Case (case-insensitive", "may be wrong",
                  "pass the spelling git", "carriage return or tab", "never a separator"):
         assert term in t, term
+
+
+# ----------------------------------------------------------------- #1853: a gitlink whose target is absent
+
+def _absent_gitlink_fixture(tmp_path):
+    repo = _repo(tmp_path / "p", ("old.py",))
+    _config(repo, _zones(("*", "legacy")))
+    _with_origin(repo, tmp_path)
+    _git(repo, "update-index", "--add", "--cacheinfo", "160000,%s,vendor/lib" % ("1" * 40))
+    _git(repo, "commit", "-q", "-m", "gitlink")
+    _git(repo, "push", "-q", "origin", "main")
+    return _worktree(repo)
+
+
+def test_an_absent_gitlink_is_found_among_many_new_paths(tmp_path):
+    """git 2.49 prints `<key> missing` for an absent-target gitlink, like any missing path; the tree names it.
+    450 new files force more than one `ls-tree` chunk. Control: skip `_find_absent_gitlinks` -> red."""
+    wt = _absent_gitlink_fixture(tmp_path)
+    news = ["n/f%03d.py" % i for i in range(450)]
+    rows = _rows(_run(wt, *news, "vendor/lib", "vendor/lib/deep/x.py"))      # the gitlink LAST: a later chunk
+    assert rows[-2][2] == "existing" and rows[-1][2] == "unknown"
+    assert {r[2] for r in rows[:-2]} == {"new"} and len(rows) == 452
+
+
+def test_a_failing_ls_tree_types_everything_unknown(tmp_path, monkeypatch):
+    """Control: ignore the rc of the `ls-tree` call -> the gitlink reads `new` -> red."""
+    wt = _absent_gitlink_fixture(tmp_path)
+    real = zones._git
+
+    def flaky(args, cwd, stdin=None):
+        if "ls-tree" in args:
+            return 1, ""
+        return real(args, cwd, stdin=stdin)
+    monkeypatch.setattr(zones, "_git", flaky)
+    top = zones._toplevel(str(wt))
+    fork = "origin/main"
+    got = zones._newness(top, fork, ["vendor/lib", "old.py", "brand_new.py"])
+    assert set(got.values()) == {"unknown"}
+
+
+def test_no_ls_tree_call_when_nothing_is_missing(tmp_path, monkeypatch):
+    wt = _absent_gitlink_fixture(tmp_path)
+    seen = []
+    real = zones._git
+
+    def spy(args, cwd, stdin=None):
+        seen.append(args)
+        return real(args, cwd, stdin=stdin)
+    monkeypatch.setattr(zones, "_git", spy)
+    top = zones._toplevel(str(wt))
+    seen.clear()
+    assert zones._newness(top, "origin/main", ["old.py"]) == {"old.py": "existing"}
+    assert not any("ls-tree" in a for a in seen)

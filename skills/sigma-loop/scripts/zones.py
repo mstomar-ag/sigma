@@ -7,8 +7,9 @@ One output row per path, tab-separated: `<path>\\t<zone>\\t<state>\\t<rule>`.
   state  new | existing | unknown                        (is the path absent at the branch's fork point)
 
 READ-ONLY. Its only write is the kit-wide script-time record every script makes through
-`timing_store.timed_main` (gitignored, under `.sdlc/state/time`); it calls no network and no `gh`; it runs a constant number of `git`
-processes whatever the path count (one `rev-parse`, one `merge-base`, one batched `cat-file`).
+`timing_store.timed_main` (gitignored, under `.sdlc/state/time`); it calls no network and no `gh`; it runs a fixed number of `git`
+processes (one `rev-parse`, one `merge-base`, one batched `cat-file`) plus one `ls-tree` per 200 paths the batch
+reports missing (#1853: an absent-target gitlink looks missing there).
 Nothing infers zones: the owner declares them (docs/change-zones.md).
 
 REFUSAL (exit 2, empty stdout, typed reason on stderr): a path outside the checkout, a path
@@ -180,9 +181,33 @@ _EXISTING_TYPES = ("blob", "tree", "commit", "submodule")
 _GITLINK_TYPES = ("commit", "submodule")
 
 
+#: Keys per `ls-tree` call in `_find_absent_gitlinks`: a path list is a command line, so it is chunked.
+_LSTREE_CHUNK = 200
+
+
+def _find_absent_gitlinks(top, fork, kind):
+    """#1853. On git 2.49 `cat-file --batch-check` prints `<key> missing` for a gitlink whose target commit
+    is not in this object store, exactly as for a path that is not in the tree at all, so the batch cannot
+    tell them apart. The tree itself can: `ls-tree` names a gitlink entry (mode 160000) without needing its
+    target. Ask it only about the keys the batch called missing and mark each gitlink `submodule` in `kind`.
+    -> False when git failed (the caller types everything unknown). Cost: one extra git process per 200
+    missing keys, none when nothing is missing."""
+    miss = [k for k, v in kind.items() if v == "missing"]
+    for i in range(0, len(miss), _LSTREE_CHUNK):
+        rc, out = _git(["--literal-pathspecs", "ls-tree", "-z", fork, "--"] + miss[i:i + _LSTREE_CHUNK], top)
+        if rc != 0:
+            return False
+        for ent in out.split("\0"):
+            head, _, path = ent.partition("\t")
+            if head.startswith("160000 ") and path in kind:
+                kind[path] = "submodule"
+    return True
+
+
 def _newness(top, fork, rels):
     """{rel: new|existing|unknown}. ONE `cat-file --batch-check` over `<fork>:<path>` for each path and
-    each of its parent directories. `missing` = new; a second token in blob|tree|commit|submodule =
+    each of its parent directories. `missing` = new (unless `_find_absent_gitlinks` finds the tree names it as
+    a gitlink); a second token in blob|tree|commit|submodule =
     existing (a gitlink prints `<oid> submodule`, two fields); anything else, a non-zero rc, or a
     different line count = unknown for every path. A path under a gitlink is unknown, never new."""
     if fork is None:
@@ -209,6 +234,8 @@ def _newness(top, fork, rels):
             kind[k] = toks[1]
         else:
             return {r: "unknown" for r in rels}
+    if not _find_absent_gitlinks(top, fork, kind):
+        return {r: "unknown" for r in rels}
     res = {}
     for r in rels:
         parts = r.split("/")

@@ -52,15 +52,17 @@ An unreachable config prints ahead of the unknown fallback. Paths may be relativ
 current directory), absolute, or contain `./`; a path outside the checkout, or one containing a
 newline, carriage return or tab (the output is tab-separated), is refused; so is a `--base` value
 that starts with a dash. A backslash is an ordinary name byte on POSIX, never a separator. A path that starts with a dash needs `--`: `zones.py classify -- -odd.py`.
-It is read-only apart from the kit-wide script-time record, runs a constant number of git
-processes whatever the path count, and uses no network and no `gh`.
+It is read-only apart from the kit-wide script-time record, runs a fixed number of git
+processes plus one `ls-tree` per 200 paths the batch reports missing (git 2.49 reports a gitlink whose
+target commit is absent as missing too, so the tree is asked, #1853), and uses no network and no `gh`.
 
-Measured (macOS, git 2.55, Python 3.12, `--base main`): 1,000 paths take 0.20 s wall in one run (all
-new paths, each in its own directory, in a one-file repo), and 20,000 such paths take 2.6 s. The
-number of git processes is constant, but wall time still grows with the path count (roughly
-linearly across those two points); a de-duplication that scanned a list instead of a hash made the
-20,000 case 12.6 s. Not measured: a large real repository, a networked filesystem, or more than
-20,000 paths.
+Measured (macOS, git 2.49, Python 3.12, `--base main`, one run each on a busy shared machine): 1,000 paths
+(all new, each in its own directory, in a one-file repo) take 0.27 s wall, and 20,000 such paths take
+5.2 s, of which the `ls-tree` calls (200 of them, since each path and its directory is a missing key) are
+about half; the earlier figures, 0.20 s and 2.6 s, were taken on git 2.55 before that call existed and are
+not comparable. Wall time grows roughly linearly with the path count; a de-duplication that scanned a
+list instead of a hash made the 20,000 case 12.6 s. Not measured: a large real repository, a networked
+filesystem, or more than 20,000 paths.
 
 ## Limits of the `new` reading
 
