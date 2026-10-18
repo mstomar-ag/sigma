@@ -62,6 +62,14 @@
       "role": "library"
     },
     {
+      "path": "skills/sigma-loop/scripts/chain.py",
+      "role": "gesture"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/chain_spend.py",
+      "role": "library"
+    },
+    {
       "path": "skills/sigma-loop/scripts/channel_notify.py",
       "role": "gesture"
     },
@@ -94,7 +102,51 @@
       "role": "gesture"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag.py",
+      "role": "gesture"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_chain.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_check.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_collect.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_core.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_cycles.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_insert.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_refresh.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_store.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_stuck.py",
+      "role": "library"
+    },
+    {
       "path": "skills/sigma-loop/scripts/decision_record.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/pick_trace.py",
       "role": "library"
     },
     {
