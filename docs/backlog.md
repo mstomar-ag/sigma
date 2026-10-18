@@ -178,6 +178,8 @@ third-party issue), the goal is parked, and only a person resumes it.
 
 #### The blocker chain, which is what the loop does by default
 
+The stored dependency map that answers "what waits on what" (chain query, stuck chains, cycles, the shadow-to-on criterion) is described in [dag.md](dag.md).
+
 Filing a blocking follow-up does not stop a goal — it starts a chain, and the loop drains it:
 
 ```

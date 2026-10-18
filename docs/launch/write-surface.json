@@ -4231,6 +4231,22 @@
       "count": 1,
       "gate": "one atomic, symlink-refusing write of the small window stamp under `.sdlc/state`; never raises",
       "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/chain_parallel.py",
+      "function": "_locked",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "opens the small sidecar lock file `.sdlc/state/chain-active.lock` (no content is written to it) so a read-modify-write of the active-chain file is serialised; reached only when `chain.parallel` or `chain.max_active` is configured, off by default",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/chain_parallel.py",
+      "function": "_write",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "one atomic write of `.sdlc/state/chain-active.json` (chain numbers, pid, heartbeat, issue numbers only), under the lock; reached only when `chain.parallel` or `chain.max_active` is configured, off by default",
+      "risk": "low"
     }
   ]
 }

@@ -7,6 +7,8 @@ run before a token is spent.
 
 ---
 
+The stored dependency map that can hold or order a pick (`discovery.dag.*`) is described in [`../../../docs/dag.md`](../../../docs/dag.md).
+
 Drive the backlog autonomously. The Python helpers own state/budget + the backlog source; you run
 each goal. The source is config-selected (`.sdlc/config.json` → `discovery.source`): **local goal
 files** (default) or **GitHub issues** (`source: github`, needs an authenticated `gh`). You run the
