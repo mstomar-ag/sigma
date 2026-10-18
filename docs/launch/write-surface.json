@@ -2466,6 +2466,14 @@
     },
     {
       "path": "skills/sigma-loop/scripts/sync.py",
+      "function": "_write_dag",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "ledger.enabled is exactly true and discovery.dag.mode is not off and the ledger worktree holds at least one dag history record; overwrites only DAG.md at the root of the ledger worktree with a pure function of the merged number-only records, never an empty file",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/sync.py",
       "function": "_write_team",
       "rule": "fs-write",
       "count": 1,
