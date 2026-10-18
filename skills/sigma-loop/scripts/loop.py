@@ -1990,7 +1990,7 @@ def _map_dependency_hold(sdlc_dir, source, goal, config, cache):
     if on:
         held, why = dp.map_hold(sdlc_dir, config, goal, cache)
         if held is not None:
-            return dp.hold_text(held)
+            return dp.hold_text(held, cache.get("dag_pick_phrases"))
         if not cache.get("dag_pick_warned"):
             cache["dag_pick_warned"] = True
             print("loop.py: dependency map not used (%s); using the board mirror" % why,
