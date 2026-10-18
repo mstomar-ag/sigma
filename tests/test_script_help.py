@@ -73,7 +73,7 @@ LIBRARY_ONLY = {
     "dag_history",
     "dag_insert",
     "dag_check",
-    "dag_chain", "dag_stuck", "dag_pick",
+    "dag_chain", "dag_stuck", "dag_pick", "dag_order",
     "feature_park",
     "qkind",
     "landing_preflight",

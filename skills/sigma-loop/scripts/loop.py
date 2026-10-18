@@ -1236,6 +1236,28 @@ def _dag_check_pick(sdlc_dir, config, source):
         pass
 
 
+def _dag_order_pick(sdlc_dir, config, source):
+    """#1620: sets `source.dag_chain_ranks` for this pick (biggest chain first, from the stored map), or
+    clears it to None so the order is exactly today's. Set only for a GitHub source whose `discovery.order`
+    is `priority`, `discovery.dag.mode` is not `off` and `state/dag.json` exists; otherwise `dag_order`
+    is not even loaded. Runs after `_dag_check_pick` so the change check it gates on is this pick's. Never raises."""
+    try:
+        source.dag_chain_ranks = None
+        if not _dag_github_source(config):
+            return
+        disc = (config or {}).get("discovery") or {}
+        if disc.get("order") == "created":
+            return
+        block = disc.get("dag")
+        if isinstance(block, dict) and block.get("mode") == "off":
+            return
+        if not (pathlib.Path(sdlc_dir) / "state" / "dag.json").is_file():
+            return
+        source.dag_chain_ranks = _load("dag_order").chain_ranks(sdlc_dir, config, {})
+    except Exception:                       # noqa: BLE001 - an order term never stops a pick
+        pass
+
+
 def _reconcile_sweep(sdlc_dir, config, run=None, now=None):
     """#1391 step 5e: the throttled, opt-in reconciliation pass. Returns the swept issue refs (or an
     empty frozenset), and NEVER raises.
@@ -2607,6 +2629,7 @@ def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, re
     rec.mark("reconcile")
     _dag_first_pick(sdlc_dir, source, config)
     _dag_check_pick(sdlc_dir, config, source)
+    _dag_order_pick(sdlc_dir, config, source)
     _reconcile_sweep(sdlc_dir, config)
     rec.mark("auto_unpark")
     just_unparked = _auto_unpark_sweep(sdlc_dir, config)
@@ -2953,6 +2976,7 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
     write_session_heartbeat(sdlc_dir, session_pid)
     _dag_first_pick(sdlc_dir, source, config)
     _dag_check_pick(sdlc_dir, config, source)
+    _dag_order_pick(sdlc_dir, config, source)
     _reconcile_sweep(sdlc_dir, config)
     capped_by_config = max_concurrent is None      # #1531: free slots count only against the configured cap
     if max_concurrent is None:
