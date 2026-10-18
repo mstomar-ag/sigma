@@ -206,3 +206,60 @@ def test_leftovers_names_labels_with_no_open_member(tmp_path):
 def test_usage_lists_status(capsys):
     assert tca._chain().main(["chain.py", "--help"]) == 0
     assert "chain.py status" in capsys.readouterr().out
+
+
+# 9 -- #1864: rebuild guard, never-armed leftovers, --json unreadable, malformed record ---------------------------
+
+def _chains_dir(tmp_path):
+    base = tmp_path / "s"
+    (base / "state" / "chains").mkdir(parents=True)
+    return base, base / "state" / "chains"
+
+
+@pytest.mark.parametrize("rec", [_rec({"state": "running", "heartbeat": _iso(5)}, armed=False), _rec()])
+def test_rebuild_of_a_running_or_armed_chain_refuses_without_force(tmp_path, capsys, rec):
+    base, d = _chains_dir(tmp_path)
+    (d / "c1.json").write_text(json.dumps(rec))
+    ch = tca._chain()
+    assert ch.main(["chain.py", "status", str(base), "1", "--rebuild"], now=NOW) == 2
+    assert "--force" in capsys.readouterr().err
+    assert json.loads((d / "c1.json").read_text()) == rec
+
+
+def test_rebuild_force_flag_is_accepted(tmp_path, capsys):
+    base, d = _chains_dir(tmp_path)
+    (d / "c1.json").write_text(json.dumps(_rec({"state": "running", "heartbeat": _iso(5)})))
+    ch = tca._chain()
+    ch.main(["chain.py", "status", str(base), "1", "--rebuild", "--force"], now=NOW)
+    assert "--force" not in capsys.readouterr().err
+
+
+def test_leftovers_skips_a_never_armed_chain(tmp_path):
+    base, fk = tca._scene(tmp_path)
+    ch = tca._chain()
+    assert ch.leftovers(base, run=fk) == []          # planned, never armed: no label yet, no leftover
+    rec = tca._rec(base)
+    rec["armed_at"] = "2026-01-01T00:00:00Z"
+    tca._put(base, rec)
+    for n in (1, 2, 3, 5, 6):
+        if n in fk.by:
+            fk.by[n]["state"] = "closed"
+    assert ch.leftovers(base, run=fk) == ["chain:1"]
+
+
+def test_json_reports_an_unreadable_record_like_text(tmp_path, capsys):
+    base, d = _chains_dir(tmp_path)
+    (d / "c1.json").write_text(json.dumps(_rec({"state": "done"})))
+    (d / "c7.json").write_text("{not json")
+    assert tca._chain().main(["chain.py", "status", str(base), "--json"], now=NOW) == 0
+    j = json.loads(capsys.readouterr().out)
+    assert {"file": "c7.json", "state": "unreadable"} in j and any(r.get("goal") == 1 for r in j)
+
+
+def test_malformed_member_list_prints_an_error_line(tmp_path, capsys):
+    base, d = _chains_dir(tmp_path)
+    bad = _rec({"state": "stuck", "stuck": "decision", "reason": "#4 is parked"})
+    bad["members"] = [5, "x"]
+    (d / "c1.json").write_text(json.dumps(bad))
+    assert tca._chain().main(["chain.py", "status", str(base)], now=NOW) == 0
+    assert "c1.json: unreadable chain record" in capsys.readouterr().out

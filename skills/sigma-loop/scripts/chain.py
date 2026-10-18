@@ -9,7 +9,7 @@
     chain.py run <sdlc_dir> <chain> [--session-pid P]
     chain.py stop <sdlc_dir> <chain>
     chain.py resume <sdlc_dir> <chain> [--cap N]
-    chain.py status <sdlc_dir> [<chain>] [--json] [--rebuild [--answers <file>]] [--leftovers]
+    chain.py status <sdlc_dir> [<chain>] [--json] [--rebuild [--force] [--answers <file>]] [--leftovers]
 
 `plan` and `sheet` are READ-ONLY toward GitHub. Every call they make goes through `_GetOnly`, which raises
 on anything that is not an explicit `gh api ... --method GET`: no `gh issue ...` verb, no GraphQL, no body
@@ -104,7 +104,8 @@ approved, running, stuck(<reason>), paused(decision), capped, done, stopped), th
 (default 30; only a running chain is ever stale). A stopped or stuck chain adds ONE root-cause line, for a
 decision `#2, #3 wait on #4's decision; /sigma-unpark #4`. `--rebuild <chain>` regenerates the record from the
 chain's plan (members and edges) and re-applies the recorded answers (the old record's, plus `--answers <file>`)
-through `answer`; approval stamps and the run block are NOT regenerated, so re-approve and re-arm. PROVISIONAL
+through `answer`; approval stamps and the run block are NOT regenerated, so re-approve and re-arm. A running or
+armed chain refuses `--rebuild` unless `--force` is given. A never-armed chain is no leftover. PROVISIONAL
 (owner to ratify): the issue names no other Q&A store. `--leftovers` lists chain labels (from the records)
 whose members are all closed, through the label drain's read-only wrapper; removing a label is the person's step. Not measured:
 the stale threshold (a default) and a rebuild against a live repository.
@@ -149,10 +150,10 @@ ARM_USAGE = ("usage: chain.py approve <sdlc_dir> <chain>\n"
              "  `approve` marks a fully answered sheet approved (local only). `arm` refuses unless the chain is\n"
              "  approved; then it creates the label chain:<root> if missing, adds it to every member and arms\n"
              "  the unarmed ones with one comment each. --dry-run writes nothing and prints the same lines.")
-STATUS_USAGE = ("usage: chain.py status <sdlc_dir> [<chain>] [--json] [--rebuild [--answers <file>]] [--leftovers]\n"
+STATUS_USAGE = ("usage: chain.py status <sdlc_dir> [<chain>] [--json] [--rebuild [--force] [--answers <file>]] [--leftovers]\n"
                 "  Print each chain's state and the age of its last progress (read-only); a stopped or stuck chain\n"
                 "  adds one root-cause line. --rebuild regenerates a chain's record from its label and recorded\n"
-                "  answers. --leftovers lists chain labels with no open member (read-only).")
+                "  answers; a running or armed chain refuses unless --force. --leftovers lists chain labels with no open member (read-only).")
 ARM_COMMENT = "Sigma is arming this issue as part of the chain for #%d."
 DEFAULT_MAX_MEMBERS = 100
 LIVE_MAX_MEMBERS = 50
@@ -1678,6 +1679,8 @@ def leftovers(sdlc_dir, config=None, run=None):
         except ChainRefused:
             continue
         label = chain_label(goal)
+        if not _was_armed(_read_record(path)):
+            continue                        # never armed: its label does not exist yet, so it is no leftover
         try:
             members = label_drain.plan(sdlc_dir, label, config=config, run=run)["members"]
         except Exception as exc:            # noqa: BLE001 - an unreadable label is not claimed as a leftover
@@ -1686,6 +1689,36 @@ def leftovers(sdlc_dir, config=None, run=None):
             members = []                    # the label is gone: nothing open under it
         if not members:
             out.append(label)
+    return out
+
+
+def _was_armed(rec):
+    run_blk = rec.get("run")
+    return bool(rec.get("armed_at")) or (isinstance(run_blk, dict) and bool(run_blk.get("state")))
+
+
+def _rebuild_refusal(sdlc_dir, goal):
+    """A reason when `goal`'s record is running or armed (a rebuild would drop its run block), else None."""
+    try:
+        rec = _read_record(_record_path(sdlc_dir, goal))
+    except ChainRefused:
+        return None
+    blk = rec.get("run") if isinstance(rec.get("run"), dict) else {}
+    st = blk.get("state")
+    if st in ("running", "approved-running") or (rec.get("armed_at") and st not in ("done", "stopped", "capped")):
+        return ("chain #%d is %s; --rebuild would drop its run block. Pass --force to rebuild anyway"
+                % (goal, st or "armed"))
+    return None
+
+
+def _status_rows(recs, cs, config, now):
+    """-> [(name, status dict or None)]; None marks a record that cannot be read or has a malformed shape."""
+    out = []
+    for p, r in recs:
+        try:
+            out.append((p.name, None if r is None else cs.status_of(r, config, now)))
+        except (KeyError, TypeError, AttributeError, ValueError):
+            out.append((p.name, None))
     return out
 
 
@@ -1703,8 +1736,9 @@ def _records(sdlc_dir):
 def _main_status(rest, run, now):
     cs = _load("chain_status")
     as_json, rebuild_, left = "--json" in rest, "--rebuild" in rest, "--leftovers" in rest
+    force = "--force" in rest
     answers_file = None
-    args = [a for a in rest if a not in ("--json", "--rebuild", "--leftovers")]
+    args = [a for a in rest if a not in ("--json", "--rebuild", "--leftovers", "--force")]
     if "--answers" in args:
         i = args.index("--answers")
         answers_file, args = (args[i + 1] if i + 1 < len(args) else None), args[:i] + args[i + 2:]
@@ -1729,6 +1763,9 @@ def _main_status(rest, run, now):
                 except (OSError, ValueError) as exc:
                     print("chain.py: could not read the answers file: %s" % exc, file=sys.stderr)
                     return 2
+            why = None if force else _rebuild_refusal(sdlc, _chain_arg(args[1]))
+            if why:
+                raise ChainRefused(why)
             res = rebuild(sdlc, _chain_arg(args[1]), given, config=config, run=run, now=now)
             print("chain #%d: record rebuilt (%s); applied %s; dropped %s; re-approve and re-arm"
                   % (res["goal"], res["state"], ", ".join(res["applied"]) or "none", ", ".join(res["dropped"]) or "none"))
@@ -1749,12 +1786,13 @@ def _main_status(rest, run, now):
     except OSError as exc:
         print("chain.py: could not write the record: %s" % exc, file=sys.stderr)
         return 1
-    rows = [cs.status_of(r, config, now) for _p, r in recs if r is not None]
+    rows = _status_rows(recs, cs, config, now)
     if as_json:
-        print(json.dumps(rows, indent=2, sort_keys=True))
+        print(json.dumps([st if st is not None else {"file": name, "state": "unreadable"} for name, st in rows],
+                         indent=2, sort_keys=True))
         return 0
-    for p, r in recs:
-        print("%s: unreadable chain record" % p.name if r is None else cs.render_status(cs.status_of(r, config, now)), end="" if r is not None else "\n")
+    for name, st in rows:
+        print(cs.render_status(st), end="") if st is not None else print("%s: unreadable chain record" % name)
     if not recs:
         print("no chains")
     return 0
