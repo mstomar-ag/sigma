@@ -107,14 +107,43 @@ def map_hold(sdlc, config, goal, cache, now=None):
                 return None, "blocker #%d state unknown" % blocker
             if not graph.resolved(blocker):
                 out.append(blocker)
-        return sorted(set(out)), "ok"
+        held = sorted(set(out))
+        cache["dag_pick_phrases"] = phrases(m, g, held)
+        return held, "ok"
     except Exception as exc:                    # noqa: BLE001 - the old path is always safe
         return None, "map read failed (%s)" % type(exc).__name__
 
 
-def hold_text(numbers):
-    """The hold string the pick prints, in the old path's shape."""
-    return ", ".join("#%d (blocked by)" % n for n in numbers)
+#: The phrases the old path's scanner can emit (`blocker_scan.TRIGGERS`); nothing else is printed.
+PHRASES = ("blocked by", "depends on", "depends upon", "needs", "after", "requires", "waiting on")
+
+
+def phrases(m, goal, held):
+    """`{blocker: phrase}` for the held blockers whose RAW map edge carries a known `phrase` key.
+
+    The stored map normalises edges to blocker/blocked/source (no prose is kept), so this yields
+    nothing from a stored map today; it only reads the optional key.
+    """
+    out = {}
+    try:
+        for e in m.get("edges") or []:
+            p = e.get("phrase")
+            if (e.get("blocked") == goal and e.get("blocker") in held and isinstance(p, str)
+                    and p.strip().lower() in PHRASES):
+                out[e["blocker"]] = p.strip().lower()
+    except Exception:                           # noqa: BLE001 - wording only, never a decision
+        return {}
+    return out
+
+
+def hold_text(numbers, phrases=None):
+    """The hold string the pick prints, in the old path's shape.
+
+    `phrases` maps a blocker to its phrase; a missing or unknown phrase prints `blocked by`.
+    """
+    phrases = phrases or {}
+    return ", ".join("#%d (%s)" % (n, phrases[n] if phrases.get(n) in PHRASES else "blocked by")
+                     for n in numbers)
 
 
 # ------------------------------------------------------------------ the comparison
@@ -185,7 +214,12 @@ def _append(sdlc, rec, now):
 # ------------------------------------------------------------------ the doctor's numbers
 
 def shadow_stats(sdlc, now=None):
-    """`None` when there is no log, else a dict: compared, disagreements, causes, days, flip."""
+    """`None` when there is no log, else a dict: compared, disagreements, causes, days, flip.
+
+    `compared` is the number of DISTINCT picks: distinct (goal, minute) pairs, since one pick of a
+    goal can append several records within a minute. The flip clause uses that count.
+    `disagreements` and `causes` still count per record.
+    """
     now = time.time() if now is None else now
     d = pathlib.Path(sdlc) / "state"
     recs = []
@@ -205,7 +239,10 @@ def shadow_stats(sdlc, now=None):
         return None
     causes = {c: 0 for c in CAUSES}
     dis = 0
+    picks = set()
     for r in recs:
+        if isinstance(r.get("t"), (int, float)) and not isinstance(r.get("t"), bool) and "g" in r:
+            picks.add((r["g"], int(r["t"]) // 60))
         if r.get("c") in ("map-only", "old-only"):
             dis += 1
             for c in r.get("k") or []:
@@ -221,5 +258,5 @@ def shadow_stats(sdlc, now=None):
         ts = [r["t"] for r in recs if isinstance(r.get("t"), (int, float))]
         since = min(ts) if ts else now
     days = max(0, int((now - since) // 86400))
-    flip = days >= FLIP_DAYS and len(recs) >= FLIP_PICKS and causes["unknown"] == 0
-    return {"compared": len(recs), "disagreements": dis, "causes": causes, "days": days, "flip": flip}
+    flip = days >= FLIP_DAYS and len(picks) >= FLIP_PICKS and causes["unknown"] == 0
+    return {"compared": len(picks), "disagreements": dis, "causes": causes, "days": days, "flip": flip}
