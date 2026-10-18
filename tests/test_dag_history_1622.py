@@ -463,6 +463,5 @@ def test_a_partial_old_map_cannot_make_a_false_merge_record():
     """Control: drop `old_short` from the chain guard and the merge below is recorded as superseding."""
     old = _partial(_map([(1, OPEN), (2, OPEN), (5, OPEN), (6, OPEN)], [(1, 2), (5, 6)]))
     new = _map([(n, OPEN) for n in (1, 2, 3, 5, 6)], [(1, 2), (2, 3), (3, 5), (5, 6)])
-    assert dag_history.diff(old, new, T) != []                                  # additions are recorded
-    assert not _ev(dag_history.diff(old, new, T), "chain-superseded")
+    assert dag_history.diff(old, new, T) == []          # a partial old map proves nothing: no false edge, no false merge
     assert _ev(dag_history.diff(_map([(n, OPEN) for n in (1, 2, 5, 6)], [(1, 2), (5, 6)]), new, T), "chain-superseded")
