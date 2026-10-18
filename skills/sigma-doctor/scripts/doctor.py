@@ -1363,6 +1363,28 @@ def _dag_history_row(cfg, sdlc_dir, now=None):
         return None
 
 
+def _dag_shadow_row(cfg, sdlc_dir, now=None):
+    """#1619: the pick-time shadow comparison between the board mirror and the stored map. Local files
+    only (`state/dag-shadow.jsonl` and its rotated `.1`). Absent (None) when `discovery.dag.mode` is
+    `off` or no log exists; always OK, since it measures and gates nothing. Never raises."""
+    try:
+        dp = _load_loop_script("dag_pick")
+        if dp.dag_store.mode(cfg) == "off":
+            return None
+        st = dp.shadow_stats(sdlc_dir, time.time() if now is None else now)
+        if st is None:
+            return None
+        c = st["causes"]
+        return _chk("dag shadow: %d compared picks, %d disagreements (pr %d, comment-only %d, "
+                    "cross-repo %d, unknown %d), %d days in shadow, flip criterion %s (needs >=%d "
+                    "days, >=%d picks, 0 unknown)"
+                    % (st["compared"], st["disagreements"], c["pr"], c["comment-only"],
+                       c["cross-repo"], c["unknown"], st["days"],
+                       "met" if st["flip"] else "not met", dp.FLIP_DAYS, dp.FLIP_PICKS), True, "")
+    except Exception:                        # noqa: BLE001
+        return None
+
+
 def _dag_map_row(cfg, sdlc_dir, now=None):
     """#1612 LIVENESS: the stored dependency map's row. Reads the config, the map file and the small
     refresh record; no network. Absent (None) when `discovery.dag.mode` is `off`, and when the operator
@@ -3889,6 +3911,9 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     _dm = _dag_map_row(cfg, sdlc_dir)  # #1612: absent when mode is off
     if _dm is not None:
         out.append(_dm)
+    _dsh = _dag_shadow_row(cfg, sdlc_dir)  # #1619: absent with no log or mode off
+    if _dsh is not None:
+        out.append(_dsh)
     _dcy = _dag_cycles_row(cfg, sdlc_dir)  # #1615: absent with no cycle or mode off
     if _dcy is not None:
         out.append(_dcy)

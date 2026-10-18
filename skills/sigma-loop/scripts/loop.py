@@ -209,6 +209,16 @@ def _ensure_ledger_delivery(sdlc_dir, config, threshold=15, publish_fn=None, coo
 #: Pure literals only (str/tuple/bool/None): the reader is `ast.literal_eval`, so it cannot follow a
 #: name or a call. Text fields carry no `|` and no newline -- they land in a Markdown table cell.
 ENFORCEMENT_GATES = (
+    {"control": "Dependency hold at pick, from the stored map", "function": "_map_dependency_hold",
+     "kind": "python-gate", "hosts": "all", "enabled_by": ("discovery.dag.mode",),
+     "settings": ("discovery.dag.ttl_minutes",),
+     "mechanism": "replaces the board-mirror read of the pick-time dependency hold with the stored "
+                  "dependency map only when it is written `on`, the map is usable and a change check "
+                  "ran in the last ten minutes; any unusable clause prints one stderr line and takes "
+                  "the old path",
+     "condition": "acts only when `discovery.dag.mode` is written `on`; the shadow default (and any "
+                  "typo) returns the old decision and appends one comparison record, and `off` "
+                  "loads nothing"},
     {"control": "Dependency hold at pick", "function": "_pick_dependency_hold",
      "kind": "python-gate", "hosts": "all", "enabled_by": ("discovery.dependency_gate.mode",),
      "settings": (),
@@ -1947,6 +1957,46 @@ def _pick_dependency_hold(sdlc_dir, source, goal, config, cache):
         return ""
 
 
+def _map_dependency_hold(sdlc_dir, source, goal, config, cache):
+    """#1619: `_pick_dependency_hold`'s answer, optionally from the stored dependency map.
+
+    Mode `off`, a source other than GitHub, or (in shadow) no stored map: the old function, and
+    `dag_pick` is never loaded. `shadow` (the default, and what a typo reads): the old decision is
+    computed and RETURNED, the map's is compared with it in a guarded block and one record is
+    appended to `state/dag-shadow.jsonl`. `on` (only when written exactly `on`): a usable map with a
+    change check inside ten minutes that knows the goal decides, with no mirror and no live read when
+    nothing is held; anything else prints ONE stderr line per call and takes the old path. Never
+    raises beyond what the old function does."""
+    block = (((config or {}).get("discovery") or {}).get("dag"))
+    mode = block.get("mode") if isinstance(block, dict) else None
+    if mode == "off" or not _dag_github_source(config):
+        return _pick_dependency_hold(sdlc_dir, source, goal, config, cache)
+    on = mode == "on"
+    if not on and not (pathlib.Path(sdlc_dir) / "state" / "dag.json").is_file():
+        return _pick_dependency_hold(sdlc_dir, source, goal, config, cache)
+    try:
+        dp = cache.get("dag_pick_mod")
+        if dp is None:
+            dp = cache["dag_pick_mod"] = _load("dag_pick")
+    except Exception:                       # noqa: BLE001 - the old path is always safe
+        return _pick_dependency_hold(sdlc_dir, source, goal, config, cache)
+    if on:
+        held, why = dp.map_hold(sdlc_dir, config, goal, cache)
+        if held is not None:
+            return dp.hold_text(held)
+        if not cache.get("dag_pick_warned"):
+            cache["dag_pick_warned"] = True
+            print("loop.py: dependency map not used (%s); using the board mirror" % why,
+                  file=sys.stderr)
+        return _pick_dependency_hold(sdlc_dir, source, goal, config, cache)
+    old = _pick_dependency_hold(sdlc_dir, source, goal, config, cache)
+    try:
+        dp.log_compare(sdlc_dir, config, goal, old, cache)
+    except Exception:                       # noqa: BLE001 - a comparison never changes a pick
+        pass
+    return old
+
+
 def _is_local_source(source):
     """#1550: goals are files under `goals_dir`, read through `fetch_title_body`. Both halves are
     required: GitHubSource has the reader but no `goals_dir`; a bare fake has neither."""
@@ -2639,7 +2689,7 @@ def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, re
         # leaves it exactly as it was found. See `_pick_dependency_hold` for the cost and the
         # fail-open cases.
         rec.mark("dependency_hold")
-        hold = _pick_dependency_hold(sdlc_dir, source, goal, config, gate)
+        hold = _map_dependency_hold(sdlc_dir, source, goal, config, gate)
         rec.mark("gates")
         if hold:
             subject, still = _hold_subject(source, goal)
