@@ -87,6 +87,17 @@ stop does not release goals already claimed. The record is a local file with no 
 chain. Not measured: a run against a live repository, and the cost of one cycle's reads beyond the fake's
 call counts.
 
+GROWTH (#1589). Each `run` cycle re-reads the end goal's open closure (read-only; a failed read is no growth)
+and looks for new open prerequisites of the members. One that needs no decision joins through
+`label_drain.pull` (the label, the fixed comment, arming as `arm` does), one printed line, up to
+`chain.max_added` (default 5) and `chain.max_goals`; the root never changes and a decomposed end goal's slices
+join under it. One that needs a decision, is over a bound, or arrives while `--no-grow` or `chain.freeze: true`
+holds is NOT pulled: it is recorded in `run.paused` with its dependents, the pick skips those dependents (the
+other branches go on), and a delta sheet with ONLY the new questions is printed and kept in `run.delta`
+(`answer` accepts them; `grow:<n>`: leave it out, or add it, which also passes a bound). Each cycle that prints a
+delta sheet counts in `run.pauses`; past `chain.max_reasks` (default 3) the run ends stuck, reason decision.
+Anything filed from a member that is not a prerequisite never joins and is listed as "filed, not in the chain".
+
 STATUS (#1594). Reads the local records only (`chain_status`, no `gh` call): per chain a closed state (planned,
 approved, running, stuck(<reason>), paused(decision), capped, done, stopped), the age of its last progress
 (the run heartbeat) and `running STALE` when a running chain's last progress is older than `chain.stale_minutes`
@@ -434,11 +445,9 @@ def _plan_live(sdlc, goal, config, ro, source, bound):
 
 # --- the plan ---------------------------------------------------------------------------------------
 
-def plan(sdlc_dir, goal, config=None, run=None, now=None):
-    """The plan dict for `goal`, and the local record written. Raises `ChainRefused`."""
+def _resolve(sdlc_dir, goal, config, run, now):
+    """The open closure of `goal` as a plan dict, and the read-only runner that served it. Writes nothing."""
     sources, state = _load("sources"), _load("state")
-    now = time.time() if now is None else now
-    config = config if config is not None else state.load_config(sdlc_dir)
     max_members = _max_members(config)
     ro = _GetOnly(run or sources._run_gh)
     source = sources.GitHubSource(config, run=ro)
@@ -456,6 +465,15 @@ def plan(sdlc_dir, goal, config=None, run=None, now=None):
         bound = min(LIVE_MAX_MEMBERS, max_members)
         out = _plan_live(sdlc_dir, goal, config, ro, source, bound)
         out.update(source="live", source_reason=why, bound=bound)
+    return out, ro
+
+
+def plan(sdlc_dir, goal, config=None, run=None, now=None):
+    """The plan dict for `goal`, and the local record written. Raises `ChainRefused`."""
+    state = _load("state")
+    now = time.time() if now is None else now
+    config = config if config is not None else state.load_config(sdlc_dir)
+    out, ro = _resolve(sdlc_dir, goal, config, run, now)
     out.update(schema=SCHEMA, goal=goal, calls=ro.summary(), planned_at=int(now), state="planned")
     path = _record_path(sdlc_dir, goal)
     try:
@@ -526,6 +544,7 @@ def questions_of(rec, config=None):
     qs.append({"id": "cap:%s" % label, "kind": "cap",
                "ask": "What cap applies to this chain? (a positive whole number; no estimate exists yet, so "
                       "there is no default)", "options": [], "unblocks": sorted(by)})
+    qs += _delta_questions(rec, config)
     for q in qs:
         q["recommended"] = q["options"][0] if q["options"] and q["kind"] not in NO_DEFAULT else None
         row = by.get(int(q["id"].split(":", 1)[1])) if q["kind"] in unpark.QUESTIONS \
@@ -608,6 +627,19 @@ def _writes(rec, qs, config=None):
     return out
 
 
+def _decision_lines(n, ident, q, ans, ids=None):
+    """The sheet's lines for one decision, shared by the full sheet and the growth delta."""
+    opts = " / ".join(o + (" (recommended)" if o == q["recommended"] else "") for o in q["options"])
+    done = "  [answered: %s]" % ans[ident] if ident in ans else ""
+    L = ["  %d. [%s] %s%s" % (n, ident, q["ask"], done)]
+    if ids:
+        L.append("     applies to %d questions: %s" % (len(ids), ", ".join(ids)))
+    L.append("     options: %s" % (opts or "none, answer with a positive whole number"))
+    if q.get("note"):
+        L.append("     note: %s" % q["note"])
+    return L
+
+
 def render_sheet(rec, now, config=None):
     qs, openq = open_questions(rec, config)
     shown = [q for q in qs if not q["hidden"]]
@@ -645,14 +677,7 @@ def render_sheet(rec, now, config=None):
     def put(ident, q, ids=None):
         nonlocal n
         n += 1
-        opts = " / ".join(o + (" (recommended)" if o == q["recommended"] else "") for o in q["options"])
-        done = "  [answered: %s]" % ans[ident] if ident in ans else ""
-        L.append("  %d. [%s] %s%s" % (n, ident, q["ask"], done))
-        if ids:
-            L.append("     applies to %d questions: %s" % (len(ids), ", ".join(ids)))
-        L.append("     options: %s" % (opts or "none, answer with a positive whole number"))
-        if q.get("note"):
-            L.append("     note: %s" % q["note"])
+        L.extend(_decision_lines(n, ident, q, ans, ids))
     for gid, ids in groups.items():
         first = next(q for q in shown if q["id"] == ids[0])
         put(gid, dict(first, ask="%d questions of kind %s share these options" % (len(ids), first["kind"]),
@@ -749,7 +774,9 @@ def answer(sdlc_dir, goal, answers=None, defaults=False, config=None, run=None):
         have[qid] = choice
     rec["answers"] = have
     still = [q["id"] for q in qs if not q["hidden"] and q["id"] not in have]
-    rec["state"] = "approved" if not still and rec.get("complete") else "awaiting-answers"
+    grown = {q["id"] for q in _delta_questions(rec, config)}      # growth questions never un-approve a running chain
+    base_open = [i for i in still if i not in grown]
+    rec["state"] = "approved" if not base_open and rec.get("complete") else "awaiting-answers"
     state.atomic_write_text(path, json.dumps(rec, indent=2, sort_keys=True) + "\n")
     out["open"], out["state"] = still, rec["state"]
     return out
@@ -927,12 +954,13 @@ def render_arm(res):
 
 # --- run, stop, resume (#1588) -----------------------------------------------------------------------------
 
-RUN_USAGE = ("usage: chain.py run <sdlc_dir> <chain> [--session-pid P]\n"
+RUN_USAGE = ("usage: chain.py run <sdlc_dir> <chain> [--session-pid P] [--no-grow]\n"
              "       chain.py stop <sdlc_dir> <chain>\n"
              "       chain.py resume <sdlc_dir> <chain> [--cap N]\n"
              "  `run` is ONE cycle of a foreground driver (no daemon): it claims the next goals of the approved,\n"
              "  armed chain through the loop's own label-scoped pick, or says why it cannot (exit 3: capped or\n"
-             "  stuck). Call it again. `stop` and `resume` change only the local record.")
+             "  stuck). Call it again. `stop` and `resume` change only the local record. A new prerequisite of the\n"
+             "  chain joins by itself up to chain.max_added; --no-grow (or chain.freeze) makes every addition ask.")
 STUCK_REASONS = ("decision", "held-gate", "claimed", "external", "rate-limit", "degraded-read", "capped")
 _DEFAULT_PICK_TIMEOUT = 900
 _NO_PICK = ("DONE", "BUDGET", "HANDOFF", "FULL", "HOLD")
@@ -998,6 +1026,157 @@ def _why_failed(exc):
     return "rate-limit" if re.search(r"rate.?limit|\b429\b|secondary", str(exc), re.I) else "degraded-read"
 
 
+# --- growth of a running chain (#1589) ------------------------------------------------------------------------
+
+GROW_OPTIONS = ["leave it out", "add it"]       # the first is the recommended one: nothing is added unasked
+DEFAULT_MAX_REASKS = 3
+_DELTA_KEYS = ("number", "verdict", "waits_on", "labels", "kind", "spend")
+_GROW_WHY = {"bound": "the chain has already taken in its limit of additions",
+             "freeze": "growth is frozen for this run",
+             "refused": "it could not be added automatically"}
+
+
+def _own_questions(goal, rows, config):
+    """-> the decisions a new prerequisite carries by itself (its kind, its spend), asked of no one else."""
+    nums = {str(r["number"]) for r in rows}
+    return [q for q in questions_of({"goal": goal, "members": [dict(r) for r in rows]}, config)
+            if q["kind"] != "cap" and q["id"].split(":", 1)[1] in nums]
+
+
+def _delta_questions(rec, config=None):
+    """-> the questions of the held-back prerequisites in the run block: their own decisions, or one
+    `grow:<n>` question where nothing but a limit or a refusal held them. Pure: reads only the record."""
+    d = (rec.get("run") or {}).get("delta") or {}
+    rows, why = d.get("rows") or [], d.get("why") or {}
+    out = []
+    for r in sorted(rows, key=lambda x: x["number"]):
+        n = r["number"]
+        own = _own_questions(rec["goal"], [r], config) if why.get(str(n)) == "decision" else []
+        deps = (((rec.get("run") or {}).get("paused") or {}).get(str(n))) or []
+        out += own or [{"id": "grow:%d" % n, "kind": "grow", "options": list(GROW_OPTIONS),
+                        "ask": "#%d is a new prerequisite of the chain, and %s. Leave it out, or add it?"
+                               % (n, _GROW_WHY.get(why.get(str(n)), "it needs a decision")),
+                        "unblocks": sorted([n] + list(deps))}]
+    return out
+
+
+def render_delta(rec, newly, config=None):
+    """The delta sheet: ONLY the questions of the prerequisites newly held back this cycle."""
+    qs = [q for q in _delta_questions(rec, config) if int(q["id"].split(":", 1)[1]) in set(newly)]
+    ans = rec.get("answers") or {}
+    for q in qs:
+        q["recommended"] = q["options"][0] if q["options"] else None
+    L = ["Chain growth for #%d: %d new decision(s), nothing else changed" % (rec["goal"], len(qs)),
+         "Held out of the chain for now: %s" % _ids(sorted(newly)), "", "Decisions:"]
+    for i, q in enumerate(qs, 1):
+        L += _decision_lines(i, q["id"], q, ans)
+    L += ["", "Answer with `chain.py answer`, then `chain.py resume`; members that do not wait on these go on."]
+    return "\n".join(L) + "\n"
+
+
+def _dependents_of(edges, start):
+    """-> every goal that waits, directly or through others, on `start`."""
+    by = collections.defaultdict(set)
+    for e in edges:
+        by[e["from"]].add(e["to"])
+    seen, todo = set(), [start]
+    while todo:
+        for nxt in by.get(todo.pop(), ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                todo.append(nxt)
+    return sorted(seen)
+
+
+def _int_cfg(block, key, default):
+    v = block.get(key)
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else default
+
+
+def _default_closure(sdlc_dir, goal, config, run, now):
+    return _resolve(sdlc_dir, goal, config, run, now)[0]
+
+
+def _grow(sdlc_dir, goal, rec, blk, config, cfg, now, run, closure, pull, filed, no_grow, res):
+    """Take in the new open prerequisites of the chain, within bounds. Edits `blk` and `res`; returns the
+    set of goal numbers the pick must skip. A failed read is no growth. See the module docstring (GROWTH)."""
+    chain_spend = _load("chain_spend")
+    recorded = [r["number"] for r in rec["members"]]
+    joined = list(blk.get("joined") or [])
+    try:
+        cl = (closure or _default_closure)(sdlc_dir, goal, config, run, now)
+    except Exception:           # noqa: BLE001 - growth is an extra read; it never stops a cycle
+        cl = None
+    try:
+        res["filed"] = sorted(_numbers((filed or (lambda *_a: ()))(sdlc_dir, goal, cl)))
+    except Exception:           # noqa: BLE001
+        res["filed"] = []
+    if res["filed"]:
+        blk["filed"] = sorted(set(blk.get("filed") or ()) | set(res["filed"]))
+    old_paused = dict(blk.get("paused") or {})
+    if cl is None:
+        return {int(d) for ds in old_paused.values() for d in ds}
+    block = cfg.get("chain") if isinstance(cfg.get("chain"), dict) else {}
+    freeze = bool(no_grow) or block.get("freeze") is True
+    max_added = _int_cfg(block, "max_added", chain_spend.DEFAULT_MAX_ADDED)
+    max_goals = block.get("max_goals")
+    max_goals = max_goals if isinstance(max_goals, (int, float)) and not isinstance(max_goals, bool) \
+        else len(recorded) + max_added
+    max_reasks = _int_cfg(block, "max_reasks", DEFAULT_MAX_REASKS)
+    answers = rec.get("answers") or {}
+    known = set(recorded) | set(blk.get("seen") or ()) | set(joined) | {goal}
+    held, why, rows = {}, {}, {}
+    for r in cl.get("members") or ():
+        n = r["number"]
+        if n in known:
+            continue
+        mine = {k: r.get(k) for k in _DELTA_KEYS if k in r}
+        rows[n] = mine
+        said = answers.get("grow:%d" % n)
+        if said == "leave it out":
+            held[n], why[n] = _dependents_of(cl.get("edges") or [], n), "declined"
+            continue
+        own = [q for q in _own_questions(goal, [mine], config) if not q["hidden"] and q["id"] not in answers]
+        override = said == "add it"
+        if own:
+            reason = "decision"
+        elif freeze and not override:
+            reason = "freeze"
+        elif (len(joined) >= max_added or len(recorded) + len(joined) >= max_goals) and not override:
+            reason = "bound"
+        else:
+            got = pull(sdlc_dir, chain_label(goal), n, goal, config=config, run=run) if pull \
+                else label_drain.pull(sdlc_dir, chain_label(goal), n, goal, config=config, run=run)
+            result = (got or {}).get("result")
+            if result in ("pulled", "already"):
+                joined.append(n)
+                res["joined"].append(n)
+                continue
+            if result in ("closed", "unreadable"):          # nothing to hold back; an unreadable one is retried
+                continue
+            reason = "refused"
+        held[n], why[n] = _dependents_of(cl.get("edges") or [], n), reason
+    newly = sorted(n for n in held if why[n] != "declined" and str(n) not in old_paused)
+    for key, val in (("joined", joined), ("paused", {str(n): d for n, d in sorted(held.items())})):
+        if val:
+            blk[key] = val
+        else:
+            blk.pop(key, None)
+    open_rows = {n: rows[n] for n in held if why[n] != "declined"}
+    if open_rows:
+        blk["delta"] = {"rows": [open_rows[n] for n in sorted(open_rows)],
+                        "why": {str(n): why[n] for n in sorted(open_rows)}}
+    else:
+        blk.pop("delta", None)
+    res["paused"] = sorted(held)
+    if newly:
+        blk["pauses"] = int(blk.get("pauses") or 0) + 1
+        if blk["pauses"] > max_reasks:
+            res["over_asked"] = "chain.max_reasks (%d) reached: #%d needs an answer" % (max_reasks, newly[0])
+        res["delta"] = render_delta(dict(rec, run=blk), newly, config)
+    return {d for ds in held.values() for d in ds}
+
+
 def _stuck(p, failure, unconfirmed):
     """-> (reason, detail), ONE reason from STUCK_REASONS for an empty pick with members still open. Numbers
     only in the detail. The order is the order a person would act in: a failed read first (nothing else can
@@ -1027,11 +1206,13 @@ def _stuck(p, failure, unconfirmed):
     return "claimed", "open members remain but none could be claimed this cycle (skipped or leased elsewhere)"
 
 
-def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=None, sweep=None):
+def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=None, sweep=None,
+        no_grow=False, closure=None, pull=None, filed=None):
     """ONE cycle of the chain run, re-callable. -> {"goal", "state", "exit", "reason", "detail", "picked",
     "added", "closed", "cycle"}. Raises `ChainRefused`, with nothing written and nothing started, unless the
     record is approved, armed and not stopped. `pick(label, skip)` -> goal numbers and `sweep(sdlc_dir,
-    config, run)` -> refs are injectable; the defaults are the loop's own. See the module docstring (RUN)."""
+    config, run)` -> refs are injectable; the defaults are the loop's own. `closure`, `pull` and `filed` (see
+    GROWTH in the module docstring) are injectable too; `no_grow` makes every addition ask."""
     state, sources = _load("state"), _load("sources")
     now = time.time() if now is None else now
     config = config if config is not None else state.load_config(sdlc_dir)
@@ -1044,7 +1225,8 @@ def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=
     if blk.get("state") == "stopped":
         raise ChainRefused("chain #%d is stopped; `chain.py resume` first; nothing was started" % goal)
     res = {"goal": goal, "state": blk.get("state"), "exit": 0, "reason": None, "detail": "", "picked": [],
-           "added": [], "closed": [], "cycle": int(blk.get("cycle") or 0)}
+           "added": [], "closed": [], "cycle": int(blk.get("cycle") or 0),
+           "joined": [], "paused": [], "delta": "", "filed": []}
     if blk.get("state") == "done":
         return res
     label = chain_label(goal)
@@ -1075,7 +1257,16 @@ def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=
         if locked:
             chain_parallel.release(sdlc_dir, goal)
         return res
-    known = set(recorded) | set(blk.get("seen") or ())
+    held_back = _grow(sdlc_dir, goal, rec, blk, config, cfg, now, run, closure, pull, filed, no_grow, res)
+    if res.pop("over_asked", None) is not None:
+        detail = "chain.max_reasks reached: %s still need an answer" % _ids(sorted(int(k) for k in blk["paused"]))
+        blk.update(state="stuck", reason=detail, stuck="decision")
+        rec["run"] = blk
+        _save(sdlc_dir, goal, rec)
+        res.update(state="stuck", exit=3, reason="decision", detail=detail)
+        return res
+    skip = skip | frozenset(str(d) for d in held_back)
+    known = set(recorded) | set(blk.get("seen") or ()) | set(blk.get("joined") or ())
     already = set(blk.get("closed") or ())
     failure, p, open_now, confirmed = None, None, set(), set()
     try:
@@ -1112,13 +1303,21 @@ def run(sdlc_dir, goal, session_pid=None, pick=None, now=None, config=None, run=
         res.update(state="running", picked=sorted(got), detail=note)
     else:
         unconfirmed = known - open_now - set(blk["closed"])
-        if failure is None and not open_now and not unconfirmed:
+        if failure is None and not open_now and not unconfirmed and not blk.get("paused"):
             blk.update(state="done", reason=None, stuck=None)
             res.update(state="done", detail="all %d members closed in %d cycle(s); %d claimed by this run"
                        % (len(known), blk["cycle"], len(blk.get("picked") or ())))
+            if blk.get("joined"):
+                res["detail"] += "; joined: " + _ids(blk["joined"])
+            if blk.get("filed"):
+                res["detail"] += "; filed, not in the chain: " + _ids(blk["filed"])
         else:
-            reason, detail = _stuck(p, failure, unconfirmed) if (p is not None or failure is not None) \
-                else ("degraded-read", "no read")
+            if failure is None and blk.get("paused"):
+                reason, detail = "decision", "%s held out of the chain and waiting for an answer" % _ids(
+                    sorted(int(k) for k in blk["paused"]))
+            else:
+                reason, detail = _stuck(p, failure, unconfirmed) if (p is not None or failure is not None) \
+                    else ("degraded-read", "no read")
             blk.update(state="stuck", reason=detail, stuck=reason)
             res.update(state="stuck", exit=3, reason=reason, detail=detail)
     rec["run"] = blk
@@ -1187,6 +1386,18 @@ def resume(sdlc_dir, goal, cap=None):
     if cap is not None:
         blk["cap"] = cap
     blk.update(state="approved-running", reason=None, stuck=None)
+    answered = rec.get("answers") or {}
+    for key in [k for k in (blk.get("paused") or {})           # clear what the person answered
+                if answered.get("grow:%s" % k, "leave it out") != "leave it out"]:
+        blk["paused"].pop(key)
+    kept = set(blk.get("paused") or ())
+    if not kept:
+        blk.pop("paused", None)
+    if blk.get("delta"):
+        blk["delta"]["rows"] = [r for r in blk["delta"]["rows"] if str(r["number"]) in kept]
+        blk["delta"]["why"] = {k: v for k, v in blk["delta"]["why"].items() if k in kept}
+        if not blk["delta"]["rows"]:
+            blk.pop("delta")
     rec["run"] = blk
     _save(sdlc_dir, goal, rec)
     return {"goal": goal, "state": "approved-running", "cap": blk.get("cap")}
@@ -1201,6 +1412,11 @@ def render_run(res):
         out.append("added to the label since the last cycle (not acted on): " + _ids(res["added"]))
     if res["closed"]:
         out.append("closed since the last cycle: " + _ids(res["closed"]))
+    out += ["joined #%d (a new prerequisite of #%d)" % (n, res["goal"]) for n in res.get("joined") or ()]
+    if res.get("filed"):
+        out.append("filed, not in the chain: " + _ids(res["filed"]))
+    if res.get("delta"):
+        out.append(res["delta"].rstrip("\n"))
     if res["reason"]:
         out.append("%s: %s" % (res["reason"], res["detail"]))
     elif res["detail"]:
@@ -1321,6 +1537,9 @@ def main(argv, run=None, now=None, pick=None):
 def _main_run(args, run, now, pick):
     verb, rest = args[0], args[1:]
     opts = {"run": "--session-pid", "resume": "--cap"}.get(verb)
+    no_grow = verb == "run" and "--no-grow" in rest
+    if no_grow:
+        rest = [a for a in rest if a != "--no-grow"]
     val = None
     if opts and opts in rest:
         i = rest.index(opts)
@@ -1340,7 +1559,8 @@ def _main_run(args, run, now, pick):
             r = resume(rest[0], goal, cap=int(val) if val else None)
             print("chain #%d: %s%s" % (goal, r["state"], " (cap %d)" % r["cap"] if r["cap"] else ""))
             return 0
-        res = globals()["run"](rest[0], goal, session_pid=val, pick=pick, now=now, run=run)
+        res = globals()["run"](rest[0], goal, session_pid=val, pick=pick, now=now, run=run,
+                           **({"no_grow": True} if no_grow else {}))
     except ChainRefused as exc:
         print("chain.py: %s" % exc, file=sys.stderr)
         return 2

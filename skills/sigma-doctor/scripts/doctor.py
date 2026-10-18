@@ -1633,6 +1633,32 @@ _REGISTRY_COMMIT_CMD = 'git add .sdlc/features && git commit -m "registry: recor
 _STALE_RECORD_DIRS = ("acceptance", "plans", "research")
 
 
+_CHAIN_NEEDLE = "do not walk the blockers one by one"      # a sentence of the docs/chain.md block, not its heading
+
+
+def _chain_block_rows(base):
+    """#1593: one row, whether an agent file in the repo root (AGENTS.md, CLAUDE.md, .cursor/rules/*.mdc)
+    carries the chain block from docs/chain.md. Read only: it never edits the file. No row when the
+    state directory does not exist (nothing is initialised to advise)."""
+    if not base.is_dir():
+        return []
+    root = base.parent
+    files = [root / "AGENTS.md", root / "CLAUDE.md"]
+    try:
+        files.extend(sorted((root / ".cursor" / "rules").glob("*.mdc")))
+    except OSError:
+        pass
+    for f in files:
+        try:
+            if _CHAIN_NEEDLE in f.read_text(encoding="utf-8", errors="replace"):
+                return [_chk("chain block in an agent file", True, "")]
+        except OSError:
+            continue
+    return [_chk("chain block in an agent file", False,
+                 "paste the block under 'Solving a whole dependency chain' from docs/chain.md into "
+                 "AGENTS.md or CLAUDE.md (doctor never edits it)")]
+
+
 def _stale_record_rows(base, run, now=None):
     """#1474: one row on untracked `.sdlc/{acceptance,plans,research}/*.md` older than a day, split into a
     landed duplicate (byte-identical to the default branch's blob: safe to remove) and a file on no branch
@@ -3407,6 +3433,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     _progress("unit records")
     out.extend(_unit_record_rows(base, run, cheap_only))
     out.extend(_stale_record_rows(base, run))      # #1474
+    out.extend(_chain_block_rows(base))            # #1593
     if disc.get("source") == "github":
         gh_disc = _block(disc, "github")
         if _block(gh_disc, "project").get("enabled"):

@@ -311,6 +311,12 @@ Portable, on every host.
 `python3 <sigma>/skills/sigma-model/scripts/predict.py "<goal>"`.
 Status output is the sibling rule `output-contract.mdc`: every status block is constructed by
 `python3 <sigma>/skills/sigma-loop/scripts/render.py`, never written by hand.
+
+## Solving a whole dependency chain
+
+When a goal is blocked by other open goals, do not walk the blockers one by one. Run the chain:
+use the sigma-chain skill, or `chain.py plan`, `sheet`, `answer`, `approve`, `arm`, `run` from
+the sigma-loop scripts. It plans the whole chain, asks every decision together, and then solves it.
 """
 
 #: The second always-apply Cursor rule (#2114): status output is CONSTRUCTED by render.py, never
