@@ -114,3 +114,22 @@ def test_parallel_and_lock_are_documented():
     for phrase in (".sdlc/state/chain-active.json", "pid is dead AND its heartbeat is older than 900 seconds",
                    "further apart than 900 seconds can be reclaimed", "Manual recovery"):
         assert phrase in flat, phrase
+
+
+def _flat():
+    return " ".join(DOC.read_text(encoding="utf-8").split())
+
+
+def test_lock_recovery_names_only_a_crashed_driver():
+    """#1867: a stuck-ended chain is not described as holding the lock."""
+    flat = _flat()
+    assert "only a crashed or killed driver leaves an entry" in flat
+    assert "ended stuck keeps it" not in flat
+
+
+def test_parallel_row_states_the_width_one_fallback():
+    """#1867: the budget shortfall falls back to width 1 (never refuses); below 2 is unset."""
+    flat = _flat()
+    assert "the run falls back to width 1" in flat
+    assert "A value below 2 is read as unset" in flat
+    assert "wider width is refused" not in flat

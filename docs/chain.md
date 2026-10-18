@@ -70,7 +70,7 @@ Keys under `chain` in the project config.
 | `chain.max_goals` | members plus `chain.max_added` | Most goals the chain may hold. |
 | `chain.max_added` | 5 | Goals the chain may grow by when `chain.max_goals` is unset. |
 | `chain.freeze` | false | When true (or `run --no-grow`), nothing joins by itself: each new prerequisite is asked on a delta sheet. A fourth such pause (max_reasks, default 3) ends the run stuck. |
-| `chain.parallel` | unset (width 1) | Whole number of 2 or more: members one run cycle may claim at once. Capped by `parallel.goals.max_concurrent` (default 3) and honoured only with `parallel.goals.enabled` true and `work.enabled` on; otherwise the width is 1. A wider width is refused when `chain.max_usd` is set and the remaining budget does not cover the goals in flight at the p90 cost per goal. |
+| `chain.parallel` | unset (width 1) | Whole number of 2 or more: members one run cycle may claim at once. Capped by `parallel.goals.max_concurrent` (default 3) and honoured only with `parallel.goals.enabled` true and `work.enabled` on; otherwise the width is 1. A value below 2 is read as unset. When `chain.max_usd` is set and the remaining budget does not cover the goals in flight at the p90 cost per goal, the run falls back to width 1. |
 | `chain.max_active` | 1 | Most chains that may run at the same time. Setting it, or `chain.parallel`, turns the active-chain lock on. |
 | `chain.max_usd` | unset | Dollar cap on spend attributed to members since approval. |
 | `chain.max_minutes` | unset | Minutes cap measured from the approval stamp. |
@@ -87,6 +87,6 @@ is to ratify). Either clause alone is not enough: a dead pid with a fresh heartb
 cycles, and a live pid with an old heartbeat is a hung driver a person should look at. So a driver whose cycles
 are further apart than 900 seconds can be reclaimed by another chain while it is still meant to be running.
 
-Manual recovery: `chain.py stop` on the chain releases its entry; a chain that ended stuck keeps it until stopped or run again. A lock file that cannot
+Manual recovery: `chain.py stop` on the chain releases its entry; a chain that ended in any non-running result, stuck included, has already released it, so only a crashed or killed driver leaves an entry (reclaimed as above, or released by `chain.py stop`). A lock file that cannot
 be read is named in the refusal; once no chain is running, delete that one file and run again. Without
 `fcntl` the lock refuses loudly rather than run unlocked.
