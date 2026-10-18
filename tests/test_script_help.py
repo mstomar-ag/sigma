@@ -70,7 +70,7 @@ LIBRARY_ONLY = {
     "conflict_state",
     "dag_store", "dag_collect", "dag_refresh",
     "dag_cycles",
-    "dag_history",
+    "dag_history", "dag_render",
     "dag_insert",
     "dag_check",
     "dag_chain", "dag_stuck",

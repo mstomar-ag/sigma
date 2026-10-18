@@ -3,7 +3,7 @@
 -> gh auth + project scope; KG enabled -> the builder; vision-first -> the north-star; always -> the
 .sdlc layer — and report each check with the exact one-line fix. The command runner is injectable so
 the logic is hermetically testable. Zero-dep."""
-import sys, json, math, time, os, pathlib, re, shutil, subprocess, importlib.util, importlib.metadata
+import sys, json, math, time, calendar, os, pathlib, re, shutil, subprocess, importlib.util, importlib.metadata
 
 try:                    # portable output: force UTF-8 so the plugin's own non-ASCII (arrows, em-dashes)
     sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")   # doesn't garble to '?' or
@@ -1359,6 +1359,26 @@ def _dag_history_row(cfg, sdlc_dir, now=None):
         return _chk(name, False,
                     "history is append-only and Sigma never deletes it; once the month is closed, compress "
                     "or move `.sdlc/state/dag-history/%s.jsonl` out of the tree yourself" % h["month"])
+    except Exception:                        # noqa: BLE001
+        return None
+
+
+def _dag_ledger_row(cfg, sdlc_dir, now=None):
+    """#1624 LIVENESS: `dag ledger: N writers, newest record <age>` from the dag stream on the ledger
+    branch. Always OK (age is information, not a verdict). None when `ledger.enabled` is not true,
+    `discovery.dag.mode` is `off`, or no dag file exists. Reads the files, no network. Never raises."""
+    try:
+        led, sync, dh = _load_loop_script("ledger"), _load_loop_script("sync"), _load_loop_script("dag_history")
+        if not led.enabled(cfg) or dh._load("dag_store").mode(cfg) == "off" or not sync.is_worktree(sdlc_dir):
+            return None
+        writers, newest = dh.contributors(sync.worktree(sdlc_dir))
+        if not writers:
+            return None
+        age = "unknown"
+        if newest:
+            secs = (time.time() if now is None else now) - calendar.timegm(time.strptime(newest, "%Y-%m-%dT%H:%M:%SZ"))
+            age = "%d min" % max(0, int(secs // 60)) if secs < 7200 else "%.1f h" % (secs / 3600) if secs < 172800 else "%d d" % int(secs // 86400)
+        return _chk("dag ledger: %d writer%s, newest record %s" % (writers, "" if writers == 1 else "s", age), True, "")
     except Exception:                        # noqa: BLE001
         return None
 
@@ -3881,6 +3901,10 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     _dhr = _dag_history_row(cfg, sdlc_dir)  # #1622: absent with no history or mode off
     if _dhr is not None:
         out.append(_dhr)
+
+    _dlr = _dag_ledger_row(cfg, sdlc_dir)  # #1624: absent with the ledger or the map off, or no dag file
+    if _dlr is not None:
+        out.append(_dlr)
 
     out.extend(_ai_filed_rows(cfg, base))  # #1705
 

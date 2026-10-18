@@ -36,6 +36,9 @@ and wrapped so a history failure never fails or delays a save. The same map save
 and appends nothing (headers are not compared). Cost: one extra read and parse of the previous map per
 save, plus the diff.
 
+Ledger readers (#1624): `read_all(root)` reads every writer's `dag/YYYY-MM/*.jsonl` under a ledger worktree,
+skipping corrupt lines; `contributors(root)` counts the writers and finds the newest record stamp.
+
 `read_month(sdlc, month)` opens only `<month>.jsonl`, `month` a strict `YYYY-MM`; anything else raises
 `ValueError`. `size_bytes` and `health` use `stat`, never a read.
 
@@ -281,3 +284,42 @@ def health(sdlc, now, config=None):
         return {"month": month, "bytes": size, "warn": size > WARN_BYTES}
     except Exception:                                   # noqa: BLE001
         return None
+
+
+# ------------------------------------------------------------------ every writer's files (#1624)
+
+def _stream_files(root):
+    base = pathlib.Path(root) / "dag"
+    if not base.is_dir():
+        return []
+    return sorted(p for m in sorted(base.iterdir()) if m.is_dir() and _MONTH.match(m.name)
+                  for p in sorted(m.glob("*.jsonl")) if p.is_file())
+
+
+def read_all(root):
+    """Every record of every writer under the ledger worktree `root` (`dag/YYYY-MM/*.jsonl`), in file
+    order. A line that does not parse, or is not an object, is skipped; an unreadable file is skipped."""
+    out = []
+    for p in _stream_files(root):
+        try:
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(r, dict):
+                out.append(r)
+    return out
+
+
+def contributors(root):
+    """`(writers, newest)`: how many distinct `<actor>-<host>` writers have a dag file under `root` (the
+    `.pid` of a process file does not make a new writer) and the newest record stamp (`t`) in any of them,
+    '' when there is none. (PROVISIONAL: a writer is actor plus host token.)"""
+    files = _stream_files(root)
+    writers = {p.name[:-len(".jsonl")].rpartition(".")[0] or p.name for p in files}
+    newest = max((str(r.get("t", "")) for r in read_all(root)), default="")
+    return len(writers), newest

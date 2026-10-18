@@ -9,9 +9,10 @@
   dag.py line [--sdlc DIR]      one line, the map's age and size; reads one file, no network, and
                                 prints nothing when mode is off or there is no map
 
-  dag.py history [--month YYYY-MM] [--sdlc DIR]
+  dag.py history [--month YYYY-MM | --all] [--sdlc DIR]
                                 that month's history records, one JSON line each (default: the current
-                                month); opens only that month's file, no network (#1622)
+                                month); opens only that month's file, no network (#1622). `--all` reads every
+                                writer's files in the ledger worktree, any month (#1624)
 
   dag.py chain GOAL [--json] [--verify] [--include-resolved] [--sdlc DIR]
                                 every unresolved transitive blocker of GOAL, in order (schema
@@ -102,8 +103,9 @@ def refresh(sdlc, force=False):
     return out, (1 if res["status"] in ("kept", "error") else 0)
 
 
-def history(sdlc, month=None):
-    """`(text, exit_code)`: one month's records, one JSON line each."""
+def history(sdlc, month=None, all_writers=False):
+    """`(text, exit_code)`: one month's records, one JSON line each. `all_writers` (#1624) reads every
+    writer's files in the ledger worktree instead, in any month; nothing when the ledger is off."""
     import json
     dh = _load("dag_history")
     try:
@@ -112,6 +114,15 @@ def history(sdlc, month=None):
         config = {}
     if dh._off(sdlc, config):
         return "dag: off", 0
+    if all_writers:
+        try:
+            sync, ledger = dh._load("sync"), dh._load("ledger")
+            if not ledger.enabled(config) or not sync.is_worktree(sdlc):
+                return "dag history: ledger is off or has no worktree", 0
+            recs = dh.read_all(sync.worktree(sdlc))
+        except Exception as exc:                            # noqa: BLE001
+            return "dag history: %s" % type(exc).__name__, 1
+        return "\n".join(json.dumps(r, sort_keys=True, separators=(",", ":")) for r in recs), 0
     try:
         recs = dh.read_month(sdlc, month or dh.month_of(time.time()))
     except ValueError as exc:
@@ -173,6 +184,7 @@ def main(argv=None):
     lp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     yp = sub.add_parser("history", help="print one month of the map's history records (no network)")
     yp.add_argument("--month", default=None, help="YYYY-MM (default: the current month)")
+    yp.add_argument("--all", action="store_true", help="every writer's records from the ledger worktree")
     yp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     cp = sub.add_parser("chain", help="every unresolved transitive blocker of a goal, in order")
     cp.add_argument("goal", type=int)
@@ -194,7 +206,7 @@ def main(argv=None):
         print(out)
         return code
     if args.verb == "history":
-        out, code = history(sdlc, args.month)
+        out, code = history(sdlc, args.month, args.all)
         if out:
             print(out)
         return code
