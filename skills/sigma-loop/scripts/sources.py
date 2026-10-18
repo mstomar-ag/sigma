@@ -5270,49 +5270,54 @@ class GitHubSource:
             out["skipped"] = "cap"
             return out
         try:
-            corpus = {}
-            for label in (self.goal_label, self.goal_blocked_label):
-                for it in self._fetch_issues_rest([label], self._BOARD_ITEM_LIMIT):
-                    if it.get("number") is not None:
-                        corpus.setdefault(str(it["number"]), it)
-            edges, cross_repo, blocker_refs = self._repair_edges(corpus, out)
-            edges = edges[:self._REPAIR_EDGE_CAP]
-            ext, proposed = {}, {}
-            known_closed = self._closed_refs_known()
-            confirmed = self._confirmed_refs_known()      # #1706: read lately and found at the right rank
-            newly_closed = []
-            # Newest ref first, and never a read for a ref already seen closed: the cap must not spend
-            # every pass on the same ten old closed issues (string order did, so a newer blocker outside
-            # the corpus was never reached).
-            outside = sorted((({b for b, _ in edges} - set(corpus)) - set(known_closed)) - set(confirmed),
-                             key=lambda r: (-int(r), r) if str(r).isdigit() else (0, r))
-            for ref in outside[:self._BLOCKER_READ_CAP]:
-                try:
-                    data = self._read_issue(ref, ["number", "state", "labels", "isPullRequest"])
-                except Exception as exc:
-                    cross_repo.append("#%s could not be read (%s)" % (ref, exc))
-                    continue
-                names = self._label_names(data.get("labels"))
-                if self._blocker_not_open(data):
-                    newly_closed.append(ref)
-                    continue
-                if self.proposed_label in names:
-                    proposed[ref] = data
-                    continue
-                ext[ref] = {"number": int(ref), "labels": data.get("labels") or []}
-            for ref, it in corpus.items():
-                if ref in blocker_refs and self.proposed_label in self._label_names(it.get("labels")):
-                    proposed[ref] = it
-            for ref in outside[self._BLOCKER_READ_CAP:]:      # #1475: beyond the cap is reported, never silent
-                out["unread"] = out.get("unread", 0) + 1
-                cross_repo.append("#%s not read (more than %d outside blockers this pass)" % (ref, self._BLOCKER_READ_CAP))
-            if apply:                                         # #1475: the dry pass writes nothing
-                self._remember_closed_refs(known_closed, newly_closed)
-            edges = [(b, d) for b, d in edges if b in ext or (b in corpus and b not in proposed)]
-            item_of = lambda r: corpus[r] if r in corpus else ext[r]            # noqa: E731
-            ranks = {r: discovery.priority_rank(self._priority_name(item_of(r).get("labels")), self.priority_aliases)
-                     for r in {x for e in edges for x in e if x in corpus or x in ext}}
-            edges = [e for e in edges if e[0] in ranks and e[1] in ranks]
+            mp = self._repair_map_input()          # #1626: None -> today's path, untouched below
+            if mp is not None:
+                corpus, cross_repo, blocker_refs, ext, proposed, known_closed, confirmed, item_of, ranks, edges = \
+                    self._repair_from_map(mp, out, apply)
+            else:
+                corpus = {}
+                for label in (self.goal_label, self.goal_blocked_label):
+                    for it in self._fetch_issues_rest([label], self._BOARD_ITEM_LIMIT):
+                        if it.get("number") is not None:
+                            corpus.setdefault(str(it["number"]), it)
+                edges, cross_repo, blocker_refs = self._repair_edges(corpus, out)
+                edges = edges[:self._REPAIR_EDGE_CAP]
+                ext, proposed = {}, {}
+                known_closed = self._closed_refs_known()
+                confirmed = self._confirmed_refs_known()      # #1706: read lately and found at the right rank
+                newly_closed = []
+                # Newest ref first, and never a read for a ref already seen closed: the cap must not spend
+                # every pass on the same ten old closed issues (string order did, so a newer blocker outside
+                # the corpus was never reached).
+                outside = sorted((({b for b, _ in edges} - set(corpus)) - set(known_closed)) - set(confirmed),
+                                 key=lambda r: (-int(r), r) if str(r).isdigit() else (0, r))
+                for ref in outside[:self._BLOCKER_READ_CAP]:
+                    try:
+                        data = self._read_issue(ref, ["number", "state", "labels", "isPullRequest"])
+                    except Exception as exc:
+                        cross_repo.append("#%s could not be read (%s)" % (ref, exc))
+                        continue
+                    names = self._label_names(data.get("labels"))
+                    if self._blocker_not_open(data):
+                        newly_closed.append(ref)
+                        continue
+                    if self.proposed_label in names:
+                        proposed[ref] = data
+                        continue
+                    ext[ref] = {"number": int(ref), "labels": data.get("labels") or []}
+                for ref, it in corpus.items():
+                    if ref in blocker_refs and self.proposed_label in self._label_names(it.get("labels")):
+                        proposed[ref] = it
+                for ref in outside[self._BLOCKER_READ_CAP:]:      # #1475: beyond the cap is reported, never silent
+                    out["unread"] = out.get("unread", 0) + 1
+                    cross_repo.append("#%s not read (more than %d outside blockers this pass)" % (ref, self._BLOCKER_READ_CAP))
+                if apply:                                         # #1475: the dry pass writes nothing
+                    self._remember_closed_refs(known_closed, newly_closed)
+                edges = [(b, d) for b, d in edges if b in ext or (b in corpus and b not in proposed)]
+                item_of = lambda r: corpus[r] if r in corpus else ext[r]            # noqa: E731
+                ranks = {r: discovery.priority_rank(self._priority_name(item_of(r).get("labels")), self.priority_aliases)
+                         for r in {x for e in edges for x in e if x in corpus or x in ext}}
+                edges = [e for e in edges if e[0] in ranks and e[1] in ranks]
             required, cyc = discovery.blocker_required_ranks(edges, ranks)
             if cyc:
                 self._warn_blocking_cycle(set(cyc))
@@ -5360,6 +5365,90 @@ class GitHubSource:
             self._note_scope(exc)
             out["skipped"] = out["skipped"] or "failed"
         return out
+
+    def _repair_map_input(self):
+        """#1626: `dag_repair.repair_input` when the stored map may answer (mode written `on`, usable, fresh
+        change check), else None. Never raises; the module is loaded once per source object."""
+        try:
+            mod = getattr(self, "_dag_repair_mod", None)
+            if mod is None:
+                mod = self._dag_repair_mod = _load("dag_repair")
+            return mod.repair_input(self.sdlc_dir, self._hs_config)
+        except Exception:                       # noqa: BLE001 - the old path is always safe
+            return None
+
+    def _repair_from_map(self, mp, out, apply):
+        """#1626: the same decision inputs as the list-and-extract block of `repair_blocker_ranks`, taken from
+        the stored map: no list read, no outside read for open or closed state. One `_read_issue` per open
+        blocker (newest outside first, then corpus, at most `_BLOCKER_READ_CAP`) gives the labels for the
+        legacy-label check and the live rank; a raise target not read in that pass is read when it is written.
+        PROVISIONAL (owner to ratify): an outside blocker beyond the read cap is reported unread and dropped,
+        as today; a corpus blocker beyond it keeps its map rank. Hand-off edges come from the ledger, as today.
+        Other-repository notes are not produced (the map holds no text). -> the tail's inputs."""
+        corpus = {ref: {"number": int(ref), "labels": []} for ref in mp["corpus"]}
+        edges = [e for e in mp["edges"] if e[1] in corpus]
+        blocker_refs = set(mp["blocker_refs"])
+        if self.sdlc_dir:
+            try:
+                for h in ledger.outstanding(ledger.read_all(self.sdlc_dir)):
+                    by, blocked = str(ledger.handoff_key(h)), str(h.get("goal"))
+                    if by == blocked:
+                        continue
+                    blocker_refs.add(by)
+                    if blocked in corpus and (by, blocked) not in edges:
+                        edges.append((by, blocked))
+            except Exception:
+                pass
+        edges = edges[:self._REPAIR_EDGE_CAP]
+        cross_repo, ext, proposed, newly_closed = [], {}, {}, []
+        known_closed = self._closed_refs_known()
+        confirmed = self._confirmed_refs_known()
+        newest = lambda r: (-int(r), r) if str(r).isdigit() else (0, r)         # noqa: E731
+        outside = sorted((({b for b, _ in edges} - set(corpus)) - set(known_closed)) - set(confirmed), key=newest)
+        inside = sorted(blocker_refs & set(corpus), key=newest)
+        open_outside = [r for r in outside if mp["states"].get(r) != "closed"]
+        reads = open_outside + inside
+        live = {}
+        for ref in reads[:self._BLOCKER_READ_CAP]:
+            try:
+                data = self._read_issue(ref, ["number", "state", "labels", "isPullRequest"])
+            except Exception as exc:
+                cross_repo.append("#%s could not be read (%s)" % (ref, exc))
+                continue
+            if self._blocker_not_open(data):
+                newly_closed.append(ref)
+                continue
+            live[ref] = {"number": int(ref), "labels": data.get("labels") or []}
+            if self.proposed_label in self._label_names(data.get("labels")):
+                proposed[ref] = data
+            elif ref not in corpus:
+                ext[ref] = live[ref]
+        for ref in open_outside[self._BLOCKER_READ_CAP:]:
+            out["unread"] = out.get("unread", 0) + 1
+            cross_repo.append("#%s not read (more than %d outside blockers this pass)" % (ref, self._BLOCKER_READ_CAP))
+        if apply:
+            self._remember_closed_refs(known_closed, newly_closed + [r for r in outside if mp["states"].get(r) == "closed"])
+        for ref in corpus:
+            if ref in live:
+                corpus[ref] = live[ref]
+        skipped_outside = set(open_outside[self._BLOCKER_READ_CAP:]) | set(newly_closed) | \
+            {r for r in outside if mp["states"].get(r) == "closed"} | set(proposed)
+        edges = [(b, d) for b, d in edges
+                 if (b in corpus and b not in proposed and b not in newly_closed)
+                 or (b in ext and b not in skipped_outside)]
+        ranks = {}
+        for r in {x for e in edges for x in e}:
+            labels = live[r]["labels"] if r in live else None
+            name = self._priority_name(labels) if labels is not None else mp["prio"].get(r, mp["corpus"].get(r))
+            ranks[r] = discovery.priority_rank(name, self.priority_aliases)
+
+        def item_of(ref):
+            if ref in live:
+                return live[ref]
+            data = self._read_issue(ref, ["number", "labels"])
+            live[ref] = {"number": int(ref), "labels": data.get("labels") or []}
+            return live[ref]
+        return corpus, cross_repo, blocker_refs, ext, proposed, known_closed, confirmed, item_of, ranks, edges
 
     _CONFIRMED_CACHE = "blocker-confirmed.json"
     _CONFIRMED_TTL = 600        # #1706 (PROVISIONAL): seconds a read-and-fine outside blocker is not read again

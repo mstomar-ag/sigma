@@ -232,21 +232,41 @@ def blocker_required_ranks(edges, ranks):
 
     resolved, in_progress, stack, cycles = {}, set(), [], set()
 
-    def resolve(ref):
-        if ref in resolved:
-            return resolved[ref]
-        if ref in in_progress:
-            cycles.update(stack[stack.index(ref):])
-            return rank_of(ref)
-        in_progress.add(ref)
-        stack.append(ref)
-        best = rank_of(ref)
-        for dep in blocks.get(ref, ()):
-            best = min(best, resolve(dep))
-        stack.pop()
-        in_progress.discard(ref)
-        resolved[ref] = best
-        return best
+    def resolve(root):
+        # Iterative (an explicit stack): a long chain must not hit the interpreter recursion limit.
+        # Same visiting order and the same cycle / partial-answer behaviour as the recursive walk.
+        if root in resolved:
+            return resolved[root]
+        in_progress.add(root)
+        stack.append(root)
+        frames = [[root, iter(blocks.get(root, ())), rank_of(root)]]
+        result = None
+        while frames:
+            frame = frames[-1]
+            if result is not None:
+                frame[2] = min(frame[2], result)
+                result = None
+            descended = False
+            for dep in frame[1]:
+                if dep in resolved:
+                    frame[2] = min(frame[2], resolved[dep])
+                elif dep in in_progress:
+                    cycles.update(stack[stack.index(dep):])
+                    frame[2] = min(frame[2], rank_of(dep))
+                else:
+                    in_progress.add(dep)
+                    stack.append(dep)
+                    frames.append([dep, iter(blocks.get(dep, ())), rank_of(dep)])
+                    descended = True
+                    break
+            if descended:
+                continue
+            ref, _it, best = frames.pop()
+            stack.pop()
+            in_progress.discard(ref)
+            resolved[ref] = best
+            result = best
+        return resolved[root]
 
     for ref in list(blocks):
         resolve(ref)
