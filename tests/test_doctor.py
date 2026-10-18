@@ -3094,6 +3094,7 @@ def _hyg(d, project_md=None, north_star=None):
     base = pathlib.Path(d) / ".sdlc"
     (base / "context").mkdir(parents=True)
     (base / "config.json").write_text('{"gates": {"phase_record": {"enabled": true}}}')  # #1343: keep the row green
+    (pathlib.Path(d) / "AGENTS.md").write_text("do not walk the blockers one by one\n")  # #1593: keep the chain-block row green
     if project_md is not None:
         (base / "project.md").write_text(project_md)
     if north_star is not None:

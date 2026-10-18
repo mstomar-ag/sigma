@@ -185,3 +185,9 @@ A status block is constructed, never hand-written: pass facts to
 `skills/sigma-loop/scripts/render.py status|event|decision` and relay its stdout verbatim —
 `python3 skills/sigma-log/scripts/log.py slots .sdlc` is the live Block A, and `phase_report.py end`
 prints Block B at every phase boundary. A refusal (stderr, exit 2, empty stdout) means fix the facts.
+
+## Solving a whole dependency chain
+
+When a goal is blocked by other open goals, do not walk the blockers one by one. Run the chain:
+use the sigma-chain skill, or `chain.py plan`, `sheet`, `answer`, `approve`, `arm`, `run` from
+the sigma-loop scripts. It plans the whole chain, asks every decision together, and then solves it.

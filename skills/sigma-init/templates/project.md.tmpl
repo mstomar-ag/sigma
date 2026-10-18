@@ -36,3 +36,9 @@ where `python3` is absent). Note it here only for humans. -->
 
 ## North-star pointers
 <!-- docs that define direction (architecture, roadmap) the work must respect -->
+
+## Solving a whole dependency chain
+
+When a goal is blocked by other open goals, do not walk the blockers one by one. Run the chain:
+use the sigma-chain skill, or `chain.py plan`, `sheet`, `answer`, `approve`, `arm`, `run` from
+the sigma-loop scripts. It plans the whole chain, asks every decision together, and then solves it.

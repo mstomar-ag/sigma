@@ -64,3 +64,42 @@ def test_agent_block_is_verbatim():
     assert "sigma-chain" in body and "chain.py" in body
     assert "one by one" in body
     assert body.startswith("## Solving a whole dependency chain\n")
+
+
+def _block():
+    text = DOC.read_text(encoding="utf-8")
+    after = text.split(f"## {HEADING}", 1)[1]
+    return re.search(r"```\n(.*?)```", after, re.S).group(1)
+
+
+def _carries(copy, block):
+    """True when `copy` holds `block` byte for byte (#1593)."""
+    return block in copy
+
+
+def _init_module():
+    import importlib.util
+    path = ROOT / "skills" / "sigma-init" / "scripts" / "sdlc_init.py"
+    spec = importlib.util.spec_from_file_location("sdlc_init_1593", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_block_pinned(tmp_path):
+    block = _block()
+    assert block.startswith("## Solving a whole dependency chain\n")
+    init = _init_module()
+    assert _carries((ROOT / "AGENTS.md").read_text(encoding="utf-8"), block), "AGENTS.md"
+    assert _carries((ROOT / "skills/sigma-init/templates/project.md.tmpl").read_text(encoding="utf-8"), block)
+    assert _carries(init._CURSOR_RULE, block), "sdlc.mdc"
+    # the scaffolded copy, not just the template
+    init.scaffold(tmp_path)
+    assert _carries((tmp_path / ".sdlc" / "project.md").read_text(encoding="utf-8"), block)
+
+
+def test_comparison_fails_on_one_char_change():
+    block = _block()
+    copy = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    i = copy.index(block) + 10
+    assert not _carries(copy[:i] + ("X" if copy[i] != "X" else "Y") + copy[i + 1:], block)

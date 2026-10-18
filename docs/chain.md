@@ -6,7 +6,7 @@ is a thin script over its verbs. Nothing here is model-driven: each verb is a pl
 
 ## Solving a whole dependency chain
 
-Paste this block into the file your agents read (`AGENTS.md`, `CLAUDE.md`, or equivalent). It is the single source; a test pins it.
+Paste this block into the file your agents read (`AGENTS.md`, `CLAUDE.md`, or equivalent). It is the single source; a test pins it. `/sigma-init` writes it into the new `project.md` and Cursor rule (never into an existing file), and `/sigma-doctor` reports whether an agent file carries it.
 
 ```
 ## Solving a whole dependency chain
