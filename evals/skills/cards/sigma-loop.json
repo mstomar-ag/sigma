@@ -126,11 +126,31 @@
       "role": "library"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag_history.py",
+      "role": "library"
+    },
+    {
       "path": "skills/sigma-loop/scripts/dag_insert.py",
       "role": "library"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag_order.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_pick.py",
+      "role": "library"
+    },
+    {
       "path": "skills/sigma-loop/scripts/dag_refresh.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_render.py",
+      "role": "library"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_repair.py",
       "role": "library"
     },
     {
