@@ -77,7 +77,7 @@ def _rec(t, ev, **kw):
 
 
 def _remote_dag(origin):
-    return _git(origin, "show", "sdlc-ledger:DAG.md")
+    return _git(origin, "show", "sdlc-ledger:DAG.md")  # the ledger branch
 
 
 def test_two_clones_later_observation_wins_in_published_dag_md(tmp_path, origin):
@@ -109,7 +109,7 @@ def test_rebase_conflict_on_dag_md_is_regenerated_from_merged_files(tmp_path, or
     assert "nothing" not in out, out
     text = _remote_dag(origin)
     assert "#1 holds 1" in text and "#5 holds 1" in text
-    names = _git(origin, "ls-tree", "-r", "--name-only", "sdlc-ledger").splitlines()
+    names = _git(origin, "ls-tree", "-r", "--name-only", "sdlc-ledger").splitlines()  # the ledger branch
     assert len([n for n in names if n.startswith("dag/")]) == 2
 
 
