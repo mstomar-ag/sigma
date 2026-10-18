@@ -56,9 +56,11 @@ change in membership is bounded by `chain.max_added` (below).
 The cap is checked before each claim, so it can be overshot by the cost of the goals in flight. With no cap
 configured nothing reads the spend ledger; with one set, an unreadable ledger fails closed.
 
-Not available yet: a `status` verb, `--parallel`, and a `--cap-usd` flag (set `chain.max_usd`).
-`resume --cap N` caps the number of goals, not dollars. Not measured: a run against a live repository, and
-two drivers on one chain (the record has no lock; run one).
+`chain.py status` reads the local records and prints each chain's state and the age of its last progress; it
+makes no GitHub call. `run --no-grow` is a flag. Run width is not a flag: it comes from the `parallel` key
+under `chain` in the project config, off by default (see [parallelism](parallelism.md)). Not available yet: a
+`--cap-usd` flag (set `chain.max_usd`). `resume --cap N` caps the number of goals, not dollars. Not measured:
+a run against a live repository, and two drivers on one chain (the record has no lock; run one).
 
 ## Configuration
 
@@ -73,3 +75,36 @@ Keys under `chain` in the project config.
 | `chain.max_usd` | unset | Dollar cap on spend attributed to members since approval. |
 | `chain.max_minutes` | unset | Minutes cap measured from the approval stamp. |
 | `chain.auto_longest` | reserved | Documented only: nothing reads it yet. |
+
+## The scratch scenario gesture
+
+The offline scenario test drives the engine only through these argv, in this order (`run` is called again
+until it reports done, and `status` closes it). The test compares what it ran with this block.
+
+```
+chain.py plan <sdlc_dir> 1
+chain.py sheet <sdlc_dir> 1
+chain.py answer <sdlc_dir> 1 --defaults
+chain.py answer <sdlc_dir> 1 --answers <file>
+chain.py approve <sdlc_dir> 1
+chain.py arm <sdlc_dir> 1
+chain.py run <sdlc_dir> 1
+chain.py status <sdlc_dir> 1
+```
+
+## Measured on the scratch scenario
+
+The scenario is a chain of four behind end goal 1 (waits on 2, 2 on 3, 3 on 4): goal 4 parked, goal 2
+unarmed, goal 3 in another unit, a fifth goal filed mid-run, and an armed goal outside the chain. It runs on a
+stateful fake of the host, with no network.
+
+- GitHub calls for `plan`: 7 (counted from the fake's call log).
+- Time to the sheet: measured as wall time on the fake, which is not meaningful against a live host.
+  It is not measured live.
+- Estimate versus actual spend: not measured (the scratch ledger holds no priced goals).
+- Not measured: a run on a live repository or a private clone.
+
+Each of four guards was broken alone and seen to fail the scenario: the pick without the label scope (an outside
+armed goal is claimed), the done clause without its open-member checks (an empty pick reads as done), the cap with
+an unreadable spend ledger read as empty (the run goes on), and the approval gate removed (a write before
+approval).
