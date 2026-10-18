@@ -736,7 +736,7 @@ def test_ensure_gitattributes_is_additive_and_idempotent(tmp_path):
     assert "entries/*.jsonl merge=union" in repaired
     assert "events/*.jsonl merge=union" not in repaired
 
-    stale = "entries/*.jsonl merge=union\nevents/*.jsonl merge=union\n"
+    stale = "entries/*.jsonl merge=union\nevents/*.jsonl merge=union\ndag/**/*.jsonl merge=union\n"   # + the #1623 line
     (d / ".gitattributes").write_text(stale)                   # a pre-#2574 clone
     assert sync._ensure_gitattributes(d) is False              # nothing to add...
     assert (d / ".gitattributes").read_text() == stale         # ...and nothing removed either
