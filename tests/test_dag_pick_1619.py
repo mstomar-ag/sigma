@@ -285,10 +285,10 @@ def _stats_dir(tmp_path, picks=200, days=8, unknown=0, disagree=3):
     d.mkdir(parents=True)
     recs = []
     for i in range(picks):
-        recs.append({"t": int(NOW), "g": A, "c": "agree-free", "k": [], "o": [], "m": []})
+        recs.append({"t": int(NOW) - 60 * i, "g": A, "c": "agree-free", "k": [], "o": [], "m": []})
     for i in range(disagree):
         cause = "unknown" if i < unknown else "pr"
-        recs[i] = {"t": int(NOW), "g": A, "c": "map-only", "k": [cause], "o": [], "m": [60]}
+        recs[i] = {"t": int(NOW) - 60 * i, "g": A, "c": "map-only", "k": [cause], "o": [], "m": [60]}
     half = picks // 2                                               # spread over both files
     (d / (dp.LOG + ".1")).write_text("".join(json.dumps(r) + "\n" for r in recs[:half]))
     (d / dp.LOG).write_text("".join(json.dumps(r) + "\n" for r in recs[half:]))
