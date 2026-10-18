@@ -4,8 +4,9 @@
 
 * `corpus`: {ref: prio name or None} for every open map node that is in the corpus and whose life is a goal
   one (`goal`, `blocked`, `blocking`, `in-progress`); the map keeps a derived life, not the label set, so
-  this is the nearest membership it can state (PROVISIONAL, owner to ratify: a parked or unrouted issue is
-  not in it).
+  this is the nearest membership it can state (PROVISIONAL, owner to ratify, #1859: a parked or unrouted
+  issue is not in it, even when it carries the goal label, because the label model says parked stands alone;
+  a parked issue is also never a blocker the repair raises or strips: `parked` lists those refs).
 * `edges`: [(blocker ref, blocked ref)] in sorted order, strings, taken from the edges written in an issue
   body and nothing else. Today's extractor reads the title and body only, so a `timeline`, `comment` or
   `other` edge is not an input (an `other` edge is a hand-off; the caller still reads the ledger itself,
@@ -14,6 +15,7 @@
   `closed` (never written to), as `GitHubSource._blocker_not_open` does today.
 * `prio`: {ref: prio name or None} for every ref an edge names.
 * `blocker_refs`: every ref that blocks something.
+* `parked`: every ref an edge names whose map life is `parked`.
 
 `None` for every unusable clause: the mode is not written exactly `on` (the pick hold's gate), the map is
 missing, unreadable, partial, stale or has no change check inside `dag_store.CHANGE_CHECK_SECONDS`
@@ -71,6 +73,7 @@ def repair_input(sdlc, config, cache=None, now=None):
             else:
                 states[ref] = "open"
         return {"corpus": corpus, "edges": edges, "states": states, "prio": prio,
-                "blocker_refs": {b for b, _ in edges}}
+                "blocker_refs": {b for b, _ in edges},
+                "parked": {r for r in prio if (nodes.get(int(r)) or {}).get("life") == "parked"}}
     except Exception:                           # noqa: BLE001 - the old path is always safe
         return None
