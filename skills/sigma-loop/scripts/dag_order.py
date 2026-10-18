@@ -45,11 +45,28 @@ class ChainRanks:
     """Lazy `number -> (-dependents, -depth)`; unknown goals are `(0, 0)`."""
 
     def __init__(self, graph):
-        edges = [(e[0], e[1], e[2]) for e in graph.edges if e[2] != "comment"]
-        nodes = list(graph.nodes.values())
+        self._edges = [(e[0], e[1], e[2]) for e in graph.edges if e[2] != "comment"]
+        self._nodes = list(graph.nodes.values())
+        self._build()
+
+    def _build(self):
+        edges, nodes = self._edges, self._nodes
         self._fwd = dag_core.build(nodes, edges)
         # Reversed edges: the "blockers below" of the reversed graph are the dependents above.
         self._rev = dag_core.build(nodes, [(b, a, s) for (a, b, s) in edges])
+        self._memo = {}
+
+    def mark_in_flight(self, number):
+        """#1621: a goal a batch just claimed no longer waits anyone out in this view: drop the edges whose
+        blocker it is and forget the memo, so later slots rank on what is still unclaimed."""
+        try:
+            n = int(number)
+        except (TypeError, ValueError):
+            return
+        kept = [e for e in self._edges if e[0] != n]
+        if len(kept) != len(self._edges):
+            self._edges = kept
+            self._build()
         self._memo = {}
 
     def get(self, number):
