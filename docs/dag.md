@@ -216,7 +216,7 @@ whole-sweep call count falls only by the unpark pass.
 
 ## The snapshot on the ledger branch
 
-With `ledger.enabled` true and the mode not `off`, each save of the stored map also writes `dag/map.json` in the ledger worktree: the same fields as `.sdlc/state/dag.json` plus a host token, whole file, last writer wins. `sync.py publish` pushes it, and `DAG.md` is built from it (with `Built by` and `Snapshot age` lines) instead of from history alone. A missing, damaged or older local map loads the newer snapshot; with the ledger off nothing is written or read there. Measured only by offline fake and real-git tests.
+With `ledger.enabled` true and the mode not `off`, each save of the stored map also writes `dag/map.json` in the ledger worktree: the same fields as `.sdlc/state/dag.json` plus a host token, whole file, last writer wins. `sync.py publish` pushes it, and `DAG.md` is built from it (with `Built by` and `Snapshot age` lines) instead of from history alone. A missing, damaged or older local map loads the newer snapshot; with the ledger off nothing is written or read there. Measured only by offline fake and real-git tests. Each history record carries `u` (the source issue's `updated_at`) and an `id`, a short hash of the event, its numbers and `u`; `dag.py history --all` and the other ledger readers apply each id once, and the snapshot records `history_through`, the newest id it includes, so a reader applies only later entries. An older record without an id gets the same one computed on read.
 
 ### One refresher per repository
 
