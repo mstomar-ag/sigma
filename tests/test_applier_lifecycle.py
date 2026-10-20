@@ -359,7 +359,7 @@ def test_current_evidence_leaves_output_and_heartbeat_shape_unchanged(tmp_path, 
     sd, cfg, _ = _setup(tmp_path)
     assert _held_main(sd, cfg, monkeypatch, behind="") == 0
     assert capsys.readouterr().out == ""
-    hb = json.load(open(os.path.join(sd, "autonomy", "applier-heartbeat.json")))
+    hb = json.load(open(os.path.join(sd, "state", "autonomy", "applier-heartbeat.json")))
     assert list(hb) == ["time"] and AP.read_hold(sd) == ""
 
 
@@ -371,3 +371,47 @@ def test_the_hold_clears_after_a_later_normal_tick(tmp_path, monkeypatch):
     monkeypatch.setattr(AP, "_evidence_behind", lambda *a: "")
     AP.tick(sd, cfg, T0 + MIN, source=Src())
     assert AP.read_hold(sd) == ""
+
+
+# --- #1938: the heartbeat and the sync cursor are runtime state under .sdlc/state/autonomy/ -----------------
+
+def _git(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
+
+
+def test_a_real_tick_leaves_no_heartbeat_or_cursor_in_git_status(tmp_path):
+    _git(tmp_path, "init", "-q")
+    (tmp_path / ".gitignore").write_text(".sdlc/state/\n")
+    sd, cfg, _ = _setup(tmp_path)
+    AP.tick(sd, cfg, T0, source=Src())
+    AP._cursor_write(sd, "k1")
+    status = _git(tmp_path, "status", "--porcelain", "--untracked-files=all")
+    assert "applier-heartbeat" not in status and "sync-cursor" not in status
+    assert os.path.exists(os.path.join(sd, "state", "autonomy", "applier-heartbeat.json"))
+    assert os.path.exists(os.path.join(sd, "state", "autonomy", "sync-cursor.json"))
+    assert not os.path.exists(os.path.join(sd, "autonomy", "applier-heartbeat.json"))
+
+
+def test_read_heartbeat_ignores_a_file_at_the_old_path(tmp_path):
+    sd = _sd(tmp_path)
+    os.makedirs(sd + "/autonomy")
+    with open(sd + "/autonomy/applier-heartbeat.json", "w") as fh:
+        fh.write(json.dumps({"time": T0.isoformat(), "held": "old"}))
+    assert AP.read_heartbeat(sd) is None and AP.read_hold(sd) == ""
+    os.makedirs(sd + "/state/autonomy")
+    with open(sd + "/state/autonomy/applier-heartbeat.json", "w") as fh:
+        fh.write(json.dumps({"time": T0.isoformat()}))
+    assert AP.read_heartbeat(sd) == T0
+
+
+def test_cursor_falls_back_to_the_old_path_once_and_writes_to_the_new(tmp_path):
+    sd = _sd(tmp_path)
+    os.makedirs(sd + "/autonomy")
+    with open(sd + "/autonomy/sync-cursor.json", "w") as fh:
+        fh.write(json.dumps({"after": "old-key"}))
+    assert AP._cursor_read(sd) == "old-key"
+    AP._cursor_write(sd, "new-key")
+    assert os.path.exists(sd + "/state/autonomy/sync-cursor.json")
+    assert AP._cursor_read(sd) == "new-key"
+    os.unlink(sd + "/state/autonomy/sync-cursor.json")
+    assert AP._cursor_read(sd) == "old-key"      # the old file is only read, never rewritten
