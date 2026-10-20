@@ -2027,10 +2027,13 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None, auth_runner=None):
         budget, ceiling = settings.get("conflicts.agent.max_budget_usd_per_unit"), settings.get("conflicts.agent.spend_ceiling_usd_per_day")
         finite = budget is not None and ceiling is not None
         why_off = rebase.level2_off_reason(cfg, which)
-        on_placeholder = why_off is None and launcher.CATALOG.get(settings["conflicts.agent.model"], placeholder) == placeholder
-        rows.append(_chk("resolver configured: " + ("model %s resolves to the placeholder id, so every launch is refused" % settings["conflicts.agent.model"]
+        shown_model = settings["conflicts.agent.model"]
+        if why_off is None and shown_model in launcher.CATALOG:              # #1953: the model after the repo ceiling cap, as the launch uses it
+            shown_model = rebase._capped_tier(shown_model, rebase._model_ceiling(cfg))
+        on_placeholder = why_off is None and launcher.CATALOG.get(shown_model, placeholder) == placeholder
+        rows.append(_chk("resolver configured: " + ("model %s resolves to the placeholder id, so every launch is refused" % shown_model
                                                     if on_placeholder else
-                                                    "%smodel %s, %s" % (_host_login_phrase(settings, auth_row), settings["conflicts.agent.model"], (
+                                                    "%smodel %s, %s" % (_host_login_phrase(settings, auth_row), shown_model, (
                                                         "no spend limit" if not (budget is not None or ceiling is not None) else
                                                         "%s, %s" % ("up to $%g per unit" % budget if budget is not None else "no per-unit limit",
                                                                     "$%g per day" % ceiling if ceiling is not None else "no daily limit")))

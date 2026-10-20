@@ -294,3 +294,24 @@ def test_the_doctor_host_probe_runs_inside_the_wall_and_its_fix_names_the_comman
     auth = [c for c in rows if c["name"].startswith("resolver auth")][0]
     assert seen and seen[0][0] == "/usr/bin/sandbox-exec" and "Library/Keychains" in seen[0][2]
     assert "claude setup-token" in json.dumps(auth)
+
+# --------------------------------------------------------------------------- #1953: the doctor shows the capped model; the account type is allowlisted
+
+def test_the_configured_row_names_the_model_after_the_repo_ceiling_cap(tmp_path):
+    d, cfg = R.doctor(), R.config()
+    cfg["upkeep"]["conflicts"]["agent"]["model"] = "opus"
+    cfg["model_selection_max_tier"] = "sonnet"
+    rows = d._resolver_rows(R.project(tmp_path, cfg), cfg, lambda n: "/bin/" + n, True, None, None)
+    configured = [c for c in rows if c["name"].startswith("resolver configured")][0]
+    assert "model sonnet" in configured["name"] and "model opus" not in configured["name"]
+
+
+def test_the_account_type_reads_unknown_for_a_value_off_the_allowlist(tmp_path):
+    L_ = S.launcher() if hasattr(S, "launcher") else None
+    launcher = L_ or R.doctor()._load_loop_script("feature_upkeep_launcher")
+    stub = tmp_path / "claude"
+    stub.write_text('#!%s\nimport json\nprint(json.dumps({"loggedIn": True, "subscriptionType": "someone-else-42"}))\n' % sys.executable)
+    stub.chmod(0o755)
+    assert launcher.auth_info(dict(os.environ), str(stub), str(tmp_path)) == (True, None)
+    stub.write_text('#!%s\nimport json\nprint(json.dumps({"loggedIn": True, "subscriptionType": "Max"}))\n' % sys.executable)
+    assert launcher.auth_info(dict(os.environ), str(stub), str(tmp_path)) == (True, "max")
