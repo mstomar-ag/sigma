@@ -212,6 +212,13 @@ class World:
 
         return sync.amend(str(self.sdlc), unit, mutate)
 
+    def legacy_pick(self, goal, unit="voice"):
+        """What a pick wrote into the ROOT checkout before #1941 (shard, then page). `work.start` no
+        longer does; a root that still carries such dirt (an upgrade, a hand-run sync) is the state
+        the dirty-root guard exists for, so its tests build that state with this."""
+        self.sigma_shard_write(goal, unit)
+        self.sigma_page_write(unit)
+
     def sigma_page_write(self, unit="voice"):
         """A Sigma page write the way `_sync_doc` makes one: `feature_doc.sync` from the registry."""
         doc = self.mod("feature_doc")

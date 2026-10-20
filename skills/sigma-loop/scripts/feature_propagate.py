@@ -660,7 +660,7 @@ def _report(goal, unit):
             "raise_suppressed": False, "why": "", "note": ""}
 
 
-def propagate_at_pick(sdlc_dir, config, goal, unit, run=None, cwd=None, remote=None):
+def propagate_at_pick(sdlc_dir, config, goal, unit, run=None, cwd=None, remote=None, features_dir=None):
     """THE PICK-PATH COPY. Put the whole entry in every sibling repo `repos` names.
 
     NEVER RAISES. A registry is a record; losing one is bad, and losing the GOAL because the record
@@ -686,7 +686,7 @@ def propagate_at_pick(sdlc_dir, config, goal, unit, run=None, cwd=None, remote=N
     issue read), inherited on purpose rather than answered with a second runner."""
     report = _report(goal, unit)
     try:
-        return _propagate_at_pick(sdlc_dir, config, goal, unit, run, cwd, remote, report)
+        return _propagate_at_pick(sdlc_dir, config, goal, unit, run, cwd, remote, report, features_dir)
     except Exception as exc:              # noqa: BLE001 - "never raises" has to be total
         report["outcome"] = FAILED
         report["why"] = _flat(exc)
@@ -695,8 +695,11 @@ def propagate_at_pick(sdlc_dir, config, goal, unit, run=None, cwd=None, remote=N
         return report
 
 
-def _propagate_at_pick(sdlc_dir, config, goal, unit, run, cwd, remote, report):
-    features_dir = registry.registry_dir(sdlc_dir)
+def _propagate_at_pick(sdlc_dir, config, goal, unit, run, cwd, remote, report, features_dir=None):
+    # #1941: `features_dir` names WHERE THE REGISTRY IS READ (the goal's worktree, which holds the
+    # entry the pick just wrote); every other thing here -- grants, the stored report, the ledger --
+    # stays under `sdlc_dir`, the root's runtime state, which a worktree does not carry.
+    features_dir = registry.registry_dir(sdlc_dir) if features_dir is None else pathlib.Path(features_dir)
     if not features_dir.is_dir():
         # THE CHEAPEST STEP IS THE OPT-OUT, exactly as `feature_sync._sync_at_pick` and
         # `cross_repo._check_at_pick` order their own: a project that never adopted the branching
