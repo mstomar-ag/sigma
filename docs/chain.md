@@ -309,6 +309,12 @@ stateful fake of the host, with no network.
 - GitHub calls for `plan`: 9 (counted from the fake's call log; it was 7 before the reader for waits written in prose
   or a comment, which adds the issue read and the comment page of the one member that has a comment; the
   closed-prerequisite check adds none here because the scenario has no closed prerequisite).
+- GitHub calls for a second plan on the on-disk read cache (#1936; `skills/sigma-loop/scripts/chain_read_cache.py`,
+  file `.sdlc/state/chain-reads.json`, keyed by issue number and exact `updated_at`, at most 900 seconds old, 400
+  entries, 8 MiB): before, 9 for the first plan and 9 for a second overlapping plan; after, 9 for the first and
+  second overlapping plan: 7 (counted from the fake's call log with the fake serving `updated_at`; the member with a
+  comment is not read again). A fake that serves no `updated_at` gets no hit, so its second plan is 9. The saving on
+  a live repository is not measured.
 - Time to the sheet: measured as wall time on the fake, which is not meaningful against a live host.
   It is not measured live.
 - Estimate versus actual spend: not measured (the scratch ledger holds no priced goals).

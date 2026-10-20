@@ -277,30 +277,37 @@ def _assignees(issue):
     return {str(n).lower() for n in names if n}
 
 
-def _read(ro, repo, number, issue, cache=None):
+def _read(ro, repo, number, issue, cache=None, disk=None, stamp=None):
     """-> (issue with its body and assignees, newest-first comment dicts, maybe_older). A known-empty issue costs
     no request; otherwise the issue and the pages of its newest COMMENT_LIMIT comments (at most 3 requests).
-    `cache` (number -> that answer) makes a repeat read free: the live closure collects once per round."""
+    `cache` (number -> that answer) makes a repeat read free: the live closure collects once per round.
+    `disk` (#1936: `(chain_read_cache, store, now)` or None) answers from the on-disk cache when the issue's current
+    `stamp` (its `updated_at`) equals the cached one; None leaves the read exactly as it was."""
     if cache is not None and number in cache:
         return cache[number]
     if issue is not None and isinstance(issue.get("comments"), int) and issue["comments"] == 0:
         got = issue, [], False
     else:
-        gh_api = _load("gh_api")
-        full = gh_api.view_issue(ro, number, repo or None, comments=COMMENT_LIMIT)
-        comments = [c for c in (full.get("comments") or []) if isinstance(c, dict)]
-        got = full, list(reversed(comments)), len(comments) >= COMMENT_LIMIT
+        got = disk[0].get(disk[1], number, stamp) if disk is not None else None
+        if got is None:
+            gh_api = _load("gh_api")
+            full = gh_api.view_issue(ro, number, repo or None, comments=COMMENT_LIMIT)
+            comments = [c for c in (full.get("comments") or []) if isinstance(c, dict)]
+            got = full, list(reversed(comments)), len(comments) >= COMMENT_LIMIT
+            if disk is not None:
+                disk[0].put(disk[1], number, stamp, got, disk[2])
     if cache is not None:
         cache[number] = got
     return got
 
 
-def collect(ro, repo, numbers, issues=None, have=None, state_of=None, cache=None):
+def collect(ro, repo, numbers, issues=None, have=None, state_of=None, cache=None, disk=None, stamps=None):
     """Read the bodies and newest comments of `numbers` (at most MAX_READS) and report what they wait on that no
     edge says. `issues` maps number -> the issue already read (skips a request for a known-empty one);
     `have` maps number -> blockers already known as edges (a ledger edge the body does not carry);
-    `state_of(ref)` -> "open" | "closed" | "unknown". -> {"unconfirmed", "weak", "read"}."""
-    issues, have = issues or {}, have or {}
+    `state_of(ref)` -> "open" | "closed" | "unknown". `disk` and `stamps` (number -> `updated_at`, else the issue's
+    own) are the optional on-disk cache of #1936. -> {"unconfirmed", "weak", "read"}."""
+    issues, have, stamps = issues or {}, have or {}, stamps or {}
     state_of = state_of or (lambda ref: "unknown")
     backlog_check = _load("backlog_check")
     members = {int(n) for n in numbers}
@@ -309,7 +316,8 @@ def collect(ro, repo, numbers, issues=None, have=None, state_of=None, cache=None
     skipped = todo[MAX_READS:]
     for n in todo[:MAX_READS]:
         try:
-            issue, comments, maybe_older = _read(ro, repo, n, issues.get(n), cache)
+            stamp = stamps.get(n) or (issues.get(n) or {}).get("updated_at")
+            issue, comments, maybe_older = _read(ro, repo, n, issues.get(n), cache, disk, stamp)
         except Exception:                      # noqa: BLE001 - say so rather than guess
             not_read.append(n)
             continue
@@ -352,9 +360,9 @@ def collect(ro, repo, numbers, issues=None, have=None, state_of=None, cache=None
                      "maybe_older_comments": older, "untrusted_ignored": ignored, "dropped": dropped}}
 
 
-def attach(out, ro, repo, numbers, issues=None, have=None, state_of=None, cache=None):
+def attach(out, ro, repo, numbers, issues=None, have=None, state_of=None, cache=None, disk=None, stamps=None):
     """Put the findings on the plan dict `out` and make the plan INCOMPLETE when anything was not read or cut."""
-    res = collect(ro, repo, numbers, issues, have, state_of, cache)
+    res = collect(ro, repo, numbers, issues, have, state_of, cache, disk, stamps)
     out["unconfirmed_waits"], out["weak_waits"], out["waits_read"] = res["unconfirmed"], res["weak"], res["read"]
     r = res["read"]
     out["complete"] = bool(out.get("complete")) and not r["not_read"] and not r["dropped"]
