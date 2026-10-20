@@ -44,6 +44,16 @@ skipping corrupt lines, each change once by `id` (#1958; `after` is the newest i
 `read_month(sdlc, month)` opens only `<month>.jsonl`, `month` a strict `YYYY-MM`; anything else raises
 `ValueError`. `size_bytes` and `health` use `stat`, never a read.
 
+Snapshot cut (#1967): a map save names `history_through` as `marks(root)`, the size of every writer file by `stat` only,
+not a read of the history (it used to read and fold every record to name the newest id, inside the map lock). A reader
+applies `read_all(root, after=marks)`: the bytes past each mark and every file the marks do not name, so a record
+published late with an older stamp is applied, and no writer clock is consulted. MEASURED once on one development
+machine, one record per file, best of 5: 30 files (a busy month, 1x) 0.3 ms, 300 files (10x) 2.5 ms, 3,000 files (100x)
+33 ms, against 0.9, 12 and 117 ms for the read it replaces (a single run, not a benchmark; the old cost also grows with
+the records in each file, the new one does not). Linear in files, one `stat` each; the test bounds 100x at 2 s.
+A change that repeats an earlier local one in event, numbers and `u` carries `k` (see `_disambiguate`), so add, remove,
+add under one unmoved `updated_at` keeps all three.
+
 Growth: about 100 bytes a record. 50 changes a day for a year is 50 * 365 * 100 = 1.8 MB in total over 12
 monthly files, about 150 KB a month, far below `WARN_BYTES` (1 MB); a burst month is the case the warning
 exists for. At 10x and 100x the changes the year holds are 18 MB and 180 MB in total, still 1.5 MB and
@@ -78,7 +88,7 @@ EVENTS = ("edge-added", "edge-removed", "node-resolved", "node-deleted", "chain-
 RESOLVED = ("closed", "merged", "closed-unmerged")
 _MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 _ID = re.compile(r"^[0-9a-f]{12}$")
-_ID_FIELDS = ("ev", "a", "b", "n", "chain", "to", "u")
+_ID_FIELDS = ("ev", "a", "b", "n", "chain", "to", "u", "k")
 
 
 def change_id(rec):
@@ -301,12 +311,50 @@ def append(sdlc, config, records):
         print("dag history: not recorded (%s)" % type(exc).__name__, file=sys.stderr)
 
 
+def _base_id(rec):
+    return change_id({k: v for k, v in rec.items() if k not in ("k", "id")})
+
+
+def _disambiguate(sdlc, recs):
+    """#1967: a change that repeats an earlier change of THIS writer's local history in event, numbers and `u` (a
+    dependency edit that did not move the issue's `updated_at`: add, remove, add) gets `k`, the number of earlier
+    records with that same base identity, folded into its id, so `fold` keeps all of them. Two writers with the same
+    local history agree on `k`; one that missed the first add reads k = 0 and folds into it (documented, never
+    loses a change it saw). Reads the local history only when a diff is non-empty."""
+    want = {_base_id(r) for r in recs}
+    seen = {}
+    d = _dir(sdlc)
+    for p in sorted(d.glob("*.jsonl")) if d.is_dir() else []:
+        try:
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(r, dict):
+                b = _base_id(r)
+                if b in want:
+                    seen[b] = seen.get(b, 0) + 1
+    out = []
+    for r in recs:
+        n = seen.get(_base_id(r), 0)
+        if n:
+            r = dict(r, k=n)
+            r["id"] = change_id(r)
+        out.append(r)
+    return out
+
+
 def record_save(sdlc, config, old_map, new_map, now):
     """`diff` + `append`, called by `dag_store.save` after a successful write (mode already not off)."""
     recs = diff(old_map, new_map, iso(now))
     if not recs:
         return
     try:
+        recs = _disambiguate(sdlc, recs)
         _append(sdlc, recs)
         _mirror(sdlc, config, recs)
     except Exception as exc:                            # noqa: BLE001
@@ -368,11 +416,60 @@ def _stream_files(root):
                   for p in sorted(m.glob("*.jsonl")) if p.is_file())
 
 
+_MARK_KEY = re.compile(r"^\d{4}-\d{2}/[A-Za-z0-9._-]+\.jsonl$")
+
+
+def marks(root):
+    """#1967: `{"YYYY-MM/<file>.jsonl": size}` of every writer file under the ledger worktree `root`, by `stat` only
+    (no read, no parse): what a snapshot names as `history_through`. Writer files are append-only, so everything past
+    a mark, and every file a mark does not name, is newer than the snapshot whatever any writer's clock said."""
+    out = {}
+    for p in _stream_files(root):
+        try:
+            out[p.parent.name + "/" + p.name] = p.stat().st_size
+        except OSError:
+            continue
+    return out
+
+
+def valid_marks(value):
+    """`value` when it is a well-formed marks dict (strict keys, non-negative int sizes), else None."""
+    if isinstance(value, dict) and value and all(
+            isinstance(k, str) and _MARK_KEY.match(k) and type(v) is int and v >= 0 for k, v in value.items()):
+        return value
+    return None
+
+
+def _read_after_marks(root, after):
+    out = []
+    for p in _stream_files(root):
+        start = after.get(p.parent.name + "/" + p.name, 0)
+        try:
+            with open(p, "rb") as fh:
+                fh.seek(start)
+                data = fh.read()
+        except OSError:
+            continue
+        for line in data.decode("utf-8", errors="replace").splitlines():
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(r, dict):
+                out.append(r)
+    return fold(out)
+
+
 def read_all(root, after=None):
     """Every record of every writer under the ledger worktree `root` (`dag/YYYY-MM/*.jsonl`), each change
     once (`fold`, #1958: an old record gets its computed `id`), oldest first. With `after`, the newest id a
-    snapshot includes, only the entries later than it. A line that does not parse, or is not an object,
+    snapshot includes, only the entries later than it. `after` may also be the `marks` dict a snapshot names (#1967):
+    then only the bytes past each file's mark and the files it does not name are read, independent of every writer's
+    clock (a record published late with an older `t` is applied); the id form orders by `(t, id)` and is kept for
+    snapshots written before marks. A line that does not parse, or is not an object,
     is skipped; an unreadable file is skipped."""
+    if isinstance(after, dict):
+        return _read_after_marks(root, valid_marks(after) or {})
     out = []
     for p in _stream_files(root):
         try:
