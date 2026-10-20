@@ -5,8 +5,13 @@ All notable changes to Sigma are recorded here, newest first.
 ## Unreleased
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 - **The doctor `resolver configured` row names the model after the repo ceiling cap, and the host-login account type comes from an allowlist (#1953).** The row and its placeholder check used the configured tier even when `model_selection_max_tier` lowers it at launch. An account type off the allowlist now reads as unknown.
 =======
+=======
+- **`label_drain.py plan` no longer trusts a listing that may lag a label write (#1943).** When the label listing is empty, or its newest issue was updated under 60 seconds ago, `plan` pauses `SIGMA_LABEL_LAG_WAIT` seconds (default 3, 0 allowed) and reads the listing once more, merging both reads by issue number; the plan gains a `lag` field and a note line when this applied. Older listings are read once with no wait. MEASURED: offline fake-transport tests only; the real listing delay is not measured.
+
+>>>>>>> fork/feature/rollout-fixes
 - **`/sigma-dag` and `dag.py report` read the dependency map in one report (#1954).** `dag.py report [--goal N] [--md|--json]` prints the stored map's state, the doctor's freshness and shadow lines, stuck chains (most freeing first), active chains, cycles, chains completed this month and where the files live, from local files only (no network, nothing written); with mode off, an unwritten `discovery.dag.mode`, no map or a stale map it prints one line with the exact fix. `--goal N` is the chain behind N; the skill also runs `dag.py html`. MEASURED: the new tests run the report with every subprocess call made to fail and compare the file tree before and after.
 >>>>>>> fork/feature/rollout-fixes
 - **The loop session's model is chosen, shown and checked (#1951).** New config key `loop.session_model`: the supervisor passes it as `--model` when `SIGMA_CLAUDE_CMD` is not set (default `sonnet` under `model_selection: auto`, no flag otherwise; an explicit command is never rewritten; an invalid value exits 2). `/sigma-doctor` gains a `loop session model` row and session start a warning line when the session's observed model is priced above every dispatched tier; a host with no transcript says so. Docs: `docs/running-the-loop.md`. MEASURED: temp-dir tests with fixture transcripts only.
