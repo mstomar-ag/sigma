@@ -4,12 +4,9 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-<<<<<<< HEAD
 - **Recorded decisions no longer commit onto the default branch (#1947).** `decision_store.publish` now returns `reason: default-branch` and the one command instead of committing on the default branch (origin's `HEAD`, else `main`/`master`), so `git pull --ff-only` keeps working; `decision_store.py publish <state-folder> --branch` writes the evidence paths onto the local branch `sigma/records` without moving HEAD, the index or the working tree, and never pushes. The branch choice is provisional for the owner. MEASURED: temp-repo tests with a local bare origin only.
 
-=======
 - **Chain reads three more dependency wordings (#1940).** `chain_waits.py` now reads slice-code chains (`S2a, S2b and S2c must precede S2d`, only when every code has its `(#N)` in the same text) and `S4b on S4a (#N)`, `waiting on #N` and `#N gates #M` in trusted comments, and `the story #N waits on` at a clause end, each as an unconfirmed wait that the sheet asks about, never an edge; a slice code with no issue number and a ruling named in words stay documented limits (`docs/chain.md`).
->>>>>>> 44846842 (feat(chain): read more dependency wordings (#1940))
 - **Chain plans in one session share a short-lived on-disk read cache (#1936).** New `chain_read_cache.py` keeps each member's body and newest comments in `.sdlc/state/chain-reads.json`, keyed by issue number and the issue's exact `updated_at` (from the issue the live closure holds, or the stored map's node); a hit needs equal non-empty stamps and an entry at most 900 seconds old, so an edited or newly commented issue is read again. Bounded at 400 entries and 8 MiB, written atomically, fail-open (a missing, corrupt, wrong-version or unwritable file reads as empty and never fails a plan); `chain.plan` loads and saves it once, and the optional `disk` argument of `chain_waits.collect`/`attach` leaves behaviour unchanged when absent. MEASURED: on the offline scratch scenario a second plan is 7 GitHub calls against 9 (the fake's call log). NOT measured: the saving on a live repository.
 - **`take it over` assigns the runner named by `plan --forecast --as`, not the login that planned (#1935).** The record keeps `runner` (the `--as` login) and `planner` (the planning login, only when different); `arm` assigns the runner and each elsewhere question says who planned for whom. MEASURED: the fake-gh tests only; not run against GitHub.
 
