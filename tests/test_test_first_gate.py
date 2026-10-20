@@ -690,6 +690,7 @@ def test_none_reason_reads_only_the_exact_single_line_form(case):
 def test_docs_only_classifier():
     rg = load('red_green')
     assert rg.docs_only(['README.md', 'docs/x.png', '.sdlc/plans/1.md', 'CHANGELOG.md'])
+    assert not rg.docs_only(['.sdlc/config.json'])
     assert not rg.docs_only(['docs/x.md', 'a.py'])
     assert not rg.docs_only(['docs/../hooks/x.sh'])
     assert not rg.docs_only([])
@@ -698,3 +699,17 @@ def test_docs_only_classifier():
 def test_none_plan_with_an_empty_diff_is_refused(case, monkeypatch):
     w, config, run, calls = none_case(case, monkeypatch, [])
     assert w.pr(case[1], config, '42', run=run).startswith('TEST-FIRST REFUSED')
+
+
+def test_none_plan_does_not_skip_the_verify_evidence_check(case, monkeypatch):
+    w, config, run, calls = none_case(case, monkeypatch, ['docs/a.md'])
+    monkeypatch.setattr(w.state, 'done_refusal', lambda *a: 'production changed since verify')
+    result = w.pr(case[1], config, '42', run=run)
+    assert 'production changed since verify' in result
+    assert not any(a[:2] == ['git', 'push'] for a in calls)
+
+
+def test_rename_out_of_code_is_read_as_a_code_change(case, monkeypatch):
+    w, config, run, calls = none_case(case, monkeypatch, ['docs/x.md'])
+    w.pr(case[1], config, '42', run=run)
+    assert any(a[:4] == ['git', 'diff', '--name-only', '--no-renames'] for a in calls)

@@ -32,7 +32,7 @@ def digest(path):
 
 
 _NONE = re.compile(r'none: (\S.*)')
-_DOC_DIRS = ('docs/', '.sdlc/')
+_DOC_DIRS = ('docs/', '.sdlc/plans/', '.sdlc/research/', '.sdlc/acceptance/')
 _DOC_SUFFIXES = ('.md', '.txt', '.png', '.svg')
 
 

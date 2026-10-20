@@ -4062,7 +4062,7 @@ def _declared_no_tests(sdlc_dir, rec, goal, run, remote, base):
         return None, []
     if not reason:
         return None, []
-    changed = (run(rec["worktree"], ["git", "diff", "--name-only", f"{remote}/{base}...HEAD"]) or "").splitlines()
+    changed = (run(rec["worktree"], ["git", "diff", "--name-only", "--no-renames", f"{remote}/{base}...HEAD"]) or "").splitlines()
     code = [p for p in changed if p.strip() and not rg.docs_only([p])]
     return reason, (code or ([] if rg.docs_only(changed) else ["(no changed files)"]))
 
@@ -4075,7 +4075,7 @@ def _test_first_refusal(sdlc_dir, config, rec, goal, run, no_tests=None, remote=
         return ""
     refused = state.done_refusal(sdlc_dir, goal)
     declared, code = _declared_no_tests(sdlc_dir, rec, goal, run, remote, base)
-    if declared and not code and no_tests is None:
+    if declared and not code and no_tests is None and not refused:
         return ""                                    # #1942: a docs-only change with a stated reason
     if code and not refused and no_tests is None:
         refused = "the plan declares `none: " + declared + "` but the change touches code: " + ", ".join(code[:5])
