@@ -88,6 +88,12 @@ def show(sdlc):
 def rebuild(sdlc):
     """`(line, exit_code)`: the outcome and the call counts by class (list, read, pull)."""
     dc = _load("dag_collect")
+    try:                                                # #1957: take the lease, then read here regardless
+        cfg = dc.dag_store.state.load_config(sdlc)
+        if dc.dag_store.mode(cfg) != "off":
+            _load("dag_lease").acquire(sdlc, cfg, time.time(), force=True)
+    except Exception:
+        pass
     rep = dc.refresh(sdlc)
     if rep["status"] == "off":
         return "dag: off", 0
