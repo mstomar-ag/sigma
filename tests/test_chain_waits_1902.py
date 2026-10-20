@@ -176,7 +176,9 @@ def test_a_sentence_that_only_names_an_issue_is_read_as_nothing(text):
 
 def test_every_form_has_a_row_in_the_table():
     seen = {f for _t, exp in PHRASINGS for _r, f in exp}
-    assert seen >= set(_cw().FORMS) - {"follow-up"}
+    # the #1940 forms have their own table in test_chain_waits_1940.py
+    later = {"slice-chain", "slice-on", "waiting-on", "gates", "reversed-waits-on"}
+    assert seen >= set(_cw().FORMS) - {"follow-up"} - later
 
 
 def test_a_follow_up_form_in_a_comment_is_advisory():

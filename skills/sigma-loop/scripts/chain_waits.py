@@ -37,7 +37,17 @@ Loose forms (closed set; each is a SHAPE with a direction, none is a bare mentio
                 that names its members in words: "sits behind E11 (#N), which ...; E3 (#M), which ...")
   once-done     "once|as soon as ... #N (has|is) merged|landed|closed|done"  ("lands again as soon as #N has merged")
   lands-before  "#N [and ... #M] land(s) ... before this|the|its"          ("#N and #M land on main before this run")
+  slice-chain   "S2a, S2b and S2c must precede|land before S2d" (#1940): this issue waits on each earlier code, read only
+                when EVERY code of the chain resolves through a `<code> (#N)` map written in the same text; one
+                unresolved code reads nothing from that sentence
+  slice-on      "S4b on S4a (#N)": the number written after the second code
+  waiting-on    "waiting on #N" (#1940), COMMENTS only (a trusted author, as above), any subject
+  gates         "#N gates #M" (#1940), COMMENTS only; PROVISIONAL (owner to ratify): both #N and #M are read as waits
+  reversed-waits-on  "the story #N waits on" at a clause end (#1940): #N, unless a reference follows in that clause
   follow-up     a follow-up form (advisory; never an unconfirmed wait)
+
+Not read, by design (nothing to resolve; docs/chain.md names both): a slice code that has no issue number, and a
+ruling named in words ("depends on rulings in the <name> item").
 
 A trigger inside a parenthetical gloss that closes before the reference ("#A (what #B is blocked on), #C (...)")
 reads nothing: the reference is outside the clause the trigger governs. A NEGATION cancels a forward form or one of the two new ones when `not`, `never`, `nor`, `n't`, `no longer` or
@@ -98,6 +108,7 @@ _FORWARD = {
     "hold": re.compile(r"\bhold[ \t]+(?:on|off|until|for)\b" + _WIN + r"#(\d+)\b", _I),
     "waiting-for": re.compile(r"\bwait(?:s|ing)?[ \t]+for\b" + _WIN + r"#(\d+)\b", _I),
     "waits-on": re.compile(r"\b(?:waits?|is[ \t]+waiting|are[ \t]+waiting)[ \t]+on\b" + _WIN + r"#(\d+)\b", _I),
+    "waiting-on": re.compile(r"\bwaiting[ \t]+on\b" + _WIN + r"#(\d+)\b", _I),
     "once-done": re.compile(r"(?<!only )(?<!only\t)\b(?:as[ \t]+soon[ \t]+as|once)\b" + _LIST_WIN + r"#(\d+)\b[^\n#;.!?]{0,25}?"
                             r"\b(?:has|have|is|are)[ \t]+(?:been[ \t]+)?(?:merged|landed|closed|done|finished|resolved)\b",
                             _I),
@@ -131,7 +142,24 @@ _SENTENCE_FORMS = {
 #: the tail of a list: ", #M", ", and #M", " and #M", " & #M", each with an optional short code before the reference
 #: (", and E22 #M") -- tight, one reference per step.
 _MORE = re.compile(r"[ \t]*(?:,[ \t]*(?:and[ \t]+)?|and[ \t]+|&[ \t]*)(?:[A-Za-z][\w.-]{0,7}[ \t]+)?#(\d+)\b", _I)
-FORMS = ("explicit", "list", "follow-up") + tuple(_FORWARD) + tuple(_REF_FIRST) + tuple(_SPAN) + tuple(_SENTENCE_FORMS)
+#: forms read only from a trusted COMMENT, never from a body (#1940)
+_COMMENT_ONLY = frozenset({"waiting-on", "gates"})
+#: slice codes (#1940): a letter, digits, up to two lower-case letters; case-sensitive so prose words are not codes
+_CODE = r"[A-Z]\d+[a-z]{0,2}"
+_CODE_MAP = re.compile(r"\b(" + _CODE + r")[ \t]*\(#(\d+)\)")
+_SLICE_CHAIN = re.compile(r"\b(" + _CODE + r"(?:(?:[ \t]*,[ \t]*(?:and[ \t]+)?|[ \t]+and[ \t]+|[ \t]*&[ \t]*)" + _CODE + r")*)"
+                          r"[ \t]+(?:must[ \t]+|need[ \t]+not[ \t]+)?(?P<t>precedes?|(?:lands?|be[ \t]+merged)[ \t]+before)"
+                          r"[ \t]+(" + _CODE + r")\b")
+_SLICE_ON = re.compile(r"\b" + _CODE + r"[ \t]+on[ \t]+" + _CODE + r"[ \t]*\(#(\d+)\)")
+#: "#N gates #M": both ends (group 1, 2); group `t` is the verb, where a negation is looked for
+_GATES = re.compile(r"#(\d+)\b[^\n#.!?;]{0,20}?(?P<t>\bgates?\b)[ \t]+#(\d+)\b", _I)
+#: "the story #N waits on" ending its clause; the optional words between are for "does not wait on"
+_REVERSED = re.compile(r"\bthe[ \t]+[\w-]{2,20}[ \t]+#(\d+)\b[ \t]+(?:[\w']+[ \t]+){0,2}?(?P<t>wait(?:s|ing)?[ \t]+on)\b"
+                       r"(?=[ \t]*(?:[\n.,;:!?)]|$))", _I)
+#: a reference still ahead in the same clause: "the story #N waits on, per #M, ..." is about #M
+_REF_AHEAD = re.compile(r"[^\n.!?;]{0,60}?#\d", _I)
+FORMS = ("explicit", "list", "follow-up") + tuple(_FORWARD) + tuple(_REF_FIRST) + tuple(_SPAN) + tuple(_SENTENCE_FORMS) + \
+    ("slice-chain", "slice-on", "gates", "reversed-waits-on")
 
 
 def _foreign(text, ref_start):
@@ -184,9 +212,10 @@ def _tail(text, pos):
     return out
 
 
-def find(text, explicit=True):
+def find(text, explicit=True, comment=False):
     """Pure. -> ordered `[(ref, form)]`, ref-and-form deduplicated, for every reading this module has over
-    `text`. `explicit` False leaves out the explicit forms (a body already holds those as edges)."""
+    `text`. `explicit` False leaves out the explicit forms (a body already holds those as edges). `comment` True
+    says `text` is a trusted comment: only then are the comment-only forms (`waiting-on`, `gates`) read."""
     text = blocker_scan.strip_unpark_qa(text or "")
     found, plain = [], set()
     for m in blocker_scan._EXPLICIT_BLOCK_RE.finditer(text):
@@ -202,6 +231,8 @@ def find(text, explicit=True):
             found.append((m.group(2), "explicit"))
         found += [(r, "list") for r in _tail(text, m.end())]
     for form, rx in _FORWARD.items():
+        if form in _COMMENT_ONLY and not comment:
+            continue
         for m in rx.finditer(text):
             if _foreign(text, m.start(1)) or (form == "far" and m.group(1) in plain):
                 continue                                  # `far` only adds what the explicit window missed
@@ -228,12 +259,38 @@ def find(text, explicit=True):
                 continue
             found += [(r.group(1), form) for r in re.finditer(r"#(\d+)\b", m.group(1))
                       if r.group(1) not in modal and not _foreign(text, m.start(1) + r.start(1))]
+    found += _find_1940(text, comment)
     out, seen = [], set()
     for ref, form in found:
         if (ref, form) not in seen:
             seen.add((ref, form))
             out.append((ref, form))
     return out
+
+
+def _find_1940(text, comment):
+    """The #1940 readings that are not a single trigger and a reference: slice codes, "gates", the reversed wait."""
+    found = []
+    codes = {c: n for c, n in _CODE_MAP.findall(text)}
+    for m in _SLICE_CHAIN.finditer(text):
+        if _negated(text, m.start("t")):
+            continue
+        members = re.findall(_CODE, m.group(1))
+        if codes and all(c in codes for c in members):                    # EVERY code resolves, or nothing is read
+            found += [(codes[c], "slice-chain") for c in members]
+    for m in _SLICE_ON.finditer(text):
+        if not _foreign(text, m.start(1)):
+            found.append((m.group(1), "slice-on"))
+    if comment:
+        for m in _GATES.finditer(text):
+            if _negated(text, m.start("t")) or _foreign(text, m.start(1)) or _foreign(text, m.start(3)):
+                continue
+            found += [(m.group(1), "gates"), (m.group(3), "gates")]
+    for m in _REVERSED.finditer(text):
+        if _foreign(text, m.start(1)) or _negated(text, m.start("t")) or _REF_AHEAD.match(text, m.end()):
+            continue
+        found.append((m.group(1), "reversed-waits-on"))
+    return found
 
 
 def loose_refs(text):
@@ -340,7 +397,7 @@ def collect(ro, repo, numbers, issues=None, have=None, state_of=None, cache=None
         gone = {int(r) for r in _dismissed(backlog_check, trusted)}
         sources = [("body", None, body)] + [("comment", role, t) for role, t in texts]
         for where, role, text in sources:
-            for ref, form in find(text, explicit=(where == "comment")):
+            for ref, form in find(text, explicit=(where == "comment"), comment=(where == "comment")):
                 r = int(ref)
                 if r == n or r in known or r in gone:
                     continue
