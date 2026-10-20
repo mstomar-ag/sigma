@@ -244,6 +244,14 @@ def remove_scratch(root, parent):
 
 
 HOST_LOGIN = "host"
+#: #1963: host mode also passes the user's identity; without USER the CLI reads a logged-in account as logged out.
+HOST_IDENTITY = ("USER", "LOGNAME")
+#: #1963: on macOS the CLI keeps its login in the keychain, which the session wall denies (and must keep denying: it also
+#: holds the git host token). The watcher, outside the wall, hands the walled session the CLI's own documented token
+#: variable (made with `claude setup-token`), the way `credential_var` hands one over. Only this name, only when set.
+HOST_TOKEN_VAR = "CLAUDE_CODE_OAUTH_TOKEN"
+KEYCHAIN_HINT = (" (on macOS the login lives in the keychain, which the session wall denies; run `claude setup-token` and "
+                 "export CLAUDE_CODE_OAUTH_TOKEN for the watcher)")
 
 
 def build_env(scratch, credential_var, environ, login=None, home=None):
@@ -257,6 +265,11 @@ def build_env(scratch, credential_var, environ, login=None, home=None):
     env["TMPDIR"] = str(scratch / "tmp")
     if login == HOST_LOGIN:
         env["HOME"] = environ.get("HOME") or home or os.path.expanduser("~")
+        for name in HOST_IDENTITY:                         # #1963: the CLI finds its login under the user's identity
+            if environ.get(name):
+                env[name] = environ[name]
+        if environ.get(HOST_TOKEN_VAR):                    # #1963: the watcher-side hand-over, see HOST_TOKEN_VAR
+            env[HOST_TOKEN_VAR] = environ[HOST_TOKEN_VAR]
         if environ.get("CLAUDE_CONFIG_DIR"):
             env["CLAUDE_CONFIG_DIR"] = environ["CLAUDE_CONFIG_DIR"]
     else:
@@ -270,6 +283,13 @@ def build_env(scratch, credential_var, environ, login=None, home=None):
 
 NOT_LOGGED_IN = "resolver cli is not logged in in the scrubbed environment"
 NOT_LOGGED_IN_HOST = "resolver cli is not logged in under the host login (conflicts.agent.login is host)"
+
+
+def not_logged_in_reason(login, walled, platform=None):
+    """The parked reason for a failed preflight; on macOS behind the session wall it names the one command to run (#1963)."""
+    if login != HOST_LOGIN:
+        return NOT_LOGGED_IN
+    return NOT_LOGGED_IN_HOST + (KEYCHAIN_HINT if walled and (platform or sys.platform) == "darwin" else "")
 AUTH_PROBE_SECONDS = 15.0
 
 
@@ -592,7 +612,7 @@ def launch(request, environ=None, clock=time.time):
     if not why and not req.scratch_parent:
         why = "no scratch root was given"
     if not why and not _logged_in(req, binary, environ):
-        why = NOT_LOGGED_IN_HOST if req.login == HOST_LOGIN else NOT_LOGGED_IN
+        why = not_logged_in_reason(req.login, bool(req.net_prefix))
     if not why and ((req.cap_usd is not None and req.cap_usd <= 0) or (req.ceiling_machine_usd is not None and req.ceiling_machine_usd <= 0)
                     or (req.ceiling_team_usd is not None and req.ceiling_team_usd <= 0)):
         why = "a cap or ceiling that is set must be a positive amount"
@@ -663,7 +683,7 @@ def _run(req, model, binary, environ, run_id, clock):
         before = None if req.session else snapshot(req.directory)
         done = bounded.run_group(argv, req.directory, req.timeout, env=env, stdin_path=str(prompt_path))
         changed = () if req.session else tuple(violations(before, snapshot(req.directory), req.conflicted))
-        reason = _scrub(done.out, secret)
+        reason = _scrub(_scrub(done.out, secret), env.get(HOST_TOKEN_VAR) if host else None)
         killed = done.outcome in (bounded.TIMEOUT, bounded.STOPPED, bounded.ERROR, bounded.REFUSED) or (done.code or 0) < 0
         if killed:
             cost = None if (cap is not None or host) else metered_cost(scratch / "config", req.rates)
