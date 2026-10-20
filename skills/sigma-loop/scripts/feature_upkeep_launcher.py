@@ -271,6 +271,8 @@ def build_env(scratch, credential_var, environ, login=None, home=None):
 NOT_LOGGED_IN = "resolver cli is not logged in in the scrubbed environment"
 NOT_LOGGED_IN_HOST = "resolver cli is not logged in under the host login (conflicts.agent.login is host)"
 AUTH_PROBE_SECONDS = 15.0
+#: The only account-type words the probe ever returns; anything else reads as unknown, so a field that is not a plan name never reaches a screen.
+KNOWN_ACCOUNT_TYPES = frozenset({"free", "pro", "max", "team", "enterprise", "claude.ai", "console", "api_key", "oauth", "oauth_token"})
 
 
 def auth_status(env, binary, cwd, timeout=AUTH_PROBE_SECONDS, prefix=None):
@@ -283,7 +285,7 @@ def auth_info(env, binary, cwd, timeout=AUTH_PROBE_SECONDS, prefix=None):
     non-zero exit or a JSON `loggedIn` that is false; any run that did not finish is (False, None). UNVERIFIED against a real
     CLI (#1691): exit 0 with text that is not JSON counts as logged in, since only the exit code is relied on. `prefix` is the
     session wall's argv (#1713): the probe runs inside the same confinement as the session where one exists, plain where none
-    does. The account type is `subscriptionType`, else `authMethod`, and only when it is a short plain word: no credential,
+    does. The account type is `subscriptionType`, else `authMethod`, and only when it is on the `KNOWN_ACCOUNT_TYPES` allowlist: no credential,
     email or other field is ever returned (#1946)."""
     bounded = _sibling("bounded_run")
     try:
@@ -302,8 +304,8 @@ def auth_info(env, binary, cwd, timeout=AUTH_PROBE_SECONDS, prefix=None):
         return False, None
     for key in ("subscriptionType", "authMethod"):
         value = parsed.get(key)
-        if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_ -]{1,24}", value):
-            return True, value
+        if isinstance(value, str) and value.strip().lower() in KNOWN_ACCOUNT_TYPES:
+            return True, value.strip().lower()
     return True, None
 
 
