@@ -4280,6 +4280,23 @@ def _pr_body(path, run, remote, base, goal, config):
     return (header + body).strip() + "\n"
 
 
+_FIXUP_SUBJECT = re.compile(r"(?i)^(wip\b|merge\b|fixup!|squash!)")
+
+
+def _pr_title(path, run, remote, base, goal):
+    """#1014: the PR title names the GOAL, never a later fix-up. It is the subject of the branch's first commit that is
+    not a work-in-progress, merge or fixup commit (the oldest commit is the one that says what the goal delivers),
+    with the goal reference `(#N)` the squash template relies on added when the subject lacks it. Chosen once, at PR
+    creation: an existing PR is never retitled, so a later commit cannot change it."""
+    subjects = [x.strip() for x in (run(path, ["git", "log", "--reverse", f"{remote}/{base}..HEAD", "--format=%s"]) or "").splitlines()
+                if x.strip()]
+    title = next((x for x in subjects if not _FIXUP_SUBJECT.match(x)), subjects[0] if subjects else "") or f"sdlc: {stem(goal)}"
+    ref = stem(goal)
+    if ref.isdigit() and f"#{ref}" not in title:
+        title += f" (#{ref})"
+    return title
+
+
 def pr(sdlc_dir, config, goal, run=None, no_tests=None):
     """Push the branch and open (or re-find) its PR. Refuses on an unclean or empty branch — or one
     missing the plan or research dossier it is meant to be read against (#1548, #1801) — rather than
@@ -4386,7 +4403,7 @@ def pr(sdlc_dir, config, goal, run=None, no_tests=None):
                         f"repos/{{owner}}/{{repo}}/pulls?head={{owner}}:{rec['branch']}",
                         "--jq", ".[0].number"])
     if not number:
-        title = run(path, ["git", "log", "-1", "--format=%s"]) or f"sdlc: {stem(goal)}"
+        title = _pr_title(path, run, remote, base, goal)
         body = _no_tests_body(_pr_body(path, run, remote, base, goal, config), no_tests)
         number = run(path, ["gh", "api", "repos/{owner}/{repo}/pulls",
                             "-f", f"title={title}", "-f", f"body={body}", "-f", f"base={base}",
