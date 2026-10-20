@@ -365,7 +365,7 @@ def test_conflict_level_is_a_setting_of_the_project_opt_in():
 def test_template_carries_the_conflicts_keys_and_a_note():
     cfg = support.template_cfg()
     assert cfg["upkeep"]["conflicts"] == {
-        "resolve": "off", "mechanical_without_verify": False,
+        "resolve": "off", "mechanical_without_verify": False, "union_paths": [],
         "agent": {"model": "sonnet", "credential_var": None, "login": "scrubbed", "max_budget_usd_per_unit": None, "spend_ceiling_usd_per_day": None, "timeout_minutes": 30,
                   "max_units_per_sweep": 5, "reviewer": {"enabled": True, "model": "sonnet"}}}
     note = cfg["_upkeep_conflicts"]

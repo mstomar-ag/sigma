@@ -415,6 +415,29 @@ def _date_of(key):
     return key.removeprefix("## ")[:10] if key.startswith("## ") else key
 
 
+def _without_own_heading(key, sb, so, st):
+    """#1968: theirs' lines of section `key`; when both sides added the same new day heading, theirs' copy of the
+    heading (and the blank lines after it) is left out so the merged section holds ONE heading and both bullet sets."""
+    mine = st.get(key, [])
+    if key.startswith("## ") and key not in sb and key in so and mine and mine[0].strip() == key:
+        mine = list(mine[1:])
+        while mine and not mine[0].strip():
+            mine.pop(0)
+    return mine
+
+
+def line_union(base, ours, theirs):
+    """#1968: the generic line union of two pure additions to `base` -> the text, or None. Base order is kept, ours
+    additions stay where ours put them, then the lines theirs added that ours lacks; a duplicate added line collapses.
+    None when either side edited or removed a base line, or when the result would drop a line of either side."""
+    b, o, t = (str(x).split("\n") for x in (base, ours, theirs))
+    merged = _merge_lines(b, o, t, True)
+    if merged is None:
+        return None
+    text = "\n".join(merged) + "\n"
+    return None if would_drop(text, ours, theirs) else text
+
+
 def append_union(base, ours, theirs):
     """The union of two pure appends to a dated `## YYYY-MM` log (sections in date order, lines unioned per section)
     or a bullet-list file (ours first, then theirs' new items) -> the text, or None. None is every other shape and
@@ -441,7 +464,7 @@ def append_union(base, ours, theirs):
             keys.sort(key=_date_of)
         parts = []
         for key in [""] + keys:
-            got = _merge_lines(sb.get(key, []), so.get(key, []), st.get(key, []), False)
+            got = _merge_lines(sb.get(key, []), so.get(key, []), _without_own_heading(key, sb, so, st), False)
             if got is None:
                 return None
             parts.append(got)

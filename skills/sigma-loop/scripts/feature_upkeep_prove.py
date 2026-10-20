@@ -68,13 +68,20 @@ def _stage_blobs(run, path, name):
         return None
 
 
-def _append_text(run, path, name):
-    """#1515: the append-only union of a single non-changelog conflicted file, or None (not that shape)."""
+def _append_text(run, path, name, union_paths=()):
+    """#1515: the append-only union of a single non-changelog conflicted file, or None (not that shape). #1968: a file
+    named in `union_paths` (`upkeep.conflicts.union_paths`) also gets the generic line union of pure additions."""
     blobs = _stage_blobs(run, path, name)
-    return None if blobs is None else _sibling("conflict_proof").append_union(*blobs)
+    if blobs is None:
+        return None
+    proof = _sibling("conflict_proof")
+    text = proof.append_union(*blobs)
+    if text is None and name in tuple(union_paths or ()):
+        text = proof.line_union(*blobs)
+    return text
 
 
-def conflicted_file(run, path, changelog=CHANGELOG):
+def conflicted_file(run, path, changelog=CHANGELOG, union_paths=()):
     """The one file Level 1 can take at this stop -- the changelog, or (#1515) a file whose two sides purely appended
     in a recognised append-only shape -- else None. Exactly one unmerged path, with a base stage."""
     try:
@@ -84,12 +91,12 @@ def conflicted_file(run, path, changelog=CHANGELOG):
     if len(stages) != 1 or 1 not in next(iter(stages.values())):
         return None
     name = next(iter(stages))
-    return name if name == changelog or _append_text(run, path, name) is not None else None
+    return name if name == changelog or _append_text(run, path, name, union_paths) is not None else None
 
 
-def eligible(run, path, changelog=CHANGELOG):
+def eligible(run, path, changelog=CHANGELOG, union_paths=()):
     """Exactly one unmerged path with a base stage: the changelog, or an append-only shape. A failed read is not eligible."""
-    return conflicted_file(run, path, changelog) is not None
+    return conflicted_file(run, path, changelog, union_paths) is not None
 
 
 def _text(run, path, argv):
@@ -100,9 +107,9 @@ def _text(run, path, argv):
         return str(exc)
 
 
-def _union_appended(run, path, name):
+def _union_appended(run, path, name, union_paths=()):
     """Write and stage the append-only union of `name` -> True when it resolved (nothing is written otherwise)."""
-    text = _append_text(run, path, name)
+    text = _append_text(run, path, name, union_paths)
     if text is None:
         return False
     try:
@@ -113,11 +120,11 @@ def _union_appended(run, path, name):
     return True
 
 
-def _one_stop(run, path, union, run_id, stops, files, stopped_at):
+def _one_stop(run, path, union, run_id, stops, files, stopped_at, union_paths=()):
     """Resolve and stamp the stop the rebase is at -> a refusal dict, or None. `stopped_at` records whether the commit
     was made (past that point the conflict cannot be restored)."""
     state, proof, res = _sibling("conflict_state"), _sibling("conflict_proof"), _sibling("feature_upkeep_resolution")
-    name = conflicted_file(run, path)
+    name = conflicted_file(run, path, CHANGELOG, union_paths)
     if name is None:
         return refusal(NOT_ELIGIBLE, "the stop is not a single changelog conflict with a base stage")
     orig = str(run(str(path), ["git", "rev-parse", "REBASE_HEAD"]) or "").strip()
@@ -131,7 +138,7 @@ def _one_stop(run, path, union, run_id, stops, files, stopped_at):
     if name == CHANGELOG:
         done = _sibling("work")._try_union_changelog(str(path), run, union)
     else:
-        done = _union_appended(run, path, name)
+        done = _union_appended(run, path, name, union_paths)
     if not done:
         return refusal(UNION_DECLINED, "the heading-aware union did not resolve the changelog")
     if state.empty_commit_about_to_land(run, str(path)):
@@ -159,16 +166,16 @@ def _one_stop(run, path, union, run_id, stops, files, stopped_at):
     return None
 
 
-def resolve_stops(run, path, union, run_id, stopped, rounds=ROUNDS):
+def resolve_stops(run, path, union, run_id, stopped, rounds=ROUNDS, union_paths=()):
     """Level 1 over the stops of one rebase -> `{"stops", "files", "refusal", "stamped"}`; `refusal` is None when the
     rebase ran to completion. `stopped(run, path)` answers whether a rebase is still in progress."""
     stops, files, stamped = {}, {}, []
     out = {"stops": stops, "files": files, "refusal": None, "stamped": stamped}
     for _ in range(rounds):
         made = []
-        out["file"] = conflicted_file(run, path) or CHANGELOG
+        out["file"] = conflicted_file(run, path, CHANGELOG, union_paths) or CHANGELOG
         try:
-            out["refusal"] = _one_stop(run, path, union, run_id, stops, files, made)
+            out["refusal"] = _one_stop(run, path, union, run_id, stops, files, made, union_paths)
         except Exception as exc:             # noqa: BLE001 - an unread state is not a resolution
             out["refusal"] = refusal(NOT_ELIGIBLE, "the stop could not be read: " + str(exc)[:200])
         stamped.extend(made)

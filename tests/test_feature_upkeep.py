@@ -49,6 +49,7 @@ EXPECTED_SCHEMA = {   # key -> (kind, lo, hi, min_items)
     "conflicts.agent.credential_var": ("env_name_null", None, None, None),
     "conflicts.agent.login": ("enum", None, None, None),
     "backup.former_prefixes": ("name_list", None, None, 0),
+    "conflicts.union_paths": ("name_list", None, None, 0),
 }
 DEFAULT_TABLE = {
     "enabled": False, "window_hours": 12, "retry_minutes": 60, "units.include": ["*"], "units.exclude": [], "triggers.drift_merges": "auto",
@@ -61,7 +62,7 @@ DEFAULT_TABLE = {
     "conflicts.agent.spend_ceiling_usd_per_day": None, "conflicts.agent.timeout_minutes": 30,
     "conflicts.agent.max_units_per_sweep": 5, "conflicts.agent.reviewer.enabled": True,
     "conflicts.agent.reviewer.model": "sonnet", "conflicts.agent.credential_var": None, "conflicts.agent.login": "scrubbed",
-    "backup.former_prefixes": [],
+    "backup.former_prefixes": [], "conflicts.union_paths": [],
 }
 #: The acceptance matrix (None, True, 0, -1, 1.5, nan, inf, "", "x", [], [1], {}, {"x": 1}) plus the values that
 #: are real traps: False, 1, the text forms of a boolean, -inf, "auto", a name list, a 400-digit integer.
