@@ -93,6 +93,7 @@ SCHEMA = {   # dotted key -> spec; the lo/hi are guard rails against typos, not 
     "conflicts.agent.reviewer.enabled": {"kind": "bool"},
     "conflicts.agent.reviewer.model": {"kind": "enum", "values": MODELS},
     "conflicts.agent.credential_var": {"kind": "env_name_null"},
+    "conflicts.agent.login": {"kind": "enum", "values": ("scrubbed", "host")},
     "backup.former_prefixes": {"kind": "name_list", "min_items": 0},
 }
 DEFAULTS = {   # the one place the defaults live; the shipped template must equal this
@@ -106,6 +107,7 @@ DEFAULTS = {   # the one place the defaults live; the shipped template must equa
     "conflicts.agent.spend_ceiling_usd_per_day": None, "conflicts.agent.timeout_minutes": 30,
     "conflicts.agent.max_units_per_sweep": 5, "conflicts.agent.reviewer.enabled": True,
     "conflicts.agent.reviewer.model": "sonnet", "conflicts.agent.credential_var": None,
+    "conflicts.agent.login": "scrubbed",
     "backup.former_prefixes": [],
 }
 CROSS_CHECKS = (   # run only after every per-key check, and only when the keys involved passed theirs
