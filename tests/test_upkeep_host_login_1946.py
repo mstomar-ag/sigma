@@ -273,6 +273,28 @@ def test_the_parked_reason_names_the_one_command_only_on_macos_behind_the_wall()
     assert launcher.not_logged_in_reason("scrubbed", True, "darwin") == launcher.NOT_LOGGED_IN
 
 
+def test_the_level2_report_keeps_the_whole_macos_host_login_fix_command(rig, tmp_path, monkeypatch):
+    """#1966: the report's reason is not clipped before the fix command (the old 120-character clip cut it mid-word)."""
+    import test_upkeep_level2 as T2
+    mac = L.load().not_logged_in_reason("host", True, "darwin")
+    l1 = T2.l1
+    m = l1.mod()
+    w = T2.conflict_world(T2.mk(tmp_path / "w"))
+    rig.install(m, w)
+    l1.verify_ok(m, rig.mp)
+    real_load = m._load
+
+    def load(name):
+        module = real_load(name)
+        if name == "feature_upkeep_level2":
+            live = module._sibling("feature_upkeep_launcher")
+            monkeypatch.setattr(live, "launch", lambda request, environ=None: live.Result(live.REFUSED, 0.0, (), mac))
+        return module
+    monkeypatch.setattr(m, "_load", load)
+    report, _ = l1.run_pass(m, w, T2.cfg())
+    assert "resolver-failed" in report["why"] and "claude setup-token" in report["why"] and OAUTH_VAR in report["why"], report
+
+
 def test_a_host_launch_hands_the_token_to_the_session_and_scrubs_it_from_the_output(lrig):
     stubbed(lrig)
     lrig.binary.write_text(lrig.binary.read_text().replace('print("done")', 'print("leak " + os.environ.get("%s", ""))' % OAUTH_VAR))
