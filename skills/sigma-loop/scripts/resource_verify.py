@@ -22,6 +22,7 @@ THE CONTRACT.
     `finally`. A pid Sigma did not start is never signalled, and nothing here pauses or resumes a process.
 """
 import importlib.util
+import json
 import os
 import pathlib
 import re
@@ -54,6 +55,27 @@ def _sibling(name):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+VITEST_MIN_MAJOR = 3        # #1931: vitest 2.x collects no tests when either variable is set
+
+
+def vitest_accepts_grant(root):
+    """True only when a vitest of major version 3 or later is installed at or above `root`. Absent, unreadable or
+    unparsable reads as False: the variables are then left unset, which is the behaviour before the grant reached node."""
+    here = os.path.abspath(root or ".")
+    while True:
+        path = os.path.join(here, "node_modules", "vitest", "package.json")
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    return int(str(json.load(fh).get("version", "")).split(".")[0]) >= VITEST_MIN_MAJOR
+            except (OSError, ValueError, AttributeError):
+                return False
+        parent = os.path.dirname(here)
+        if parent == here:
+            return False
+        here = parent
 
 
 def _lowered(current, n):
@@ -218,8 +240,9 @@ def run(kind, commands, root, timeout, goal, *, config=None, repo=None, env=None
         child_env = bounded.unattended_env(env)
         child_env[ENV_WORKERS] = str(n)
         child_env[ENV_XDIST] = str(n)
-        for name in ENV_NODE_RUNNERS:
-            child_env[name] = str(_lowered(child_env.get(name), n))
+        if vitest_accepts_grant(root):
+            for name in ENV_NODE_RUNNERS:
+                child_env[name] = str(_lowered(child_env.get(name), n))
         resolved = guard.resolve_config(config)[0]
         if shed_after is None:                                   # #1769: an explicit argument wins, then the key
             shed_after = resolved.get("shed_after") or SHED_AFTER
