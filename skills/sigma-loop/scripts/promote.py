@@ -439,7 +439,7 @@ def _upper_tier(names):
     return next((n for n in names if str(n).strip().lower() in _UPPER_TIER_LABELS), None)
 
 
-_EPIC_TITLE = re.compile(r"^[\s\[(]*epic\b", re.IGNORECASE)
+_EPIC_TITLE = re.compile(r"^[\s\[(]*epic\b(?!-)", re.IGNORECASE)
 _SLICE_HEADING = re.compile(r"^#{1,6}\s*(?:slices|children|child issues|sub-issues)\s*:?\s*$", re.IGNORECASE)
 _ANY_HEADING = re.compile(r"^#{1,6}\s")
 _LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")

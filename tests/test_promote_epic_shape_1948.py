@@ -186,3 +186,7 @@ def test_label_drain_verdict_calls_an_unlabelled_epic_upper_tier(tmp_path):
     p, calls = tp._plan(tmp_path, issues)
     assert tp._by(p, 1)["verdict"] == "upper-tier" and "looks like an epic" in tp._by(p, 1)["detail"]
     assert tp._by(p, 2)["verdict"] == "armed"
+
+
+def test_a_hyphenated_epic_word_is_not_an_epic_title():
+    assert promote.epic_shaped("Epic-sized typo fix", "") is None
