@@ -28,6 +28,13 @@
                                 default `<sdlc>/state/dag-html/`; reads only the stored map, no network
                                 (#1924, see dag_html.py)
 
+  dag.py report [--goal N] [--md | --json] [--sdlc DIR]
+                                the whole map in one read-only report: state, the doctor's freshness and
+                                shadow lines, stuck and active chains, cycles, chains done this month, where
+                                the files live; `--goal N` is the chain behind N. Stored map only, no network,
+                                writes nothing; with nothing to read it prints one line with the exact fix
+                                (#1954, see dag_report.py, `/sigma-dag`)
+
 `chain`, `chains` and `stuck` exit 0 answered, 2 goal unknown to the map, 3 map unusable (the line
 says why), 4 mode off (one line). `--verify` re-reads open members live, at most 50.
 
@@ -214,11 +221,21 @@ def main(argv=None):
     wp.add_argument("--out", default=None, help="the output directory (default: <sdlc>/state/dag-html)")
     wp.add_argument("--titles", default=None, help="a JSON file of titles, {\"<number>\": \"<title>\"}; the map holds none")
     wp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
+    pp = sub.add_parser("report", help="the stored map in one read-only report (markdown, or --json)")
+    pp.add_argument("--goal", type=int, default=None, help="the chain behind this goal instead")
+    fmt = pp.add_mutually_exclusive_group()
+    fmt.add_argument("--md", action="store_true", help="markdown (the default)")
+    fmt.add_argument("--json", action="store_true", help="the dag-report/1 object")
+    pp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     args = ap.parse_args(argv)
     sdlc = args.sdlc or os.path.join(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd(), ".sdlc")
     if args.verb in ("chain", "chains", "stuck"):
         out, code = _query(args.verb, args, sdlc)
         print(out)
+        return code
+    if args.verb == "report":
+        out, code = _load("dag_report").report(sdlc, args.goal, args.json, chain_text=_chain_text)
+        print(out, end="" if out.endswith("\n") else "\n")
         return code
     if args.verb == "html":
         lines, code = _load("dag_html").run(sdlc, args.goal, args.all, args.out, args.titles)

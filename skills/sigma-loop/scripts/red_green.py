@@ -31,6 +31,38 @@ def digest(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 
 
+_NONE = re.compile(r'none: (\S.*)')
+_DOC_DIRS = ('docs/', '.sdlc/plans/', '.sdlc/research/', '.sdlc/acceptance/')
+_DOC_SUFFIXES = ('.md', '.txt', '.png', '.svg')
+
+
+def none_reason(plan):
+    """#1942: the reason of a `## Tests` section that is exactly one `none: <reason>` line, else None."""
+    if plan is None:
+        return None
+    body, active = [], False
+    for line in pathlib.Path(plan).read_text().splitlines():
+        if line.strip() == '## Tests':
+            if active or body:
+                return None
+            active = True
+            continue
+        if line.startswith('## '):
+            active = False
+        if active and line.strip():
+            body.append(line.strip())
+    match = _NONE.fullmatch(body[0]) if len(body) == 1 else None
+    return match[1].strip() if match else None
+
+
+def docs_only(paths):
+    """#1942: True when every changed path is documentation (never an empty list, never a `..` path)."""
+    paths = [p.strip() for p in paths if p.strip()]
+    return bool(paths) and all(
+        '..' not in pathlib.PurePosixPath(p).parts
+        and (p.startswith(_DOC_DIRS) or p.endswith(_DOC_SUFFIXES)) for p in paths)
+
+
 def selectors(plan):
     """Canonical ## Tests entries are backticked pytest file/node selectors, one per bullet."""
     if plan is None:
@@ -59,7 +91,7 @@ def selectors(plan):
         if selector not in result:
             result.append(selector)
     if not result or len(result) > MAX_SELECTORS:
-        raise ValueError('## Tests requires 1–25 pytest selectors; use --no-tests for an explicit exception')
+        raise ValueError('## Tests requires 1–25 pytest selectors; use --no-tests, or the line `none: <reason>` for a docs-only change')
     return result
 
 

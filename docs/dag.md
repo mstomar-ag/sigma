@@ -49,7 +49,10 @@ are in the [configuration reference](configuration.md).
 
 ## Reading the map
 
-All of these read the stored file and write nothing. Run them from the project root, or pass
+`/sigma-dag` is the one gesture: it runs `dag.py report` (`<N>` for the chain behind a goal, `--html` for the
+offline pages) and prints the stored map's state, stuck and active chains, cycles and what finished this month,
+or one line with the exact fix when there is nothing to read. It reads the stored file and writes nothing.
+The verbs below are what it is built from. All of these read the stored file and write nothing. Run them from the project root, or pass
 `--sdlc <dir>` to point at another `.sdlc`. Outputs below are from a six-node fixture map, with
 issue numbers replaced by placeholders.
 
