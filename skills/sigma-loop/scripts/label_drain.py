@@ -295,6 +295,9 @@ class _Judge:
         tier = self.promote._upper_tier(names)
         if tier:
             return "upper-tier", "labelled %s; the picker never takes it" % tier
+        shaped = self.promote.epic_shaped(issue.get("title") or "", issue.get("body") or "")
+        if shaped:                                           # #1948: no label, but it reads as an epic
+            return "upper-tier", "looks like an epic (%s); the picker never takes it" % shaped
         if self.source.parked_label in names:
             return "parked", "carries %s" % self.source.parked_label
         cp = getattr(self.source, "checkpoint_label", None)

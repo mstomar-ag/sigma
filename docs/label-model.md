@@ -1277,3 +1277,5 @@ model; that is `model_selection`'s job, and it reads the goal, not the board.
 ---
 
 *Per-change rationale for everything here is in [CHANGELOG.md](../CHANGELOG.md).*
+
+**Epic-shaped issues without an upper-tier label (#1948).** An open issue whose title starts with `EPIC`, or whose body lists two or more issues under a Slices / Children / Child issues / Sub-issues heading, is refused by `promote.py apply` and `migrate-confirmation` until it carries the `epic` label (or is reworded); `/sigma-doctor` lists such issues.

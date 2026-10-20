@@ -72,7 +72,7 @@ never "carries `sdlc:goal`", never "not carrying the legacy confirmation label",
     python3 promote.py apply <sdlc_dir> <issue>... [--dry-run]
     python3 promote.py demote <sdlc_dir> <issue>...
 """
-import json, pathlib, sys, importlib.util
+import json, pathlib, re, sys, importlib.util
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -275,7 +275,7 @@ def _state(source, number):
 
 
 def _read_state(source, number):
-    """`((labels, closed, author, body) | None, why)` -- see below; `why` names a failure (#2757).
+    """`((labels, closed, author, body, title) | None, why)` -- see below; `why` names a failure (#2757).
 
     `(labels, closed, author, body)` for one issue, or `None` when it cannot be read. Refusing on
     an unreadable issue is deliberate: every refusal below is a SAFETY check, and a check that fails
@@ -294,7 +294,7 @@ def _read_state(source, number):
     exactly the live, authoritative `state == "CLOSED"` check the target issue itself already gets,
     applied consistently to a reference instead of a second, differently-shaped `gh` call."""
     try:
-        data = source._read_issue(number, ["labels", "state", "author", "body", "stateReason"])   # #895: REST first
+        data = source._read_issue(number, ["labels", "state", "author", "body", "stateReason", "title"])   # #895: REST first
         if not data.get("state"):
             return None, "unreadable response"
         author = data.get("author")
@@ -306,7 +306,7 @@ def _read_state(source, number):
                 blocker_scan.closed_state(str(data.get("state") or "").upper(),
                                           data.get("stateReason") or ""),
                 (author.get("login") if isinstance(author, dict) else "") or "",
-                data.get("body") or ""), ""
+                data.get("body") or "", data.get("title") or ""), ""
     except Exception as exc:                            # noqa: BLE001 - unreadable == refuse
         return None, _why(exc)
 
@@ -439,6 +439,46 @@ def _upper_tier(names):
     return next((n for n in names if str(n).strip().lower() in _UPPER_TIER_LABELS), None)
 
 
+_EPIC_TITLE = re.compile(r"^[\s\[(]*epic\b", re.IGNORECASE)
+_SLICE_HEADING = re.compile(r"^#{1,6}\s*(?:slices|children|child issues|sub-issues)\s*:?\s*$", re.IGNORECASE)
+_ANY_HEADING = re.compile(r"^#{1,6}\s")
+_LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+_ISSUE_REF = re.compile(r"(?<![\w/])#(\d+)\b")
+
+
+def epic_shaped(title, body):
+    """#1948: why an issue with NO upper-tier label still looks like an epic, or None. Pure, no I/O.
+
+    Two independent clauses: the title opens with `EPIC` (case-insensitive, after brackets or space),
+    or the body has a Slices / Children / Child issues / Sub-issues heading followed by a list naming
+    at least two distinct issues. One reference is a goal citing a neighbour, not a breakdown."""
+    if _EPIC_TITLE.match(title or ""):
+        return "its title starts with EPIC"
+    refs, inside = set(), False
+    for line in (body or "").splitlines():
+        if _SLICE_HEADING.match(line.strip()):
+            inside = True
+        elif _ANY_HEADING.match(line):
+            inside = False
+        elif inside and _LIST_ITEM.match(line):
+            refs.update(_ISSUE_REF.findall(line))
+    if len(refs) >= 2:
+        return "its body lists %d child issues under a slices heading" % len(refs)
+    return None
+
+
+def _epic_refusal(number, title, body, names):
+    """#1948: the refusal for an epic-shaped issue that lacks the upper-tier label, or None. A labelled
+    tier is `_refusal`'s own message; this one only fires when the label is missing, and names the way out."""
+    if _upper_tier(names):
+        return None
+    why = epic_shaped(title, body)
+    if not why:
+        return None
+    return ("#%s looks like an epic (%s) but has no upper-tier label — it is not armed. Add the `epic` "
+            "label if it is one, or reword the title and slice list if it is a goal." % (number, why))
+
+
 def _refusal(source, number, names, closed, demote, hold=None, unresolved=None):
     """The one reason this issue must not be touched, or None. Every message names the ROUTE, not
     just the problem -- a refusal inside the tool built to remove dead ends must not itself be one.
@@ -551,7 +591,7 @@ def promote(sdlc_dir, config, numbers, source=None, run=None, apply=True, demote
                                    "detail": "could not read the current state of #%s: %s"
                                              % (n, why or "no reason given")})
             continue
-        names, closed, author, body = state
+        names, closed, author, body, title = state
         # Asked only on the PROMOTE direction: a demotion is taking work out of the queue, which is
         # where a held goal is going anyway, so a gate that would hold it is not a reason to refuse.
         hold = None if demote else _feature_hold(sdlc_dir, config, n, names, author)
@@ -560,6 +600,8 @@ def promote(sdlc_dir, config, numbers, source=None, run=None, apply=True, demote
         checked = [] if demote else _blocker_status(source, n, body)
         unresolved = [c for c in checked if c[2] != "CLOSED"]
         refusal = _refusal(source, n, names, closed, demote, hold, unresolved)
+        if not refusal and not demote:                  # #1948: arming only; a demotion leaves the queue anyway
+            refusal = _epic_refusal(n, title, body, names)
         if refusal:
             out["results"].append({"number": n, "outcome": "skipped", "detail": refusal})
             continue
@@ -858,6 +900,12 @@ def _migrate_one(source, config, sdlc_dir, item, apply, rep_item, writes=None):
         (writes or _Writes(config, time.monotonic, time.sleep)).do(
             lambda: source._swap_labels(n, add=[], remove=[source.proposed_label]))
         rep_item.update(outcome="unlabelled", detail=reason)
+        return
+    shaped = _epic_refusal(n, item.get("title") or data.get("title") or "", data.get("body") or "", names)
+    if shaped:                                          # #1948: never arm it; the owner labels it epic
+        reason = "epic-shaped: label it epic"
+        rep_item.update(population="epic-shaped", action="skip", reason=reason, outcome="would-skip" if not apply else "skipped",
+                        detail=shaped)
         return
     author = data.get("author")
     author = (author.get("login") if isinstance(author, dict) else "") or ""
