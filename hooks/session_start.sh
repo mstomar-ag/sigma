@@ -308,6 +308,33 @@ PY
 then
     exit 0
 fi
+# --- Loop session model above every dispatched tier (issue #1951) ---------------------------------
+# An ACCELERATOR: the load-bearing surface is `/sigma-doctor`'s "loop session model" row. This runs the
+# sibling loop script's own CLI (all logic lives in Python, not here); `--warn-only` prints nothing
+# unless the session's model is priced above every tier it dispatched, so the wrapper exits 1 to fall
+# through in every other case. Headless skip as above.
+if [ -z "${SIGMA_RUN_ID:-}" ] && python3 - "$PROJECT" "$PLUGIN_ROOT" <<'PY' 2>/dev/null
+import json, os, subprocess, sys
+project, plugin_root = sys.argv[1], sys.argv[2]
+_notice = (os.environ.get("HOOK_COEXIST_NOTICE") or "") and os.environ["HOOK_COEXIST_NOTICE"] + "\n\n"
+script = os.path.join(plugin_root, "skills", "sigma-loop", "scripts", "loop_session_model.py")
+try:
+    r = subprocess.run([sys.executable, script, "check", os.path.join(project, ".sdlc"), "--warn-only"],
+                       capture_output=True, text=True, timeout=30)
+    text = (r.stdout or "").strip()
+except Exception:
+    sys.exit(1)
+if r.returncode != 0 or not text:
+    sys.exit(1)
+print(json.dumps({"hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": _notice + "Sigma " + text,
+}}))
+sys.exit(0)
+PY
+then
+    exit 0
+fi
 # --- Knowledge graph never built / stale under auto_refresh (issue #2704) ------------------------
 # Same tier idiom as the two above, and the same ACCELERATOR status: the load-bearing surface is
 # `kg.py warn` itself, which `loop.py next`/`next-batch` print on every host (Cursor has no hooks).

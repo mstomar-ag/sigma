@@ -14,7 +14,8 @@ hardened alternative for sleep-prone machines.
     supervise_daemon.py [sdlc_dir]      (default .sdlc)
 
 Env:
-  SIGMA_CLAUDE_CMD          — the session command (default: claude -p /sigma-loop).
+  SIGMA_CLAUDE_CMD          — the session command (default: claude -p /sigma-loop,
+                              with --model from loop.session_model; see docs/running-the-loop.md).
   SIGMA_SUPERVISE_MAX_RUNS  — total session launches before giving up (default 48).
   SIGMA_SUPERVISE_SLEEP_SCALE — multiply every wait (tests set a small fraction,
                                     e.g. 0.01, to shrink real pauses to a few seconds;
@@ -71,6 +72,8 @@ exercises for real). This is NOT a byte-faithful implementation of MSVCRT/Comman
 parsing — a quoted argument containing an ESCAPED embedded quote (`\"`) is not specially handled
 and is not claimed to be. POSIX (`sys.platform != "win32"`) behaviour is completely unchanged.
 """
+import importlib.util
+import json
 import os
 import pathlib
 import random
@@ -146,6 +149,14 @@ logroll = _load_logroll()
 
 #: #239: operator env vars may still carry the plugin's previous prefix (`SIGMA_RUN_ID` never does).
 legacy = _load_legacy()
+
+
+def _session_model():
+    spec = importlib.util.spec_from_file_location(
+        "loop_session_model", pathlib.Path(__file__).resolve().parent / "loop_session_model.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _split_claude_cmd(cmd):
@@ -555,6 +566,21 @@ def main(argv):
         return 2
 
     cmd = legacy.getenv("SIGMA_CLAUDE_CMD", "claude -p /sigma-loop")
+    # #1951: the default command carries the loop session's model; an explicit command is the
+    # operator's and is never rewritten. A bad key refuses loudly (exit 2); an unreadable
+    # config just means no flag.
+    if not legacy.getenv("SIGMA_CLAUDE_CMD") and host == "claude":
+        try:
+            session_cfg = json.loads((pathlib.Path(sdlc_dir) / "config.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            session_cfg = {}
+        try:
+            session_model = _session_model().effective(session_cfg)
+        except ValueError as exc:
+            print(f"supervisor: {exc}", file=sys.stderr)
+            return 2
+        if session_model:
+            cmd = f"claude --model {session_model} -p /sigma-loop"
 
     # H5 (plan-review, non-blocking #5): bash's `$(( secs * SCALE ))` silently
     # coerces a non-numeric SCALE/MAX_RUNS to 0 — which, for MAX_RUNS, means an

@@ -1409,6 +1409,19 @@ def _chain_row(cfg, sdlc_dir, now=None):
         return None
 
 
+def _loop_session_model_row(sdlc_dir):
+    """#1951: `loop session model: <observed model>` from the session transcript, no network. Fails only
+    when the model is priced above every tier the session dispatched; a host that exposes none says so
+    (ok). Never raises."""
+    try:
+        state, text = _load_loop_script("loop_session_model").status(sdlc_dir)
+        return _chk(f"loop session model: {text}", state != "above-tier",
+                    "set `loop.session_model` in .sdlc/config.json (or SIGMA_CLAUDE_CMD) to a cheaper "
+                    "model; every orchestration step is spent on the session's model")
+    except Exception:                        # noqa: BLE001
+        return None
+
+
 #: Hard cap on sealed goals one doctor run re-hashes; the rest are summarised as `N more` (a named ceiling).
 _SEALED_ROW_CAP = 200
 
@@ -4481,6 +4494,10 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
     _chr = _chain_row(cfg, sdlc_dir)  # #1594: absent when no chain record exists
     if _chr is not None:
         out.append(_chr)
+
+    _lsr = _loop_session_model_row(sdlc_dir)  # #1951
+    if _lsr is not None:
+        out.append(_lsr)
 
     _sdr = _sealed_drift_row(cfg, sdlc_dir)  # #850: absent when no live goal is sealed
     if _sdr is not None:
