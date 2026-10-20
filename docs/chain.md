@@ -127,6 +127,18 @@ starts early), follows it to the issue it names so that issue and what it waits 
 sheet lists every one in a block of its own. Follow-up wording ("filed as a follow-up to #N") stays a **weak
 mention**: advisory, never an edge.
 
+Five more wordings are read the same way (#1940), each only ever an unconfirmed wait. `slice-chain`: "S2a, S2b and
+S2c must precede S2d" (also "... must land before S2d"), read only when every code of the chain is written with its
+issue number in the same text as `S2a (#N)`; one unresolved code reads nothing from that sentence. `slice-on`:
+"S4b on S4a (#N)". `waiting-on`: "waiting on #N", from a comment only. `gates`: "#N gates #M", from a comment
+only; provisional until the owner ratifies it, and it reads both #N and #M as waits. `reversed-waits-on`: "the
+story #N waits on" at a clause end, not when a reference follows. The two comment-only forms are read only from
+the trusted authors above, never from a body or from anyone else.
+
+Two wordings are not read, because there is nothing to resolve: a slice code with no issue number ("built in S7"),
+and a ruling named in words ("depends on rulings in the <name> item"). Write the issue number, or settle the wait
+with `deps.py mark`.
+
 The block names the two ways to settle a wait: `deps.py mark <sdlc_dir> <goal> <ref> <reason...>` for a real one
 (it becomes a body edge every reader trusts), or the dismissal marker from `backlog_check.py dismiss-text
 blocked-by <ref>` for a wrong one (the plan stops reading it); run `chain.py plan` again after either. Only
