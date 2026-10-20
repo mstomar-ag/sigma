@@ -75,7 +75,7 @@ run that stops on something the sheet never asked is a defect. A question is ask
 |---|---|---|---|
 | `park:<n>` | a parked member: why it is parked (its recorded park question, else the first line of its park note or body, cut to 140 characters; withheld when the decision records are keys-only) and who waits behind it | `keep it parked`: the chain stops before it and the members that wait on it, named | `release it`: the existing atomic unpark gesture (`unpark.resolve`, decision `unpark`: one label swap, the Q&A block, one comment); an undeclared kind is declared with the recommended guess |
 | `wait:<a>-<b>` | a wait read only from prose or a comment, whose blocker is **open** and in the chain and whose edge the explicit edges do not already imply (a wait on a closed issue is only shown) | `confirm it`: the marker `deps.py mark` writes (`**Blocked by:** #b` in the body, one note) | `dismiss it`: the dismissal marker (`backlog_check.dismiss_comment`, posted the way `loop.py note` posts it); the plan, the forecast and the run drop the wait |
-| `elsewhere:<n>` | a member assigned to someone else, or in progress in another session | `wait for them`: the run pauses there and says whose it is | `take it over`: assign the runner, then remove the old assignee (one assignee). Never offered for a member in progress: only `wait for them` is, and the sheet says why |
+| `elsewhere:<n>` | a member assigned to someone else, or in progress in another session | `wait for them`: the run pauses there and says whose it is | `take it over`: assign the runner, then remove the old assignee (one assignee). The runner is the `--as` login the plan was made for, not the login that ran `plan`; the ask says "Planned by X for Y" when they differ. Never offered for a member in progress: only `wait for them` is, and the sheet says why |
 | `irreversible:<n>` | a paid step: a declared paid line in the body, or a label listed in `chain.paid_labels` | none: never defaulted | `go ahead`; anything else is skipped by every run cycle |
 | `cap:c<n>` | every chain | none: never defaulted | the answer is the goal cap the run enforces (`chain_spend.admit`); the tighter of it and `chain.max_goals` wins, and the forecast models it |
 | `cross_unit:<a>-<b>` | an edge between two units | `keep going` | `stop here`: the dependent and what waits behind it are held (labelled, never armed, skipped by every run cycle) |
@@ -309,6 +309,12 @@ stateful fake of the host, with no network.
 - GitHub calls for `plan`: 9 (counted from the fake's call log; it was 7 before the reader for waits written in prose
   or a comment, which adds the issue read and the comment page of the one member that has a comment; the
   closed-prerequisite check adds none here because the scenario has no closed prerequisite).
+- GitHub calls for a second plan on the on-disk read cache (#1936; `skills/sigma-loop/scripts/chain_read_cache.py`,
+  file `.sdlc/state/chain-reads.json`, keyed by issue number and exact `updated_at`, at most 900 seconds old, 400
+  entries, 8 MiB): before, 9 for the first plan and 9 for a second overlapping plan; after, 9 for the first and
+  second overlapping plan: 7 (counted from the fake's call log with the fake serving `updated_at`; the member with a
+  comment is not read again). A fake that serves no `updated_at` gets no hit, so its second plan is 9. The saving on
+  a live repository is not measured.
 - Time to the sheet: measured as wall time on the fake, which is not meaningful against a live host.
   It is not measured live.
 - Estimate versus actual spend: not measured (the scratch ledger holds no priced goals).

@@ -4273,6 +4273,22 @@
       "risk": "low"
     },
     {
+      "path": "skills/sigma-loop/scripts/chain_read_cache.py",
+      "function": "save",
+      "rule": "fs-remove",
+      "count": 2,
+      "gate": "the rename that replaces `.sdlc/state/chain-reads.json` with the temporary file this same save just wrote, and the removal of that temporary file when the write or the rename fails; removes no other file",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/chain_read_cache.py",
+      "function": "save",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "one atomic write of `.sdlc/state/chain-reads.json` (issue numbers, update stamps and the comment text already read from GitHub; a cache of reads, bounded by entry count, byte size and a maximum age); reached only by an explicit `chain.py plan` run; any failure is ignored and the plan reads fresh; no GitHub call and no write to GitHub",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/chain_parallel.py",
       "function": "_locked",
       "rule": "fs-write",
