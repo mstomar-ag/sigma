@@ -216,7 +216,7 @@ def test_promote_label_write_failure_prints_the_fix(monkeypatch):
     def boom(*a, **k):
         raise _err(BAD)
     monkeypatch.setattr(source, "_swap_labels", boom)
-    monkeypatch.setattr(p, "_read_state", lambda s, n: (({"sdlc:proposed"}, False, "", ""), ""))
+    monkeypatch.setattr(p, "_read_state", lambda s, n: (({"sdlc:proposed"}, False, "", "", "t"), ""))
     monkeypatch.setattr(p, "_blocker_status", lambda *a, **k: [])
     out = p.promote(".sdlc", {"discovery": {"source": "github"}}, [7], source=source)
     detail = out["results"][0]["detail"]
