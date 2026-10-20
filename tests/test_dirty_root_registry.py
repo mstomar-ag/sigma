@@ -53,9 +53,11 @@ def _sigma_dirt(w):
     raw porcelain, asserted to be exactly Sigma's two registry writes."""
     first = w.start("100")
     assert first.startswith("worktree"), first
+    w.legacy_pick(100)
     w.commit_registry()
     second = w.start("101")
     assert second.startswith("worktree"), second
+    w.legacy_pick(101)
     lines = w.porcelain().splitlines()
     assert lines == [" M " + SHARD, " M " + PAGE], lines
     return lines
@@ -113,6 +115,7 @@ def test_a_human_shard_edit_that_sigma_then_wrote_over_still_refuses(tmp_path, c
     with registry_root.drained(capfd):
         w = World(tmp_path).build()
         assert w.start("100").startswith("worktree")
+        w.legacy_pick(100)
         w.commit_registry()
         shard = w.root / SHARD
         edited = shard.read_text(encoding="utf-8").replace('"authorized": false', '"authorized": true')
@@ -131,6 +134,7 @@ def _staged_or_moded(w, case):
     """One shard Sigma wrote after the §15 commit (chain [C, W1]), then `case` applied. -> the
     v2 entry, its columns asserted."""
     assert w.start("100").startswith("worktree")
+    w.legacy_pick(100)
     w.commit_registry()
     committed = registry_root.blob_id(w.read(SHARD))
     w.sigma_shard_write("101")
@@ -178,6 +182,7 @@ def test_a_hand_revert_to_an_older_sigma_state_is_not_laundered(tmp_path, capfd)
     with registry_root.drained(capfd):
         w = World(tmp_path).build()
         assert w.start("100").startswith("worktree")
+        w.legacy_pick(100)
         older = w.read(SHARD)
         w.sigma_shard_write("101")
         w.commit_registry()
@@ -280,9 +285,11 @@ def test_the_documented_cli_gesture_with_a_relative_sdlc_is_not_refused(tmp_path
         w = World(tmp_path).build()
         rc, printed = w.cli("100", monkeypatch, out)
         assert rc == 0 and printed.startswith("worktree"), (rc, printed)
+        w.legacy_pick(100)
         w.commit_registry()
         rc, printed = w.cli("101", monkeypatch, out)
         assert rc == 0 and printed.startswith("worktree"), (rc, printed)
+        w.legacy_pick(101)
         lines = w.porcelain().splitlines()
         assert lines == [" M " + SHARD, " M " + PAGE], lines
         rc, printed = w.cli("102", monkeypatch, out)
