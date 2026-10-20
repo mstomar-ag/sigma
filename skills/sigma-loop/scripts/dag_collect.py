@@ -198,7 +198,7 @@ def _handoff_edges(sdlc, config):
 
 def collect(sdlc, config, run=None, now=None, previous=None, cap=LIST_CAP):
     """The report: `{map, calls, unread, last_error, partial}`; `map` is None when nothing may be
-    published (a failed list, an empty result)."""
+    published (a failed list, a goal list empty beside non-empty others)."""
     now = time.time() if now is None else now
     counted, calls = _counting(_strict(run or gh_api._default_run))
     repo = _gh(config).get("repo") or ""
@@ -219,10 +219,9 @@ def collect(sdlc, config, run=None, now=None, previous=None, cap=LIST_CAP):
     except Exception as exc:                            # noqa: BLE001 - recorded as a class name
         rep["last_error"] = type(exc).__name__
         return rep
-    if not items:
-        rep["last_error"] = "EmptyResult"
-        return rep
-    if not sizes.get("goal") and any(sizes.values()):   # PROVISIONAL (owner to ratify): goals never empty alone
+    # Every list read fine and all came back empty: an empty backlog is a valid state (#1933), so it
+    # falls through to a 0-node map. A list that returned entries none of which parsed is not empty.
+    if any(sizes.values()) and (not sizes.get("goal") or not items):   # PROVISIONAL (owner to ratify): goals never empty alone
         rep["last_error"] = "EmptyList"
         return rep
     nodes, edges = {}, []
