@@ -206,6 +206,9 @@ def project_world(projects=None, fields=None, items=None, issues=None):
     def run(a):
         if a[:2] == ["api", "rate_limit"]:      # #1305: REST budget read the watcher back-fill gates on
             return json.dumps({"resources": {"graphql": {"remaining": 5000, "limit": 5000}}})
+        if a[:2] == ["api", "user"]:            # #1934: the login read is an explicit GET; `@me` is this simulator's _FAKE_ME
+            calls.append(list(a))
+            return _FAKE_ME + "\n"
         swap = _pw_label_swap(a, state["issue_labels"], calls=calls,
                               repo=next((c[c.index("--repo") + 1] for c in calls
                                          if "--repo" in c), None))

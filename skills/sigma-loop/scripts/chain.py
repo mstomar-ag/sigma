@@ -519,8 +519,8 @@ def _weak_count(issue, goal_n, blocker_scan):
 
 def _runner_login(ro, source):
     """The login a run would match assignees against, or None (no filter, or unresolved: fails open like the
-    picker). `@me` is resolved with an explicit GET, which `_GetOnly` allows (#1907)."""
-    return _load("sources").resolve_assignee_login(lambda args: ro(list(args) + ["--method", "GET"]),
+    picker). `@me` is resolved by `sources`, whose `gh api user` call carries an explicit `--method GET` that `_GetOnly` allows (#1907, #1934)."""
+    return _load("sources").resolve_assignee_login(ro,
                                                     getattr(source, "assignee", None))
 
 

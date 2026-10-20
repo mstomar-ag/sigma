@@ -317,7 +317,7 @@ def rest_write(args, calls=None, repo_args=("--repo", "o/r"), labels=None, me="o
     f = _fields(args)
     rec = calls.append if calls is not None else (lambda c: None)
     if kind == "user":
-        return json.dumps({"login": me})
+        return me + "\n" if "--jq" in args else json.dumps({"login": me})   # #1934: `--jq .login` prints the bare login
     if kind == "label_get":
         if extra in missing_labels:
             e = RuntimeError("gh: Not Found (HTTP 404)")
