@@ -68,6 +68,7 @@ state = _load("state")                  # atomic_write_text, load_config
 
 SCHEMA = "dag/1"
 FILE = "dag.json"
+SNAPSHOT = "dag/map.json"              # on the ledger branch (#1956)
 LOCK = "dag.lock"
 DEFAULT_TTL_MINUTES = 60
 CHANGE_CHECK_SECONDS = 600              # a change check this recent keeps an old map usable
@@ -238,12 +239,13 @@ def save(sdlc, m, config=None):
         p = path(sdlc)
         os.makedirs(p.parent, exist_ok=True)
         try:                                    # the map being replaced, for the history (#1622)
-            before = load(sdlc, config)[0]
+            before = _load_local(sdlc, config)[0]
         except Exception:
             before = None
         state.atomic_write_text(p, json.dumps(doc, sort_keys=True, separators=(",", ":")) + "\n")
     except Exception:
         return False, "error"
+    publish_snapshot(sdlc, doc, config)         # #1956: never fails a save
     try:                                        # a history failure never fails or delays a save
         _load("dag_history").record_save(sdlc, config, before, doc, time.time())
     except Exception as exc:
@@ -251,8 +253,107 @@ def save(sdlc, m, config=None):
     return True, "ok"
 
 
+def _cfg(sdlc, config):
+    if config is None:
+        try:
+            config = state.load_config(sdlc)
+        except Exception:
+            config = {}
+    return config
+
+
+def snapshot_path(ledger_root):
+    """`dag/map.json` at the root of the ledger worktree `ledger_root` (#1956)."""
+    return pathlib.Path(ledger_root) / SNAPSHOT
+
+
+def _ledger_root(sdlc, config):
+    """The ledger worktree root when `ledger.enabled`, mode is not `off` and the worktree exists, else
+    None. Ledger off touches no ledger path."""
+    try:
+        if mode(config) == "off":
+            return None
+        ledger = _load("ledger")
+        if not ledger.enabled(config):
+            return None
+        sync = _load("sync")
+        if not sync.is_worktree(sdlc):
+            return None
+        return sync.worktree(sdlc)
+    except Exception:
+        return None
+
+
+def publish_snapshot(sdlc, doc, config=None):
+    """Write the cleaned map to `dag/map.json` in the ledger worktree, atomically (#1956). Whole file,
+    last writer wins. Returns True when written; never raises and never fails a save."""
+    try:
+        config = _cfg(sdlc, config)
+        root = _ledger_root(sdlc, config)
+        if root is None:
+            return False
+        out = clean(doc)
+        out["schema"] = SCHEMA
+        out["built_by"] = _load("ledger")._host_token(config)
+        p = snapshot_path(root)
+        os.makedirs(p.parent, exist_ok=True)
+        state.atomic_write_text(p, json.dumps(out, sort_keys=True, separators=(",", ":")) + "\n")
+        return True
+    except Exception:
+        return False
+
+
+def read_snapshot_at(root):
+    """`(map, built_by)` for the snapshot file under ledger worktree `root`, or `(None, None)`. The file is
+    untrusted input: it goes through `clean` and the same shape checks as `load`."""
+    try:
+        doc = json.loads(_read_text(snapshot_path(root)))
+    except Exception:
+        return None, None
+    if (not isinstance(doc, dict) or doc.get("schema") != SCHEMA or not isinstance(doc.get("header"), dict)
+            or not isinstance(doc.get("nodes"), list) or not isinstance(doc.get("edges"), list)):
+        return None, None
+    b = doc.get("built_by")
+    return clean(doc), (b if isinstance(b, str) and _TOKEN.match(b) else None)
+
+
+def read_snapshot(sdlc, config=None):
+    """The ledger snapshot map for this checkout, or None (ledger off, no worktree, no or bad file)."""
+    root = _ledger_root(sdlc, _cfg(sdlc, config))
+    return read_snapshot_at(root)[0] if root is not None else None
+
+
+def _built(m):
+    h = m.get("header") if isinstance(m, dict) else None
+    t = parse_ts(h.get("built_at")) if isinstance(h, dict) else None
+    return t if t is not None else -1.0
+
+
+def load_with_source(sdlc, config=None):
+    """`(map, why, source)`, source `local`, `ledger` or `none`. The local file wins unless it is missing,
+    corrupt, truncated, another schema, or older by `built_at` than a valid ledger snapshot (#1956)."""
+    config = _cfg(sdlc, config)
+    m, why = _load_local(sdlc, config)
+    if why == "off":
+        return m, why, "none"
+    snap = read_snapshot(sdlc, config)
+    if snap is not None and (m is None or _built(snap) > _built(m)):
+        return snap, "ok", "ledger"
+    return m, why, ("local" if m is not None else "none")
+
+
 def load(sdlc, config=None):
-    """`(map, "ok")` or `(None, reason)`; never raises. Mode `off` reads nothing: `(None, "off")`."""
+    """`(map, "ok")` or `(None, reason)`; never raises. Mode `off` reads nothing: `(None, "off")`. With the
+    ledger on, a newer ledger snapshot replaces a missing, damaged or older local file (`load_with_source`)."""
+    config = _cfg(sdlc, config)
+    m, why = _load_local(sdlc, config)
+    if why == "off":
+        return m, why
+    m2, why2, _src = load_with_source(sdlc, config)
+    return (m2, why2) if m2 is not None else (m, why)
+
+
+def _load_local(sdlc, config=None):
     if _mode_for(sdlc, config) == "off":
         return None, "off"
     p = path(sdlc)

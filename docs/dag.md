@@ -213,3 +213,7 @@ whole-sweep call count falls only by the unpark pass.
   root until older goals drain.
 - The refresh is one writer at a time by design; a sibling refresher reads the existing file and does
   not wait.
+
+## The snapshot on the ledger branch
+
+With `ledger.enabled` true and the mode not `off`, each save of the stored map also writes `dag/map.json` in the ledger worktree: the same fields as `.sdlc/state/dag.json` plus a host token, whole file, last writer wins. `sync.py publish` pushes it, and `DAG.md` is built from it (with `Built by` and `Snapshot age` lines) instead of from history alone. A missing, damaged or older local map loads the newer snapshot; with the ledger off nothing is written or read there. Measured only by offline fake and real-git tests.

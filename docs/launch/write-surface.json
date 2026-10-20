@@ -538,6 +538,14 @@
     },
     {
       "path": "skills/sigma-loop/scripts/dag_store.py",
+      "function": "publish_snapshot",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "ledger.enabled is exactly true and discovery.dag.mode is not off and the ledger worktree exists; one atomic write of dag/map.json in the ledger worktree, rebuilt from the closed-vocabulary map fields and one host token, never a title or free text",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_store.py",
       "function": "refresh_lock",
       "rule": "fs-write",
       "count": 1,

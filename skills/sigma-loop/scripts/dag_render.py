@@ -73,8 +73,34 @@ def _sccs(nodes, out):
     return sorted(res)
 
 
-def render(records):
+def _snapshot_records(snap):
+    """The snapshot as the facts `render` folds: every edge present, every node not `open` resolved."""
+    h = snap.get("header") if isinstance(snap.get("header"), dict) else {}
+    t = h.get("built_at") or ""
+    out = [{"t": t, "ev": "edge-added", "a": e["blocker"], "b": e["blocked"]} for e in snap.get("edges") or []]
+    out += [{"t": t, "ev": "node-resolved", "n": n["number"]} for n in snap.get("nodes") or []
+            if n.get("state", "open") != "open"]
+    return out
+
+
+def _age(built, now):
+    import calendar
+    import time
+    try:
+        secs = int(now - calendar.timegm(time.strptime(built, "%Y-%m-%dT%H:%M:%SZ")))
+    except (ValueError, TypeError):
+        return None
+    # whole days, on purpose: a finer age would change DAG.md on every publish tick and so commit and
+    # push it forever; the exact build time is on the line above
+    return "%d day(s)" % (max(secs, 0) // 86400)
+
+
+def render(records, snapshot=None, built_by=None, now=None):
+    """With `snapshot` (a cleaned map), chains, stuck, cycles and counts come from it and only
+    `chain-completed` history records are used; provenance lines follow the title (#1956)."""
     recs = [r for r in records if isinstance(r, dict) and isinstance(r.get("ev"), str)]
+    if snapshot is not None:
+        recs = [r for r in recs if r["ev"] == "chain-completed"] + _snapshot_records(snapshot)
     recs.sort(key=_key)
     edges, resolved, completed, newest = {}, set(), [], ""
     for r in recs:
@@ -88,7 +114,7 @@ def render(records):
         elif ev == "chain-completed" and ch is not None:
             completed.append((t, ch, n))
     present = sorted(e for e, on in edges.items() if on)
-    if not recs:
+    if not recs and snapshot is None:
         return "# DAG\n"
     allnodes = {x for e in present for x in e}
     # weak components over every present edge
@@ -125,6 +151,13 @@ def render(records):
         stuck.append((len(seen), n))
     stuck.sort(key=lambda x: (-x[0], x[1]))
     lines = ["# DAG", ""]
+    if snapshot is not None:
+        built = (snapshot.get("header") or {}).get("built_at") or "unknown"
+        lines += ["Built by %s at %s" % (built_by or "unknown", built)]
+        age = _age(built, now) if now is not None else None
+        if age:
+            lines += ["Snapshot age: " + age]
+        lines += [""]
     lines += ["## Stuck chains", ""]
     lines += ["- #%d holds %d" % (n, k) for k, n in stuck] or ["- none"]
     lines += ["", "## Active chains", ""]
