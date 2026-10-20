@@ -1966,7 +1966,8 @@ def _resolver_auth_row(launcher, binary, var, runner=None, which=None, login=Non
     if login == "host":                     # #1946: the watcher's own login; only the account TYPE is ever named
         return _chk("resolver auth: " + ("host login: logged in as %s" % (kind or "an account of unknown type") if ok
                                          else "host login: not logged in") + " (route: %s)" % route, bool(ok),
-                    "log the host CLI in as the user that runs the watcher, or set conflicts.agent.login back to scrubbed; "
+                    "log the host CLI in as the user that runs the watcher (on macOS run `claude setup-token` and export "
+                    "CLAUDE_CODE_OAUTH_TOKEN for the watcher: the keychain is denied inside the wall), or set conflicts.agent.login back to scrubbed; "
                     "the live run against a real CLI is Awaiting (owner-gated)")
     return _chk("resolver auth: " + ("logged in in the scrubbed environment" if ok else "not logged in in the scrubbed environment")
                 + " (route: %s)" % route, bool(ok), fix)

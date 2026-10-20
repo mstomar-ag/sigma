@@ -225,6 +225,76 @@ def test_the_doctor_host_row_is_red_when_logged_out_and_scrubbed_rows_are_unchan
     assert not [c for c in scrubbed if "host login" in c["name"]]
 
 
+# --------------------------------------------------------------------------- #1963: macOS login (identity, keychain, hand-over)
+# Controls (each clause broken once, seen red): USER dropped from host mode; LOGNAME dropped; the token hand-over removed; the
+# hand-over let into scrubbed mode; a Library/Keychains or .config/gh entry removed from the wall; the macOS hint dropped;
+# the token left unscrubbed in the output. The real-CLI run inside the wall on macOS is owner-run (no model call).
+OAUTH_VAR = "CLAUDE_CODE_OAUTH_TOKEN"
+
+
+def test_host_mode_passes_user_and_logname_when_set_and_nothing_else(tmp_path):
+    launcher = L.load()
+    env = launcher.build_env(tmp_path / "s", None, host_environ(tmp_path, USER="someone", LOGNAME="someone", SHELL="/bin/zsh"), "host")
+    assert env["USER"] == "someone" and env["LOGNAME"] == "someone"
+    assert set(env) == {"PATH", "TMPDIR", "HOME", "CLAUDE_CONFIG_DIR", "GIT_TERMINAL_PROMPT", "USER", "LOGNAME"}
+    only_user = launcher.build_env(tmp_path / "s", None, host_environ(tmp_path, USER="someone"), "host")
+    assert only_user["USER"] == "someone" and "LOGNAME" not in only_user
+
+
+def test_scrubbed_mode_never_carries_user_logname_or_the_token(tmp_path):
+    launcher = L.load()
+    env = launcher.build_env(tmp_path / "s", None, host_environ(tmp_path, USER="u", LOGNAME="u", **{OAUTH_VAR: "t"}))
+    assert not {"USER", "LOGNAME", OAUTH_VAR} & set(env)
+
+
+def test_the_token_variable_reaches_the_host_session_and_never_a_git_gh_or_ssh_variable(tmp_path):
+    launcher = L.load()
+    env = launcher.build_env(tmp_path / "s", None, host_environ(tmp_path, **{OAUTH_VAR: "the-token"}), "host")
+    assert env[OAUTH_VAR] == "the-token"
+    assert not [k for k in env if k in LEAKS or k.startswith(("GIT_CONFIG", "GH_", "SSH_", "GITHUB_"))]
+    assert "must-not-travel" not in json.dumps(env)
+    assert OAUTH_VAR not in launcher.build_env(tmp_path / "s", None, host_environ(tmp_path), "host")
+
+
+def test_the_wall_still_denies_the_keychain_and_the_gh_configuration_for_a_host_launch(tmp_path):
+    launcher = L.load()
+    prefix, _ = launcher.session_wall("darwin", lambda n: "/usr/bin/" + n, str(tmp_path / "home"), str(tmp_path / "sess"))
+    profile = prefix[2]
+    for denied in ("Library/Keychains", ".config/gh", ".ssh", ".netrc", ".aws"):
+        assert str(tmp_path / "home" / denied) in profile.split("(deny file-write*")[0], denied
+
+
+def test_the_parked_reason_names_the_one_command_only_on_macos_behind_the_wall():
+    launcher = L.load()
+    mac = launcher.not_logged_in_reason("host", True, "darwin")
+    assert launcher.NOT_LOGGED_IN_HOST in mac and "claude setup-token" in mac and OAUTH_VAR in mac
+    assert launcher.not_logged_in_reason("host", True, "linux") == launcher.NOT_LOGGED_IN_HOST
+    assert launcher.not_logged_in_reason("host", False, "darwin") == launcher.NOT_LOGGED_IN_HOST
+    assert launcher.not_logged_in_reason("scrubbed", True, "darwin") == launcher.NOT_LOGGED_IN
+
+
+def test_a_host_launch_hands_the_token_to_the_session_and_scrubs_it_from_the_output(lrig):
+    stubbed(lrig)
+    lrig.binary.write_text(lrig.binary.read_text().replace('print("done")', 'print("leak " + os.environ.get("%s", ""))' % OAUTH_VAR))
+    result = lrig.launcher.launch(lrig.request(login="host"), environ=host_environ(lrig.tmp, **{OAUTH_VAR: "tok-1963"}))
+    assert recorded(lrig, "run.json")["env"][OAUTH_VAR] == "tok-1963" and recorded(lrig, "auth.json")[OAUTH_VAR] == "tok-1963"
+    assert "tok-1963" not in result.reason and "[removed]" in result.reason
+
+
+def test_the_doctor_host_probe_runs_inside_the_wall_and_its_fix_names_the_command(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    seen = []
+
+    def runner(env, binary, cwd, timeout=None, prefix=None):
+        seen.append(prefix)
+        return False, None
+    d, cfg = R.doctor(), R.config()
+    cfg["upkeep"]["conflicts"]["agent"]["login"] = "host"
+    rows = d._resolver_rows(R.project(tmp_path, cfg), cfg, lambda n: "/usr/bin/" + n, False, None, runner)
+    auth = [c for c in rows if c["name"].startswith("resolver auth")][0]
+    assert seen and seen[0][0] == "/usr/bin/sandbox-exec" and "Library/Keychains" in seen[0][2]
+    assert "claude setup-token" in json.dumps(auth)
+
 # --------------------------------------------------------------------------- #1953: the doctor shows the capped model; the account type is allowlisted
 
 def test_the_configured_row_names_the_model_after_the_repo_ceiling_cap(tmp_path):
