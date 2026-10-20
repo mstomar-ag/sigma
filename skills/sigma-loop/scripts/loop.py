@@ -878,7 +878,8 @@ def _predict_model_choice_at_pick(sdlc_dir, source, goal, config):
             print(f"sigma: model-tier prediction failed (non-fatal): {err_tail[0]}",
                   file=sys.stderr)
             return
-        m = _WHY_LINE.match((r.stdout or "").strip())
+        # #1950: `why` prints the tier on line 1 and the effort signal on line 2; only line 1 is the tier.
+        m = _WHY_LINE.match(((r.stdout or "").strip().splitlines() or [""])[0])
         if not m:
             print(f"sigma: model-tier prediction returned an unexpected shape "
                   f"(non-fatal): {r.stdout!r}", file=sys.stderr)

@@ -488,13 +488,37 @@ def resolve_host_model(host, tier, config=None, *, effort=None):
     return _validate_host_model_pair(host, tier, pair)
 
 
+def predict_effort_location(goal_text):
+    """`(effort, signal, where, hits)` -- the effort axis with the tier axis's own safeguards for
+    `high` (#1950): a match lying wholly inside a code span or a path-shaped token never counts; a hit
+    in the TITLE (text up to the first `\n`) wins on one occurrence; a body-only hit needs
+    `_BODY_MULTI_MIN_HITS` or more occurrences. Short of that the scan falls through to `low`, whose
+    rules are unchanged (any occurrence). `(default, None, None, 0)` with no signal."""
+    t = (goal_text or "").lower()
+    nl = t.find("\n")
+    title_end = len(t) if nl < 0 else nl
+    spans = _excluded_spans(t)
+    for tier, pat in _EFFORT_PATTERNS:
+        if tier != "high":
+            m = re.search(pat, t)
+            if m:
+                return tier, m.group(0), ("title" if m.start() < title_end else "body"), 1
+            continue
+        body_hits = []
+        for m in re.finditer(pat, t):
+            if _within_excluded_span(m.start(), m.end(), spans):
+                continue
+            if m.start() < title_end:
+                return tier, m.group(0), "title", 1
+            body_hits.append(m)
+        if len(body_hits) >= _BODY_MULTI_MIN_HITS:
+            return tier, body_hits[0].group(0), "body", len(body_hits)
+    return _EFFORT_DEFAULT, None, None, 0
+
+
 def predict_effort(goal_text):
     """Return the reasoning effort (low|medium|high) for a goal/step text. Deterministic."""
-    t = (goal_text or "").lower()
-    for tier, pat in _EFFORT_PATTERNS:
-        if re.search(pat, t):
-            return tier
-    return _EFFORT_DEFAULT
+    return predict_effort_location(goal_text)[0]
 
 
 def predict_with_reason(goal_text, excludes=(), max_tier=_MAX_TIER_DEFAULT):
@@ -942,6 +966,11 @@ def main(argv):
                                                           max_tier(_c))
         print(f"model={tier} in={where} hits={hits} signal={signal}" if signal
               else f"model={tier} signal=")
+        # #1950: the effort axis on a second line, same field order, so the first line a caller
+        # parses is byte-identical to before.
+        effort, e_signal, e_where, e_hits = predict_effort_location(_read_goal(argv[2]))
+        print(f"effort={effort} in={e_where} hits={e_hits} signal={e_signal}" if e_signal
+              else f"effort={effort} signal=")
         return 0
     if len(argv) < 2 or argv[1] in ("resolve", "resolve-step", "why"):
         print(USAGE, file=sys.stderr)
