@@ -257,12 +257,28 @@ def test_failed_list_leaves_file_byte_identical(tmp_path):
     assert p.read_bytes() == good
 
 
-def test_empty_result_leaves_file_byte_identical(tmp_path):
-    """A well-formed but empty answer (a rate-limited gh) is not an answer.
-    control: write the empty result -> the file changes."""
-    p, good = _published(tmp_path, _world())
+def test_empty_backlog_publishes_a_usable_empty_map(tmp_path):
+    """Every list read fine and all came back empty: that is a repository state, not an error (#1933).
+    control: restore the EmptyResult branch -> the file is kept and last_error is set."""
+    _published(tmp_path, _world())
     rep = dc.refresh(tmp_path, CONFIG, Fake([]), NOW + 10)
-    assert rep["status"] == "kept" and rep["last_error"] == "EmptyResult"
+    assert rep["status"] == "saved" and rep["last_error"] is None and not rep["partial"]
+    m, why = ds.load(tmp_path, CONFIG)
+    assert why == "ok" and m["nodes"] == [] and m["edges"] == []
+    assert m["header"]["last_error"] is None and m["header"]["partial"] is False
+    assert ds.usable(m, NOW + 10, 60) == (True, "ok")
+
+
+def test_failed_list_on_an_empty_backlog_still_keeps_the_file(tmp_path):
+    """The exception path is unchanged: one list raising publishes nothing, empty or not.
+    control: treat a raised list as empty -> the empty map replaces the good one."""
+    p, good = _published(tmp_path, _world())
+
+    def boom(args):
+        if "labels=sdlc:parked" in args:
+            raise RuntimeError("network down")
+    rep = dc.refresh(tmp_path, CONFIG, Fake([], fail=boom), NOW + 10)
+    assert rep["status"] == "kept" and rep["last_error"] == "GhApiError"
     assert p.read_bytes() == good
 
 
