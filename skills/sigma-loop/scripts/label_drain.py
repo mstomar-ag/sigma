@@ -46,8 +46,11 @@ import hashlib
 import importlib.util
 import json
 import pathlib
+import os
 import re
 import sys
+import time
+from datetime import datetime, timezone
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -80,6 +83,8 @@ USAGE = ("usage: label_drain.py plan|status <sdlc_dir> <label> [--json]\n"
          "  Nothing here ever removes the label; the one body edit is the spend-approval marker line.")
 
 MAX_MEMBERS = 200
+LAG_WINDOW_S = 60   # #1943: a listing whose newest `updated_at` is younger than this may lag a label write
+LAG_WAIT_S = 3      # one pause before the single re-read; `SIGMA_LABEL_LAG_WAIT` overrides (0 allowed)
 MAX_PULLED = 50
 MAX_DEPTH = 8
 MAX_PARKED_BRIEFS = 20
@@ -380,7 +385,29 @@ def _brief_row(row, sdlc_dir, config, n, source, scrub, briefed, not_briefed, un
     return briefed + 1, unpark
 
 
-def plan(sdlc_dir, label, config=None, run=None, hide_answered=True):
+def _lag_wait():
+    try:
+        return max(0.0, float(os.environ.get("SIGMA_LABEL_LAG_WAIT", LAG_WAIT_S)))
+    except ValueError:
+        return float(LAG_WAIT_S)
+
+
+def _newest_age(listed, now=None):
+    """-> seconds since the newest parseable `updated_at` in `listed`, or None when none parses."""
+    now = now or datetime.now(timezone.utc)
+    ages = []
+    for i in listed:
+        try:
+            t = datetime.fromisoformat(str(i.get("updated_at") or "").replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        ages.append((now - t).total_seconds())
+    return min(ages) if ages else None
+
+
+def plan(sdlc_dir, label, config=None, run=None, hide_answered=True, sleep=None):
     """-> the full read-only plan dict. A question with a recorded answer is dropped and `ready` follows
     (#1732); `answer` passes hide_answered=False so it can still validate a repeated answer. Raises `sources.LabelScopeError` or `ValueError` (too many
     members) for the refusals the CLI turns into exit 2."""
@@ -392,6 +419,19 @@ def plan(sdlc_dir, label, config=None, run=None, hide_answered=True):
     sources.scope_to_label(source, label)             # slice #1575's rules, not a copy
     repo = source.repo
     listed = sources.fetch_issues_rest(ro, repo, [label], MAX_MEMBERS + 1)
+    # #1943: the label listing can trail a just-made label write. An empty listing, or one whose
+    # newest issue changed under LAG_WINDOW_S ago, is read once more after a short pause and the two
+    # reads are unioned by number. One extra REST call at most, never a loop.
+    age = _newest_age(listed)
+    window = (not listed) or (age is not None and age < LAG_WINDOW_S)
+    lag = {"window_s": LAG_WINDOW_S, "reread": False, "added": []}
+    if window:
+        (sleep or time.sleep)(_lag_wait())
+        again = sources.fetch_issues_rest(ro, repo, [label], MAX_MEMBERS + 1)
+        have = {int(i["number"]) for i in listed}
+        extra = [i for i in again if int(i["number"]) not in have]
+        listed = list(listed) + extra
+        lag = {"window_s": LAG_WINDOW_S, "reread": True, "added": sorted(int(i["number"]) for i in extra)}
     if len(listed) > MAX_MEMBERS:
         raise ValueError("label %r has more than %d open members (%d read before stopping); "
                          "refusing rather than truncating. Narrow the label first."
@@ -483,7 +523,8 @@ def plan(sdlc_dir, label, config=None, run=None, hide_answered=True):
             "unresolved": [{"ref": t, "dependents": d} for t, d in sorted(unresolved_all.items())],
             "warnings": warnings, "stops": clo["stops"], "counts": dict(sorted(counts.items())),
             "pickable": sum(1 for r in rows if r["ready"]), "pulled": clo["pulled"],
-            "drained": not rows, "calls": ro.summary()}
+            "drained": not rows, "calls": ro.summary(), "lag": lag,
+            "lag_window": window}
 
 
 # --- label kinds and scope (#1581) ---------------------------------------------------------------
@@ -741,6 +782,11 @@ def _reason(row, in_progress, blocked_overlay):
 def render_plan(p):
     out = ["label %s (%s): %d open member(s), %d pickable now" % (
         p["label"], p["repo"] or "this repo", len(p["members"]), p["pickable"])]
+    if p.get("lag_window"):
+        out.append("  note: the label listing may lag a recent label change (re-read once, %s); "
+                   "a label added in the last %ds can be missing" % (
+                       ("added " + ", ".join("#%d" % x for x in p["lag"]["added"]))
+                       if p["lag"]["added"] else "nothing new", p["lag"]["window_s"]))
     for r in p["members"]:
         extra = ""
         if r["verdict"] == "parked":
