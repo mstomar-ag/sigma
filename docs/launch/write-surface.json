@@ -545,6 +545,14 @@
       "risk": "low"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag_lease.py",
+      "function": "_write",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "reached only through acquire, which returns before any write unless ledger.enabled is exactly true, discovery.dag.mode is not off and the ledger worktree exists; one atomic write of this writer's own dag/lease/<writer>.json (writer, taken_at, expires_at), never another writer's file",
+      "risk": "low"
+    },
+    {
       "path": "skills/sigma-loop/scripts/dag_store.py",
       "function": "refresh_lock",
       "rule": "fs-write",
@@ -687,6 +695,14 @@
       "count": 2,
       "gate": "ungated",
       "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_lease.py",
+      "function": "_write",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "reached only through acquire, which returns before any write unless ledger.enabled is exactly true, discovery.dag.mode is not off and the ledger worktree exists; one atomic write of this writer's own dag/lease/<writer>.json (writer, taken_at, expires_at), never another writer's file",
+      "risk": "low"
     },
     {
       "path": "skills/sigma-loop/scripts/dag_store.py",
@@ -4006,6 +4022,14 @@
       "rule": "fs-remove",
       "count": 1,
       "gate": "runs only after a refresh that saved the dependency map (discovery.dag.mode is not off); removes only the one file state/dag-unchecked.json under the runtime state directory, a list of number pairs the saved refresh has just examined",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_lease.py",
+      "function": "_write",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "reached only through acquire, which returns before any write unless ledger.enabled is exactly true, discovery.dag.mode is not off and the ledger worktree exists; one atomic write of this writer's own dag/lease/<writer>.json (writer, taken_at, expires_at), never another writer's file",
       "risk": "low"
     },
     {

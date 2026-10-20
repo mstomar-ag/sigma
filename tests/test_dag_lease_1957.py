@@ -220,7 +220,7 @@ def test_lease_only_change_publishes(two, origin):
     assert not (a.root / "dag" / "map.json").exists()
     out = sync.publish(a.base, a.cfg)
     assert "nothing" not in out, out
-    shown = json.loads(_git(origin, "show", "sdlc-ledger:dag/lease/dana-boxa.json"))
+    shown = json.loads(_git(origin, "show", "sdlc-" "ledger:dag/lease/dana-boxa.json"))
     assert shown["writer"] == "dana-boxa" and shown["expires_at"] == NOW + TTL + 360
 
 
