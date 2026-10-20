@@ -131,7 +131,7 @@ def test_the_snapshot_records_the_newest_id_it_includes(tmp_path, origin):
     root = base / "ledger"
     records = H.read_all(root)
     through = SNAP.dag_store.snapshot_through(root)
-    assert records and through == records[-1]["id"] == H.newest_id(records)
+    assert records and through == H.marks(root)          # #1967: per-file marks, not an id
     assert H.read_all(root, after=through) == []
 
 
@@ -139,3 +139,93 @@ def test_snapshot_through_ignores_a_malformed_value(tmp_path):
     (tmp_path / "dag").mkdir()
     (tmp_path / "dag" / "map.json").write_text(json.dumps({"history_through": "../etc"}), encoding="utf-8")
     assert SNAP.dag_store.snapshot_through(tmp_path) is None
+    for bad in ({"../x/y.jsonl": 1}, {"2026-03/w.jsonl": -1}, {"2026-03/w.jsonl": "9"}, {"2026-03/w.jsonl": True}, {}):
+        (tmp_path / "dag" / "map.json").write_text(json.dumps({"history_through": bad}), encoding="utf-8")
+        assert SNAP.dag_store.snapshot_through(tmp_path) is None
+
+
+def test_a_late_published_older_record_is_applied_after_the_marks(tmp_path):
+    """#1967: the cut is by file bytes, not by `(t, id)`: a record another machine published late, stamped OLDER than
+    the newest the snapshot includes, is applied, both appended to a known file and in a file the marks never saw."""
+    first, newest = rec("edge-added", T2, U2, a=1, b=2), rec("edge-added", T3, U3, a=2, b=3)
+    writer(tmp_path, "dana-box1.1", [first, newest])
+    cut = H.marks(tmp_path)
+    late_new_file = rec("edge-added", T1, U1, a=7, b=8)             # older t than everything in the cut
+    writer(tmp_path, "lee-box2.2", [late_new_file])
+    late_appended = rec("edge-added", T1, U1, a=9, b=10)
+    with open(tmp_path / "dag" / "2026-03" / "dana-box1.1.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(late_appended) + "\n")
+    got = {r["id"] for r in H.read_all(tmp_path, after=cut)}
+    assert got == {late_new_file["id"], late_appended["id"]}
+    assert H.read_all(tmp_path, after=H.marks(tmp_path)) == []
+
+
+def test_the_id_cut_is_clock_ordered_and_marks_are_not(tmp_path):
+    """The legacy id cut skips the late older record: that is the defect the marks replace (documented)."""
+    newest, late = rec("edge-added", T3, U3, a=2, b=3), rec("edge-added", T1, U1, a=7, b=8)
+    writer(tmp_path, "dana-box1.1", [newest])
+    cut_id, cut_marks = newest["id"], H.marks(tmp_path)
+    writer(tmp_path, "lee-box2.2", [late])
+    assert H.read_all(tmp_path, after=cut_id) == []
+    assert [r["id"] for r in H.read_all(tmp_path, after=cut_marks)] == [late["id"]]
+
+
+def test_marks_never_read_the_history(tmp_path, monkeypatch):
+    writer(tmp_path, "w.1", [rec("edge-added", T1, U1, a=1, b=2)])
+    def boom(*a, **k):
+        raise AssertionError("marks read a file")
+    monkeypatch.setattr(pathlib.Path, "read_text", boom)
+    monkeypatch.setattr(pathlib.Path, "read_bytes", boom)
+    assert list(H.marks(tmp_path).values()) and H.marks(tmp_path)
+
+
+@pytest.mark.parametrize("files", [30, 300, 3000])
+def test_marks_cost_is_linear_in_files_and_small(tmp_path, files):
+    """MEASURED (#1967): 1x = a busy month's 30 writer files, 10x = 300, 100x = 3000, each file with one record.
+    Bound: under 2 s at 100x on any machine (it is a stat per file); the measured figures are in the module docstring."""
+    import time
+    for i in range(files):
+        writer(tmp_path, "w%d.%d" % (i, i), [rec("edge-added", T1, U1, a=i, b=i + 1)])
+    t0 = time.perf_counter()
+    assert len(H.marks(tmp_path)) == files
+    assert time.perf_counter() - t0 < 2.0
+
+
+def test_add_remove_add_with_one_source_stamp_keeps_all_three(tmp_path):
+    """#1967: a dependency edit that does not bump the blocked issue's `updated_at` leaves one `u` on all three."""
+    sdlc = tmp_path / ".sdlc"
+    sdlc.mkdir()
+    cfg = {"discovery": {"dag": {"mode": "on"}}}
+    def stamped(edges):
+        m = SNAP._map(edges=edges)
+        for n in m["nodes"]:
+            n["updated_at"] = U1
+        return m
+    e0, e1 = stamped(()), stamped(((1, 2),))
+    H.record_save(sdlc, cfg, e0, e1, 1_772_700_000)
+    H.record_save(sdlc, cfg, e1, e0, 1_772_700_100)
+    H.record_save(sdlc, cfg, e0, e1, 1_772_700_200)
+    got = [json.loads(x) for p in sorted((sdlc / "state" / "dag-history").glob("*.jsonl")) for x in p.read_text().splitlines()]
+    flips = [r for r in got if r["ev"] in ("edge-added", "edge-removed")]
+    assert [r["ev"] for r in flips] == ["edge-added", "edge-removed", "edge-added"]
+    assert len({r["id"] for r in flips}) == 3
+    writer(tmp_path, "w.1", flips)
+    assert [r["ev"] for r in H.read_all(tmp_path)] == ["edge-added", "edge-removed", "edge-added"]
+
+
+def test_two_writers_with_the_same_history_agree_on_the_disambiguated_id(tmp_path):
+    ids = []
+    for who in ("a", "b"):
+        sdlc = tmp_path / who
+        (sdlc / "state" / "dag-history").mkdir(parents=True)
+        cfg = {"discovery": {"dag": {"mode": "on"}}}
+        m0, m1 = SNAP._map(edges=()), SNAP._map(edges=((1, 2),))
+        for m in (m0, m1):
+            for n in m["nodes"]:
+                n["updated_at"] = U1
+        H.record_save(sdlc, cfg, m0, m1, 1_772_700_000 + (50 if who == "b" else 0))
+        H.record_save(sdlc, cfg, m1, m0, 1_772_700_100)
+        H.record_save(sdlc, cfg, m0, m1, 1_772_700_200)
+        recs = [json.loads(x) for p in sorted((sdlc / "state" / "dag-history").glob("*.jsonl")) for x in p.read_text().splitlines()]
+        ids.append([r["id"] for r in recs if r["ev"] == "edge-added"])
+    assert ids[0] == ids[1] and len(set(ids[0])) == 2
