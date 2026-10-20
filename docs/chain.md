@@ -166,6 +166,8 @@ really get, before anything is armed:
 | `checkpoint` | never worked: met when its unit lands or a person closes it |
 | `not workable` | held by a gate, a paid step the owner answered not to run, carries the blocked label, waits on a prerequisite outside the chain, or could not be read |
 
+A member counts as in progress only while a live holder backs the label: a registered worker whose process is alive on this machine, or an unexpired claim in the team ledger. With the ledger on and neither, or with it off and a worker marker that is definitively dead, the label is stale: the member is not treated as someone else's, and the sheet names it with the `loop.py release` gesture. With the ledger off and no marker the planner cannot tell another machine's work from a leftover, so the member stays in progress, and so does any member whose evidence could not be read.
+
 A member that carries the blocked label because of waits on other members of the chain is classified by those
 waits (`after #N`) and is counted as finishing once they do: Sigma's own sweep sets that label and clears it when the
 waits close, so reading it as permanent promised 1 goal where a run did 3.

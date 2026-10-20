@@ -562,6 +562,30 @@ def _live_closure(goal, ro, repo, bound, cache, ld, blocker_scan, disk=None):
     return clo, extra, True
 
 
+def _label_holders(sdlc, config, numbers):
+    """{number: True when a live holder backs the in-progress label, False when it is stale} (#1945).
+    A live holder is a registered worker whose process is alive on this machine, or (ledger on) an unexpired
+    claim in the team ledger. Ledger on and neither: stale. Ledger off: stale only when a local marker is
+    definitively dead; no marker is unknown and stays in progress. The ledger is read once, for all of `numbers`
+    (O(entries), one read per plan). Raises on any read failure: the caller keeps the label's word."""
+    loop, ledger = _load("loop"), _load("ledger")
+    claims = None
+    if ledger.enabled(config):
+        claims = ledger.open_claims(ledger.read_all(sdlc), ttl_seconds=ledger.lease_ttl_seconds(config))
+    out = {}
+    for n in numbers:
+        if claims is not None and (str(n) in claims or n in claims):
+            out[n] = True
+        elif loop._goal_has_registered_worker(sdlc, n, config):
+            out[n] = True
+        elif claims is not None:
+            out[n] = False
+        else:
+            states = [loop.agent_alive(sdlc, n, config, t)[0] for t in loop.agent_threads(sdlc, n)]
+            out[n] = not (states and all(x == "dead" for x in states))
+    return out
+
+
 def _plan_live(sdlc, goal, config, ro, source, bound, cache=None, as_login=None, disk=None):
     ld = label_drain
     blocker_scan, features = _load("blocker_scan"), _load("features")
@@ -604,6 +628,15 @@ def _plan_live(sdlc, goal, config, ro, source, bound, cache=None, as_login=None,
         if verdict == "checkpoint":                                  # #1904
             row["checkpoint"] = chain_checkpoint.status(sdlc, config, units[n])
         rows.append(row)
+    labelled = [r for r in rows if r["in_progress"]]
+    if labelled:                                                     # #1945: the label alone is not a holder
+        try:
+            holders = _label_holders(sdlc, config, [r["number"] for r in labelled])
+        except Exception:                                            # fail open: keep the label's word
+            holders = {}
+        for r in labelled:
+            if holders.get(r["number"], True) is False:
+                r["in_progress"], r["stale_label"] = False, True
     edges = [{"from": b, "to": n, "tag": "unconfirmed" if b in extra.get(n, ()) else "explicit"}
              for n, bs in clo["edges"].items() for b in bs]
     ext = []
@@ -1079,6 +1112,10 @@ def render_sheet(rec, now, config=None, runner=None):
     L += chain_forecast.answer_lines(fc)                                                    # #1908: first
     L += _unblock_blocks(vrec, members, fc)
     L.append("Done prerequisites: %s" % _ids(rec.get("done") or []))
+    for r in members:
+        if r.get("stale_label"):                                    # #1945
+            L.append("Stale in-progress label: #%d (no live claim recorded); release it with python3 loop.py "
+                     "release .sdlc %d \"stale in-progress label\"" % (r["number"], r["number"]))
     L.append("Runs ahead of: %s higher-priority open goal(s)" % ("an unknown number of" if ahead is None else ahead))
     for e in rec.get("externals") or []:
         L.append("External: %s (%s), needed by %s" % (e["ref"], e["kind"], _ids(e["needed_by"])))
