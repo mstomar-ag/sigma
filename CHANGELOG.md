@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- A map save names its history cut by file sizes (`stat` only), not by reading the whole ledger history, and a reader applying entries after the cut no longer skips a record published late with an older stamp; add, remove, add of one edge under an unmoved `updated_at` keeps all three records (#1967).
 - Upkeep's mechanical level also unions two-sided additions under `## YYYY-MM-DD ...` headings (a decision-record index), keeping both sides in date order; any edit or removal still parks (#1949). The optional `union_paths` key is not built yet.
 - **Every map history record has an identity, so a change two machines both saw is counted once (#1958).** Records now carry `u` (the source issue's `updated_at`) and `id` (a short hash of the event, its numbers and `u`; an old record without them gets the same id computed on read, from its own stamp when it has no `u`). `dag_history.read_all` and `dag.py history --all` apply each id once; the ledger snapshot `dag/map.json` records `history_through`, the newest id it includes, and `read_all(root, after=...)` applies only later entries. DAG.md was already unchanged by duplicates (edges are a map, completions a set). MEASURED: offline fake writers and a real local ledger only; no multi-machine run.
 - Upkeep level 2 keeps the resolver's refusal reason whole up to 240 characters, so the macOS host-login fix command (`claude setup-token`) is no longer cut mid-word in the report.
