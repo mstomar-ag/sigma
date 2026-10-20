@@ -95,7 +95,7 @@ def enact(sdlc_dir, config, rec, source, rd, dry_run):
         actions.append(_finish(_act("unpark", n, "release it through the unpark gesture"), dry_run, release))
 
     if chain_asks.taken_over(rec):
-        me = source._assignee_login()
+        me = rec.get("runner") or source._assignee_login()      # #1935: who the plan was made for
     for n in sorted(chain_asks.taken_over(rec)):
         issue = read(n)
         if issue is None:

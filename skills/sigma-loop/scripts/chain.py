@@ -561,7 +561,7 @@ def _live_closure(goal, ro, repo, bound, cache, ld, blocker_scan):
     return clo, extra, True
 
 
-def _plan_live(sdlc, goal, config, ro, source, bound, cache=None):
+def _plan_live(sdlc, goal, config, ro, source, bound, cache=None, as_login=None):
     ld = label_drain
     blocker_scan, features = _load("blocker_scan"), _load("features")
     dag_collect, hard_stop = _load("dag_collect"), _load("hard_stop")
@@ -580,7 +580,7 @@ def _plan_live(sdlc, goal, config, ro, source, bound, cache=None):
                   at_least=any("pulled-issue limit" in s for s in clo["stops"]))
     judge = ld._Judge(sdlc, config, source)
     runner = _runner_login(ro, source)
-    judge._login = runner            # #1907: the login the run's own judge resolves; `_GetOnly` refuses a bare `@me`
+    judge._login = as_login or runner      # #1907 (#1935: the runner `--as` names, else the planner's): the login the run's own judge resolves; `_GetOnly` refuses a bare `@me`
     prefix = dag_collect._gh(config).get("priority_label_prefix", "priority:")
     aliases = dag_collect._priority_aliases(config)
     rows, ranks, units, weak = [], {}, {}, 0
@@ -657,7 +657,7 @@ def _plan_live(sdlc, goal, config, ro, source, bound, cache=None):
 
 # --- the plan ---------------------------------------------------------------------------------------
 
-def _resolve(sdlc_dir, goal, config, run, now):
+def _resolve(sdlc_dir, goal, config, run, now, as_login=None):
     """The open closure of `goal` as a plan dict, and the read-only runner that served it. Writes nothing."""
     sources, state = _load("sources"), _load("state")
     max_members = _max_members(config)
@@ -684,17 +684,22 @@ def _resolve(sdlc_dir, goal, config, run, now):
             why = str(exc)
     if out is None:
         bound = min(LIVE_MAX_MEMBERS, max_members)
-        out = _plan_live(sdlc_dir, goal, config, ro, source, bound, cache)
+        out = _plan_live(sdlc_dir, goal, config, ro, source, bound, cache, as_login)
         out.update(source="live", source_reason=why, bound=bound)
+    if as_login:        # #1935: the runner is who `--as` names; the login that planned is kept only when it differs
+        planner = out.get("runner") or _runner_login(ro, source)
+        out["runner"] = as_login
+        if planner and planner.casefold() != as_login.casefold():
+            out["planner"] = planner
     return out, ro
 
 
-def plan(sdlc_dir, goal, config=None, run=None, now=None):
+def plan(sdlc_dir, goal, config=None, run=None, now=None, as_login=None):
     """The plan dict for `goal`, and the local record written. Raises `ChainRefused`."""
     state = _load("state")
     now = time.time() if now is None else now
     config = config if config is not None else state.load_config(sdlc_dir)
-    out, ro = _resolve(sdlc_dir, goal, config, run, now)
+    out, ro = _resolve(sdlc_dir, goal, config, run, now, as_login)
     out.update(schema=SCHEMA, goal=goal, calls=ro.summary(), planned_at=int(now), state="planned")
     path = _record_path(sdlc_dir, goal)
     try:
@@ -2022,7 +2027,7 @@ def main(argv, run=None, now=None, pick=None):
         print(USAGE, file=sys.stderr)
         return 2
     try:
-        p = plan(args[1], int(args[2]), run=run, now=now)
+        p = plan(args[1], int(args[2]), run=run, now=now, as_login=runner)
         if want_forecast:
             p["forecast"] = chain_forecast.forecast(chain_asks.view(p), _load("state").load_config(args[1]), runner,
                                                     _held(p, True), _declined(p), _held(p, True) - _held(p),

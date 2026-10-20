@@ -259,6 +259,8 @@ def elsewhere_questions(rec):
                 n, whose(r), " and also parked: this matters only if you release it" if r["verdict"] == "parked" else "",
                 runner or "the runner", tail)
             opts = list(ELSEWHERE_OPTIONS)
+        if rec.get("planner") and rec["planner"] != runner:        # #1935: the plan was made by one login for another
+            ask += " Planned by %s for %s." % (rec["planner"], runner or "the runner")
         out.append({"id": "%s:%d" % (ELSEWHERE, n), "kind": ELSEWHERE, "area": None, "ask": ask, "options": opts,
                     "unblocks": sorted([n] + behind)})
     return out
