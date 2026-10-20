@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **Recorded decisions no longer commit onto the default branch (#1947).** `decision_store.publish` now returns `reason: default-branch` and the one command instead of committing on the default branch (origin's `HEAD`, else `main`/`master`), so `git pull --ff-only` keeps working; `decision_store.py publish <state-folder> --branch` writes the evidence paths onto the local branch `sigma/records` without moving HEAD, the index or the working tree, and never pushes. The branch choice is provisional for the owner. MEASURED: temp-repo tests with a local bare origin only.
+
 - **`take it over` assigns the runner named by `plan --forecast --as`, not the login that planned (#1935).** The record keeps `runner` (the `--as` login) and `planner` (the planning login, only when different); `arm` assigns the runner and each elsewhere question says who planned for whom. MEASURED: the fake-gh tests only; not run against GitHub.
 
 - **An empty backlog builds a usable, empty dependency map (#1933).** When every label list reads fine and all come back empty, the refresh now publishes a map with 0 nodes and no `last_error` instead of keeping the old file with `EmptyResult`; a failed list still keeps the old map, and an empty goal list beside non-empty others is still `EmptyList`. `dag.py show` and `chain.py plan --longest` say "nothing to plan" (exit 0) for it, and the doctor map row is OK. A mistyped repo or label that returns nothing now replaces the previous map, which is the stated behaviour.

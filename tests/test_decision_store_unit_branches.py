@@ -63,7 +63,7 @@ def test_publish_skips_on_real_shape_unit_branch(tmp_path):
 
 
 def test_publish_commits_on_non_unit_branch_and_gate_closed(tmp_path):
-    sdlc = _repo(tmp_path, "main")
+    sdlc = _repo(tmp_path, "work")
     _unit(tmp_path, "a.json", _real("a", "feat/a"))
     closed = {"rulebook": {"records": {"enabled": False}}}
     assert _ds().publish(sdlc, closed)["reason"] == "records-closed"

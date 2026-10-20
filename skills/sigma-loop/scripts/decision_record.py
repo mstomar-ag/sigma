@@ -13,6 +13,7 @@ adds no direct gh call site. A store failure never blocks the comment: the error
 """
 import importlib.util
 import pathlib
+import sys
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -258,7 +259,10 @@ def write_all(sdlc_dir, record, config, source, text="", poster=None):
         if out["id"]:
             _safe(record_comparison, sdlc_dir, record, would, config)
             if record.get("how") == "human":            # #1313: commit only, best effort
-                _safe(decision_store.publish, sdlc_dir, config)
+                res = _safe(decision_store.publish, sdlc_dir, config)
+                if isinstance(res, dict) and res.get("reason") == "default-branch":   # #1947
+                    print("decision records not committed on the default branch; to keep them: %s"
+                          % res.get("command"), file=sys.stderr)
     except Exception as exc:                            # noqa: BLE001 - reported, never raised
         out["error"] = "decision record not stored: %s" % exc
     rid = out["id"] or "(not stored)"
