@@ -320,6 +320,7 @@ key path. (`work.rebase_upkeep` has the opposite typo rule: an unrecognised valu
 | `backup.former_prefixes` | `[]` | list of `refs/<name>/backup/` | namespaces an earlier product wrote, pruned the same way |
 | `conflicts.resolve` | `"off"` | `off`, `mechanical`, `agent` | how far a unit conflict may be resolved; `agent` runs a capped headless resolver, see [Upkeep part B](upkeep-part-b.md) |
 | `conflicts.mechanical_without_verify` | `false` | boolean | lets the mechanical level run with no verify command |
+| `conflicts.union_paths` | `[]` | list of repo-relative file names | files whose two-sided pure additions the mechanical level unions line by line (base order kept, ours then theirs, duplicates collapsed); a listed file with an edited or removed line, and any unlisted file outside the recognised append-only shapes, still parks |
 | `triggers.*`, `auto.*` | see branching-model.md 13e | | still read and validated for one release; they no longer schedule anything |
 
 Related keys outside the block: `work.base` (the default branch), `work.integration_base` (a unit branch that

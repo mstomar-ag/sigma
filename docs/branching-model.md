@@ -1743,6 +1743,7 @@ of settings that contradicts itself closes the whole block, and `/sigma-doctor` 
 | backup.former_prefixes | [] | list of names | namespaces an earlier product wrote, pruned the same way |
 | conflicts.resolve | "off" | off, mechanical, agent | how far a unit conflict may be resolved |
 | conflicts.mechanical_without_verify | false | boolean | lets Level 1 resolve a changelog conflict when no verify command is set; see `docs/upkeep-part-b.md` |
+| conflicts.union_paths | [] | list of file names | files whose two-sided pure additions Level 1 unions line by line; an edit or removal still parks |
 | conflicts.agent.model / reviewer.model | "sonnet" | haiku, sonnet, opus, fable | resolver and reviewer tiers for Level 2 |
 | conflicts.agent.max_budget_usd_per_unit / spend_ceiling_usd_per_day | null | positive dollars | both must be set or Level 2 behaves as off |
 | conflicts.agent.timeout_minutes / max_units_per_sweep | 30 / 5 | 1 to 240 / 1 to 100 | wall clock per run, units per sweep |

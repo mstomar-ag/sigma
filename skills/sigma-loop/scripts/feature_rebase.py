@@ -1625,11 +1625,12 @@ def _level1(run, cwd, path, base_ref, report, level1):
     when the caller must describe and park the stop as before. On a refusal the conflict is restored when it can be
     (so the description is of the real stop) and `report["why"]` carries the code."""
     prove = _prove()
-    if not prove.eligible(run, path):
+    if not prove.eligible(run, path, union_paths=level1.get("union_paths") or ()):
         if level1.get("level2") is not None:
             return _level2(run, path, report, level1)
         return None
-    out = prove.resolve_stops(run, path, level1["union"], level1["run_id"], rebase_stopped)
+    out = prove.resolve_stops(run, path, level1["union"], level1["run_id"], rebase_stopped,
+                              union_paths=level1.get("union_paths") or ())
     if not out["refusal"]:
         return {"run_id": level1["run_id"], "stops": out["stops"], "files": out["files"]}
     report["why"] = "level 1 refused (%s): %s" % (out["refusal"].get("code"), out["refusal"].get("detail"))
@@ -3034,6 +3035,7 @@ def _level1_options(config, sdlc_dir=None, cwd=None):
                 "verify_command": verify if isinstance(verify, str) else None,
                 "verify_timeout": int(settings["verify.timeout_minutes"]) * 60,
                 "allow_no_verify": settings["conflicts.mechanical_without_verify"] is True,
+                "union_paths": tuple(settings["conflicts.union_paths"]),
                 "level2": _level2_plan(config, sdlc_dir, cwd)}
     except Exception:                     # noqa: BLE001 - a doubtful gate reads closed
         return None
