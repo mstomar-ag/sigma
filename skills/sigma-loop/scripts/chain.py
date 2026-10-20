@@ -1991,7 +1991,12 @@ def _main_longest(args, as_json, now):
     except dag_chain.ChainError as exc:
         print("chain.py: %s" % exc, file=sys.stderr)
         return 2
-    print(json.dumps(p, indent=2, sort_keys=True) if as_json else render_longest(p), end="\n" if as_json else "")
+    if as_json:
+        print(json.dumps(p, indent=2, sort_keys=True))
+    elif p.get("empty"):
+        print("nothing to plan: the stored map has no goals")
+    else:
+        print(render_longest(p), end="")
     return 0
 
 

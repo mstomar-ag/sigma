@@ -706,7 +706,26 @@ def resource_step(p, sdlc_dir, call_timeout, config=None):
         return ""
 
 
-def cleanup(p, my_pid):
+_SHUTDOWN_PUBLISHED = False     # once per process: the signal handler and atexit both call cleanup
+
+
+def _publish_on_shutdown(p, sdlc_dir, call_timeout):
+    """#1932: one `sync.py publish` as the watcher stops, so an entry written since the last tick
+    leaves with it instead of waiting on a successor. Bounded exactly like a tick call (through
+    `run_with_timeout.py`, `SIGMA_WATCH_CALL_TIMEOUT`), output to the watch log, best effort, never
+    raises, once per process. A publish that loses git's index lock just defers; the dead-pid sweep
+    in `sync.publish` on the next start is the backstop."""
+    global _SHUTDOWN_PUBLISHED
+    if _SHUTDOWN_PUBLISHED or not sdlc_dir:
+        return
+    _SHUTDOWN_PUBLISHED = True
+    try:
+        run_call(p, sdlc_dir, call_timeout or DEFAULT_CALL_TIMEOUT, "sync.py", ("publish",), "log")
+    except BaseException:                    # noqa: BLE001 - cleanup must never raise
+        pass
+
+
+def cleanup(p, my_pid, sdlc_dir=None, call_timeout=None):
     """B-28/B-29. Registered ONLY on the takeover path, after the mutex is released -- a process
     that exits as a sibling or as "already running" removes nothing.
 
@@ -723,6 +742,7 @@ def cleanup(p, my_pid):
     `atexit` in the same exit."""
     if pid_from_file(p.pid) != my_pid:
         return
+    _publish_on_shutdown(p, sdlc_dir, call_timeout)
     try:
         p.pid.unlink(missing_ok=True)
         p.heartbeat.unlink(missing_ok=True)
@@ -911,7 +931,7 @@ def tick(p, sdlc_dir, call_timeout, n, config=None, interval=None):
         print(traceback.format_exc(), file=sys.stderr, flush=True)
 
 
-def _install_cleanup(p, my_pid):
+def _install_cleanup(p, my_pid, sdlc_dir=None, call_timeout=None):
     """B-28/B-29: registered only on the takeover path, after the mutex is released.
 
     **This is the one place a straight transliteration silently regresses** (dossier §6.2, measured
@@ -928,7 +948,7 @@ def _install_cleanup(p, my_pid):
     KeyboardInterrupt traceback, which would violate B-36's "exit 0 / no stray output"."""
 
     def _on_signal(signum, _frame):
-        cleanup(p, my_pid)
+        cleanup(p, my_pid, sdlc_dir, call_timeout)
         signal.signal(signum, signal.SIG_DFL)
         try:
             os.kill(os.getpid(), signum)     # die BY the signal -> the same rc bash produced
@@ -939,7 +959,7 @@ def _install_cleanup(p, my_pid):
         sig = getattr(signal, name, None)    # SIGHUP does not exist on Windows
         if sig is not None:
             signal.signal(sig, _on_signal)
-    atexit.register(cleanup, p, my_pid)      # normal returns and SystemExit
+    atexit.register(cleanup, p, my_pid, sdlc_dir, call_timeout)      # normal returns and SystemExit
 
 
 def _run(p, sdlc_dir):
@@ -1009,7 +1029,7 @@ def _run(p, sdlc_dir):
                    f"{_coexist().stop_lever(sdlc_dir)}")
         return 0
 
-    _install_cleanup(p, os.getpid())
+    _install_cleanup(p, os.getpid(), sdlc_dir, call_timeout)
 
     ticks = 0
     while True:

@@ -312,4 +312,5 @@ def longest(sdlc, by="length", now=None):
     else:
         key = lambda e: (e["prio"], -e["depth"], -e["members"], age(e), e["goal"])      # noqa: E731
     found.sort(key=key)
-    return {"by": by, "ends": found[:LONGEST_TOP], "candidates": len(found), "excluded": excluded}
+    return {"by": by, "ends": found[:LONGEST_TOP], "candidates": len(found), "excluded": excluded,
+            "empty": not m["nodes"]}

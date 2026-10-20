@@ -127,8 +127,8 @@ OUT_KEEP = 4096
 Request = collections.namedtuple(
     "Request",
     "config sdlc_dir state_dir repo_root directory conflicted binary prompt blocks timeout cap_usd "
-    "model flags credential_var scratch_parent rates ceiling_machine_usd ceiling_team_usd budget_seconds home session net_prefix",
-    defaults=(None,) * 22)
+    "model flags credential_var scratch_parent rates ceiling_machine_usd ceiling_team_usd budget_seconds home session net_prefix login",
+    defaults=(None,) * 23)
 
 
 # ------------------------------------------------------------------------------------------ small helpers
@@ -243,15 +243,25 @@ def remove_scratch(root, parent):
         shutil.rmtree(real, ignore_errors=True)
 
 
-def build_env(scratch, credential_var, environ):
-    """From nothing: a short basic list, fresh home/config/tmp under the scratch root, no GIT_*, no CLAUDE_PROJECT_DIR."""
+HOST_LOGIN = "host"
+
+
+def build_env(scratch, credential_var, environ, login=None, home=None):
+    """From nothing: a short basic list, fresh home/config/tmp under the scratch root, no GIT_*, no CLAUDE_PROJECT_DIR.
+    `login` "host" (#1946, opt-in) swaps ONLY the home and the configuration directory for the watcher's own, so the
+    CLI finds the login that is already there; TMPDIR stays in the scratch and nothing else is added."""
     env = {"PATH": environ.get("PATH") or DEFAULT_PATH}
     for name in BASE_ENV[1:]:
         if environ.get(name):
             env[name] = environ[name]
-    env["HOME"] = str(scratch / "home")
     env["TMPDIR"] = str(scratch / "tmp")
-    env["CLAUDE_CONFIG_DIR"] = str(scratch / "config")        # UNVERIFIED: that this variable moves the session store
+    if login == HOST_LOGIN:
+        env["HOME"] = environ.get("HOME") or home or os.path.expanduser("~")
+        if environ.get("CLAUDE_CONFIG_DIR"):
+            env["CLAUDE_CONFIG_DIR"] = environ["CLAUDE_CONFIG_DIR"]
+    else:
+        env["HOME"] = str(scratch / "home")
+        env["CLAUDE_CONFIG_DIR"] = str(scratch / "config")    # UNVERIFIED: that this variable moves the session store
     env["GIT_TERMINAL_PROMPT"] = "0"
     if credential_var:
         env[credential_var] = environ[credential_var]
@@ -259,26 +269,42 @@ def build_env(scratch, credential_var, environ):
 
 
 NOT_LOGGED_IN = "resolver cli is not logged in in the scrubbed environment"
+NOT_LOGGED_IN_HOST = "resolver cli is not logged in under the host login (conflicts.agent.login is host)"
 AUTH_PROBE_SECONDS = 15.0
 
 
 def auth_status(env, binary, cwd, timeout=AUTH_PROBE_SECONDS, prefix=None):
-    """-> True (logged in) or False, from `<binary> auth status` run bounded in `env`. No model call. Logged out is a non-zero exit
-    or a JSON `loggedIn` that is false; any run that did not finish is False. UNVERIFIED against a real CLI (#1691): exit 0 with
-    text that is not JSON counts as logged in, since only the exit code is relied on. `prefix` is the session wall's argv (#1713):
-    the probe runs inside the same confinement as the session where one exists, plain where none does."""
+    """-> True (logged in) or False; see `auth_info`."""
+    return auth_info(env, binary, cwd, timeout, prefix)[0]
+
+
+def auth_info(env, binary, cwd, timeout=AUTH_PROBE_SECONDS, prefix=None):
+    """-> (logged_in, account_type_or_None) from `<binary> auth status` run bounded in `env`. No model call. Logged out is a
+    non-zero exit or a JSON `loggedIn` that is false; any run that did not finish is (False, None). UNVERIFIED against a real
+    CLI (#1691): exit 0 with text that is not JSON counts as logged in, since only the exit code is relied on. `prefix` is the
+    session wall's argv (#1713): the probe runs inside the same confinement as the session where one exists, plain where none
+    does. The account type is `subscriptionType`, else `authMethod`, and only when it is a short plain word: no credential,
+    email or other field is ever returned (#1946)."""
     bounded = _sibling("bounded_run")
     try:
         done = bounded.run_group([str(a) for a in (prefix or ())] + [binary, "auth", "status"], cwd, timeout, env=env)
     except Exception:                                       # noqa: BLE001 - a probe that could not run is not a login
-        return False
+        return False, None
     if done.outcome != bounded.OK or (done.code or 0) != 0:
-        return False
+        return False, None
     try:
         parsed = json.loads(done.out)
     except ValueError:
-        return True
-    return not (isinstance(parsed, dict) and parsed.get("loggedIn") is False)
+        return True, None
+    if not isinstance(parsed, dict):
+        return True, None
+    if parsed.get("loggedIn") is False:
+        return False, None
+    for key in ("subscriptionType", "authMethod"):
+        value = parsed.get(key)
+        if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_ -]{1,24}", value):
+            return True, value
+    return True, None
 
 
 # ------------------------------------------------------------------------------------------ confinement
@@ -566,7 +592,7 @@ def launch(request, environ=None, clock=time.time):
     if not why and not req.scratch_parent:
         why = "no scratch root was given"
     if not why and not _logged_in(req, binary, environ):
-        why = NOT_LOGGED_IN
+        why = NOT_LOGGED_IN_HOST if req.login == HOST_LOGIN else NOT_LOGGED_IN
     if not why and ((req.cap_usd is not None and req.cap_usd <= 0) or (req.ceiling_machine_usd is not None and req.ceiling_machine_usd <= 0)
                     or (req.ceiling_team_usd is not None and req.ceiling_team_usd <= 0)):
         why = "a cap or ceiling that is set must be a positive amount"
@@ -604,7 +630,7 @@ def _logged_in(req, binary, environ):
     scratch = None
     try:
         scratch, _ = make_scratch(req.scratch_parent, "")
-        return auth_status(build_env(scratch, req.credential_var, environ), binary, str(scratch),
+        return auth_status(build_env(scratch, req.credential_var, environ, req.login, req.home), binary, str(scratch),
                            prefix=list(req.net_prefix) if req.net_prefix else None)
     except Exception:                                       # noqa: BLE001
         return False
@@ -618,13 +644,14 @@ def _run(req, model, binary, environ, run_id, clock):
     secret = environ.get(req.credential_var) if req.credential_var else None
     cap = None if req.cap_usd is None else float(req.cap_usd)
     killed_charge = cap or 0.0            # a killed run with no cap is charged what was metered, or nothing when unmetered
+    host = req.login == HOST_LOGIN
     scratch = None
     charge, outcome, changed, reason = killed_charge, KILLED, (), ""
     try:
         text = build_prompt(req.prompt, req.blocks, secrets.token_hex(8))
         scratch, prompt_path = make_scratch(req.scratch_parent, text)
         argv = [binary] + list(BASE_ARGV) + (["--max-budget-usd", "%g" % cap] if cap is not None else []) + ["--model", model]
-        env = build_env(scratch, req.credential_var, environ)
+        env = build_env(scratch, req.credential_var, environ, req.login, req.home)
         if req.session:
             argv.extend(session_argv(bool(req.net_prefix)))
             env["GIT_CONFIG_NOSYSTEM"], env["GIT_CONFIG_GLOBAL"] = "1", os.devnull
@@ -639,10 +666,10 @@ def _run(req, model, binary, environ, run_id, clock):
         reason = _scrub(done.out, secret)
         killed = done.outcome in (bounded.TIMEOUT, bounded.STOPPED, bounded.ERROR, bounded.REFUSED) or (done.code or 0) < 0
         if killed:
-            cost = None if cap is not None else metered_cost(scratch / "config", req.rates)
+            cost = None if (cap is not None or host) else metered_cost(scratch / "config", req.rates)
             outcome, charge = KILLED, (cap if cap is not None else (cost or 0.0))
         else:
-            cost = metered_cost(scratch / "config", req.rates)
+            cost = None if host else metered_cost(scratch / "config", req.rates)     # host mode: the store holds other sessions, so it is never priced
             charge = (cap or 0.0) if cost is None else cost
             outcome = OK if done.outcome == bounded.OK else FAILED
             if cost is not None and cap is not None and cost > cap:
