@@ -18,7 +18,7 @@ nothing.
   (approval already required `autonomy.is_owner`). Every `spot_check_one_in`-th ask still tells.
 - `apply` goes only through the atomic gestures: one `swap-label` through `triage.apply_actions`
   (the unpark shape the sweep uses) or `promote.promote`.
-- A dead tick shows by age: the tick writes `applier-heartbeat.json`; `tick_is_dead` is true when it
+- A dead tick shows by age: the tick writes `<state>/state/autonomy/applier-heartbeat.json` (git-ignored); `tick_is_dead` is true when it
   is missing or older than `stale_after_intervals` watch intervals. The goal simply stays parked.
 
 SCALE: one file per open or recent ask, read by one listing per tick; applied or answered asks older
@@ -133,6 +133,12 @@ def _parse(text):
 
 def _folder(sdlc_dir):
     return os.path.join(str(sdlc_dir), _DIR)
+
+
+def _runtime_folder(sdlc_dir):
+    """#1938: the heartbeat and the sync cursor are runtime state, so they live under the git-ignored
+    `<sdlc>/state/autonomy/`, never beside the committed asks."""
+    return os.path.join(str(sdlc_dir), "state", _DIR)
 
 
 def _write_atomic(path, body):
@@ -375,17 +381,22 @@ _CURSOR = "sync-cursor.json"
 
 
 def _cursor_read(sdlc_dir):
-    try:
-        with open(os.path.join(_folder(sdlc_dir), _CURSOR), encoding="utf-8") as fh:
-            v = json.load(fh).get("after")
-        return v if isinstance(v, str) else ""
-    except (OSError, ValueError, AttributeError):
-        return ""
+    """The new location, else (#1938) the pre-move `<sdlc>/autonomy/` copy once; the next write lands in the new one."""
+    for folder in (_runtime_folder(sdlc_dir), _folder(sdlc_dir)):
+        try:
+            with open(os.path.join(folder, _CURSOR), encoding="utf-8") as fh:
+                v = json.load(fh).get("after")
+            return v if isinstance(v, str) else ""
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError, AttributeError):
+            return ""
+    return ""
 
 
 def _cursor_write(sdlc_dir, key):
     try:
-        _write_atomic(os.path.join(_folder(sdlc_dir), _CURSOR), {"after": key})
+        _write_atomic(os.path.join(_runtime_folder(sdlc_dir), _CURSOR), {"after": key})
     except OSError:
         pass
 
@@ -552,7 +563,7 @@ def tick_is_dead(heartbeat, config, now):
 
 def read_heartbeat(sdlc_dir):
     try:
-        with open(os.path.join(_folder(sdlc_dir), _HEARTBEAT), encoding="utf-8") as fh:
+        with open(os.path.join(_runtime_folder(sdlc_dir), _HEARTBEAT), encoding="utf-8") as fh:
             return _parse(json.load(fh).get("time"))
     except (OSError, ValueError, AttributeError):
         return None
@@ -561,7 +572,7 @@ def read_heartbeat(sdlc_dir):
 def read_hold(sdlc_dir):
     """The reason the last tick was held (evidence behind the default branch), or "" (not held, or unreadable)."""
     try:
-        with open(os.path.join(_folder(sdlc_dir), _HEARTBEAT), encoding="utf-8") as fh:
+        with open(os.path.join(_runtime_folder(sdlc_dir), _HEARTBEAT), encoding="utf-8") as fh:
             held = json.load(fh).get("held")
         return held if isinstance(held, str) else ""
     except (OSError, ValueError, AttributeError):
@@ -722,7 +733,7 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
     if behind:
         with contextlib.suppress(Exception):
             if not dry_run:     # #1499: a dry run writes nothing, on any branch
-                _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT),
+                _write_atomic(os.path.join(_runtime_folder(sdlc_dir), _HEARTBEAT),
                                {"time": now.isoformat(), "held": behind})
         return [{"kind": "behind", "result": "skipped", "reason": behind}]
     started = monotonic_fn()    # #1390: each ask is stamped when its own gesture lands, not at tick start
@@ -836,7 +847,7 @@ def tick(sdlc_dir, config, now, source=None, run=None, apply_actions=True, comme
                 a["result"] = "would"
         actions.extend(skipped)     # F-04: reported, never applied; the ask stays pending
         if not dry_run:
-            _write_atomic(os.path.join(_folder(sdlc_dir), _HEARTBEAT), {"time": now.isoformat()})
+            _write_atomic(os.path.join(_runtime_folder(sdlc_dir), _HEARTBEAT), {"time": now.isoformat()})
             _prune(sdlc_dir, asks, now, config)
     except Exception as exc:  # a tick never raises
         actions.append({"kind": "error", "error": type(exc).__name__, "result": "failed"})

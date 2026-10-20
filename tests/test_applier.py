@@ -215,8 +215,8 @@ def test_dead_tick_is_visible_by_age(tmp_path):
     assert AP.tick_is_dead(None, cfg, T0) is True
     doctor = _mod("doctor", ROOT / "skills" / "sigma-doctor" / "scripts" / "doctor.py")
     sd = _sd(tmp_path)
-    os.makedirs(sd + "/autonomy")
-    open(sd + "/autonomy/applier-heartbeat.json", "w").write(json.dumps({"time": T0.isoformat()}))
+    os.makedirs(sd + "/state/autonomy")
+    open(sd + "/state/autonomy/applier-heartbeat.json", "w").write(json.dumps({"time": T0.isoformat()}))
     assert "dead" in doctor._applier_state(cfg, sd, now=T0 + datetime.timedelta(seconds=1801))
     assert "dead" not in doctor._applier_state(cfg, sd, now=T0 + datetime.timedelta(seconds=60))
     assert doctor._applier_state(_cfg(enabled=False), sd, now=T0 + datetime.timedelta(days=9)) == "off (default)"
@@ -310,8 +310,8 @@ def test_doctor_applier_row_shows_the_hold_only_when_held(tmp_path):
     cfg = _cfg({"stale_after_intervals": 3})
     doctor = _mod("doctor", ROOT / "skills" / "sigma-doctor" / "scripts" / "doctor.py")
     sd = _sd(tmp_path)
-    os.makedirs(sd + "/autonomy")
-    hb = sd + "/autonomy/applier-heartbeat.json"
+    os.makedirs(sd + "/state/autonomy")
+    hb = sd + "/state/autonomy/applier-heartbeat.json"
     open(hb, "w").write(json.dumps({"time": T0.isoformat()}))
     plain = doctor._applier_state(cfg, sd, now=T0 + datetime.timedelta(seconds=60))
     assert plain.startswith("on: last tick") and "HELD" not in plain
