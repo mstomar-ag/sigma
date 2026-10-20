@@ -70,6 +70,8 @@ TOO_MANY_LINES = "too-many-conflict-lines"
 TOO_MANY_STOPS = "too-many-stops"
 NO_EXPORT = "export-failed"
 RESOLVER_FAILED = "resolver-failed"
+#: #1966: the launcher reason is kept whole up to here; its longest (the macOS host-login refusal with the fix command) is 233.
+REASON_CLIP = 240
 LEFTOVER_MARKERS = "leftover-markers"
 WRITE_BACK = "write-back-failed"
 STAMP = "stamp-failed"
@@ -696,7 +698,7 @@ def resolve_stop(run, path, plan, evidence, stamped):
             settle_attempt(sdlc_dir, unit, attempt, result.outcome, spent)
             if result.outcome == launcher.REFUSED and "24-hour ceiling" in (result.reason or ""):
                 return refusal(SPEND_CEILING, "spend ceiling reached")
-            return refusal(RESOLVER_FAILED, "the resolver run ended %s (%s)" % (result.outcome, (result.reason or "")[:120]),
+            return refusal(RESOLVER_FAILED, "the resolver run ended %s (%s)" % (result.outcome, (result.reason or "")[:REASON_CLIP]),
                            changed=list(result.changed))
         resolved_text, problem, pending = {}, None, {}
         for name in conflicted:
