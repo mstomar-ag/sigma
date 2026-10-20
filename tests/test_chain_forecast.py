@@ -263,6 +263,32 @@ def test_at_me_is_resolved_with_an_explicit_get(tmp_path):
     assert ch._runner_login(ro, type("S", (), {"assignee": None})()) is None
 
 
+def test_plan_resolves_at_me_through_the_read_only_guard(tmp_path, capfd):
+    """#1934: every `gh api user` a plan makes carries `--method GET`, so the guard lets the assignee check run."""
+    base, fk = tca._scene(tmp_path, issues=_backlog(), approve=False)
+    fk.calls.clear()
+    ch = tca._chain()
+    ch.plan(base, 1, config=_cfg(ch, base, "@me"), run=fk, now=NOW)
+    users = [c for c in fk.calls if c[:2] == ["api", "user"]]
+    assert users and all("GET" in c for c in users), users
+    assert tca._rec(base)["assignee_filter"] is True
+    # the backlog fetch's own resolution (the source method, not the planner's) also runs under the guard
+    ro = ch._GetOnly(lambda args: "alice\n" if list(args[:2]) == ["api", "user"] else fk(args))
+    src = ch._load("sources").GitHubSource(_cfg(ch, base, "@me"), run=ro)
+    assert src._assignee_login() == "alice"
+    assert "refused" not in capfd.readouterr().err
+
+
+def test_guard_still_refuses_write_shaped_api_calls():
+    ch = tca._chain()
+    gate = ch._GetOnly(lambda args: "{}")
+    for bad in (["api", "user", "-f", "name=x"], ["api", "user", "-F", "a=b"], ["api", "user", "--input", "f"],
+                ["api", "user", "--method", "PATCH", "-f", "name=x"], ["api", "user", "--jq", ".login"]):
+        with pytest.raises(RuntimeError):
+            gate(bad)
+    assert gate(["api", "user", "--method", "GET", "--jq", ".login"]) == "{}"
+
+
 def test_map_plan_says_what_it_cannot_know():
     ch = tca._chain()
     rec = {"verdict_basis": "map-life", "runner": None, "assignee_filter": None,

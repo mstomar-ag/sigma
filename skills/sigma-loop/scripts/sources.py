@@ -171,7 +171,7 @@ def resolve_assignee_login(run, raw, failure=None):
     if raw != "@me":
         return raw.lstrip("@").casefold()
     try:
-        login = ((run(["api", "user", "--jq", ".login"]) or "").strip() or "").casefold()
+        login = ((run(["api", "user", "--method", "GET", "--jq", ".login"]) or "").strip() or "").casefold()
     except Exception as exc:
         if isinstance(failure, list):
             failure.append(exc)
@@ -1745,7 +1745,7 @@ class GitHubSource:
             self._assignee_login_cache = raw.lstrip("@").casefold()
             return self._assignee_login_cache
         try:
-            login = ((self._run(["api", "user", "--jq", ".login"]) or "").strip() or "").casefold() or None
+            login = ((self._run(["api", "user", "--method", "GET", "--jq", ".login"]) or "").strip() or "").casefold() or None
         except Exception as exc:              # noqa: BLE001 - fail OPEN, but not silently
             login = None
             if not self._assignee_login_warned:
