@@ -569,7 +569,7 @@ def main(argv):
     # #1951: the default command carries the loop session's model; an explicit command is the
     # operator's and is never rewritten. A bad key refuses loudly (exit 2); an unreadable
     # config just means no flag.
-    if not legacy.getenv("SIGMA_CLAUDE_CMD") and host == "claude":
+    if legacy.getenv("SIGMA_CLAUDE_CMD") is None and host == "claude":      # #1961: an empty command is the operator's, left empty
         try:
             session_cfg = json.loads((pathlib.Path(sdlc_dir) / "config.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):

@@ -116,7 +116,7 @@ cap, the spend keys, the confined scratch copy, and no git, gh or ssh credential
 set, because the shared transcript store is never priced. The model tiers are capped by the repo's `model_selection_max_tier`
 (default `opus`): a `model` or `reviewer.model` above it is lowered to it, never raised. The doctor rows `resolver auth` and
 `resolver configured` read "host login: logged in as <account type>" and never print a credential. A unit whose preflight finds
-no login parks with "resolver cli is not logged in under the host login". The recorded real-model run of this mode is owner-run
+no login parks with "resolver cli is not logged in under the host login". On macOS the CLI keeps its login in the keychain, which the session wall denies and keeps denying (it also holds the git host token). Host mode therefore passes `USER` and `LOGNAME`, and hands the walled session the CLI's own `CLAUDE_CODE_OAUTH_TOKEN` when the watcher has it (made once with `claude setup-token`); the unit that finds no login parks naming that command. Only that one variable travels, never a `GH_*`, `GITHUB_*`, `SSH_*` or `GIT_*` one. UNVERIFIED on a real macOS CLI: the recorded `claude auth status` inside the wall is owner-run. The recorded real-model run of this mode is owner-run
 after landing; until it is recorded, host mode is proven against a fake CLI only.
 
 ## Landing a unit
