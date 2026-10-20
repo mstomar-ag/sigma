@@ -8,7 +8,7 @@ SCRIPTS = ROOT / "skills" / "sigma-loop" / "scripts"
 # Files the map writes at run time: they exist in a user's checkout, not in this repository.
 RUNTIME = {".sdlc/state/", ".sdlc/state/dag.json", ".sdlc/state/dag-shadow.jsonl", ".sdlc/state/dag-history/",
            ".sdlc/state/dag-history/YYYY-MM.jsonl", "dag/", "DAG.md", ".sdlc/state/dag-shadow.meta.json",
-           "dag/YYYY-MM/<writer>.jsonl"}
+           "dag/YYYY-MM/<writer>.jsonl", "dag/map.json"}
 
 
 def _page():

@@ -1043,7 +1043,8 @@ def publish(sdlc_dir, config, run=None, attempts=PUSH_ATTEMPTS, channel=LEDGER):
         # #1623: the dependency map's history stream rides along. A change that is only there must
         # still push, so the early return waits for both.
         dag_mine = [str(p.relative_to(path)) for p in ledger.dag_files_for(path, who)]
-        if not mine and not dag_mine:
+        snap = ["dag/map.json"] if (path / "dag" / "map.json").is_file() else []     # #1956
+        if not mine and not dag_mine and not snap:
             return "nothing to publish"
         # #2574/S1-G3: THE EVENTS STREAM IS NO LONGER STAGED. It used to be
         # `to_stage += _staged_paths(path, ledger.EVENTS, who)`, which published a machine's events to
@@ -1051,7 +1052,7 @@ def publish(sdlc_dir, config, run=None, attempts=PUSH_ATTEMPTS, channel=LEDGER):
         # publishing: the journal is local-only, at `.sdlc/events/`, which is not in this worktree at
         # all. Nothing already on the branch is removed — a teammate's clone still pulls it, and it is
         # still read for one release.
-        to_stage = list(mine) + dag_mine
+        to_stage = list(mine) + dag_mine + snap
         if _ensure_gitattributes(path):
             to_stage.append(".gitattributes")
         _write_team(sdlc_dir, path)
@@ -1095,9 +1096,11 @@ def _write_dag(path, config):
         if dag_history._load("dag_store").mode(config) == "off":
             return False
         recs = dag_history.read_all(path)
-        if not recs:
+        snap, built_by = dag_history._load("dag_store").read_snapshot_at(path)      # #1956
+        if not recs and snap is None:
             return False
-        (pathlib.Path(path) / "DAG.md").write_text(dag_render.render(recs), encoding="utf-8")
+        text = dag_render.render(recs) if snap is None else dag_render.render(recs, snap, built_by, time.time())
+        (pathlib.Path(path) / "DAG.md").write_text(text, encoding="utf-8")
         return True
     except Exception:                            # noqa: BLE001 - DAG.md is a view; it never fails a publish
         return False
