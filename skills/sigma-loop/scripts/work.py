@@ -2385,7 +2385,7 @@ def _feature_propagate():
     return _FEATURE_PROPAGATE
 
 
-def _propagate_registry(sdlc_dir, config, goal, unit, run, base_root, remote):
+def _propagate_registry(sdlc_dir, config, goal, unit, run, base_root, remote, features_dir=None):
     """#1477: put the WHOLE entry in every sibling repo the unit names. -> a one-line clause, or "".
 
     RUNS AFTER `_sync_registry`, NEVER BEFORE IT, and the order is the requirement rather than a
@@ -2406,7 +2406,8 @@ def _propagate_registry(sdlc_dir, config, goal, unit, run, base_root, remote):
     genuine pick does."""
     try:
         return _feature_propagate().propagate_at_pick(sdlc_dir, config, goal, unit, run=run,
-                                                      cwd=base_root, remote=remote)["note"]
+                                                      cwd=base_root, remote=remote,
+                                                      features_dir=features_dir)["note"]
     except Exception as exc:                # noqa: BLE001 - never break a start over a record
         print(f"sigma: feature registry propagation skipped (non-fatal): {exc}", file=sys.stderr)
         return ""
@@ -2908,14 +2909,10 @@ def start(sdlc_dir, config, goal, run=None, session_pid=None):
     # ABSOLUTE on purpose: every git call below runs with cwd elsewhere, so a relative path would
     # resolve against THAT directory and the worktree would land somewhere nobody looks.
     path = (base_root / s["worktree_dir"] / stem(goal)).resolve()
-    # #1473: BEFORE the fetch. See `_sync_registry` — a new unit's branch does not exist yet, which
-    # is precisely what the next line fails closed on, so syncing after it would lose the one goal
-    # that creates the entry.
-    sync_note = _sync_registry(sdlc_dir, config, stem(goal), unit, run, base_root, s["remote"])
-    # #1477: and then out to the siblings, on the entry the line above just brought up to date.
-    # After the sync and before the fetch for the same reason the sync is: a brand-new unit has no
-    # branch yet, and the fetch fails closed on exactly that.
-    sync_note += _propagate_registry(sdlc_dir, config, stem(goal), unit, run, base_root, s["remote"])
+    # #1941: the registry write NO LONGER happens here, in the root checkout. It is made in the
+    # goal's own worktree below, once that exists, so it rides the goal's commit to the base and a
+    # goal that never lands leaves the root untouched (branching-model §15).
+    sync_note = ""
     # #1476: last of the three, and still before the fetch — see `_rebase_upkeep`. The registry has
     # just been brought up to date and propagated, and the worktree below is about to be cut from
     # the very branch this brings forward, so the cut has to happen after it and not before.
@@ -2984,6 +2981,16 @@ def start(sdlc_dir, config, goal, run=None, session_pid=None):
     # no new worktree and isn't a new mechanical action worth logging again.
     _load("actionlog").safe_append(sdlc_dir, goal, "worktree_start", worktree=str(path),
                                    branch=branch, base=base, base_resolved=base_resolved)
+    # #1941: THE PICK-TIME REGISTRY PASS, MADE IN THE GOAL'S WORKTREE. A tracked, uncommitted edit
+    # on the goal branch: `commit`'s `git add -A` carries it to the base with the goal, and a goal
+    # that never commits never puts membership anywhere shared. Only a fresh cut records (a
+    # reattach is a resume, which never rewrote it). Then out to the siblings, from the entry the
+    # sync just wrote -- after it, never before (see `_propagate_registry`).
+    if not reattached:
+        wt_sdlc = path / pathlib.Path(sdlc_dir).resolve().relative_to(base_root)
+        sync_note = _sync_registry(wt_sdlc, config, stem(goal), unit, run, path, s["remote"])
+        sync_note += _propagate_registry(sdlc_dir, config, stem(goal), unit, run, path, s["remote"],
+                                         features_dir=wt_sdlc / "features")
     # #2009: the reattach is a resume too, so it gets the same freshness gate -- but only it. A
     # fresh cut is fresh by construction, and running the check there would cost every pick a fetch
     # to prove what the cut just guaranteed (`tests/test_docs.py`'s §6e 3/15 call counts are the
@@ -5171,6 +5178,92 @@ def _union_rescue(path, run, union=_union_diff3):
     return False
 
 
+#: #1941: the registry now rides the goal's own commit, so goals of one unit amend the same per-unit
+#: shard and a rebase can conflict on it. The ONLY paths the rescue below will touch.
+_REGISTRY_PREFIX = ".sdlc/features/"
+
+
+def _unmerged(path, run):
+    """-> the unmerged paths, or None when git could not say (the caller then declines)."""
+    try:
+        return [ln.strip() for ln in
+                run(path, ["git", "diff", "--name-only", "--diff-filter=U"]).splitlines()
+                if ln.strip()]
+    except Exception:                       # noqa: BLE001 - unreadable state must abort, not crash
+        return None
+
+
+def _registry_only(unmerged):
+    """True only for a non-empty conflict set that lies wholly under `.sdlc/features/`."""
+    return bool(unmerged) and all(p.startswith(_REGISTRY_PREFIX) and ".." not in p.split("/")
+                                  for p in unmerged)
+
+
+def _resync_goal(sdlc_dir, config, goal, rec, run, path):
+    """Re-run the pick-time membership write for this goal in the worktree (idempotent: goals are an
+    order-preserving union). True only when the sync reports the goal recorded. Never raises."""
+    base = (rec or {}).get("base") or ""
+    if not base.startswith(features.BRANCH_PREFIX):
+        return False                        # no unit to re-record under: decline, abort as before
+    try:
+        wt_sdlc = pathlib.Path(path) / pathlib.Path(sdlc_dir).resolve().relative_to(project_root(sdlc_dir))
+        report = _feature_sync().sync_at_pick(wt_sdlc, config, stem(goal), base[len(features.BRANCH_PREFIX):],
+                                              run=run, cwd=path, remote=rec.get("remote"))
+        return bool(report.get("recorded"))
+    except Exception:                       # noqa: BLE001 - a failed rescue is a deferred rebase
+        return False
+
+
+def _take_upstream_and_resync(path, run, unmerged, side, resync):
+    """Take upstream's bytes for each registry path (`side`: `--ours` mid-rebase, `HEAD` after an
+    autostash pop), re-write this goal's membership on top, and stage the registry. False declines."""
+    try:
+        for p in unmerged:
+            if side == "HEAD":
+                run(path, ["git", "checkout", "HEAD", "--", p])
+            else:
+                run(path, ["git", "checkout", side, "--", p])
+        if not resync():
+            return False
+        run(path, ["git", "add", "-A", "--", _REGISTRY_PREFIX.rstrip("/")])
+        txt = "".join((pathlib.Path(path) / p).read_text(encoding="utf-8") for p in unmerged
+                      if (pathlib.Path(path) / p).is_file())
+        return "<<<<<<<" not in txt
+    except Exception:                       # noqa: BLE001
+        return False
+
+
+def _registry_rescue(path, run, resync):
+    """True only when the WHOLE rebase completed through registry-only conflicts, each resolved by
+    taking upstream's shard and re-recording this goal on it. Anything else declines."""
+    for _ in range(UNION_ROUNDS):
+        unmerged = _unmerged(path, run)
+        if not _registry_only(unmerged):
+            return False
+        if not _take_upstream_and_resync(path, run, unmerged, "--ours", resync):
+            return False
+        try:
+            run(path, ["git", "-c", "core.editor=true", "rebase", "--continue"])
+            return True
+        except Exception:                   # noqa: BLE001 - a later replayed commit also conflicted
+            continue
+    return False
+
+
+def _stash_pop_registry_rescue(path, run, unmerged, resync):
+    """#1941: an autostash pop that conflicted ONLY on `.sdlc/features/` paths (the goal's uncommitted
+    membership edit against a shard upstream moved). Take HEAD's bytes, drop the spent stash entry,
+    re-record the goal. False leaves everything for the caller's reset-and-restore."""
+    if not _take_upstream_and_resync(path, run, unmerged, "HEAD", resync):
+        return False
+    try:
+        if run(path, ["git", "stash", "list"]):
+            run(path, ["git", "stash", "drop"])     # the one entry the autostash just made
+        return True
+    except Exception:                       # noqa: BLE001
+        return False
+
+
 def rebase(sdlc_dir, config, goal, run=None):
     """Replay the branch on the current base -- called reactively when GitHub reports a PR BEHIND
     (`_reconcile_behind`), proactively before `loop.py verify` runs anything expensive against a
@@ -5208,7 +5301,15 @@ def rebase(sdlc_dir, config, goal, run=None):
         # ONE narrow exception to "any failure aborts": a CHANGELOG.md conflict where BOTH sides
         # only inserted (see `_union_diff3`). That shape is mechanical and lossless, and it is the
         # single most frequent conflict in this repo. Everything else still aborts.
+        resync = lambda: _resync_goal(sdlc_dir, config, goal, rec, run, path)   # noqa: E731
+        rescued = "CHANGELOG union-merged"
         if _union_rescue(path, run, _union_for(config)):
+            pass
+        elif _registry_rescue(path, run, resync):
+            rescued = "registry shard re-recorded"      # #1941
+        else:
+            rescued = None
+        if rescued:
             refused = (_replay_would_lose(path, run, pre_rebase_head, f"{remote}/{base}",
                                           rec["branch"])
                        or _push_refused(path, rec["branch"]))
@@ -5221,7 +5322,7 @@ def rebase(sdlc_dir, config, goal, run=None):
             run(path, ["git", "push", "--force-with-lease", remote, f"HEAD:{rec['branch']}"])
             _rerecord_cut_tip(sdlc_dir, config, goal, rec, run, path, remote, base)
             _reanchor_after_rebase(sdlc_dir, config, goal)
-            return "rebased (CHANGELOG union-merged)"
+            return f"rebased ({rescued})"
         try:
             run(path, ["git", "rebase", "--abort"])
         except Exception:                   # noqa: BLE001 - nothing to abort is a fine outcome
@@ -5253,6 +5354,9 @@ def rebase(sdlc_dir, config, goal, run=None):
     except Exception as exc:            # noqa: BLE001 - #1899: the conflict probe itself must fail safe
         return (f"rebase deferred: could not confirm whether the autostash popped cleanly onto "
                 f"{remote}/{base} ({exc})")
+    if unmerged and _registry_only(unmerged.split("\n")) and _stash_pop_registry_rescue(
+            path, run, unmerged.split("\n"), lambda: _resync_goal(sdlc_dir, config, goal, rec, run, path)):
+        unmerged = ""                       # #1941: only the goal's own shard conflicted; re-recorded on upstream's
     if unmerged:
         try:
             run(path, ["git", "reset", "--hard", pre_rebase_head])

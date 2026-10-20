@@ -837,6 +837,19 @@ def test_treating_an_unknown_verdict_as_permission_is_a_mutant_this_suite_kills(
 # --------------------------------------------------------------------------- 6. the wiring
 
 
+def _fake_worktree_add(cwd, argv):
+    """#1941: a real `git worktree add` checks out the TRACKED registry; the fake runners below do
+    not run git, so copy `.sdlc/features` from the root into the new path the way a checkout would."""
+    import shutil
+    if argv[:3] == ["git", "worktree", "add"]:
+        rest = [a for a in argv[3:] if a != "-b"]
+        dest = pathlib.Path(rest[1] if "-b" in argv else rest[0])
+        src = pathlib.Path(str(cwd)) / ".sdlc" / "features"
+        if src.is_dir():
+            shutil.copytree(src, dest / ".sdlc" / "features", dirs_exist_ok=True)
+
+
+
 def _work_runner(sdlc, branches=("feature/int-contract",), body="Feature: int-contract",
                  labels=(), gh=None):
     """`work.start()`'s own `(cwd, argv) -> stdout` runner: the one issue read #1467 added, the
@@ -845,6 +858,7 @@ def _work_runner(sdlc, branches=("feature/int-contract",), body="Feature: int-co
 
     def run(cwd, argv):
         line = " ".join(str(a) for a in argv)
+        _fake_worktree_add(cwd, [str(a) for a in argv])
         if "/contents/" in line or "-X PUT" in line:
             return contents(cwd, argv)
         if "issues/" in line:

@@ -119,6 +119,19 @@ def _seed(sdlc, name, entry):
     return _registry().write_unit(sdlc / "features", name, entry)
 
 
+def _fake_worktree_add(cwd, argv):
+    """#1941: a real `git worktree add` checks out the TRACKED registry; the fake runners below do
+    not run git, so copy `.sdlc/features` from the root into the new path the way a checkout would."""
+    import shutil
+    if argv[:3] == ["git", "worktree", "add"]:
+        rest = [a for a in argv[3:] if a != "-b"]
+        dest = pathlib.Path(rest[1] if "-b" in argv else rest[0])
+        src = pathlib.Path(str(cwd)) / ".sdlc" / "features"
+        if src.is_dir():
+            shutil.copytree(src, dest / ".sdlc" / "features", dirs_exist_ok=True)
+
+
+
 def _runner(branches=("feature/int-contract",), handlers=(), url="git@github.com:org/repo.git"):
     """The `(cwd, argv) -> stdout` runner shape `work.py` injects everywhere. `branches` is the
     live set `git ls-remote` reports; `None` makes that call raise, which is the ONLY way a caller
@@ -128,6 +141,7 @@ def _runner(branches=("feature/int-contract",), handlers=(), url="git@github.com
     def run(cwd, argv):
         line = " ".join(str(a) for a in argv)
         calls.append(line)
+        _fake_worktree_add(cwd, [str(a) for a in argv])
         for token, resp in handlers:
             if token in line:
                 if isinstance(resp, Exception):
@@ -583,13 +597,15 @@ def test_start_records_the_goal_under_the_unit_it_resolved(tmp_path):
                                    "labels": []}))])
     work.start(str(sdlc), CONFIG, "1473", run=run)
     assert work._record(str(sdlc), "1473")["base"] == "feature/billing"
-    assert _goals(sdlc, "billing") == [1473]
+    wt = pathlib.Path(work._record(str(sdlc), "1473")["worktree"]) / ".sdlc"
+    assert _goals(wt, "billing") == [1473]
+    assert _goals(sdlc, "billing") == [], "#1941: and the ROOT registry is untouched"
 
 
-def test_start_syncs_before_it_fetches_so_a_missing_branch_is_still_recorded(tmp_path):
-    """Order is load-bearing. A brand-new unit has no branch yet, and `start()`'s `git fetch` fails
-    closed on exactly that -- correctly. If the sync ran after it, the first goal of every new unit
-    would be the one goal the registry never learned about."""
+def test_a_start_whose_fetch_fails_records_nothing_in_the_root(tmp_path):
+    """#1941 reverses the old order on purpose. The registry write now happens in the goal's worktree,
+    which only exists after the fetch succeeds; a brand-new unit with no branch fails closed there
+    and records nothing anywhere -- in particular nothing in the root checkout."""
     work = _load("work")
     sdlc = _sdlc(tmp_path)
     run = _runner(branches=(), handlers=[
@@ -598,7 +614,7 @@ def test_start_syncs_before_it_fetches_so_a_missing_branch_is_still_recorded(tmp
         ("git fetch", RuntimeError("couldn't find remote ref feature/billing"))])
     with pytest.raises(RuntimeError):
         work.start(str(sdlc), CONFIG, "1473", run=run)
-    assert _goals(sdlc, "billing") == [1473]
+    assert _goals(sdlc, "billing") == []
 
 
 def test_a_project_that_has_not_adopted_the_registry_pays_nothing(tmp_path):
@@ -1379,7 +1395,8 @@ def test_a_resumed_start_does_not_sync_and_that_is_the_documented_choice(tmp_pat
     assert run.calls == ["git fetch origin feature/billing",
                          "git rev-list --count HEAD..origin/feature/billing"], \
         "a resume makes no sync calls — not the issue read, not `ls-remote`; only the #2009 check"
-    assert _goals(sdlc, "billing") == [1473], "and the first start's record stands, undisturbed"
+    wt = pathlib.Path(work._record(str(sdlc), "1473")["worktree"]) / ".sdlc"
+    assert _goals(wt, "billing") == [1473], "and the first start's record stands, undisturbed"
 
 
 def test_a_swept_units_unserialised_write_is_flagged_too(tmp_path, monkeypatch):
