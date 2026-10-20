@@ -85,7 +85,7 @@ Nothing below is needed for the rest of Sigma. Do the steps in order and stop wh
    before you open anything (see [Privacy](#privacy-on-public-repositories)).
 3. **Open records.** Set `rulebook.records.enabled` to `true`. From now on `/sigma-unpark`, `/sigma-promote`
    and the automatic sweep each write a record and one comment carrying its id. Commit the `decisions/` folder
-   (with `records.publish` on, a person-run gesture commits it for you; it never pushes).
+   (with `records.publish` on, a person-run gesture on a non-default branch commits it for you; on the default branch it commits nothing and prints the one command below; it never pushes).
 4. **Look at what you have.** Run `python3 skills/sigma-loop/scripts/decision_import.py plan .sdlc` to see what
    past decisions could be imported, then `apply` if you want them (see [Importing](#importing-past-decisions)).
 5. **Open autonomy (read-only effect).** Set `rulebook.autonomy.enabled` to `true`. Levels are now derived.
@@ -160,6 +160,15 @@ Housekeeping:
 - `records.publish` (the config template sets it to `true`; a config that omits the key leaves it off): a person-run unpark or rule approval **commits, never
   pushes,** the records folder, the `autonomy` folder and the rulebook file, and nothing else. It skips goal
   worktrees, unit branches and a detached HEAD.
+  **On the default branch it commits nothing** (#1947): a commit there would make the next `git pull --ff-only` refuse. The default
+  branch is the short name of `origin/HEAD` (else `origin/main`, `origin/master`; with no remote, `main` or `master`).
+  Instead the result is `reason: default-branch` plus the one command, and the gesture prints it once to stderr:
+  `python3 skills/sigma-loop/scripts/decision_store.py publish <sdlc_dir> --branch`. It writes the evidence paths onto a
+  local branch `sigma/records` with a temporary index and `commit-tree`, so HEAD, the index and the working tree do not move;
+  an unchanged tree makes no commit; it never pushes (push it yourself with `git push <remote> sigma/records`). The branch is
+  chosen over the ledger branch because the ledger is a separate sharing feature that may be off. PROVISIONAL, for the owner to ratify.
+  Not measured: the records stay untracked in the root working tree after `--branch`; Sigma does not clean them up, so after the
+  records branch lands, remove the byte-identical copies yourself if `git pull` refuses.
 
 ## Question kinds
 
@@ -631,7 +640,7 @@ All scripts are in `skills/sigma-loop/scripts/` unless noted.
 | migrate the old label | `promote.py migrate-confirmation` | see [above](#migrating-the-old-confirmation-label) |
 | draft and approve a rule | `rule_draft.py list`, `draft`, `approve` | see [Rules](#rules-drafting-and-approval) |
 | import | `decision_import.py scan`, `plan`, `apply` | see [Importing](#importing-past-decisions) |
-| publish records | `decision_store.py publish <sdlc_dir>` | the local commit that `records.publish` does for you |
+| publish records | `decision_store.py publish <sdlc_dir>` | the local commit that `records.publish` does for you (not on the default branch; add `--branch` for the local `sigma/records` branch) |
 | run the applier once | `applier.py [sdlc_dir]` | the watcher runs it each tick |
 | plan the applier without writing | `applier.py [sdlc_dir] --dry-run` | prints each action with rule, level and window |
 | open asks for existing parks | `applier.py sync [sdlc_dir]` | also runs before each tick |

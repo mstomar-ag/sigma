@@ -453,11 +453,80 @@ def commits_differing(sdlc_dir, config, behind=True):
         return 0, []
 
 
+RECORDS_BRANCH = "sigma/records"
+
+
+def _default_names(root):
+    """Short names of the default branch: origin's (`origin/trunk` -> `trunk`), else main and master."""
+    ref = _default_ref(root)
+    return {ref.split("/", 1)[1]} if ref and "/" in ref else {"main", "master"}
+
+
+def _branch_command(sdlc_dir):
+    return "python3 %s publish %s --branch" % (os.path.abspath(__file__), os.path.abspath(str(sdlc_dir)))
+
+
+def publish_branch(sdlc_dir, config):
+    """#1947: commit the evidence paths onto the local branch `sigma/records`, never touching HEAD, the index
+    or the working tree (a temporary index and `commit-tree`), and never pushing. Parent: the existing
+    records tip, else the default ref, else none. Returns `{"committed", "reason", "branch", "push"}`."""
+    out = {"committed": False, "reason": "", "branch": RECORDS_BRANCH, "push": ""}
+    if not enabled(config):
+        out["reason"] = "records-closed"
+        return out
+    try:
+        root, paths = evidence_paths(sdlc_dir, config)
+        paths = [p for p in paths if os.path.exists(os.path.join(root, p))]
+        remote = (_git(root, "remote").stdout.split() or ["origin"])[0]
+        out["push"] = "git push %s %s" % (remote, RECORDS_BRANCH)
+        if not paths:
+            out["reason"] = "nothing-changed"
+            return out
+        ref = "refs/heads/" + RECORDS_BRANCH
+        parent = None
+        for cand in (ref, _default_ref(root)):
+            if cand and _git(root, "rev-parse", "-q", "--verify", cand + "^{commit}").returncode == 0:
+                parent = _git(root, "rev-parse", cand + "^{commit}").stdout.strip()
+                break
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, GIT_INDEX_FILE=os.path.join(tmp, "index"))
+
+            def g(*args):
+                return subprocess.run(["git", "-C", root] + list(args), capture_output=True, text=True,
+                                      timeout=30, env=env)
+            if parent and g("read-tree", parent).returncode != 0:
+                out["reason"] = "git-failed"
+                return out
+            if g("add", "-A", "--", *paths).returncode != 0:
+                out["reason"] = "add-failed"
+                return out
+            tree = g("write-tree").stdout.strip()
+            old = _git(root, "rev-parse", parent + "^{tree}").stdout.strip() if parent else None
+            if not tree or tree == old:
+                out["reason"] = "nothing-changed"
+                return out
+            had = _git(root, "rev-parse", "-q", "--verify", ref).stdout.strip()
+            made = g("commit-tree", tree, *(["-p", parent] if parent else []), "-m", _MSG)
+            sha = made.stdout.strip()
+            if made.returncode != 0 or not sha:
+                out["reason"] = "commit-failed"
+                return out
+            moved = _git(root, "update-ref", ref, sha, *([had] if had else [""]))
+            out["committed"] = moved.returncode == 0
+            out["reason"] = "committed" if moved.returncode == 0 else "update-ref-failed"
+        return out
+    except (OSError, subprocess.SubprocessError, ValueError):
+        out["reason"] = "git-unavailable"
+        return out
+
+
 def publish(sdlc_dir, config):
     """Commit (never push) the records folder, the autonomy folder and the rulebook file, and nothing else.
 
     Returns `{"committed", "reason"}`; never raises. Skips: gate closed, `records.publish` not the JSON
-    boolean true, a goal worktree, a registered unit branch or a detached HEAD, nothing changed."""
+    boolean true, a goal worktree, a registered unit branch or a detached HEAD, nothing changed. On the
+    default branch (#1947) nothing is committed: the result is `reason: default-branch` plus the one
+    `command` that writes the local records branch instead."""
     def skip(reason):
         return {"committed": False, "reason": reason}
     if not enabled(config):
@@ -478,6 +547,8 @@ def publish(sdlc_dir, config):
         # empty `repos`): nobody commits directly to a unit branch, so never publish onto one.
         if not branch or branch.startswith("feature/") or branch in _unit_branches(root):
             return skip("unit-branch")
+        if branch in _default_names(root):
+            return {"committed": False, "reason": "default-branch", "command": _branch_command(sdlc)}
         rel = os.path.relpath(sdlc, root)
         paths = [os.path.join(rel, settings(config)["store_dir"]), os.path.join(rel, "autonomy"),
                  _rulebook_rel(sdlc, config)]
@@ -493,16 +564,16 @@ def publish(sdlc_dir, config):
 
 
 def main(argv):
-    if len(argv) == 3 and argv[1] == "publish":
+    if len(argv) in (3, 4) and argv[1] == "publish" and (len(argv) == 3 or argv[3] == "--branch"):
         try:
             with open(os.path.join(argv[2], "config.json"), encoding="utf-8") as fh:
                 config = json.load(fh)
         except (OSError, ValueError):
             config = {}
-        print(json.dumps(publish(argv[2], config)))
+        print(json.dumps((publish_branch if len(argv) == 4 else publish)(argv[2], config)))
         return 0
     help_asked = len(argv) > 1 and argv[1] in ("-h", "--help")
-    print("usage: decision_store.py publish <state-folder>", file=sys.stdout if help_asked else sys.stderr)
+    print("usage: decision_store.py publish <state-folder> [--branch]", file=sys.stdout if help_asked else sys.stderr)
     return 0 if help_asked else 2
 
 
