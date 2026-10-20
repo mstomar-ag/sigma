@@ -130,7 +130,7 @@ def _markdown(f):
     out += ["- mode: %s" % s["mode"], "- age: %s" % age,
             "- nodes: %d, edges: %d" % (s["nodes"], s["edges"]), "- usable: yes"]
     if f.get("source") and f["source"]["ledger"]:       # ledger off: nothing to say beyond the JSON facts
-        out.append("- source: %s" % dag_source.line(f["source"]))
+        out.append("- %s" % dag_source.line(f["source"]))
     if f["freshness"]:
         out.append("- freshness: %s%s" % (f["freshness"]["name"],
                                          "" if f["freshness"]["ok"] else " (needs: %s)" % f["freshness"]["fix"]))

@@ -132,6 +132,6 @@ def test_report_shows_source_in_markdown_and_json(two):
     a, b = two
     _published(a)
     text, code = dag_report.report(a.base, now=NOW + 60)
-    assert code == 0 and "- source: source local, snapshot 1m old built by " in text
+    assert code == 0 and "- source local, snapshot 1m old built by " in text
     doc = json.loads(dag_report.report(a.base, as_json=True, now=NOW + 60)[0])
     assert doc["source"]["source"] == "local" and doc["source"]["snapshot_age"] == 60
