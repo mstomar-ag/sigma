@@ -34,7 +34,7 @@ All take the project's `.sdlc` directory and the label name.
 
 - `label_drain.py plan <sdlc_dir> <label> [--json]` lists every open member with a verdict, the open
   prerequisites outside the label (with depth), the questions a person must answer, and whether the
-  label is `ready`. It never writes. `status` is the same read with a shorter view that also says which members are pickable now.
+  label is `ready`. It never writes. The label listing can trail a label that was just added, so when it is empty or its newest issue changed under 60 seconds ago, `plan` waits a few seconds (`SIGMA_LABEL_LAG_WAIT`, default 3, 0 allowed) and reads once more, merging by issue number, and says so in its output (one extra read, never a loop; #1943). `status` is the same read with a shorter view that also says which members are pickable now.
 - `label_drain.py arm <sdlc_dir> <label> [--apply]` is a dry run unless `--apply`. It arms the members
   `plan` calls unarmed: adds the goal label, removes a parked or blocked label, adds a priority label
   only when the issue has none, and assigns the configured assignee. It never creates a label and
