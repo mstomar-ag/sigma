@@ -9315,3 +9315,27 @@ def test_record_done_of_a_goal_that_does_not_exist_says_so_not_the_phase_record(
         assert _loop().main(["loop.py", "record", base, "9999", "done"]) == 2
         err = capsys.readouterr().err
         assert "no such goal 9999" in err and "phase record" not in err
+
+
+def test_pick_time_model_choice_reads_line_one_of_a_two_line_why(monkeypatch, capsys):
+    """#1950: `predict.py why` prints the effort signal on a second line; the pick-time parser must
+    still record the tier from line one, not report an unexpected shape."""
+    lp = _loop()
+
+    class Result:
+        def __init__(self, stdout):
+            self.returncode = 0
+            self.stdout = stdout
+            self.stderr = ""
+
+    def run(argv, **_kwargs):
+        return Result("model=opus in=body hits=2 signal=migrat\neffort=high in=body hits=2 signal=auth\n"
+                      if argv[2] == "why" else "model=gpt-6-astra effort=high\n")
+
+    monkeypatch.setattr(lp.subprocess, "run", run)
+    with tempfile.TemporaryDirectory() as d:
+        base = _model_choice_base(d)
+        src = _QueueWithTitleBody(["a"], {"title": "Add a retry", "body": "x"})
+        lp._next(base, src, lp.state.load_config(base))
+        events = _model_choice_events(base)
+    assert [(e["model"], e.get("signal")) for e in events] == [("opus", "migrat")], capsys.readouterr().err
