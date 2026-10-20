@@ -173,6 +173,14 @@ here can change the command's own output: stdout stays the bare entry id and the
 untouched, so a push that fails costs you a warning, never the write. Set
 `ledger.publish_on_write: false` to keep the push local and leave it to the watcher.
 
+**A stopped writer's file is published too (#1932).** An entries file belongs to one process
+(`<actor>-<host>.<pid>.jsonl`). `sync.py publish` also stages any such file that carries this
+machine's host token and a pid that is no longer running, whatever actor it names, so a file left
+by a stopped process no longer sits untracked and defers the next `pull`. A live pid's file, another
+host's file and a legacy pid-only name are never taken. The watcher (`skills/sigma-loop/scripts/watch_daemon.py`)
+also runs one bounded `sync.py publish` when it is stopped by SIGTERM, SIGINT or SIGHUP or exits
+normally; a kill -9 or a power loss skips it, and the next publish sweeps the file instead.
+
 ### What the entry file name says about your machine
 
 Each machine writes its own file, `entries/<actor>-<host token>.<pid>.jsonl`, and the ops branch
