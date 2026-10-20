@@ -71,28 +71,46 @@ def observed(session_id, home=None):
         return None
 
 
-def dispatched_tiers(sdlc_dir):
-    """The tiers named by `model_choice` rows in the action log (all goals)."""
-    out = set()
-    base = pathlib.Path(sdlc_dir) / "state" / "log"
+#: The read is bounded: only the newest MAX_STREAM_FILES files of each stream, and only the last MAX_STREAM_BYTES of each file.
+#: A tier dispatched longer ago than that no longer counts, so an old high-tier dispatch cannot silence the warning for good;
+#: the cost is at most MAX_STREAM_FILES * MAX_STREAM_BYTES * 2 bytes however long the history grows.
+MAX_STREAM_FILES = 50
+MAX_STREAM_BYTES = 256 * 1024
+
+
+def _tail_lines(path):
     try:
-        files = sorted(base.glob("*.jsonl"))
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - MAX_STREAM_BYTES))
+            data = handle.read()
     except OSError:
-        return out
-    for path in files:
+        return []
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    return lines[1:] if size > MAX_STREAM_BYTES else lines      # the first line of a cut read may be partial
+
+
+def dispatched_tiers(sdlc_dir):
+    """The tiers named by recent `model_choice` rows: the action log (`state/log`) and the events stream (`events`, where the
+    pick-time record goes). Bounded by MAX_STREAM_FILES newest files per stream and MAX_STREAM_BYTES per file."""
+    out = set()
+    for sub in (("state", "log"), ("events",)):
+        base = pathlib.Path(sdlc_dir).joinpath(*sub)
         try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            files = sorted(base.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)[:MAX_STREAM_FILES]
         except OSError:
             continue
-        for line in lines:
-            try:
-                row = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(row, dict) and row.get("kind") == "model_choice":
-                tier = tier_of(row.get("model"))
-                if tier:
-                    out.add(tier)
+        for path in files:
+            for line in _tail_lines(path):
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and row.get("kind") == "model_choice":
+                    tier = tier_of(row.get("model"))
+                    if tier:
+                        out.add(tier)
     return out
 
 

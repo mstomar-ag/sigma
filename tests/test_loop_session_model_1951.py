@@ -60,7 +60,7 @@ def _supervise(tmp_path, cfg, explicit=None):
     env.update({"PATH": f"{fake.parent}{os.pathsep}{os.environ['PATH']}", "SIGMA_HOST": "claude",
                 "SIGMA_SUPERVISE_MAX_RUNS": "1", "SIGMA_SUPERVISE_SLEEP_SCALE": "0"})
     resource_mode.carry(env)
-    if explicit:
+    if explicit is not None:
         env["SIGMA_CLAUDE_CMD"] = explicit.replace("FAKE", str(fake))
     r = subprocess.run([sys.executable, str(S / "supervise_daemon.py"), str(base)],
                        capture_output=True, text=True, env=env, timeout=60)
@@ -188,3 +188,33 @@ def test_doctor_row_quiet_within_tiers(tmp_path, monkeypatch):
 def test_doctor_row_says_unavailable(tmp_path, monkeypatch):
     rows = _rows(tmp_path, monkeypatch, None, ["sonnet"], sid="")
     assert len(rows) == 1 and rows[0]["ok"] is True and "not exposed by this host" in rows[0]["name"]
+
+
+# ---- #1961: the bounded read, the pick-time record, the empty command ------------------------------
+def test_an_empty_session_command_is_left_empty_not_rewritten(tmp_path):
+    r, argv = _supervise(tmp_path, {"loop": {"session_model": "opus"}}, explicit="")
+    assert argv is None                                           # the session was never launched with a rewritten command
+    assert "Traceback" not in r.stderr
+
+
+def test_the_read_is_capped_to_the_newest_files_and_the_last_bytes(tmp_path):
+    lsm = _lsm()
+    d = tmp_path / "state" / "log"
+    d.mkdir(parents=True)
+    old = d / "old.jsonl"
+    old.write_text(json.dumps({"kind": "model_choice", "model": "opus"}) + "\n")
+    os.utime(old, (1, 1))
+    for i in range(lsm.MAX_STREAM_FILES):
+        (d / f"g{i}.jsonl").write_text(json.dumps({"kind": "model_choice", "model": "haiku"}) + "\n")
+    assert lsm.dispatched_tiers(tmp_path) == {"haiku"}            # the one old opus row is past the file cap
+    big = d / "g0.jsonl"
+    big.write_text("junk\n" + json.dumps({"kind": "model_choice", "model": "fable"}) + "\n" + "x" * (lsm.MAX_STREAM_BYTES + 10) + "\n")
+    assert "fable" not in lsm.dispatched_tiers(tmp_path)           # a row before the last MAX_STREAM_BYTES is not read
+
+
+def test_a_pick_time_record_in_the_events_stream_counts(tmp_path, monkeypatch):
+    ev = tmp_path / "events"
+    ev.mkdir()
+    (ev / "a.jsonl").write_text(json.dumps({"kind": "model_choice", "model": "sonnet", "goal": "7"}) + "\n")
+    assert _lsm().dispatched_tiers(tmp_path) == {"sonnet"}
+    assert _lsm().verdict("claude-opus-5", _lsm().dispatched_tiers(tmp_path))[0] == "above-tier"
