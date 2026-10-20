@@ -95,7 +95,7 @@ TABLE = [
 @pytest.mark.parametrize("kind,expected", TABLE)
 def test_diff_yields_the_expected_records_for_each_kind(kind, expected):
     """control: omit this kind from `diff` -> exactly its row goes red (each kind on its own)."""
-    got = [{k: v for k, v in r.items() if k != "t"} for r in _ev(dag_history.diff(OLD, NEW, T), kind)]
+    got = [{k: v for k, v in r.items() if k not in ("t", "id", "u")} for r in _ev(dag_history.diff(OLD, NEW, T), kind)]
     assert got == expected
 
 
@@ -118,7 +118,7 @@ def test_chain_completes_when_all_members_resolve():
     old = _map([(1, DONE), (2, OPEN), (3, DONE)], [(1, 2), (2, 3)])
     new = _map([(1, DONE), (2, DONE), (3, DONE)], [(1, 2), (2, 3)])
     recs = _ev(dag_history.diff(old, new, T), "chain-completed")
-    assert [{k: v for k, v in r.items() if k != "t"} for r in recs] == [{"ev": "chain-completed", "chain": 1, "n": 3}]
+    assert [{k: v for k, v in r.items() if k not in ("t", "id", "u")} for r in recs] == [{"ev": "chain-completed", "chain": 1, "n": 3}]
     assert _ev(dag_history.diff(old, old, T), "chain-completed") == []
     assert _ev(dag_history.diff(new, new, T), "chain-completed") == []     # already complete: once only
 
@@ -310,8 +310,10 @@ def test_every_record_holds_only_numbers_event_names_and_timestamps():
         for k, v in r.items():
             if k == "ev":
                 assert v in dag_history.EVENTS
-            elif k == "t":
+            elif k in ("t", "u"):
                 assert ts.match(v)
+            elif k == "id":
+                assert re.fullmatch(r"[0-9a-f]{12}", v)        # #1958: a hash, never text
             elif k == "to":
                 assert isinstance(v, list) and all(type(x) is int for x in v)
             else:
@@ -447,8 +449,9 @@ def test_a_partial_new_map_still_records_additions_and_resolutions():
     old = _map([(1, OPEN), (2, OPEN)], [(1, 2)])
     new = _partial(_map([(1, DONE), (2, OPEN), (3, OPEN)], [(1, 2), (2, 3)]))
     recs = dag_history.diff(old, new, T)
-    assert _ev(recs, "edge-added") == [{"t": T, "ev": "edge-added", "a": 2, "b": 3}]
-    assert _ev(recs, "node-resolved") == [{"t": T, "ev": "node-resolved", "n": 1}]
+    bare = lambda rs: [{k: v for k, v in r.items() if k not in ("id", "u")} for r in rs]      # noqa: E731
+    assert bare(_ev(recs, "edge-added")) == [{"t": T, "ev": "edge-added", "a": 2, "b": 3}]
+    assert bare(_ev(recs, "node-resolved")) == [{"t": T, "ev": "node-resolved", "n": 1}]
 
 
 def test_a_complete_map_after_a_partial_one_records_nothing_false():

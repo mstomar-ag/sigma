@@ -16,6 +16,8 @@ Records (`EVENTS`), each one JSON object on one line, `t` an ISO UTC stamp and `
                                     chain is a weak component of two or more nodes. It is superseded when
                                     it is merged with another, is split, or dissolves; a chain that only
                                     grows or shrinks and stays one-to-one is NOT superseded.
+Every record also carries `u` (the source issue's `updated_at`, when the map has one) and `id` (#1958: a short hash of
+the event, its numbers and `u`; `fold` applies each id once and a record without one gets the same id on read).
 Nothing else is ever written: no title, label, name, url or comment text; the first map ever saved (no
 old map) records nothing.
 
@@ -36,8 +38,8 @@ and wrapped so a history failure never fails or delays a save. The same map save
 and appends nothing (headers are not compared). Cost: one extra read and parse of the previous map per
 save, plus the diff.
 
-Ledger readers (#1624): `read_all(root)` reads every writer's `dag/YYYY-MM/*.jsonl` under a ledger worktree,
-skipping corrupt lines; `contributors(root)` counts the writers and finds the newest record stamp.
+Ledger readers (#1624): `read_all(root, after=None)` reads every writer's `dag/YYYY-MM/*.jsonl` under a ledger worktree,
+skipping corrupt lines, each change once by `id` (#1958; `after` is the newest id a snapshot's `history_through` names); `contributors(root)` counts the writers and finds the newest record stamp.
 
 `read_month(sdlc, month)` opens only `<month>.jsonl`, `month` a strict `YYYY-MM`; anything else raises
 `ValueError`. `size_bytes` and `health` use `stat`, never a read.
@@ -49,6 +51,7 @@ exists for. At 10x and 100x the changes the year holds are 18 MB and 180 MB in t
 `diff` is linear in nodes plus edges: measured by the test at 30,000 nodes and 29,999 edges: 0.13 s for the whole test on one development
 machine, fixture build included (a single run, not a benchmark); the cost is paid once per save, inside the map lock the refresh already holds.
 """
+import hashlib
 import importlib.util
 import json
 import os
@@ -74,6 +77,57 @@ EVENTS = ("edge-added", "edge-removed", "node-resolved", "node-deleted", "chain-
           "chain-superseded")
 RESOLVED = ("closed", "merged", "closed-unmerged")
 _MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+_ID = re.compile(r"^[0-9a-f]{12}$")
+_ID_FIELDS = ("ev", "a", "b", "n", "chain", "to", "u")
+
+
+def change_id(rec):
+    """#1958: the identity of one change, a short hash of its event, its numbers and the source issue's
+    `updated_at` (`u`; a record without one uses its own stamp `t`). Pure over the record's own fields, so the
+    same change seen by two writers, or a record written before ids existed (no `id`, no `u`), gets the same
+    id wherever it is read."""
+    body = {k: rec.get(k) for k in _ID_FIELDS if rec.get(k) is not None}
+    if "u" not in body and rec.get("t") is not None:
+        body["u"] = rec["t"]                     # no source stamp (an old record): its own time, so a re-add is never folded away
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:12]
+
+
+def with_id(rec):
+    """`rec` with its `id` (a well-formed stored one is kept, a missing or malformed one is computed)."""
+    stored = rec.get("id")
+    return rec if isinstance(stored, str) and _ID.match(stored) else dict(rec, id=change_id(rec))
+
+
+def _sort_key(rec):
+    return (str(rec.get("t", "")), rec["id"])
+
+
+def fold(records, after=None):
+    """#1958: each change once. Records get their `id` (computed when absent), a repeat of an id is dropped
+    (the first seen wins), and with `after` (the newest id a snapshot includes) only entries strictly later
+    than it, by `(t, id)`, are kept. An `after` that no record carries applies everything: the cut is an
+    optimisation and never loses a change. Order: oldest first."""
+    seen, out = set(), []
+    for r in records:
+        if not isinstance(r, dict):
+            continue
+        r = with_id(r)
+        if r["id"] in seen:
+            continue
+        seen.add(r["id"])
+        out.append(r)
+    out.sort(key=_sort_key)
+    if after:
+        for i, r in enumerate(out):
+            if r["id"] == after:
+                return out[i + 1:]
+    return out
+
+
+def newest_id(records):
+    """The id of the newest record by `(t, id)`, or None with no record."""
+    folded = fold(records)
+    return folded[-1]["id"] if folded else None
 
 
 # ------------------------------------------------------------------ the pure side
@@ -117,7 +171,9 @@ def _chain_records(old, new, st_old, st_new, ts):
 
 
 def diff(old, new, ts):
-    """The records that turn `old` into `new`, stamped `ts`. `old` None (the first map) -> `[]`."""
+    """The records that turn `old` into `new`, stamped `ts`. `old` None (the first map) -> `[]`. Every record
+    carries `u` (the source issue's `updated_at`: the blocked issue for an edge, the node itself, the chain's
+    lowest member) and its `id` (#1958)."""
     if old is None or new is None:
         return []
     out = []
@@ -142,7 +198,23 @@ def diff(old, new, ts):
             out.append({"t": ts, "ev": "node-deleted", "n": n})
     if not (cut_short or old_short):
         out.extend(_chain_records(old, new, st_old, st_new, ts))
-    return out
+    return [_stamp(r, old, new) for r in out]
+
+
+def _updated(m):
+    return {n["number"]: n.get("updated_at") for n in m["nodes"] if isinstance(n.get("updated_at"), str)}
+
+
+def _stamp(rec, old, new):
+    """Add `u` and `id` to a fresh record: the source issue's `updated_at` from the new map, else the old."""
+    u_new, u_old = _updated(new), _updated(old)
+    ev = rec["ev"]
+    src = rec.get("b") if ev in ("edge-added", "edge-removed") else rec.get("n") if ev in ("node-resolved", "node-deleted") \
+        else rec.get("chain")
+    u = u_new.get(src) or u_old.get(src)
+    if u:
+        rec = dict(rec, u=u)
+    return with_id(rec)
 
 
 # ------------------------------------------------------------------ the files
@@ -296,9 +368,11 @@ def _stream_files(root):
                   for p in sorted(m.glob("*.jsonl")) if p.is_file())
 
 
-def read_all(root):
-    """Every record of every writer under the ledger worktree `root` (`dag/YYYY-MM/*.jsonl`), in file
-    order. A line that does not parse, or is not an object, is skipped; an unreadable file is skipped."""
+def read_all(root, after=None):
+    """Every record of every writer under the ledger worktree `root` (`dag/YYYY-MM/*.jsonl`), each change
+    once (`fold`, #1958: an old record gets its computed `id`), oldest first. With `after`, the newest id a
+    snapshot includes, only the entries later than it. A line that does not parse, or is not an object,
+    is skipped; an unreadable file is skipped."""
     out = []
     for p in _stream_files(root):
         try:
@@ -312,7 +386,7 @@ def read_all(root):
                 continue
             if isinstance(r, dict):
                 out.append(r)
-    return out
+    return fold(out, after)
 
 
 def contributors(root):
