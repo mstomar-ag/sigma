@@ -460,6 +460,7 @@ def _board_dup_risk(gh_cfg, run):
 _BOARD_GONE = ("could not resolve to a",)
 _OWNER_REFUSED = ("unknown owner type",)
 #: the same markers cross_repo/promote use for "GitHub is rate limiting this account"
+_SECONDARY_MARKERS = ("secondary rate", "secondary limit", "abuse detection")   # #1939: split from primary
 _RATE_LIMIT_MARKERS = ("rate limit", "secondary rate", "abuse detection", "too many requests")
 
 
@@ -506,6 +507,16 @@ def _pinned_board_state(gh_cfg, run):
         return ("ok" if isinstance(got, dict) and got.get("number") == want
                 else "unverifiable"), None
     said = _failure_text(raw).lower()
+    if any(tell in said for tell in _SECONDARY_MARKERS):
+        # #1939: a secondary limit is not the hourly allowance. Say so, and say when to retry: the refused
+        # response's own Retry-After (read by gh_quota, never /rate_limit), else a bounded default.
+        try:
+            wait = _load_loop_script("gh_quota").wait_seconds(said)
+        except Exception:                    # noqa: BLE001 - the row still says "secondary limit"
+            wait = 60
+        when = ("in about %d seconds" % wait if wait < 120 else "in about %d minutes" % -(-wait // 60))
+        return "refused", ("GitHub's secondary limit refused the board read; retry %s and re-run /sigma-doctor"
+                           % when)
     if any(tell in said for tell in _RATE_LIMIT_MARKERS):
         return "unverifiable", None  # #1485: a rate-limited read says nothing about the board
     if any(tell in said for tell in _OWNER_REFUSED) and not any(t in said for t in _BOARD_GONE):
