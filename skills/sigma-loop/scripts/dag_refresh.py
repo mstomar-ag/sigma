@@ -41,6 +41,7 @@ def _load(name):
 
 dag_store = _load("dag_store")
 dag_collect = _load("dag_collect")
+dag_lease = _load("dag_lease")                          # #1957: one refresher per repository
 dag_cycles = None                                       # #1615: loaded on first use after a saved refresh
 dag_insert = None                                       # #1616: loaded on first use after a saved refresh
 
@@ -120,7 +121,7 @@ def is_due(sdlc_dir, config, now):
         return False, "off"
     meta = read_meta(sdlc_dir)
     last = _number(meta.get("last_attempt"))
-    if meta.get("last_status") == "error" and last is not None and 0 <= now - last < RETRY_SECONDS:
+    if meta.get("last_status") in ("error", "folded") and last is not None and 0 <= now - last < RETRY_SECONDS:
         return False, "retry-wait"
     m, why = dag_store.load(sdlc_dir, config)
     if m is None:
@@ -186,7 +187,7 @@ def _clear_unchecked(sdlc_dir, seen):
 
 def refresh_if_due(sdlc_dir, config, run=None, now=None, force=False):
     """Refresh the map when due (or `force`). Never raises. -> `{status, why, calls}` where status is
-    `off`, `fresh` (not due, no read), `retry-wait`, `busy`, `kept`, `saved` or `error`."""
+    `off`, `fresh` (not due, no read), `retry-wait`, `folded` (another machine holds the lease; no read), `busy`, `kept`, `saved` or `error`."""
     now = time.time() if now is None else now
     try:
         if config is None:
@@ -201,6 +202,11 @@ def refresh_if_due(sdlc_dir, config, run=None, now=None, force=False):
             return {"status": why if why == "retry-wait" else "fresh", "why": why}
     else:
         why = "forced"
+    if dag_lease.acquire(sdlc_dir, config, now, force=force) == "fold":     # #1957: another machine reads
+        prior = read_meta(sdlc_dir)
+        _write_meta(sdlc_dir, {"last_attempt": now, "last_status": "folded", "last_error": None,
+                               "errors": int(_number(prior.get("errors")) or 0)})
+        return {"status": "folded", "why": why}
     seen = _read_unchecked(sdlc_dir)
     cap, budget = bounds()
     counted = _bounded(run, cap, budget)
