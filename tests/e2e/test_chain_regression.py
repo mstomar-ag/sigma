@@ -779,3 +779,33 @@ def test_owner_answers_from_the_reference_only():
     qs = [{"id": "wait:3", "kind": "wait", "ask": "#3 may wait on #9: does it?", "options": ["no", "it waits"]}]
     assert owner_answers(qs, rec, ref) == ({"wait:3": "it waits"}, [])
     assert owner_answers(qs, {"edges": [{"from": 9, "to": 3}]}, ref) == ({}, ["wait:3"])
+
+
+# --- #1940: five more dependency wordings, each read through the documented `plan` and `sheet` verbs ------------
+
+#: (form, goal 1's body, a trusted comment on goal 1, the issue number the plan must hold goal 1 waiting on)
+WORDINGS_1940 = [
+    ("slice-chain", "Fixture slices: S2a (#2), S2b (#3), S2c (#4), S2d (#1). S2a, S2b and S2c must precede S2d.", None, 2),
+    ("slice-on", "Fixture slices: S4b on S4a (#2); S4a is a fixture.", None, 2),
+    ("waiting-on", "Plain body.", "Still waiting on #2 before the paid run.", 2),
+    ("gates", "Plain body.", "#2 gates #1.", 2),
+    ("reversed-waits-on", "Plain body. This is what the story #2 waits on.", None, 2),
+]
+
+
+@pytest.mark.parametrize("form,body,comment,blocker", WORDINGS_1940, ids=[w[0] for w in WORDINGS_1940])
+def test_1940_wording_is_an_unconfirmed_wait_on_the_sheet(tmp_path, form, body, comment, blocker):
+    """Goal 1 carries the wording; the documented `chain.py plan` reads it as an unconfirmed wait (never an edge
+    the pick gate holds) and `chain.py sheet` lists it, with the form named."""
+    issues = [tla.issue(1, "sdlc:goal", assignees=("alice",), body=body + "\n\n" + DW,
+                        comments=[comment] if comment else ()),
+              tla.issue(2, "sdlc:goal", assignees=("alice",), body="Fixture issue 2.\n\n" + DW),
+              tla.issue(3, "sdlc:goal", assignees=("alice",), body="Fixture issue 3.\n\n" + DW),
+              tla.issue(4, "sdlc:goal", assignees=("alice",), body="Fixture issue 4.\n\n" + DW)]
+    sc = RegScenario(tmp_path, 1, issues=issues)
+    assert sc.step("plan") == 0, sc.out
+    rec = sc.record()
+    got = {(i["goal"], i["ref"], i["form"]) for i in rec["unconfirmed_waits"]}
+    assert (1, blocker, form) in got, got
+    assert sc.step("sheet") == 0, sc.out
+    assert "Unconfirmed waits" in sc.out and "(%s;" % form in sc.out, sc.out
