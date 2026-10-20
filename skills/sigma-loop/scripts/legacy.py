@@ -53,7 +53,8 @@ POST_RENAME_ENV = frozenset({"SIGMA_ALLOW_COEXIST", "SIGMA_HOST", "SIGMA_CODEX_C
                              "SIGMA_GH_BREAKER_COOLDOWN",
                              "SIGMA_RESOURCE_DIR", "SIGMA_RESOURCE_MODE", "SIGMA_VERIFY_WORKERS",
                              "SIGMA_UPKEEP_JOB", "SIGMA_LEAK_PATTERNS",   # #801, #895, #917
-                             "SIGMA_PICK_TRACE"})   # #375, #1607
+                             "SIGMA_PICK_TRACE",
+                             "SIGMA_GH_ACCOUNT"})   # #375, #1607, #1939
 
 #: The schema ids (kind@version) whose spelling changed only in its brand segment. A previous-name id
 #: of any OTHER kind or version is not understood: it reads as itself (so it matches nothing Sigma

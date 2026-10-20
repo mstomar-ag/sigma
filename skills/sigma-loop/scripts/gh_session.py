@@ -119,7 +119,7 @@ REMEDIES = {
                   "`gh auth refresh -s repo,workflow` (`gh auth status` shows what it has); a "
                   "fine-grained token needs Issues and Pull requests read and write; an organisation "
                   "that requires it must authorize the token on GitHub's token settings page",
-    "rate_limit": "fix: wait for the quota to reset; `gh api rate_limit` shows when",
+    "rate_limit": "fix: wait until the retry time in the refused response itself (`gh api -i` shows X-RateLimit-Reset or Retry-After); `gh api rate_limit` can disagree with it; a secondary limit is not the hourly quota",
     "transport": "fix: check your network connection and retry",
     "server": "fix: GitHub returned a server error; retry in a minute (https://www.githubstatus.com)",
 }
