@@ -4,11 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
-<<<<<<< HEAD
 - **The chain reads "in progress" from a live holder, not the label alone (#1945).** A member whose in-progress label has no live worker marker and no unexpired ledger claim is planned as stale instead of held by someone else, and the sheet names it with the `loop.py release` gesture; with the ledger off and no marker it stays in progress. MEASURED: fake-gh and local ledger fixtures only; no multi-machine run.
-=======
 - Upkeep's mechanical level also unions two-sided additions under `## YYYY-MM-DD ...` headings (a decision-record index), keeping both sides in date order; any edit or removal still parks (#1949). The optional `union_paths` key is not built yet.
->>>>>>> fork/feature/rollout-fixes
 - **Every map history record has an identity, so a change two machines both saw is counted once (#1958).** Records now carry `u` (the source issue's `updated_at`) and `id` (a short hash of the event, its numbers and `u`; an old record without them gets the same id computed on read, from its own stamp when it has no `u`). `dag_history.read_all` and `dag.py history --all` apply each id once; the ledger snapshot `dag/map.json` records `history_through`, the newest id it includes, and `read_all(root, after=...)` applies only later entries. DAG.md was already unchanged by duplicates (edges are a map, completions a set). MEASURED: offline fake writers and a real local ledger only; no multi-machine run.
 - Upkeep level 2 keeps the resolver's refusal reason whole up to 240 characters, so the macOS host-login fix command (`claude setup-token`) is no longer cut mid-word in the report.
 - **The PR `work.py pr` opens is titled after the goal, not the last fix-up commit (#1014).** The title is the subject of the branch's first commit that is not a work-in-progress, merge or fixup commit, with `(#N)` added when the goal reference is missing so the squash template keeps it. It is chosen once at PR creation; an existing PR is never retitled. History already on `main` is not rewritten. MEASURED: tests on a real git fixture branch and the fake-gh seam only.
