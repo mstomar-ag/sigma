@@ -152,7 +152,7 @@ constant copied from a laptop, and nothing here ever pauses a process.
   verdict; the stderr prefix tells them apart, and the final receipt records a hold as `RESOURCE-HOLD`, never as `UNVERIFIED`.
 - **Verify workers.** The granted worker count reaches the proving command as a `{workers}` token (replaced by an
   integer before the shell sees it), as `SIGMA_VERIFY_WORKERS`, as `PYTEST_XDIST_AUTO_NUM_WORKERS` for
-  `-n auto`, and as `VITEST_MAX_FORKS` and `VITEST_MAX_THREADS`, which vitest reads (measured on the vitest version installed here), so a
+  `-n auto`, and as `VITEST_MAX_FORKS` and `VITEST_MAX_THREADS`, which vitest 3.x or later reads (exported only when the installed vitest is 3.x or later: vitest 2.x aborts on them), so a
   `bash scripts/verify.sh` that runs vitest no longer starts cpus-1 workers whatever was granted. A positive cap the
   caller already set lower than the grant is kept, never raised. A literal `-n N` is never lowered: a warm cost record that cannot fit N holds instead.
 - **Shed.** With `resource.shed` at `verify` (the default) and `enforce`, `resource.shed_after` (default 3) critical samples in a row stop the

@@ -129,6 +129,13 @@ def test_env_levers_reach_the_child_and_the_grant_is_derived(env, tmp_path):
     assert 1 <= n <= 7 and out.outputs[0].split() == [str(n), str(n)]
 
 
+def stub_vitest(root, version):
+    """A minimal installed vitest: only the package.json version is read."""
+    d = root / "node_modules" / "vitest"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "package.json").write_text('{"name": "vitest", "version": "%s"}' % version)
+
+
 def test_node_test_runner_levers_follow_the_grant(env, tmp_path):
     """vitest reads VITEST_MAX_FORKS / VITEST_MAX_THREADS (MEASURED by reading vitest 3.2.7's dist: the env value
     overrides the config's maxForks). Without them a `bash scripts/verify.sh` that runs vitest starts cpus-1 workers
@@ -136,9 +143,37 @@ def test_node_test_runner_levers_follow_the_grant(env, tmp_path):
     that the grant reaches the child; it does not start vitest."""
     seed(env, [1 * GIB])
     env.box["available"] = 12 * GIB
+    stub_vitest(tmp_path, "3.2.7")
     out = env.run("verify", 'echo "$VITEST_MAX_FORKS $VITEST_MAX_THREADS"', str(tmp_path), 30, "g1")
     n = out.workers
     assert out.outputs[0].split() == [str(n), str(n)]
+
+
+@pytest.mark.parametrize("version", ["2.1.9", "1.6.0", "junk", ""])
+def test_vitest_levers_are_not_exported_for_a_vitest_that_aborts_on_them(env, tmp_path, version):
+    """#1931: vitest 2.x collects no tests when either variable is set, so a verify on it failed for every goal."""
+    seed(env, [1 * GIB])
+    env.box["available"] = 12 * GIB
+    stub_vitest(tmp_path, version)
+    out = env.run("verify", 'echo "[$VITEST_MAX_FORKS][$VITEST_MAX_THREADS][$SIGMA_VERIFY_WORKERS]"', str(tmp_path), 30, "g3")
+    assert out.outputs[0].split() == ["[][][%d]" % out.workers]
+
+
+def test_vitest_levers_are_not_exported_when_no_vitest_is_installed(env, tmp_path):
+    seed(env, [1 * GIB])
+    env.box["available"] = 12 * GIB
+    out = env.run("verify", 'echo "[$VITEST_MAX_FORKS][$VITEST_MAX_THREADS]"', str(tmp_path), 30, "g4")
+    assert out.outputs[0].split() == ["[][]"]
+
+
+def test_vitest_levers_find_a_vitest_installed_above_the_verify_root(env, tmp_path):
+    seed(env, [1 * GIB])
+    env.box["available"] = 12 * GIB
+    stub_vitest(tmp_path, "4.0.1")
+    sub = tmp_path / "packages" / "app"
+    sub.mkdir(parents=True)
+    out = env.run("verify", 'echo "$VITEST_MAX_FORKS"', str(sub), 30, "g5")
+    assert out.outputs[0].split() == [str(out.workers)]
 
 
 @pytest.mark.parametrize("caller, lowered", [("1", True), ("99", False), ("0", False), ("-3", False), ("junk", False), ("", False)])
@@ -146,6 +181,7 @@ def test_node_test_runner_levers_never_raise_a_cap_the_caller_set(env, tmp_path,
     """A caller's own positive cap below the grant stays; a larger, zero, negative, non-numeric or empty one is replaced."""
     seed(env, [1 * GIB])
     env.box["available"] = 12 * GIB
+    stub_vitest(tmp_path, "3.2.7")
     base = dict(os.environ, VITEST_MAX_FORKS=caller)
     out = env.run("verify", 'echo "$VITEST_MAX_FORKS"', str(tmp_path), 30, "g2", env=base)
     assert out.workers > 1, "the grant must exceed the caller's cap, or this test proves nothing"
