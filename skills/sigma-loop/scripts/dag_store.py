@@ -245,11 +245,11 @@ def save(sdlc, m, config=None):
         state.atomic_write_text(p, json.dumps(doc, sort_keys=True, separators=(",", ":")) + "\n")
     except Exception:
         return False, "error"
-    publish_snapshot(sdlc, doc, config)         # #1956: never fails a save
     try:                                        # a history failure never fails or delays a save
         _load("dag_history").record_save(sdlc, config, before, doc, time.time())
     except Exception as exc:
         print("dag history: not recorded (%s)" % type(exc).__name__, file=sys.stderr)
+    publish_snapshot(sdlc, doc, config)         # #1956: never fails a save; after the history so it names its newest id (#1958)
     return True, "ok"
 
 
@@ -295,6 +295,12 @@ def publish_snapshot(sdlc, doc, config=None):
         out = clean(doc)
         out["schema"] = SCHEMA
         out["built_by"] = _load("ledger")._host_token(config)
+        try:                                    # #1958: the newest change id the snapshot includes
+            through = _load("dag_history").newest_id(_load("dag_history").read_all(root))
+        except Exception:                       # noqa: BLE001
+            through = None
+        if through:
+            out["history_through"] = through
         p = snapshot_path(root)
         os.makedirs(p.parent, exist_ok=True)
         state.atomic_write_text(p, json.dumps(out, sort_keys=True, separators=(",", ":")) + "\n")
@@ -315,6 +321,16 @@ def read_snapshot_at(root):
         return None, None
     b = doc.get("built_by")
     return clean(doc), (b if isinstance(b, str) and _TOKEN.match(b) else None)
+
+
+def snapshot_through(root):
+    """The newest history change id the snapshot under ledger worktree `root` says it includes (#1958), or
+    None (no snapshot, none recorded, or not a well-formed id). A reader passes it as `read_all(after=...)`."""
+    try:
+        v = json.loads(_read_text(snapshot_path(root))).get("history_through")
+    except Exception:
+        return None
+    return v if isinstance(v, str) and re.fullmatch(r"[0-9a-f]{12}", v) else None
 
 
 def read_snapshot(sdlc, config=None):
