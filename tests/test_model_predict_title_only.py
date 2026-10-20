@@ -193,7 +193,7 @@ def test_390_why_reports_the_hit_count(capsys):
     m = _mod()
     text = "x\n\nThe migration touches billing. A second migration note follows too."
     assert m.main(["predict.py", "why", text]) == 0
-    assert capsys.readouterr().out.strip() == "model=opus in=body hits=2 signal=migrat"
+    assert capsys.readouterr().out.splitlines()[0] == "model=opus in=body hits=2 signal=migrat"
 
 
 def test_a_body_haiku_is_not_rescued_when_the_title_haiku_is_excluded():
@@ -242,18 +242,18 @@ def _documented_fallback_shape(title, body):
 def test_why_reports_where_the_signal_was_found(capsys):
     m = _mod()
     assert m.main(["predict.py", "why", _documented_fallback_shape("Fix typo", "x")]) == 0
-    assert capsys.readouterr().out.strip() == "model=haiku in=title hits=1 signal=typo"
+    assert capsys.readouterr().out.splitlines()[0] == "model=haiku in=title hits=1 signal=typo"
     # #390: a single body-only "race condition" mention no longer clears the 2+-hit threshold.
     assert m.main(["predict.py", "why",
                    _documented_fallback_shape("Tidy", "the race condition")]) == 0
-    assert capsys.readouterr().out.strip() == "model=sonnet signal="
+    assert capsys.readouterr().out.splitlines()[0] == "model=sonnet signal="
     # ... but two distinct opus alternatives, one occurrence each, do.
     assert m.main(["predict.py", "why",
                    _documented_fallback_shape(
                        "Tidy", "the race condition and general concurrency issues")]) == 0
-    assert capsys.readouterr().out.strip() == "model=opus in=body hits=2 signal=race condition"
+    assert capsys.readouterr().out.splitlines()[0] == "model=opus in=body hits=2 signal=race condition"
     assert m.main(["predict.py", "why", _documented_fallback_shape("Tidy", "the comment")]) == 0
-    assert capsys.readouterr().out.strip() == "model=sonnet signal="
+    assert capsys.readouterr().out.splitlines()[0] == "model=sonnet signal="
 
 
 def test_resolve_on_the_documented_fallback_shape_ignores_a_body_haiku(tmp_path, capsys):
@@ -284,7 +284,7 @@ def test_a_goal_file_title_is_its_frontmatter_title(tmp_path, capsys, newline):
     assert m.main(["predict.py", "resolve", real, base]) == 0
     assert capsys.readouterr().out.strip() == "sonnet"
     assert m.main(["predict.py", "why", trivial, base]) == 0
-    assert capsys.readouterr().out.strip() == "model=haiku in=title hits=1 signal=typo"
+    assert capsys.readouterr().out.splitlines()[0] == "model=haiku in=title hits=1 signal=typo"
 
 
 def test_a_subtitle_key_is_not_the_title(tmp_path, capsys):

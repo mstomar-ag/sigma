@@ -255,7 +255,7 @@ def test_resolve_cli_output_stays_backward_compatible(tmp_path, capsys):
     assert m.main(["predict.py", "resolve", "fix a typo", str(base)]) == 0
     assert capsys.readouterr().out.strip() == "haiku"                  # bare tier, no pair
     assert m.main(["predict.py", "resolve-step", "fix a typo", str(base)]) == 0
-    assert capsys.readouterr().out.strip() == "model=haiku effort=low"
+    assert capsys.readouterr().out.splitlines()[0] == "model=haiku effort=low"
 
 
 def test_resolve_cli_github_text_uses_separate_issue_id_for_ledger(tmp_path, capsys, monkeypatch):
@@ -1113,9 +1113,9 @@ def test_why_reports_what_the_loop_would_actually_choose(tmp_path, capsys):
     tuned = _sdlc_cfg(tmp_path, {"model_selection_max_tier": "fable",
                                  "model_selection_signal_excludes": ["vision"]}, ".tuned")
     assert m.main(["predict.py", "why", goal, plain]) == 0
-    assert capsys.readouterr().out.strip() == "model=fable in=title hits=1 signal=vision"
+    assert capsys.readouterr().out.splitlines()[0] == "model=fable in=title hits=1 signal=vision"
     assert m.main(["predict.py", "why", goal, tuned]) == 0
-    assert capsys.readouterr().out.strip() == "model=sonnet signal="
+    assert capsys.readouterr().out.splitlines()[0] == "model=sonnet signal="
 
 
 def test_the_bare_verb_agrees_with_why_and_with_resolve(tmp_path, capsys):
@@ -1141,18 +1141,18 @@ def test_the_cli_survives_a_missing_or_unreadable_sdlc_dir(tmp_path, capsys):
     m = _mod()
     missing = str(tmp_path / "nope")
     assert m.main(["predict.py", "why", "draft the product vision", missing]) == 0
-    assert capsys.readouterr().out.strip() == "model=sonnet in=title hits=1 signal=vision"
+    assert capsys.readouterr().out.splitlines()[0] == "model=sonnet in=title hits=1 signal=vision"
     broken = tmp_path / ".broken"; broken.mkdir()
     (broken / "config.json").write_text("{not json")
     assert m.main(["predict.py", "why", "draft the product vision", str(broken)]) == 0
-    assert capsys.readouterr().out.strip() == "model=sonnet in=title hits=1 signal=vision"
+    assert capsys.readouterr().out.splitlines()[0] == "model=sonnet in=title hits=1 signal=vision"
     # valid JSON that is not an OBJECT: `.get` would not exist on it, so this reaches further into
     # the reader than a parse error does -- and `resolve`, which calls `.get` for the gate before
     # excludes are ever consulted, would traceback on every goal the loop picks.
     listy = tmp_path / ".listy"; listy.mkdir()
     (listy / "config.json").write_text("[1, 2]")
     assert m.main(["predict.py", "why", "draft the product vision", str(listy)]) == 0
-    assert capsys.readouterr().out.strip() == "model=sonnet in=title hits=1 signal=vision"
+    assert capsys.readouterr().out.splitlines()[0] == "model=sonnet in=title hits=1 signal=vision"
     assert m.resolve("draft the product vision", str(listy)) is None
     assert m.main(["predict.py", "resolve", "draft the product vision", str(listy)]) == 0
     assert capsys.readouterr().out.strip() == "off"
@@ -1328,7 +1328,7 @@ def test_host_model_cli_emits_the_dispatch_arguments(capsys):
     """Skills need a shell-safe, machine-readable gesture rather than copying a model map by eye."""
     m = _mod()
     assert m.main(["predict.py", "host-model", "codex", "sonnet"]) == 0
-    assert capsys.readouterr().out.strip() == "model=gpt-5.6-terra effort=medium"
+    assert capsys.readouterr().out.splitlines()[0] == "model=gpt-5.6-terra effort=medium"
 
 
 def test_host_model_cli_honors_a_repo_codex_override(tmp_path, capsys):
@@ -1341,7 +1341,7 @@ def test_host_model_cli_honors_a_repo_codex_override(tmp_path, capsys):
             "model": "gpt-6-astra", "effort": "high"}}}}))
     m = _mod()
     assert m.main(["predict.py", "host-model", "codex", "sonnet", str(sdlc)]) == 0
-    assert capsys.readouterr().out.strip() == "model=gpt-6-astra effort=high"
+    assert capsys.readouterr().out.splitlines()[0] == "model=gpt-6-astra effort=high"
 
 
 def test_host_model_cli_refuses_a_broken_config_before_dispatch(tmp_path, capsys):
@@ -1638,12 +1638,12 @@ def test_all_four_documented_cli_gestures_honour_the_cap(tmp_path, capsys, monke
     assert m.main(["predict.py", goal, plain]) == 0                          # bare verb
     assert capsys.readouterr().out.strip() == "sonnet"
     assert m.main(["predict.py", "why", goal, plain]) == 0                   # why
-    assert capsys.readouterr().out.strip() == "model=sonnet in=title hits=1 signal=vision"
+    assert capsys.readouterr().out.splitlines()[0] == "model=sonnet in=title hits=1 signal=vision"
     assert m.main(["predict.py", "resolve", goal, plain]) == 0               # resolve
     assert capsys.readouterr().out.strip() == "sonnet"
     assert m.main(["predict.py", "resolve-step",                             # resolve-step
                    "render the narrative stage", plain, "2564"]) == 0
-    assert capsys.readouterr().out.strip() == "model=sonnet effort=medium"
+    assert capsys.readouterr().out.splitlines()[0] == "model=sonnet effort=medium"
 
     # ...and the opt-up restores every one of them, through the same four gestures.
     up = _sdlc_cfg(tmp_path, {"model_selection": "auto",
@@ -1651,8 +1651,54 @@ def test_all_four_documented_cli_gestures_honour_the_cap(tmp_path, capsys, monke
     assert m.main(["predict.py", goal, up]) == 0
     assert capsys.readouterr().out.strip() == "fable"
     assert m.main(["predict.py", "why", goal, up]) == 0
-    assert capsys.readouterr().out.strip() == "model=fable in=title hits=1 signal=vision"
+    assert capsys.readouterr().out.splitlines()[0] == "model=fable in=title hits=1 signal=vision"
     assert m.main(["predict.py", "resolve", goal, up]) == 0
     assert capsys.readouterr().out.strip() == "fable"
     assert m.main(["predict.py", "resolve-step", "render the narrative stage", up, "2564"]) == 0
-    assert capsys.readouterr().out.strip() == "model=fable effort=medium"
+    assert capsys.readouterr().out.splitlines()[0] == "model=fable effort=medium"
+
+
+# --- #1950: the effort axis shares the tier axis's safeguards for `high` -------------------------
+def _goal(title, body):
+    return f"{title}\n\n{body}"
+
+
+def test_1950_one_incidental_body_word_stays_medium():
+    m = _mod()
+    assert m.predict_effort(_goal("Add a retry", "Context: the auth team asked for this.")) == "medium"
+    assert m.predict_effort_location(_goal("Add a retry", "see the architecture notes")) \
+        == ("medium", None, None, 0)
+
+
+def test_1950_two_body_hits_are_high_and_counted():
+    m = _mod()
+    text = _goal("Add a retry", "The auth layer is touched; the auth tokens too.")
+    assert m.predict_effort_location(text) == ("high", "auth", "body", 2)
+
+
+def test_1950_one_title_hit_is_high():
+    m = _mod()
+    assert m.predict_effort_location(_goal("Debug the retry loop", "details")) == ("high", "debug", "title", 1)
+    assert m.predict_effort("debug the race condition in the scheduler") == "high"
+
+
+def test_1950_code_span_and_path_hits_never_count():
+    m = _mod()
+    assert m.predict_effort(_goal("Add a retry", "uses `auth` and `auth` again and `migrate`")) == "medium"
+    assert m.predict_effort(_goal("Add a retry", "see docs/architecture/auth.md and docs/architecture/auth.md")) == "medium"
+    assert m.predict_effort(_goal("Fix `debug` flag", "x")) == "medium"
+
+
+def test_1950_low_axis_keeps_its_rules_and_is_reached_after_a_rejected_high():
+    m = _mod()
+    assert m.predict_effort(_goal("Fix typo", "one auth mention")) == "low"
+    assert m.predict_effort(_goal("Tidy", "fix the typo in the docs")) == "low"
+
+
+def test_1950_why_prints_the_effort_signal_on_a_second_line(capsys):
+    m = _mod()
+    assert m.main(["predict.py", "why", _goal("Add a retry", "auth and auth again")]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1] == "effort=high in=body hits=2 signal=auth"
+    assert m.main(["predict.py", "why", _goal("Add a retry", "one auth")]) == 0
+    assert capsys.readouterr().out.splitlines()[1] == "effort=medium signal="
