@@ -231,7 +231,8 @@ Rules of the ladder:
 - Public visibility writes no watch comparisons, because they would carry the free-text choice.
 
 State lives in `.sdlc/autonomy/` as one small file per fact (`watch-<id>.json`, `veto-<id>.json`, plus the applier's
-`ask-<id>.json`, `applier-heartbeat.json` and `spot-counter.json`). The machine tag is a short hash of the host name.
+`ask-<id>.json` and `spot-counter.json`). The applier's heartbeat and sync cursor are runtime state and live in the
+git-ignored `.sdlc/state/autonomy/` instead (#1938). The machine tag is a short hash of the host name.
 
 ### Per-category thresholds
 
@@ -354,7 +355,7 @@ for applies that landed, and it is decided per action at apply time.
 A person's gesture on the same issue (unpark, keep-parked, promote, demote) closes the pending ask with their text.
 A keep-parked or demote on an issue whose ask was applied inside its window records the veto.
 
-The tick writes `applier-heartbeat.json`; the doctor reads a tick as dead when it is missing or older than
+The tick writes `applier-heartbeat.json` under `.sdlc/state/autonomy/` (git-ignored; an older copy in `.sdlc/autonomy/` is not read); the doctor reads a tick as dead when it is missing or older than
 `stale_after_intervals` (default 3) watch intervals. A dead tick is harmless: the goal stays parked. Applied asks with no
 pending veto are deleted after `prune_after_days` (default 30); answered and vetoed asks after two days.
 
