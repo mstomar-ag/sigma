@@ -223,3 +223,25 @@ def test_the_doctor_host_row_is_red_when_logged_out_and_scrubbed_rows_are_unchan
     row = [c for c in scrubbed if c["name"].startswith("resolver auth")][0]
     assert row["name"] == "resolver auth: logged in in the scrubbed environment (route: none)"
     assert not [c for c in scrubbed if "host login" in c["name"]]
+
+
+# --------------------------------------------------------------------------- #1953: the doctor shows the capped model; the account type is allowlisted
+
+def test_the_configured_row_names_the_model_after_the_repo_ceiling_cap(tmp_path):
+    d, cfg = R.doctor(), R.config()
+    cfg["upkeep"]["conflicts"]["agent"]["model"] = "opus"
+    cfg["model_selection_max_tier"] = "sonnet"
+    rows = d._resolver_rows(R.project(tmp_path, cfg), cfg, lambda n: "/bin/" + n, True, None, None)
+    configured = [c for c in rows if c["name"].startswith("resolver configured")][0]
+    assert "model sonnet" in configured["name"] and "model opus" not in configured["name"]
+
+
+def test_the_account_type_reads_unknown_for_a_value_off_the_allowlist(tmp_path):
+    L_ = S.launcher() if hasattr(S, "launcher") else None
+    launcher = L_ or R.doctor()._load_loop_script("feature_upkeep_launcher")
+    stub = tmp_path / "claude"
+    stub.write_text('#!%s\nimport json\nprint(json.dumps({"loggedIn": True, "subscriptionType": "someone-else-42"}))\n' % sys.executable)
+    stub.chmod(0o755)
+    assert launcher.auth_info(dict(os.environ), str(stub), str(tmp_path)) == (True, None)
+    stub.write_text('#!%s\nimport json\nprint(json.dumps({"loggedIn": True, "subscriptionType": "Max"}))\n' % sys.executable)
+    assert launcher.auth_info(dict(os.environ), str(stub), str(tmp_path)) == (True, "max")
