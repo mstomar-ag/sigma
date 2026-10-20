@@ -64,6 +64,14 @@ class Fake:
     def __call__(self, args):
         args = [str(a) for a in args]
         self.calls.append(args)
+        m = re.fullmatch(r"repos/[^/]+/[^/]+/labels/(.+)", args[1]) if args[0] == "api" else None
+        if m:                                    # #1939: label_exists is a REST GET; answered before gqlfake's
+            import urllib.parse
+            if urllib.parse.unquote(m.group(1)) in self.missing:
+                exc = RuntimeError("HTTP 404 Not Found")
+                exc.hint = "gh: Not Found (HTTP 404)"
+                raise exc
+            return json.dumps({"name": m.group(1)})
         swaps = []
         g = gqlfake.swap(args, calls=swaps)
         if g is not None:
@@ -79,12 +87,6 @@ class Fake:
         method = args[args.index("--method") + 1] if "--method" in args else "GET"
         if path == "user":
             return json.dumps({"login": "alice"})
-        m = re.fullmatch(r"repos/[^/]+/[^/]+/labels/(.+)", path)
-        if m:
-            import urllib.parse
-            if urllib.parse.unquote(m.group(1)) in self.missing:
-                raise RuntimeError("HTTP 404 Not Found")
-            return json.dumps({"name": m.group(1)})
         m = re.fullmatch(r"repos/[^/]+/[^/]+/issues/(\d+)/(labels|comments|assignees)", path)
         if m and method == "POST":
             n, kind = int(m.group(1)), m.group(2)

@@ -73,8 +73,9 @@ def show(sdlc):
     t = ds.stamp(m)
     age = _age(time.time() - t) if t is not None else "unknown"
     ok, reason = ds.usable(m, time.time(), ds.ttl_minutes(config))
-    return (f"dag: mode {md}, age {age}, nodes {len(m['nodes'])}, edges {len(m['edges'])}, "
+    line = (f"dag: mode {md}, age {age}, nodes {len(m['nodes'])}, edges {len(m['edges'])}, "
             f"{'usable' if ok else 'not usable (' + reason + ')'}")
+    return line + ", nothing to plan" if ok and not m["nodes"] else line
 
 
 def rebuild(sdlc):

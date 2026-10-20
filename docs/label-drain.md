@@ -116,6 +116,32 @@ by a person.
 - Bounds: at most 200 members (more is refused with the count), at most 50 single-issue reads in the
   prerequisite walk, depth 8, and at most 20 parked members briefed; the rest report `not-read`.
 
+## GraphQL budget
+
+GitHub counts GraphQL points per account, so two watchers on one machine spend one allowance. Sigma keeps
+that spend in one place:
+
+- **The bucket.** `gh-graphql-bucket.json` in the user state folder (`SIGMA_RESOURCE_DIR`, else the XDG state
+  home; the same folder as the resource guard's `hold.json`), never inside a repository. Keyed by account:
+  `SIGMA_GH_ACCOUNT` if set, else one shared `default` bucket for the machine user.
+- **Spacing.** One point refills every 2 seconds, up to a burst of 20: about 1800 points an hour when steady.
+  A watcher tick may spend 5 of them. A call made through `sources._run_gh` that is GraphQL-shaped takes one
+  point first; with none left it is not made and the error says how long to wait.
+- **A refusal holds everyone.** The refusal's text is read once and `hold_until` is written, so every other
+  process stops calling until then instead of finding out one refusal at a time.
+- **Where the wait comes from.** Only the refused response: `Retry-After`, else `X-RateLimit-Reset`, else a
+  bounded default (60 seconds secondary, 300 primary). `gh api rate_limit` is never the source; it can say
+  thousands are left while a secondary limit holds the account. `gh` hides headers unless asked, so the gesture
+  to see them is `gh api -i`; without them the default applies.
+- **Secondary versus primary.** A secondary limit (an abuse guard, `Retry-After` in seconds) is named as one in
+  the doctor board row ("secondary limit", with when to retry); a primary limit is the hourly allowance and
+  keeps its reset-time wording.
+- **Label lookup is REST.** The pick's label check (`GitHubSource.label_exists`) and `label_drain.py plan` use
+  one `GET repos/{repo}/labels/{name}` (the core pool), so both work with GraphQL refused. Attaching or swapping
+  a label still needs GraphQL node ids.
+- **Damage fails open.** A missing, corrupt or locked bucket file never blocks a call. Unmeasured against a live
+  secondary limit.
+
 ## Parallelism
 
 `next-batch --label <name>` follows the same scope, and the goal-level parallelism settings in

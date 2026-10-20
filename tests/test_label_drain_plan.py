@@ -391,8 +391,8 @@ def test_json_carries_the_exact_call_count_for_six_members_and_two_blockers(tmp_
     rec = []
     assert ld.main(["label_drain.py", "plan", base, LBL, "--json"], run=_runner(issues, rec)) == 0
     out = json.loads(capsys.readouterr().out)
-    # one label lookup + one list + one GET per distinct blocker (#20 is shared, memoised)
-    assert out["calls"] == {"total": 4, "list": 1, "get": 2, "graphql": 1, "other": 0}
+    # one label lookup (REST since #1939: "other", no GraphQL) + one list + one GET per distinct blocker
+    assert out["calls"] == {"total": 4, "list": 1, "get": 2, "graphql": 0, "other": 1}
     assert len(rec) == 4
     assert len(out["members"]) == 6
 

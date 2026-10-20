@@ -203,6 +203,7 @@ ledger = _load("ledger")             # blocker-promotion's ledger edge channel (
 gh_session = _load("gh_session")     # #78: tell a Claude Code Remote session's gh proxy block apart
                                       # from a real auth failure -- see that module's own docstring.
 post_guard = _load("post_guard")      # #375: opt-in refusal of private-reference text (SIGMA_LEAK_PATTERNS)
+gh_quota = _load("gh_quota")         # #1939: refusal reading + the shared per-account GraphQL bucket
 gh_api = _load("gh_api")             # #895: issue READS go REST first (gh_api.read_issue)
 _fx = gh_api.with_remedy             # D7: a failure shown to a human carries its fix (raw reason first)
 feature_labels = _load("feature_labels")   # #1468: the never-create rule for `feature:*` labels.
@@ -749,6 +750,19 @@ def _run_gh(args, binary="gh"):
     failure — a real GitHub error, `gh` missing entirely, a genuinely bad token — never matches, so
     `hint` is exactly what it always was for those."""
     import subprocess
+    gated = binary == "gh" and gh_quota.graphql_shaped(args)
+    if gated:
+        # #1939: GraphQL is budgeted per account across every process on this machine. A recorded refusal
+        # (or an empty bucket) stops the call BEFORE it is made; the wait is the refusal's own, not a counter's.
+        ok, wait = gh_quota.acquire()
+        if not ok:
+            kind = gh_quota.held_kind()
+            hint = ("GitHub's %s limit is holding this account's GraphQL calls; retry in about %ds"
+                    % (kind or "GraphQL budget", wait) if gh_quota.held() else
+                    "the shared GraphQL budget is spent; retry in about %ds" % wait)
+            exc = RuntimeError("gh " + " ".join(args) + " not run: " + hint)
+            exc.hint = hint
+            raise exc
     try:
         proc = subprocess.run([binary, *args], capture_output=True, text=True)
     except FileNotFoundError as missing:
@@ -761,6 +775,8 @@ def _run_gh(args, binary="gh"):
         raise exc from missing
     if proc.returncode != 0:
         raw_hint = proc.stderr.strip() or "is `gh` installed and authenticated? run `gh auth status`"
+        if gated:
+            gh_quota.note_refusal(None, proc.stderr + "\n" + proc.stdout)
         hint = gh_session.proxy_session_block(raw_hint) or raw_hint
         exc = RuntimeError("gh " + " ".join(args) + " failed: " + hint)
         exc.hint = hint
@@ -3720,16 +3736,16 @@ class GitHubSource:
 
         The three-valued answer is the point: a transient failure is NOT evidence a label is absent,
         and collapsing the two would either flag a human for a network blip or start a goal against
-        the wrong base. Routed through `_label_node_ids`, whose `repository.label(name:)` query
-        returns null for a name the repo does not have -- the same signal `_swap_labels` raises on --
-        so this asks the question the write path would ask, one step earlier and without writing.
+        the wrong base. #1939: one REST GET (`gh_api.label_exists`, `GET repos/{repo}/labels/{name}`),
+        the core pool, so a pick and `label_drain plan` still answer while GraphQL is refused. A 404
+        is `False`; any other failure is `None`. It does NOT fall back to GraphQL: the node-id lookup
+        (`_label_node_ids`) still serves attach and swap, which need the ids, not the answer.
 
-        NEVER CREATES, and cannot: this is a query, and the one method that could create is refused
-        at `_run`. Self-healing by construction, too -- `_label_node_ids` caches only names it FOUND,
-        so a `False` answer is re-queried on the next pick and flips the moment a human creates the
-        label."""
+        NEVER CREATES, and cannot: this is a GET, and the one method that could create is refused
+        at `_run`. Self-healing by construction: nothing is cached, so a `False` answer is re-asked on
+        the next pick and flips the moment a human creates the label."""
         try:
-            return name in self._label_node_ids([name])
+            return bool(gh_api.label_exists(self._run, name, self.repo or None))
         except Exception as exc:          # noqa: BLE001 - "could not tell" is a real answer here
             try:
                 sys.stderr.write("sigma: could not look up the label %r (%s)\n" % (name, _fx(exc)))
@@ -4717,6 +4733,8 @@ class GitHubSource:
             return 0
         floor = self._project_cfg.get("backfill_min_graphql", 1000)
         try:
+            if gh_quota.held():            # #1939: a recorded refusal outranks the counter
+                return 0
             remaining = json.loads(self._run(["api", "rate_limit"]))["resources"]["graphql"]["remaining"]
             if int(remaining) < int(floor):
                 return 0
@@ -5631,6 +5649,8 @@ class GitHubSource:
         floor or unreadable. Label writes never depend on it."""
         try:
             floor = self._project_cfg.get("backfill_min_graphql", 1000)
+            if gh_quota.held():            # #1939: a recorded refusal outranks the counter
+                return True
             remaining = json.loads(self._run(["api", "rate_limit"]))["resources"]["graphql"]["remaining"]
             return int(remaining) < int(floor)
         except Exception:

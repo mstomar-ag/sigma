@@ -61,7 +61,7 @@ LIBRARY_ONLY = {
     "setup_wizard", "wizard_actions", "actionlog", "blocker_scan", "blockers", "breaker", "breaker_run", "seal_tests",
     "decompose_goal", "design_goal", "diff_revert", "feature_classify", "feature_doc", "legacy",
     "feature_judge", "feature_labels", "feature_registry", "feature_stamp", "feature_upkeep", "rulebook_cfg", "features", "file_triage", "decision_record", "ears_patterns", "drift_judge", "spend_cap", "chain_spend", "drift_shadow", "ai_filed_counter", "hard_stop_guard", "gate_hold",
-    "dag_core", "flake_check", "frontmatter", "gh_api", "gh_session", "goal_size", "pick_trace", "post_guard", "mutation",
+    "dag_core", "flake_check", "frontmatter", "gh_api", "gh_quota", "gh_session", "goal_size", "pick_trace", "post_guard", "mutation",
     "scrub", "sources", "state", "tamper_scan", "timing_store", "watch_classify", "witness",
     "bounded_run", "run_receipt", "sealed_tests", "resource_verify", "resource_liveness",
     "feature_landed",

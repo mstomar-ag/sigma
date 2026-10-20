@@ -725,7 +725,7 @@ def test_a_label_lookup_that_could_not_answer_refuses_without_flagging_or_overla
     """A transient failure is not evidence the label is absent. Refuse (redo a little work next
     pass) but do NOT flag a human, and do NOT write a state, for a network blip."""
     fl = _mod("feature_labels")
-    run = _runner(body=_DECLARES, labels={"sdlc:goal"}, fail_on=["label(name:"])
+    run = _runner(body=_DECLARES, labels={"sdlc:goal"}, fail_on=["/labels/"])   # #1939: the existence check is one REST GET
     gh = _source(run)
     with tempfile.TemporaryDirectory() as d:
         base, cfg = _sdlc(d)
