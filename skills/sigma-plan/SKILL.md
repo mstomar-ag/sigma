@@ -49,10 +49,9 @@ extend it by sprout or wrap at one seam, sending dropped improvements to retro's
 ## 4. Definition of done
 State each task's proof: command, expected output, and the goal's `done_when`.
 
-Include `## Tests`: 1–25 backticked repo-relative pytest selectors, one per bullet and no prose.
+Write `## Tests`: 1–25 backticked pytest selectors, one per bullet, or the line `none: <reason>` (docs-only).
 
-A file selector covers every collected test. With `verify.enforce`, no applicable tests require
-`work.py pr --no-tests <reason>`.
+A file selector covers every collected test. Else `work.py pr --no-tests <reason>`.
 
 ## 5. Write it to disk — `.sdlc/plans/<goal-stem>.md`
 The plan is an **artifact**, not a message. Save it under `.sdlc/plans/`, named for the goal

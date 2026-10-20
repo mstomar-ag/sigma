@@ -636,3 +636,80 @@ def test_flake_scope_says_planned_files_or_classes_for_a_bare_file_or_class(case
     assert (result['scope']['nodes'], result['scope']['files']) == (1, 1)
     assert ('loop: flake check scope: planned files/classes -- 1 node id(s) in 1 file(s), '
             '3 run(s) at a time') in err
+
+
+# #1942: a plan whose `## Tests` is the single line `none: <reason>` is an explicit exception for a
+# docs-only change; it is read by the proof, recorded in the PR body, and refused for any code change.
+def none_case(case, monkeypatch, changed, tests='none: wording only, no testable code'):
+    case[2].write_text(f'# Plan\n\n## Tests\n{tests}\n')
+    w, config, run, calls = pr_case(case, monkeypatch)
+    def diff_run(cwd, argv):
+        if argv[:3] == ['git', 'diff', '--name-only']:
+            calls.append(argv)
+            return '\n'.join(changed)
+        return run(cwd, argv)
+    return w, config, diff_run, calls
+
+
+def test_docs_only_none_plan_reaches_pr_without_no_tests_flag(case, monkeypatch):
+    w, config, run, calls = none_case(case, monkeypatch, ['docs/a.md', 'CHANGELOG.md', '.sdlc/plans/42.md'])
+    assert w.pr(case[1], config, '42', run=run) == 'PR #7'
+    body = next(x for a in calls for x in a if x.startswith('body='))
+    assert 'wording only, no testable code' in body and 'Test-first exception' in body
+
+
+@pytest.mark.parametrize('code', ['skills/sigma-loop/scripts/work.py', 'tests/test_x.py', 'hooks/session_start.sh'])
+def test_none_plan_is_refused_when_the_change_touches_code(case, monkeypatch, code):
+    w, config, run, calls = none_case(case, monkeypatch, ['docs/a.md', code])
+    result = w.pr(case[1], config, '42', run=run)
+    assert result.startswith('TEST-FIRST REFUSED') and code in result, result
+    assert not any(a[:2] == ['git', 'push'] for a in calls)
+
+
+@pytest.mark.parametrize('tests', ['none:', 'none:   ', 'none: reason\n- `tests/test_x.py`', 'None: reason', 'nothing'])
+def test_malformed_or_mixed_none_section_is_still_refused(case, monkeypatch, tests):
+    w, config, run, calls = none_case(case, monkeypatch, ['docs/a.md'], tests)
+    assert w.pr(case[1], config, '42', run=run).startswith('TEST-FIRST REFUSED')
+    assert not any(a[:2] == ['git', 'push'] for a in calls)
+
+
+def test_code_goal_without_a_tests_section_is_still_refused(case, monkeypatch):
+    w, config, run, calls = none_case(case, monkeypatch, ['skills/x.py'])
+    case[2].write_text('# Plan\n\nno tests heading\n')
+    assert w.pr(case[1], config, '42', run=run).startswith('TEST-FIRST REFUSED')
+
+
+def test_none_reason_reads_only_the_exact_single_line_form(case):
+    rg = load('red_green')
+    case[2].write_text('# Plan\n\n## Tests\n\nnone: because docs\n\n## Risks\nx\n')
+    assert rg.none_reason(case[2]) == 'because docs'
+    case[2].write_text('# Plan\n\n## Tests\n- `tests/test_x.py`\n')
+    assert rg.none_reason(case[2]) is None
+
+
+def test_docs_only_classifier():
+    rg = load('red_green')
+    assert rg.docs_only(['README.md', 'docs/x.png', '.sdlc/plans/1.md', 'CHANGELOG.md'])
+    assert not rg.docs_only(['.sdlc/config.json'])
+    assert not rg.docs_only(['docs/x.md', 'a.py'])
+    assert not rg.docs_only(['docs/../hooks/x.sh'])
+    assert not rg.docs_only([])
+
+
+def test_none_plan_with_an_empty_diff_is_refused(case, monkeypatch):
+    w, config, run, calls = none_case(case, monkeypatch, [])
+    assert w.pr(case[1], config, '42', run=run).startswith('TEST-FIRST REFUSED')
+
+
+def test_none_plan_does_not_skip_the_verify_evidence_check(case, monkeypatch):
+    w, config, run, calls = none_case(case, monkeypatch, ['docs/a.md'])
+    monkeypatch.setattr(w.state, 'done_refusal', lambda *a: 'production changed since verify')
+    result = w.pr(case[1], config, '42', run=run)
+    assert 'production changed since verify' in result
+    assert not any(a[:2] == ['git', 'push'] for a in calls)
+
+
+def test_rename_out_of_code_is_read_as_a_code_change(case, monkeypatch):
+    w, config, run, calls = none_case(case, monkeypatch, ['docs/x.md'])
+    w.pr(case[1], config, '42', run=run)
+    assert any(a[:4] == ['git', 'diff', '--name-only', '--no-renames'] for a in calls)
