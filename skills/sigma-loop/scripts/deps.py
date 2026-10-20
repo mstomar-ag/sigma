@@ -35,7 +35,18 @@ the agent and are never stored; they pass through `scrub.scrub` first.
 
 Usage:
   deps.py report <sdlc_dir> <goal>
+  deps.py report <sdlc_dir> --label <label>     every open member of a run label
+  deps.py report <sdlc_dir> --chain <N>         goal N and every open prerequisite the chain planner finds
   deps.py mark <sdlc_dir> <goal> <ref> <reason...>
+
+Batch (#1944): `--label` / `--chain` print one JSON line per member (the exact single-goal object, ordered by
+issue number) from ONE process. Members come from what already lists them: the label drain's scope check and
+REST listing (`sources.scope_to_label` + `fetch_issues_rest`), and `chain._resolve` (the planner's own closure,
+which writes no record). The listing carries bodies but not comments, so each member is still read with the
+single form's `_read_issue` inside this process: no subprocess per member, but NOT one read in total.
+Reads: 1 listing (label) or the planner's reads (chain), plus per member one issue read and its comment pages.
+MEASURED: process count only (one), by fake-source tests; no timing and no speedup is claimed. An unreadable
+member prints `{"error": ..., "goal": N}` and the exit code is 2 at the end; none is skipped silently.
 
 Scale: `report` is one issue read plus ceil(comments/100) comment pages, whatever the board size;
 `mark` adds one goal read, one read of the referenced issue, one body write and one comment.
@@ -62,7 +73,8 @@ _REF_RE = re.compile(r"#(\d+)\b")
 SNIPPET_CHARS = 160
 SNIPPETS_PER_REF = 2
 _RANK = {"edge": 0, "comment-edge": 1, "weak": 2, "mention": 3}
-USAGE = "usage: deps.py report <sdlc_dir> <goal> | deps.py mark <sdlc_dir> <goal> <ref> <reason...>"
+USAGE = ("usage: deps.py report <sdlc_dir> <goal> | deps.py report <sdlc_dir> --label <label> | "
+         "deps.py report <sdlc_dir> --chain <N> | deps.py mark <sdlc_dir> <goal> <ref> <reason...>")
 
 
 def _snippet(text, start, end):
@@ -158,6 +170,43 @@ def mark(source, goal, ref, reason):
     return "MARKED", "issue %s now blocks this goal" % ref
 
 
+def _open_source(sdlc_dir):
+    state, sources = _load("state"), _load("sources")
+    return sources.get_source(sdlc_dir, state.load_config(sdlc_dir))
+
+
+def _label_members(source, label, fetch=None):
+    """-> sorted open member numbers of run label `label`: the label drain's own scope check and REST listing."""
+    sources = _load("sources")
+    sources.scope_to_label(source, label)                     # raises LabelScopeError, as the drain does
+    fetch = fetch or (lambda run, repo, labels, cap: sources.fetch_issues_rest(run, repo, labels, cap))
+    cap = _load("label_drain").MAX_MEMBERS
+    listed = fetch(getattr(source, "_run", None), source.repo, [label], cap + 1)
+    if len(listed) > cap:
+        raise ValueError("label %r has more than %d open members; refusing rather than truncating" % (label, cap))
+    return sorted(int(i["number"]) for i in listed)
+
+
+def _chain_members(sdlc_dir, goal, resolve=None, config=None, now=None):
+    """-> sorted numbers of goal and its open prerequisites: the rows `chain.plan` would record, not re-walked."""
+    import time
+    config = config if config is not None else _load("state").load_config(sdlc_dir)
+    resolve = resolve or _load("chain")._resolve
+    out, _ro = resolve(sdlc_dir, int(goal), config, None, time.time() if now is None else now)
+    return sorted(int(r["number"]) for r in out["members"])
+
+
+def _report_batch(source, numbers):
+    code = 0
+    for n in sorted(set(int(x) for x in numbers)):
+        try:
+            rec = report(source, n)
+        except Exception as exc:                   # noqa: BLE001 - an unreadable member is reported, never skipped
+            rec, code = {"goal": str(n), "error": "%s: %s" % (type(exc).__name__, str(exc)[:200])}, 2
+        print(json.dumps(rec, ensure_ascii=False, sort_keys=True))
+    return code
+
+
 def main(argv):
     if argv[1:] in (["-h"], ["--help"]):
         print(USAGE)
@@ -165,12 +214,26 @@ def main(argv):
     if len(argv) < 4 or argv[1] not in ("report", "mark") or (argv[1] == "mark" and len(argv) < 5):
         print(USAGE, file=sys.stderr)
         return 2
-    state, sources = _load("state"), _load("sources")
-    config = state.load_config(argv[2])
-    source = sources.get_source(argv[2], config)
+    source = _open_source(argv[2])
     if not hasattr(source, "_read_issue") or not hasattr(source, "append_to_body"):
         print("UNSUPPORTED deps.py reads GitHub issues only; this project uses local goal files")
         return 2
+    if argv[1] == "report" and argv[3] in ("--label", "--chain"):
+        if len(argv) != 5:
+            print(USAGE, file=sys.stderr)
+            return 2
+        try:
+            if argv[3] == "--label":
+                numbers = _label_members(source, argv[4])
+            else:
+                numbers = _chain_members(argv[2], argv[4].lstrip("c#"))
+        except Exception as exc:                   # noqa: BLE001 - a refusal from the shared pieces, shown as is
+            print("REFUSED %s" % str(exc)[:300], file=sys.stderr)
+            return 2
+        if not numbers:
+            print("no open members for %s %s" % (argv[3], argv[4]), file=sys.stderr)
+            return 2
+        return _report_batch(source, numbers)
     if argv[1] == "report":
         print(json.dumps(report(source, argv[3]), ensure_ascii=False, sort_keys=True))
         return 0

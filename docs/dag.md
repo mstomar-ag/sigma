@@ -200,7 +200,7 @@ whole-sweep call count falls only by the unpark pass.
 ## Limits
 
 - Edges that exist only in a comment, and weak phrases, are not in the map; they show up as `comment-only`
-  disagreements in shadow. `deps.py report` lists them per goal, and `deps.py mark` writes one into the body as
+  disagreements in shadow. `deps.py report` lists them per goal (`deps.py report <sdlc_dir> --label <label>` or `--chain <N>` does a whole label or chain in one process, one JSON line per member), and `deps.py mark` writes one into the body as
   a `Blocked by` line, which the map reads. The map also reads `blocked on` and `blocked until`, and the
   follow-up forms (`follow-up to` and its variants, with nothing but spaces before the number), from a body.
 - A priority change made only on the board is seen only by the hourly read.
