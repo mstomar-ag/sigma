@@ -81,3 +81,18 @@ def test_no_existing_headings_new_ones_come_out_in_date_order():
     t = b + "\n## 2026-02-01 — theirs\n\n- t\n"
     got = union(b, o, t)
     assert got is not None and got.index("theirs") < got.index("ours")
+
+
+def test_same_day_heading_added_by_both_sides_is_one_heading_holding_both_bullet_sets():
+    o = BASE + "\n## 2026-02-01 — x\n\n- o1\n"
+    t = BASE + "\n## 2026-02-01 — x\n\n- t1\n- t2\n"
+    got = union(BASE, o, t)
+    assert got == BASE + "\n## 2026-02-01 — x\n\n- o1\n- t1\n- t2\n"
+    assert got.count("## 2026-02-01 — x") == 1
+
+
+def test_same_day_heading_added_by_both_sides_with_other_new_days_around_it():
+    o = BASE + "\n## 2026-02-01 — x\n\n- o1\n\n## 2026-03-01 — z\n\n- z1\n"
+    t = BASE + "\n## 2026-02-01 — x\n\n- t1\n"
+    got = union(BASE, o, t)
+    assert got == BASE + "\n## 2026-02-01 — x\n\n- o1\n- t1\n\n## 2026-03-01 — z\n\n- z1\n"
