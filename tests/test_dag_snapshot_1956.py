@@ -131,9 +131,9 @@ def test_publish_pushes_a_map_only_change(tmp_path, origin):
     dag_store.save(base, _map(), cfg)
     out = sync.publish(base, cfg)
     assert "nothing" not in out, out
-    shown = json.loads(_git(origin, "show", "sdlc-ledger:dag/map.json"))
+    shown = json.loads(_git(origin, "show", "sdlc-ledger:dag/map.json"))  # the ledger branch
     assert shown["edges"][0]["blocked"] == 2
-    assert "Built by box1 at " + NEW in _git(origin, "show", "sdlc-ledger:DAG.md")
+    assert "Built by box1 at " + NEW in _git(origin, "show", "sdlc-ledger:DAG.md")  # the ledger branch
 
 
 def test_dag_md_golden_from_snapshot_and_history():
