@@ -26,7 +26,7 @@ version heading, the unit's new entries are filed under Unreleased above that re
 as they are, and an entry the base already has is dropped by its text; an edit to an existing line, a link footer or an
 unknown heading still parks.
 
-Level 1 also takes two append-only files (#1515): a dated log with `## YYYY-MM` sections (lines unioned per section, sections in
+Level 1 also takes two append-only files (#1515): a dated log with `## YYYY-MM` or `## YYYY-MM-DD ...` sections (#1949: a day-form heading is one entry, so two entries on one date both stay; lines unioned per section, sections in
 date order) and a bullet-list file (the base side's order, then the unit's new items). Only when both sides purely added lines and
 no line of either side is lost; an edit or removal on either side parks exactly as before. The record, backup ref and
 `sigma-resolution:` trailer are the changelog path's.
