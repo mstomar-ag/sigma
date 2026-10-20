@@ -1909,7 +1909,16 @@ def _newest_resolution(store, suffix, limit=200):
         return None
 
 
-def _resolver_auth_row(launcher, binary, var, runner=None, which=None):
+def _host_login_phrase(settings, auth_row):
+    """The `resolver configured` prefix for host mode: the auth row's own "host login: ..." clause when it ran, else the bare mode."""
+    if settings.get("conflicts.agent.login") != "host":
+        return ""
+    name = (auth_row or {}).get("name", "")
+    clause = name.split("resolver auth: ", 1)[-1].split(" (route:")[0] if "host login:" in name else "host login"
+    return clause + ", "
+
+
+def _resolver_auth_row(launcher, binary, var, runner=None, which=None, login=None):
     """#1691: `<cli> auth status` (no model call) in the launcher's own scrubbed environment; names the route (variable name or none)."""
     import tempfile
     route = var or "none"
@@ -1924,11 +1933,17 @@ def _resolver_auth_row(launcher, binary, var, runner=None, which=None):
         try:
             wall = launcher.session_wall(sys.platform, which or shutil.which, os.path.expanduser("~"), str(scratch), [parent])[0]
             kw = {"prefix": wall} if wall else {}                # #1713: the session's own confinement where one exists
-            ok = (runner or launcher.auth_status)(launcher.build_env(scratch, var, os.environ), binary, str(scratch), **kw)
+            got = (runner or launcher.auth_info)(launcher.build_env(scratch, var, os.environ, login), binary, str(scratch), **kw)
+            ok, kind = got if isinstance(got, tuple) else (got, None)
         finally:
             launcher.remove_scratch(scratch, parent)
     except Exception:                       # noqa: BLE001 - a probe that could not run is not a login
-        ok = False
+        ok, kind = False, None
+    if login == "host":                     # #1946: the watcher's own login; only the account TYPE is ever named
+        return _chk("resolver auth: " + ("host login: logged in as %s" % (kind or "an account of unknown type") if ok
+                                         else "host login: not logged in") + " (route: %s)" % route, bool(ok),
+                    "log the host CLI in as the user that runs the watcher, or set conflicts.agent.login back to scrubbed; "
+                    "the live run against a real CLI is Awaiting (owner-gated)")
     return _chk("resolver auth: " + ("logged in in the scrubbed environment" if ok else "not logged in in the scrubbed environment")
                 + " (route: %s)" % route, bool(ok), fix)
 
@@ -1962,8 +1977,11 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None, auth_runner=None):
             res = _bounded_run([binary, "--version"], timeout=RESOLVER_PROBE_SECONDS)
             rows.append(_chk("resolver cli: " + ("answers a version probe" if res else "did not answer a bounded version probe"),
                              bool(res), "check the CLI runs by hand; the probe is limited to %gs" % RESOLVER_PROBE_SECONDS))
+        auth_row = None
         if binary and not cheap_only:                                                                # #1691
-            rows.append(_resolver_auth_row(launcher, binary, settings.get("conflicts.agent.credential_var"), auth_runner, which))
+            auth_row = _resolver_auth_row(launcher, binary, settings.get("conflicts.agent.credential_var"), auth_runner, which,
+                                          settings.get("conflicts.agent.login"))
+            rows.append(auth_row)
         unverified = list(getattr(launcher, "UNVERIFIED_FLAGS", ()))
         # The flags the launcher itself puts on the command line; the resolver passes no extra flag (#1694).
         requested = set(getattr(launcher, "BASE_ARGV", ())) | set(launcher.session_argv(True)) | {"--model", "--max-budget-usd"}
@@ -1987,7 +2005,7 @@ def _resolver_rows(base, cfg, which, cheap_only, now=None, auth_runner=None):
         on_placeholder = why_off is None and launcher.CATALOG.get(settings["conflicts.agent.model"], placeholder) == placeholder
         rows.append(_chk("resolver configured: " + ("model %s resolves to the placeholder id, so every launch is refused" % settings["conflicts.agent.model"]
                                                     if on_placeholder else
-                                                    "model %s, %s" % (settings["conflicts.agent.model"], (
+                                                    "%smodel %s, %s" % (_host_login_phrase(settings, auth_row), settings["conflicts.agent.model"], (
                                                         "no spend limit" if not (budget is not None or ceiling is not None) else
                                                         "%s, %s" % ("up to $%g per unit" % budget if budget is not None else "no per-unit limit",
                                                                     "$%g per day" % ceiling if ceiling is not None else "no daily limit")))

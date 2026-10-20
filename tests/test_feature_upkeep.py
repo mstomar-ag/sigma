@@ -47,6 +47,7 @@ EXPECTED_SCHEMA = {   # key -> (kind, lo, hi, min_items)
     "conflicts.agent.reviewer.enabled": ("bool", None, None, None),
     "conflicts.agent.reviewer.model": ("enum", None, None, None),
     "conflicts.agent.credential_var": ("env_name_null", None, None, None),
+    "conflicts.agent.login": ("enum", None, None, None),
     "backup.former_prefixes": ("name_list", None, None, 0),
 }
 DEFAULT_TABLE = {
@@ -59,7 +60,7 @@ DEFAULT_TABLE = {
     "conflicts.agent.model": "sonnet", "conflicts.agent.max_budget_usd_per_unit": None,
     "conflicts.agent.spend_ceiling_usd_per_day": None, "conflicts.agent.timeout_minutes": 30,
     "conflicts.agent.max_units_per_sweep": 5, "conflicts.agent.reviewer.enabled": True,
-    "conflicts.agent.reviewer.model": "sonnet", "conflicts.agent.credential_var": None,
+    "conflicts.agent.reviewer.model": "sonnet", "conflicts.agent.credential_var": None, "conflicts.agent.login": "scrubbed",
     "backup.former_prefixes": [],
 }
 #: The acceptance matrix (None, True, 0, -1, 1.5, nan, inf, "", "x", [], [1], {}, {"x": 1}) plus the values that
@@ -176,7 +177,7 @@ STRICT_MUTANTS = ["return bool(value)", "return value == True or value == False"
 # ------------------------------------------------------------------------------------------ schema and defaults
 
 def test_schema_is_locked():
-    """The schema is exactly the 28 keys the gate reads, with the documented kinds and bounds."""
+    """The schema is exactly the 29 keys the gate reads, with the documented kinds and bounds."""
     g = support.gate()
     got = {k: (s["kind"], s.get("lo"), s.get("hi"), s.get("min_items")) for k, s in g.SCHEMA.items()}
     assert got == EXPECTED_SCHEMA
