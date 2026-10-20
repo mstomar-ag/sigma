@@ -1043,7 +1043,27 @@ def _run(p, sdlc_dir):
         tick(p, sdlc_dir, call_timeout, ticks, config, interval=interval)
         sleep_for = interval * scale                                  # B-35: SCALE=0 means NO sleep
         if sleep_for > 0:
-            time.sleep(sleep_for)
+            sleep_unless_stopped(p.stop, sleep_for)                   # #1937: the stop file is read DURING the sleep
+
+
+#: #1937: how often the sleep between ticks looks for `state/watch.stop`. The bound on honouring a
+#: stop is this plus the tick already running (each call is capped by `SIGMA_WATCH_CALL_TIMEOUT`),
+#: not the whole interval: before this a stop raised mid-sleep waited out the remaining interval.
+STOP_POLL_SECONDS = 5.0
+
+
+def sleep_unless_stopped(stop, seconds, poll=None, sleep=time.sleep, clock=time.monotonic):
+    """Sleep `seconds`, waking every `poll` (default `STOP_POLL_SECONDS`) to look for `stop`.
+    -> True when the stop file appeared (the caller's loop then exits on its own check)."""
+    poll = STOP_POLL_SECONDS if poll is None else poll
+    deadline = clock() + seconds
+    while True:
+        if stop.is_file():
+            return True
+        left = deadline - clock()
+        if left <= 0:
+            return False
+        sleep(min(poll, left))
 
 
 USAGE = "usage: watch_daemon.py [sdlc_dir]"

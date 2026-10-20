@@ -436,8 +436,8 @@ marker naming another plugin is part of the notice, never a lock: Sigma replaces
 old plugin's watcher holds the lock, a Sigma watcher start logs that the running watcher was not
 started by Sigma and exits without starting a second one. Sigma never signals another plugin's
 process. To hand the lock over, use the polite lever: uninstall the old plugin first (or its
-triggers start its watcher again), create `.sdlc/state/watch.stop`, wait one watcher tick for it to
-exit, then delete the file (no watcher starts while it exists). Sigma's own watcher starts on the
+triggers start its watcher again), create `.sdlc/state/watch.stop`, wait for it to exit (the watcher looks for the file every 5 seconds while it sleeps, so it exits within about 5 seconds
+plus any tick already running, each call of which is capped by `SIGMA_WATCH_CALL_TIMEOUT`), then delete the file (no watcher starts while it exists). Sigma's own watcher starts on the
 next trigger and records itself in `state/watch.owner`.
 
 **Migrating under a live watcher.** `migrate.py --apply` refuses (exit 2, nothing written) while any
