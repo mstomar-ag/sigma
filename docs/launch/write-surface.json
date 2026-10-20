@@ -753,6 +753,14 @@
       "risk": "high"
     },
     {
+      "path": "skills/sigma-loop/scripts/decision_store.py",
+      "function": "publish_branch",
+      "rule": "git-ref-write",
+      "count": 1,
+      "gate": "person-run `publish <state-folder> --branch` or the default-branch hint; records part enabled; moves only the local branch `sigma/records` (compare-and-swap on its old tip) to a commit of the records, autonomy and rulebook paths built in a temporary index; never HEAD, never a push",
+      "risk": "high"
+    },
+    {
       "path": "skills/sigma-loop/scripts/diff_revert.py",
       "function": "cleanup",
       "rule": "fs-remove",

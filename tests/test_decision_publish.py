@@ -48,6 +48,7 @@ def repo(tmp_path):
     _git(root, "init", "-q", "-b", "main")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "init")
+    _git(root, "checkout", "-q", "-b", "work")        # #1947: never the default branch
     return root
 
 
