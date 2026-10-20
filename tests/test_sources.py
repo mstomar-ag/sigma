@@ -61,6 +61,9 @@ def _recording_runner(by_subcommand=None):
     labels = set()
     by_subcommand = by_subcommand or {}
     def run(args):
+        if list(args[:2]) == ["api", "user"] and "user" in by_subcommand:   # #1934: the login read is an explicit GET
+            calls.append(list(args))
+            return by_subcommand["user"]
         gql = _gql_swap(args, labels=labels, calls=calls, repo_args=_repo_flag(args, calls))
         if gql is not None:
             return gql
