@@ -1,7 +1,7 @@
 """The dependency map's read-only report (#1954). Library; `dag.py report` is its CLI and `/sigma-dag` its skill.
 
 `report(sdlc, goal=None, as_json=False, now=None)` returns `(text, exit_code)` from the STORED map only: it
-reads the config, the map file, this month's history file and the doctor's two map rows (local files; the
+reads the config, the map file, this month's history file and the doctor's two map rows and the map's source and lease holder (`dag_source`; local files; the
 doctor's own functions, not a copy of their math). It runs no process, makes no GitHub call, rebuilds
 nothing and writes nothing. Markdown by default; `as_json` gives schema `dag-report/1` carrying the same facts.
 
@@ -36,6 +36,7 @@ dag_chain = _load("dag_chain")
 dag_stuck = _load("dag_stuck")
 dag_history = _load("dag_history")
 dag_refresh = _load("dag_refresh")
+dag_source = _load("dag_source")
 
 
 def _config(sdlc):
@@ -91,6 +92,10 @@ def _facts(sdlc, config, m, now):
     except Exception:                                   # noqa: BLE001
         month, done = "", []
     rows = _doctor_rows(config, sdlc, now)
+    try:
+        source = dag_source.facts(sdlc, config, now=now)
+    except Exception:                                   # noqa: BLE001
+        source = None
     files = ["`.sdlc/state/dag.json` (the map)", "`.sdlc/state/dag-history/` (this month's records)"]
     try:
         if _load("ledger").enabled(config):
@@ -102,7 +107,7 @@ def _facts(sdlc, config, m, now):
         "state": {"mode": dag_store.mode(config), "written": dag_refresh.active(config),
                   "age_seconds": None if t is None else max(0, int(now - t)),
                   "nodes": len(m["nodes"]), "edges": len(m["edges"]), "usable": True},
-        "freshness": rows["freshness"], "shadow": rows["shadow"],
+        "source": source, "freshness": rows["freshness"], "shadow": rows["shadow"],
         "stuck": [{k: s[k] for k in ("root", "why", "waiting", "kind")} | {"line": dag_stuck.line(s)} for s in stuck],
         "chains": [{"members": c["members"], "ends": c["ends"], "depth": c["depth"]} for c in chains],
         "cycles": cycles,
@@ -124,6 +129,8 @@ def _markdown(f):
                 "only once it is written.", ""]
     out += ["- mode: %s" % s["mode"], "- age: %s" % age,
             "- nodes: %d, edges: %d" % (s["nodes"], s["edges"]), "- usable: yes"]
+    if f.get("source") and f["source"]["ledger"]:       # ledger off: nothing to say beyond the JSON facts
+        out.append("- source: %s" % dag_source.line(f["source"]))
     if f["freshness"]:
         out.append("- freshness: %s%s" % (f["freshness"]["name"],
                                          "" if f["freshness"]["ok"] else " (needs: %s)" % f["freshness"]["fix"]))

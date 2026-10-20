@@ -1540,8 +1540,19 @@ def _dag_map_row(cfg, sdlc_dir, now=None):
             stuck = 0
         if stuck:
             name += ", %d stuck root%s" % (stuck, "" if stuck == 1 else "s")
+        src = None
+        try:                                 # #1959: where the map came from and who refreshes it (local files)
+            ds = _load_loop_script("dag_source")
+            src = ds.facts(sdlc_dir, cfg, now=now, live=live)
+            if src and src["ledger"]:        # ledger off: the row keeps its older shape
+                name += ", " + ds.line(src)
+        except Exception:                    # noqa: BLE001 - a line that cannot be made adds nothing
+            src = None
         why = []
-        if h["stale"]:
+        if src and src["lease_dead"]:
+            why.append("the shared snapshot is over %d TTLs old and no machine holds the refresh lease while the "
+                       "loop or watcher is live" % dr.STALE_TTLS)
+        elif h["stale"]:
             why.append("last good refresh is over %d TTLs old while the loop or watcher is live" % dr.STALE_TTLS)
         if h["erroring"]:
             why.append("the last %d refreshes errored" % h["errors"])
