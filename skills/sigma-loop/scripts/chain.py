@@ -465,7 +465,7 @@ def map_closure(m, goal, bound=None, strict=True, now=None):
     return out, g, esrc, body
 
 
-def _plan_map(sdlc, goal, config, ro, source, now, m, bound, cache=None):
+def _plan_map(sdlc, goal, config, ro, source, now, m, bound, cache=None, disk=None):
     out, g, esrc, _body = map_closure(m, goal, bound, True, now)
     members, done = {r["number"] for r in out["members"]}, out["done"]
     rows = out["members"]
@@ -480,7 +480,8 @@ def _plan_map(sdlc, goal, config, ro, source, now, m, bound, cache=None):
     for a, b in esrc:
         have[b].add(a)
     chain_waits.attach(out, ro, source.repo, members, have=have,
-                       state_of=lambda r: getattr(g.nodes.get(r), "state", "unknown"), cache=cache)
+                       state_of=lambda r: getattr(g.nodes.get(r), "state", "unknown"), cache=cache, disk=disk,
+                       stamps={n["number"]: n.get("updated_at") for n in m["nodes"]} if disk is not None else None)
     if out["unconfirmed_waits"]:      # #1902: the map holds no comment or prose, so only the live read can follow them
         raise _NeedsLive("%d wait(s) written only in comments or loose wording, which the map does not hold"
                          % len(out["unconfirmed_waits"]))
@@ -532,7 +533,7 @@ class _NeedsLive(Exception):
 MAX_WAIT_ROUNDS = 25
 
 
-def _live_closure(goal, ro, repo, bound, cache, ld, blocker_scan):
+def _live_closure(goal, ro, repo, bound, cache, ld, blocker_scan, disk=None):
     """-> (closure, extra, hit_limit). The label drain's closure over `goal`, widened by the waits Chain reads
     from loose wording and trusted comments (#1902): read the members, add what they wait on, close again, until
     nothing new turns up. `extra` maps a member to the references it was widened by."""
@@ -549,7 +550,7 @@ def _live_closure(goal, ro, repo, bound, cache, ld, blocker_scan):
         if goal not in clo["nodes"]:
             return clo, extra, False
         found = chain_waits.collect(ro, repo, clo["nodes"], issues={n: v["issue"] for n, v in clo["nodes"].items()},
-                                    cache=cache)
+                                    cache=cache, disk=disk)
         fresh = sorted({(i["goal"], i["ref"]) for i in found["unconfirmed"]}
                        - {(n, r) for n, rs in extra.items() for r in rs})
         if not fresh:
@@ -561,13 +562,13 @@ def _live_closure(goal, ro, repo, bound, cache, ld, blocker_scan):
     return clo, extra, True
 
 
-def _plan_live(sdlc, goal, config, ro, source, bound, cache=None):
+def _plan_live(sdlc, goal, config, ro, source, bound, cache=None, disk=None):
     ld = label_drain
     blocker_scan, features = _load("blocker_scan"), _load("features")
     dag_collect, hard_stop = _load("dag_collect"), _load("hard_stop")
     repo = source.repo
     cache = {} if cache is None else cache
-    clo, extra, deep = _live_closure(goal, ro, repo, bound, cache, ld, blocker_scan)
+    clo, extra, deep = _live_closure(goal, ro, repo, bound, cache, ld, blocker_scan, disk)
     if goal not in clo["nodes"]:
         raise ChainRefused("#%d could not be read" % goal)
     seed = clo["nodes"][goal]["issue"]
@@ -648,7 +649,7 @@ def _plan_live(sdlc, goal, config, ro, source, bound, cache=None):
         e["kind"] not in ("not-read", "unreadable") for e in out["externals"])
     chain_waits.attach(out, ro, repo, clo["nodes"], issues={n: v["issue"] for n, v in clo["nodes"].items()},
                        state_of=lambda r: "open" if r in clo["nodes"] else "closed" if r in done else "unknown",
-                       cache=cache)
+                       cache=cache, disk=disk)
     if deep:        # waits written in prose, deeper than the rounds above follow: say so rather than plan thin
         out["complete"] = False
         out["stops"].append("waits written in comments or loose wording go deeper than %d levels" % MAX_WAIT_ROUNDS)
@@ -657,7 +658,7 @@ def _plan_live(sdlc, goal, config, ro, source, bound, cache=None):
 
 # --- the plan ---------------------------------------------------------------------------------------
 
-def _resolve(sdlc_dir, goal, config, run, now):
+def _resolve(sdlc_dir, goal, config, run, now, disk=None):
     """The open closure of `goal` as a plan dict, and the read-only runner that served it. Writes nothing."""
     sources, state = _load("sources"), _load("state")
     max_members = _max_members(config)
@@ -678,13 +679,13 @@ def _resolve(sdlc_dir, goal, config, run, now):
     out = None
     if m is not None:
         try:
-            out = _plan_map(sdlc_dir, goal, config, ro, source, now, m, max_members, cache)
+            out = _plan_map(sdlc_dir, goal, config, ro, source, now, m, max_members, cache, disk)
             out.update(source="map", source_reason=None, bound=max_members)
         except _NeedsLive as exc:
             why = str(exc)
     if out is None:
         bound = min(LIVE_MAX_MEMBERS, max_members)
-        out = _plan_live(sdlc_dir, goal, config, ro, source, bound, cache)
+        out = _plan_live(sdlc_dir, goal, config, ro, source, bound, cache, disk)
         out.update(source="live", source_reason=why, bound=bound)
     return out, ro
 
@@ -694,7 +695,10 @@ def plan(sdlc_dir, goal, config=None, run=None, now=None):
     state = _load("state")
     now = time.time() if now is None else now
     config = config if config is not None else state.load_config(sdlc_dir)
-    out, ro = _resolve(sdlc_dir, goal, config, run, now)
+    rc = _load("chain_read_cache")           # #1936: members read by a neighbouring plan are not read again
+    disk = (rc, rc.load(sdlc_dir, now), now)
+    out, ro = _resolve(sdlc_dir, goal, config, run, now, disk)
+    rc.save(sdlc_dir, disk[1])               # never raises
     out.update(schema=SCHEMA, goal=goal, calls=ro.summary(), planned_at=int(now), state="planned")
     path = _record_path(sdlc_dir, goal)
     try:
