@@ -757,6 +757,11 @@ def _calls_for_one_started_goal(tmp_path, adopted, upkeep=None, hook=None):
     def run(_cwd, argv):
         line = " ".join(str(a) for a in argv)
         calls.append(line)
+        if adopted and argv[:3] == ["git", "worktree", "add"]:
+            # #1941: the registry pass is made in the goal's worktree, which a real `git worktree
+            # add` fills with the tracked `.sdlc/features/`; the fake runner must do the same.
+            wt = pathlib.Path(argv[-2] if "-b" in argv else argv[-2])
+            (wt / ".sdlc" / "features").mkdir(parents=True, exist_ok=True)
         if "api repos/" in line and "issues/" in line:
             return issue
         if "ls-remote" in line:
