@@ -127,3 +127,14 @@ time to see the recommended tier. `/sigma-goal` also dispatches each phase at th
 when subagents are available. Claude accepts the tier alias; Codex resolves it to an exact model ID
 and reasoning effort before dispatch, checks the observed phase rollout, and uses a plugin-versioned
 map. `model_host_overrides.codex` can choose a release-approved ID; a changed catalog needs a plugin update, never an arbitrary model string or portable tier such as `sonnet`.
+
+### The loop session's own model
+
+The session that runs `/sigma-loop` spends its model on every orchestration step, however cheap the
+goal's phases are. Choose it with **`loop.session_model`** in `.sdlc/config.json` (letters, digits, `.`,
+`_`, `-` only; anything else is refused with exit 2). The supervisor (`supervise_daemon.py`) passes it as
+`--model` when `SIGMA_CLAUDE_CMD` is not set; with `model_selection: auto` and no key it defaults to
+`sonnet`, and with neither it adds no flag. An explicit `SIGMA_CLAUDE_CMD` is never rewritten.
+`/sigma-doctor` shows a "loop session model" row read from the session transcript and warns when that
+model is priced above every tier the session dispatched; a host that exposes no transcript says so.
+Measured: temp-dir tests only, not a live session.
