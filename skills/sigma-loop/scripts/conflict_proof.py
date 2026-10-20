@@ -348,7 +348,7 @@ def check_tests(path, base, ours, theirs, resolved):
 
 # ------------------------------------------------------------------------------------------------ append-only union (#1515)
 
-_DATED = re.compile(r"^## (\d{4}-\d{2})\b")
+_DATED = re.compile(r"^## (\d{4}-\d{2}(-\d{2})?)\b")
 _BULLET = re.compile(r"^\s*[-*] \S")
 
 
@@ -402,12 +402,17 @@ def _sections(lines):
     for ln in lines:
         hit = _DATED.match(ln)
         if hit:
-            key = hit.group(1)
+            key = ln.strip() if hit.group(2) else hit.group(1)
             if key in out:
                 return None
             out[key] = []
         out[key].append(ln)
     return out
+
+
+def _date_of(key):
+    """The `YYYY-MM` or `YYYY-MM-DD` a section key leads with (#1949: a day-form key is the whole heading line)."""
+    return key.removeprefix("## ")[:10] if key.startswith("## ") else key
 
 
 def append_union(base, ours, theirs):
@@ -426,12 +431,14 @@ def append_union(base, ours, theirs):
         sb, so, st = _sections(b), _sections(o), _sections(t)
         if None in (sb, so, st) or not set(sb) <= set(so) & set(st):
             return None
-        keys = sorted((set(so) | set(st)) - {""})
+        keys = list(dict.fromkeys(k for seq in (sb, so, st) for k in seq if k))
         for seq in (sb, so, st):
-            order = [k for k in seq if k]
+            order = [_date_of(k) for k in seq if k]
             if len(order) > 1:
-                keys.sort(reverse=order == sorted(order, reverse=True))
+                keys.sort(key=_date_of, reverse=order == sorted(order, reverse=True))
                 break
+        else:
+            keys.sort(key=_date_of)
         parts = []
         for key in [""] + keys:
             got = _merge_lines(sb.get(key, []), so.get(key, []), st.get(key, []), False)
