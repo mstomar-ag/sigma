@@ -218,6 +218,15 @@ def test_foreign_issue_close_parks():
     assert len(s.parks) == 1 and "hard stop" in s.parks[0][1]
 
 
+def test_foreign_append_to_body_raises_and_neither_writes_nor_parks():
+    """#1984 review: a skipped body write must be a FAILED write (callers record success on return)."""
+    import pytest
+    s = Stub()
+    with pytest.raises(ValueError, match="hard stop"):
+        sources.GitHubSource.append_to_body(s, "5", "**Blocked by:** #9")
+    assert s.parks == []
+
+
 def test_guard_park_does_not_recurse():
     """Red when the guard's own park is guarded again: the park would read and park forever."""
     s = Stub()

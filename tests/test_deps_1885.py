@@ -160,8 +160,10 @@ def test_append_to_body_on_a_foreign_issue_writes_nothing():
     s = _Guarded("A hand-filed ticket.")
     s._dag_blockers = lambda goal, marker: (None, [])
     s._issue_edit_body = lambda goal, body: s.writes.append("edit")
-    sources.GitHubSource.append_to_body(s, "5", "**Blocked by:** #12")
-    assert "edit" not in s.writes
+    import pytest
+    with pytest.raises(ValueError, match="hard stop"):
+        sources.GitHubSource.append_to_body(s, "5", "**Blocked by:** #12")
+    assert s.writes == []          # no edit and no park: a refused write raises, it is never a silent skip
     own = _Guarded("t", labels=["sdlc:goal"])
     own._dag_blockers = lambda goal, marker: (None, [])
     own._issue_edit_body = lambda goal, body: own.writes.append("edit")
