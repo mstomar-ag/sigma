@@ -4009,6 +4009,8 @@ class GitHubSource:
         # (`CycleRefused` names the members; nothing is written), and its edge enters the stored map
         # after the write. Mode `off`, no `.sdlc` directory, or a marker without `Blocked by` skip all
         # of it: the write below is then exactly what it was.
+        if hsg.blocks_issue_write(self, goal, "append_to_body"):    # #1984: a foreign issue is parked, not written
+            return
         dag, blockers = self._dag_blockers(goal, marker)
         unchecked = []
         for blocker in blockers:
