@@ -125,7 +125,7 @@ def test_members_equal_the_dag_chain_query(sdlc):
 
 
 def test_goal_in_the_middle_of_a_larger_chain_is_its_own_page(sdlc):
-    got = {n for n, d in _model(sdlc, 9)["nodes"].items() if d["m"] not in ("closed", "outside")}
+    got = {n for n, d in _model(sdlc, 9)["nodes"].items() if d["m"] not in ("closed", "outside", "waiting")}
     assert got == {5, 6, 9}
 
 
