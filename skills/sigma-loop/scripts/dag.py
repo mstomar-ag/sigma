@@ -25,8 +25,11 @@
   dag.py html (--goal N | --all) [--out DIR] [--titles FILE] [--sdlc DIR]
                                 one self-contained, offline HTML page per chain (a goal and its open
                                 prerequisites, the set `chain.py plan` reads), plus an index with `--all`;
-                                default `<sdlc>/state/dag-html/`; reads only the stored map, no network
+                                default `<sdlc>/state/dag-html/`; reads only the stored map and the titles file `titles` made, no network
                                 (#1924, see dag_html.py)
+
+  dag.py titles [--sdlc DIR]    the one network verb of the pair: list open issue titles (REST, at most 50 calls)
+                                into `<sdlc>/state/dag-titles.json`, which `html` reads; never in the map (#1987)
 
   dag.py report [--goal N] [--md | --json] [--sdlc DIR]
                                 the whole map in one read-only report: state, the doctor's freshness and
@@ -249,6 +252,8 @@ def main(argv=None):
     wp.add_argument("--out", default=None, help="the output directory (default: <sdlc>/state/dag-html)")
     wp.add_argument("--titles", default=None, help="a JSON file of titles, {\"<number>\": \"<title>\"}; the map holds none")
     wp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
+    ttp = sub.add_parser("titles", help="read open issue titles into <sdlc>/state/dag-titles.json for html pages")
+    ttp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     pp = sub.add_parser("report", help="the stored map in one read-only report (markdown, or --json)")
     pp.add_argument("--goal", type=int, default=None, help="the chain behind this goal instead")
     fmt = pp.add_mutually_exclusive_group()
@@ -267,6 +272,10 @@ def main(argv=None):
         return code
     if args.verb == "html":
         lines, code = _load("dag_html").run(sdlc, args.goal, args.all, args.out, args.titles)
+        print("\n".join(lines))
+        return code
+    if args.verb == "titles":
+        lines, code = _load("dag_titles").run(sdlc)
         print("\n".join(lines))
         return code
     if args.verb == "history":
