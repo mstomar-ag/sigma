@@ -218,6 +218,10 @@
       "role": "library"
     },
     {
+      "path": "skills/sigma-loop/scripts/dag_titles.py",
+      "role": "library"
+    },
+    {
       "path": "skills/sigma-loop/scripts/decision_record.py",
       "role": "library"
     },

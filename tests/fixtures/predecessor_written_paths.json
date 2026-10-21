@@ -482,7 +482,7 @@
   {
    "compatible": true,
    "pattern": ".sdlc/state",
-   "reason": "Directory creation only; the files inside carry their own entries. Vetted #1152 (refs #1142): sync.py::_reroot_guarded takes the existing knowledge flock (the already vetted _knowledge_lock file) and sync.py::bootstrap makes directories and aside copies only under .sdlc/state/orphaned/<stamp>/, a subtree the predecessor does not write; neither writes a file the predecessor writes in .sdlc/state. Vetted #1229: drift_shadow.py::_save and ::shadow_for_park write only .sdlc/state/drift-shadow.json, a file the predecessor never writes (shadow-mode drift verdicts of this product). Vetted #1243: decision_import.py::classify_model and ::_cache_save write only .sdlc/state/decision-import-classes.json (the import classification cache), a file the predecessor never writes. Vetted #1410: reconcile_tick.py::_blocker_rank_repair and ::_write_repair_state write only .sdlc/state/blocker-repair.meta.json (the blocker-rank repair record), a file the predecessor never writes. Vetted #1612: dag_refresh.py::_write_meta and ::refresh_if_due write only .sdlc/state/dag-refresh.meta.json (the dependency map refresh record), a file the predecessor never writes. Vetted #1584: chain.py::plan writes only .sdlc/state/chains/c<N>.json (the local chain plan record, issue numbers and labels only), a file the predecessor never writes. Vetted (dag release): dag_insert.py::insert and dag_pick.py::_append and log_compare write their own dag files (store and compare log) under the state directory; paths the predecessor never writes.",
+   "reason": "Directory creation only; the files inside carry their own entries. Vetted #1152 (refs #1142): sync.py::_reroot_guarded takes the existing knowledge flock (the already vetted _knowledge_lock file) and sync.py::bootstrap makes directories and aside copies only under .sdlc/state/orphaned/<stamp>/, a subtree the predecessor does not write; neither writes a file the predecessor writes in .sdlc/state. Vetted #1229: drift_shadow.py::_save and ::shadow_for_park write only .sdlc/state/drift-shadow.json, a file the predecessor never writes (shadow-mode drift verdicts of this product). Vetted #1243: decision_import.py::classify_model and ::_cache_save write only .sdlc/state/decision-import-classes.json (the import classification cache), a file the predecessor never writes. Vetted #1410: reconcile_tick.py::_blocker_rank_repair and ::_write_repair_state write only .sdlc/state/blocker-repair.meta.json (the blocker-rank repair record), a file the predecessor never writes. Vetted #1612: dag_refresh.py::_write_meta and ::refresh_if_due write only .sdlc/state/dag-refresh.meta.json (the dependency map refresh record), a file the predecessor never writes. Vetted #1584: chain.py::plan writes only .sdlc/state/chains/c<N>.json (the local chain plan record, issue numbers and labels only), a file the predecessor never writes. Vetted (dag release): dag_insert.py::insert and dag_pick.py::_append and log_compare write their own dag files (store and compare log) under the state directory; paths the predecessor never writes. Vetted #1989: dag_insert.py::remove takes a wrong edge out of the stored map (the same dag store file dag_insert.py::insert writes); a file the predecessor never writes. Vetted #1987: dag_titles.py::run writes only .sdlc/state/dag-titles.json (issue numbers and capped titles of map nodes), one atomic replace after the whole listing succeeded; a file the predecessor never writes.",
    "verdict": "directory",
    "vetted_writers": [
     "skills/sigma-init/scripts/init_flow.py::main",
@@ -506,11 +506,13 @@
     "skills/sigma-loop/scripts/dag_check.py::check",
     "skills/sigma-loop/scripts/dag_collect.py::refresh",
     "skills/sigma-loop/scripts/dag_insert.py::insert",
+    "skills/sigma-loop/scripts/dag_insert.py::remove",
     "skills/sigma-loop/scripts/dag_pick.py::_append",
     "skills/sigma-loop/scripts/dag_pick.py::log_compare",
     "skills/sigma-loop/scripts/dag_refresh.py::_write_meta",
     "skills/sigma-loop/scripts/dag_refresh.py::refresh_if_due",
     "skills/sigma-loop/scripts/dag_store.py::refresh_lock",
+    "skills/sigma-loop/scripts/dag_titles.py::run",
     "skills/sigma-loop/scripts/decision_import.py::_cache_save",
     "skills/sigma-loop/scripts/decision_import.py::classify_model",
     "skills/sigma-loop/scripts/drift_shadow.py::_save",
