@@ -121,7 +121,7 @@ def clean_title(text):
 def _clean_login(x):
     """A login as text: a plain login stays as it is; anything else is scrubbed like a title, has no space, and is
     cut to the login length. Never a link."""
-    if isinstance(x, str) and dag_store._LOGIN.match(x):
+    if isinstance(x, str) and dag_store._LOGIN.fullmatch(x):
         return x
     return "-".join(clean_title(x).split())[:39]
 

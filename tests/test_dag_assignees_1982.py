@@ -100,6 +100,11 @@ def test_store_drops_bad_logins_and_caps_the_list():
     assert ds._clean_node({"number": 6, "assignees": []})["assignees"] == []
 
 
+def test_login_with_a_trailing_newline_is_dropped():
+    """control: `fullmatch` back to `match` in the store -> `$` admits a trailing newline and this goes red."""
+    assert ds._clean_node({"number": 1, "assignees": ["alice\n", "alice"]})["assignees"] == ["alice"]
+
+
 def test_login_shape_does_not_admit_a_range_hole():
     """control: widen the class to admit `:` `<` `@` `^` `\\` -> each is kept as a login."""
     for bad in ("a:b", "a<b", "a@b", "a^b", "a\\b"):

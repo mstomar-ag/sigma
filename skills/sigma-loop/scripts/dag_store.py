@@ -210,7 +210,7 @@ def _clean_node(n):
     if isinstance(u, str) and _UNIT.match(u):
         out["unit"] = u
     if isinstance(n.get("assignees"), list):            # absent stays absent: unknown is not unassigned
-        out["assignees"] = [a for a in n["assignees"] if isinstance(a, str) and _LOGIN.match(a)][:MAX_ASSIGNEES]
+        out["assignees"] = [a for a in n["assignees"] if isinstance(a, str) and _LOGIN.fullmatch(a)][:MAX_ASSIGNEES]
     return out
 
 
