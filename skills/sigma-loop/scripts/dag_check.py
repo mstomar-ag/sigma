@@ -129,6 +129,7 @@ def _apply(m, items, config, run, now):
                 "updated_at": it.get("updated_at") if isinstance(it.get("updated_at"), str) else None}
         if it.get("pull_request") is None:
             node["state"] = "closed" if it.get("state") == "closed" else "open"
+            dag_collect.keep_open_fields(node, it, (labels, in_progress, prefix, aliases))     # #1994
             return node
         node["kind"] = "pr"
         if reads[0] >= dag_collect.OUTSIDE_MAX:         # over the cap: unread, never resolving
@@ -169,7 +170,7 @@ def _apply(m, items, config, run, now):
             nodes[num] = outside_from(latest[num])
         elif reads[0] < dag_collect.OUTSIDE_MAX:
             reads[0] += 1
-            nodes[num], _ok = dag_collect._outside(run, repo, num, now)
+            nodes[num], _ok = dag_collect._outside(run, repo, num, now, (labels, in_progress, prefix, aliases))
         else:
             nodes[num] = {"number": num, "kind": "issue", "state": "unknown", "life": "none",
                           "prio": None, "in_corpus": False}

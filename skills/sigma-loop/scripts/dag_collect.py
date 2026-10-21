@@ -158,6 +158,18 @@ def _assignees(item):
     return [a["login"] for a in item["assignees"] if isinstance(a, dict) and isinstance(a.get("login"), str)]
 
 
+def keep_open_fields(node, item, ctx):
+    """An OPEN outside issue keeps its assignees, priority and life from the payload in hand (#1994); a closed
+    one is left as it is. Shared with `dag_check`, so an incremental check and a rebuild give the same node."""
+    if node["state"] != "open":
+        return
+    labels, in_progress, prefix, aliases = ctx
+    names = _names(item)
+    node["life"], node["prio"] = _life(names, labels, in_progress), _prio(names, prefix, aliases)
+    if isinstance(item.get("assignees"), list):
+        node["assignees"] = _assignees(item)
+
+
 def _outside(run, repo, number, now, ctx=None):
     """`(node, ok)` for one number outside the lists. Unreadable is `unknown`, never a guess. `ctx` is the
     `(labels, in_progress, prefix, aliases)` the listed nodes use: an OPEN issue then keeps its assignees,
@@ -171,12 +183,8 @@ def _outside(run, repo, number, now, ctx=None):
     node["updated_at"] = item.get("updated_at") if isinstance(item.get("updated_at"), str) else None
     if "pull_request" not in item:
         node["state"] = "closed" if item.get("state") == "closed" else "open"
-        if node["state"] == "open" and ctx is not None:
-            labels, in_progress, prefix, aliases = ctx
-            names = _names(item)
-            node["life"], node["prio"] = _life(names, labels, in_progress), _prio(names, prefix, aliases)
-            if isinstance(item.get("assignees"), list):
-                node["assignees"] = _assignees(item)
+        if ctx is not None:
+            keep_open_fields(node, item, ctx)
         return node, True
     node["kind"] = "pr"
     try:
