@@ -86,7 +86,7 @@ EDGE_SOURCES = ("body", "comment", "timeline", "other")
 TOP_KEYS = ("schema", "header", "nodes", "edges")
 HEADER_KEYS = ("repo", "built_at", "refreshed_at", "last_ok_at", "last_error", "partial", "cursor",
                "etag", "checked_at")
-NODE_KEYS = ("number", "kind", "state", "life", "prio", "in_corpus", "updated_at", "unit")
+NODE_KEYS = ("number", "kind", "state", "life", "prio", "in_corpus", "updated_at", "unit", "assignees")
 EDGE_KEYS = ("blocker", "blocked", "source")
 PRIOS = ("P0", "P1", "P2", "P3", "P4")
 VOCAB = (SCHEMA,) + TOP_KEYS + HEADER_KEYS + NODE_KEYS + EDGE_KEYS + KINDS + STATES + LIVES + EDGE_SOURCES + PRIOS
@@ -183,6 +183,10 @@ def _clean_header(h):
     return out
 
 
+MAX_ASSIGNEES = 20
+_LOGIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\[\]-]{0,38}$")
+
+
 def _clean_node(n):
     num = _int(n.get("number")) if isinstance(n, dict) else None
     if num is None:
@@ -205,6 +209,8 @@ def _clean_node(n):
     u = n.get("unit")
     if isinstance(u, str) and _UNIT.match(u):
         out["unit"] = u
+    if isinstance(n.get("assignees"), list):            # absent stays absent: unknown is not unassigned
+        out["assignees"] = [a for a in n["assignees"] if isinstance(a, str) and _LOGIN.match(a)][:MAX_ASSIGNEES]
     return out
 
 

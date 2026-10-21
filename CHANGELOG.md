@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **dag html shows assignees; the index sorts and filters (#1982).** The stored map keeps each member's assignees from the listings the refresh already reads (an old map reads as unknown, never unassigned); chain pages show them in the node and the panel; the index shows each chain's top priority and assignee set and sorts and filters by inline script. A login is scrubbed text, never a link. Measured only on fixtures; a real board is unmeasured.
 - **goal-review runs the quality check and rejects on it (#1781).** Step 1 runs `goal_design.py quality` on the design and reports its lines verbatim; a failed check is a REJECT ground naming the category; an `open: D-n` row is bucketed through its Doubt id. Prose only: the REJECT depends on the reviewing model following it, `mark-designed` does not refuse, and the end-to-end review is unmeasured.
 
 ## 1.0.19 — 2026-10-21 — fixes from rolling 1.0.18 out: verify on vitest 2.x, stranded ledger entries, a per-account GraphQL budget and Chain read fixes; /sigma-dag and one team map on the ledger branch; upkeep host login; the loop session's own model

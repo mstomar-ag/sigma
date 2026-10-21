@@ -97,6 +97,17 @@ python3 skills/sigma-loop/scripts/dag.py html --all [--titles <file>] [--out <di
 - **Titles.** The map holds no titles, so a page names members by number unless you pass `--titles <file>`,
   a JSON object `{"<number>": "<title>"}` (or a list of `{number, title}`, 4 MiB at most). A title is shortened to
   100 characters and any URL is removed. No issue body is read or written.
+- **Assignees.** The map keeps each member's assignees (from the issue listings the refresh already reads: no extra
+  call; at most 20 per member, each a plain login or dropped). A member's node and its panel show them, or
+  "unassigned" for an empty list; a map written before this field draws "assignee unknown (map predates this
+  field)", because an absent field is not an empty one. A login is scrubbed like a title and is text, never a link.
+- **Index controls.** Each index row carries the top priority among its open members and the set of their
+  assignees (with `unassigned` and `unknown` as filter values). Sort by priority, open members or goal number;
+  filter by assignee and by priority. One inline function, `applyView`, does it; no network, no external file.
+- **Index growth.** Per row about 220 bytes (the row plus its four data attributes) and about 50 bytes per
+  distinct assignee login in the filter list, measured on synthetic rows: 100 chains 22 KB, 1,000 chains 222 KB
+  (10x), 10,000 chains 2.26 MB (100x). Linear in chains and logins; the page filters in the browser, so a 100x
+  index is also a 100x DOM. Not measured on a real board.
 - **Offline.** One file, inline SVG, CSS and a little JavaScript; no library, no network at view time, no link.
 - **Where it goes.** `<sdlc>/state/dag-html/` by default (gitignored). `--out` inside a git checkout that does not
   ignore it is refused, so a page never dirties the root checkout. An earlier page is overwritten, never deleted.

@@ -78,6 +78,7 @@ MEMBER_CAP = 80                 # open members a page draws readably; over it th
 DUMMY_CAP = 6000                # layout slots for long edges; past it they are drawn direct, and the page says so
 TITLES_MAX_BYTES = 4 * 1024 * 1024
 TITLE_CHARS = 100
+UNASSIGNED, UNKNOWN = "(unassigned)", "(unknown)"    # index tokens: not login-shaped, so no login can collide
 SWEEPS, SWEEPS_BIG = 8, 2
 BIG_SEGMENTS = 3000
 NODE_W, NODE_H, DUMMY_H, GAP_Y, COL_GAP, MARGIN = 220, 78, 14, 14, 84, 28
@@ -115,6 +116,14 @@ def clean_title(text):
     t = re.sub(r"(?i)http", "ht\u200btp", t)
     t = " ".join("".join(c if c.isprintable() else " " for c in t).split())
     return t if len(t) <= TITLE_CHARS else t[:TITLE_CHARS - 1].rstrip() + "\u2026"
+
+
+def _clean_login(x):
+    """A login as text: a plain login stays as it is; anything else is scrubbed like a title, has no space, and is
+    cut to the login length. Never a link."""
+    if isinstance(x, str) and dag_store._LOGIN.match(x):
+        return x
+    return "-".join(clean_title(x).split())[:39]
 
 
 def read_titles(path):
@@ -215,12 +224,14 @@ def build(m, config, goal, titles=None, now=None, fresh=(True, "ok")):
         raise HtmlError(EXIT["refused"], "dag: #%d is a pull request, not a goal" % goal)
     fc = chain_forecast.forecast(out, config)
     marks = {x["number"]: x for x in fc["members"]}
+    amap = {n["number"]: n["assignees"] for n in m["nodes"] if isinstance(n.get("assignees"), list)}
     nodes = {}
     for r in out["members"]:
         mk = marks[r["number"]]
         nodes[r["number"]] = {"n": r["number"], "m": mk["marker"], "after": mk["after"], "why": mk["why"],
                               "life": r["life"], "prio": r["prio"], "unit": r.get("unit"),
-                              "depth": r["depth"]}
+                              "depth": r["depth"],
+                              "who": sorted({_clean_login(a) for a in amap[r["number"]]}) if r["number"] in amap else None}
     for n in out["done"]:
         nodes[n] = {"n": n, "m": "closed", "after": [], "why": "resolved", "life": None,
                     "prio": g.nodes[n].prio, "unit": None, "depth": 0}
@@ -245,11 +256,15 @@ def build(m, config, goal, titles=None, now=None, fresh=(True, "ok")):
         d["t"] = titles.get(n)
     open_rows = [d for d in nodes.values() if d["m"] not in ("closed", "outside", "cycle")]
     stops = [{"n": s["number"], "m": s["marker"], "why": s["why"]} for s in fc["stops"]]
+    ranked = [d["prio"] for d in open_rows if d["prio"]]
+    top = min(ranked, key=chain._rank) if ranked else ""
+    who = sorted({UNKNOWN if d["who"] is None else UNASSIGNED if not d["who"] else a
+                  for d in open_rows for a in (d["who"] or [None])})
     return {"goal": goal, "nodes": nodes, "edges": [(a, b, t) for (a, b), t in edges], "stops": stops,
             "forecast": fc["line"], "notes": fc["notes"], "reason": fc["reason"], "finish": len(fc["finish"]),
             "open": len(open_rows), "closed": len(out["done"]), "outside": len(out["externals"]),
             "cycles": body["cycles"], "depth": max([d["depth"] for d in open_rows] or [0]),
-            "decisions": sum(1 for d in open_rows if d["m"] == "needs decision"),
+            "decisions": sum(1 for d in open_rows if d["m"] == "needs decision"), "top": top, "who": who,
             "over_cap": len(open_rows) > MEMBER_CAP, "titled": bool(titles),
             "built_at": out["map_built_at"], "age": out["map_age_seconds"], "fresh": fresh, "mode": None}
 
@@ -454,6 +469,7 @@ dd button{display:block;width:100%%;text-align:left;margin:3px 0}
 .e.ce,.n.cl{display:none}.show-closed .e.ce,.show-closed .n.cl{display:inline}
 .e.hot{stroke:var(--accent);stroke-width:2.6;opacity:1}.e.cool{opacity:.14}
 #arr path{fill:var(--edge)}
+.view{display:flex;flex-wrap:wrap;gap:8px 18px;margin:12px 24px 0;color:var(--muted)}
 table{border-collapse:collapse;margin:16px 24px;width:calc(100%% - 48px)}
 th,td{text-align:left;padding:7px 12px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--muted);font-weight:600;font-size:12.5px}td.num{text-align:right;font-variant-numeric:tabular-nums}
@@ -542,6 +558,7 @@ function select(n,pan,only){
  head.textContent=name(n);hint.hidden=true;body.textContent='';
  row('State',d.mk);row('Why',d.why||'nothing holds it');
  (d.ex||[]).forEach(function(r){row(r[0],r[1]);});
+ if('who' in d)row('Assignees',d.who===null?'assignee unknown (map predates this field)':d.who.length?d.who.join(', '):'unassigned');
  if(d.life)row('Life',d.life);if(d.prio)row('Priority',d.prio);if(d.unit)row('Unit',d.unit);
  var qs=about(n);if(qs.length)row('Questions','number '+qs.join(', ')+' in the list');
  row('Waits on',list(d.waits,function(m){return m+'>'+n;}));row('Frees',list(d.frees,function(m){return n+'>'+m;}));
@@ -579,6 +596,8 @@ def _data_json(model):
         nodes[str(n)] = {"t": d["t"], "mk": _shown(d), "why": d["why"], "life": d["life"], "prio": d["prio"],
                          "unit": d["unit"], "waits": d["waits"], "frees": d["frees"], "label": d.get("label"),
                          "ex": d.get("ex") or []}
+        if "who" in d:                     # members only; null is "unknown", [] is "unassigned"
+            nodes[str(n)]["who"] = d["who"]
     tags = {"%d>%d" % (a, b): t for a, b, t in model["edges"] if t != "explicit"}
     doc = {"goal": model["goal"], "nodes": nodes, "tags": tags,
            "questions": [{"n": q["n"], "id": q["ident"], "nodes": q["nodes"]} for q in model.get("questions") or []]}
@@ -638,6 +657,10 @@ def _node_svg(d, goal, xy, closed_blockers=0, badges=()):
         out.append('<text class="tag" x="%.1f" y="%.1f" text-anchor="end">GOAL</text>' % (x + NODE_W - 9, y + 18))
     for i, ln in enumerate(lines):
         out.append('<text x="%.1f" y="%.1f">%s</text>' % (x + 10, y + 34 + 14 * i, _esc(ln)))
+    if d.get("who") is not None and "who" in d and d["m"] not in ("closed", "outside", "cycle"):
+        line = ", ".join(d["who"]) or "unassigned"
+        out.append('<text class="mk" x="%.1f" y="%.1f">%s</text>'
+                   % (x + 10, y + 66, _esc(line if len(line) <= 24 else line[:23] + "\u2026")))
     out += _badges_svg(d["n"], x, y, list(badges))
     out.append("</g>")
     return "".join(out)
@@ -742,6 +765,36 @@ def render_page(model, repo=None):
                svg, _questions_html(model) if plan else "", _more_html(model) if plan else "", _data_json(model), JS))
 
 
+INDEX_JS = r"""
+function applyView(rows, sort, who, prio) {
+  var rank = function(t) { var m = /^P(\d+)$/.exec(t); return m ? +m[1] : 99; };
+  var out = rows.filter(function(r) { return (!who || r.who.indexOf(who) >= 0) && (!prio || r.top === prio); });
+  out.sort(function(a, b) {
+    var d = 0;
+    if (sort === 'priority') d = rank(a.top) - rank(b.top);
+    else if (sort === 'open') d = b.open - a.open;
+    return d || a.goal - b.goal;
+  });
+  return out;
+}
+(function() {
+  var tb = document.querySelector('tbody'), ctl = {};
+  ['sort', 'who', 'prio'].forEach(function(k) { ctl[k] = document.getElementById(k); });
+  var trs = [].slice.call(tb.rows).filter(function(tr) { return tr.dataset.goal; });
+  var rows = trs.map(function(tr) {
+    return {goal: +tr.dataset.goal, open: +tr.dataset.open, top: tr.dataset.top,
+            who: tr.dataset.who.split(' ').filter(Boolean), tr: tr};
+  });
+  function go() {
+    var v = applyView(rows, ctl.sort.value, ctl.who.value, ctl.prio.value);
+    trs.forEach(function(t) { t.hidden = true; });
+    v.forEach(function(r) { r.tr.hidden = false; tb.appendChild(r.tr); });
+  }
+  ['sort', 'who', 'prio'].forEach(function(k) { ctl[k].addEventListener('change', go); });
+})();
+"""
+
+
 def render_index(rows, repo, stamp_built, age, fresh, titled):
     """The index page: one row per chain, linking its page."""
     notice = ""
@@ -752,20 +805,31 @@ def render_index(rows, repo, stamp_built, age, fresh, titled):
     trs = []
     for r in rows:
         held = "; ".join("#%d %s" % (s["n"], s["m"]) for s in r["stops"][:4]) or "nothing"
-        trs.append('<tr><td><a href="%s">#%d</a>%s</td><td class="num">%d%s</td><td class="num">%d</td><td>%s</td>'
+        trs.append('<tr data-goal="%d" data-open="%d" data-top="%s" data-who="%s"><td><a href="%s">#%d</a>%s</td><td class="num">%d%s</td><td class="num">%d</td><td>%s</td>'
                    '<td class="num">%d</td><td>%s</td></tr>'
-                   % (_esc(r["file"]), r["goal"], " " + _esc(r["title"]) if r["title"] else "", r["open"],
+                   % (r["goal"], r["open"], _esc(r.get("top", "")), _esc(" ".join(r.get("who", []))),
+                      _esc(r["file"]), r["goal"], " " + _esc(r["title"]) if r["title"] else "", r["open"],
                       " (over the cap)" if r["over_cap"] else "", r["depth"], _esc(held), r["decisions"],
                       _esc("%d of %d" % (r["finish"], r["open"]))))
+    people = sorted({w for r in rows for w in r.get("who", [])})
+    tops = sorted({r["top"] for r in rows if r.get("top")}, key=chain._rank)
+    opt = lambda v, label: '<option value="%s">%s</option>' % (_esc(v), _esc(label))
+    controls = ('<div class="view"><label>Sort <select id="sort">%s%s%s</select></label>'
+                '<label>Assignee <select id="who">%s</select></label>'
+                '<label>Priority <select id="prio">%s</select></label></div>'
+                % (opt("open", "open members"), opt("priority", "priority"), opt("goal", "goal number"),
+                   opt("", "any") + "".join(opt(w, w.strip("()")) for w in people),
+                   opt("", "any") + "".join(opt(t, t) for t in tops)))
     css = CSS % {"light": _vars("light"), "dark": _vars("dark")}
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
             'content="width=device-width,initial-scale=1"><title>Chains</title><style>%s</style></head><body>'
             '<header class="top"><h1>Chains <small>%s</small></h1><div class="facts"><span><b>%d</b> chains</span>'
-            '<span>map built <b>%s</b>, age <b>%s</b></span></div>%s</header><table><thead><tr><th>End goal</th>'
+            '<span>map built <b>%s</b>, age <b>%s</b></span></div>%s</header>%s<table><thead><tr><th>End goal</th>'
             '<th>Open members</th><th>Depth</th><th>Held by</th><th>Need a decision</th><th>A run can finish</th>'
-            '</tr></thead><tbody>%s</tbody></table></body></html>\n'
-            % (css, _esc(repo or ""), len(rows), _esc(stamp_built), age, notice,
-               "".join(trs) or '<tr><td colspan="6">No open end goal waits on anything open.</td></tr>'))
+            '</tr></thead><tbody>%s</tbody></table><script>%s</script></body></html>\n'
+            % (css, _esc(repo or ""), len(rows), _esc(stamp_built), age, notice, controls,
+               "".join(trs) or '<tr><td colspan="6">No open end goal waits on anything open.</td></tr>',
+               INDEX_JS))
 
 
 # ------------------------------------------------------------------ the plan page (`chain.py html`)
@@ -1041,7 +1105,8 @@ def run(sdlc, goal=None, all_=False, out_dir=None, titles_path=None, now=None):
                                                                                          MEMBER_CAP))
         rows.append({"file": name, "goal": model["goal"], "title": model["nodes"][model["goal"]]["t"],
                      "open": model["open"], "depth": model["depth"], "stops": model["stops"],
-                     "decisions": model["decisions"], "finish": model["finish"], "over_cap": model["over_cap"]})
+                     "decisions": model["decisions"], "finish": model["finish"], "over_cap": model["over_cap"],
+                     "top": model["top"], "who": model["who"]})
     if all_:
         rows.sort(key=lambda r: (-r["open"], r["goal"]))
         t = dag_store.stamp(m)
