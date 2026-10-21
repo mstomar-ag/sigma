@@ -235,7 +235,10 @@ Commands run from the directory that holds `.sdlc`; scripts are under `skills/si
    `chain.py html <sdlc_dir> <goal>` after `plan` (see [chain](chain.md)).
 4. **Clean up prose dependencies.** For a goal whose ticket says what it waits for in words, run
    `deps.py report .sdlc <goal>` and `deps.py mark` for each real one. The loop's instructions do this per goal
-   before its pre-checks; doing it by hand first makes the shadow comparison cleaner.
+   before its pre-checks; doing it by hand first makes the shadow comparison cleaner. To sweep a band of goals, run
+   `deps.py report .sdlc --label <band> --sheet` (`--label` may repeat; the union is read once): the sheet lists each
+   goal's non-edge refs with their snippets, comment-edge first, then weak, then mention; decide per ref, then `deps.py mark`
+   each real wait. The sheet is a review aid and writes nothing.
 5. **Watch the shadow.** The doctor row `dag shadow` counts compared picks and disagreements by cause, and says
    whether the flip criterion is met (at least 7 days, at least 200 distinct compared picks, no `unknown`
    disagreement).
