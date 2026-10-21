@@ -10,7 +10,7 @@ In one paragraph: write a dependency as a `**Blocked by:** #N` line in the issue
 pick time, the map reads it on every refresh, and Chain reads it from the map. Other phrasings are read too,
 but only a few are trusted to make an edge; the rest are advisory, because a phantom edge parks a goal that
 nothing will unpark and can write to an unrelated issue. When a ticket states a dependency in prose or only in
-a comment, `deps.py report` shows every reference in it and `deps.py mark` turns the real ones into that line.
+a comment, `deps.py report` shows every reference in it and `deps.py mark` turns the real ones into that line. The report also flags a ref that waits back on the goal (`reverse`) and a body edge that only quotes another issue's marker (`quoted`); both are advisory.
 The map ships in `shadow` mode, where it watches and compares but decides nothing. Chain starts nothing by
 itself: every step is a command a person (or an agent told to) runs.
 

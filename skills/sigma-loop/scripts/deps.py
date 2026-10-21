@@ -49,6 +49,14 @@ Reads: 1 listing (label) or the planner's reads (chain), plus per member one iss
 MEASURED: process count only (one), by fake-source tests; no timing and no speedup is claimed. An unreadable
 member prints `{"error": ..., "goal": N}` and the exit code is 2 at the end; none is skipped silently.
 
+Two advisory flags (#1990), never a write and never a reason for `mark` to refuse: `reverse` on an edge,
+comment-edge or weak ref says the OTHER issue also names this goal with a blocking phrase (a two-way wait, a
+deadlock no marker line can show); `quoted` on an `edge` says the body sentence names a slice code, `#M` or
+the word slice as carrying the marker (an epic describing its children, not its own wait). Cost: at most
+`REVERSE_READ_MAX` (10) extra issue reads per goal, each one read plus ceil(comments/100) comment pages; at
+10x refs the cost stays at that number and the rest are listed in `reverse_unchecked` (`reverse_reads` counts
+the reads made). A batch (`--label`/`--chain`) multiplies by its members. Measured on fixtures only.
+
 Scale: `report` is one issue read plus ceil(comments/100) comment pages, whatever the board size;
 `mark` adds one goal read, one read of the referenced issue, one body write and one comment.
 """
@@ -74,6 +82,8 @@ _hsg = _load("hard_stop_guard")
 _REF_RE = re.compile(r"#(\d+)\b")
 SNIPPET_CHARS = 160
 SNIPPETS_PER_REF = 2
+REVERSE_READ_MAX = 10
+_QUOTE_RE = re.compile(r"(?i)(?:\bS\d+\b|#\d+|\bslices?\b)[^.\n!?]*\bcarr(?:y|ies)\b")
 _RANK = {"edge": 0, "comment-edge": 1, "weak": 2, "mention": 3}
 USAGE = ("usage: deps.py report <sdlc_dir> <goal> | deps.py report <sdlc_dir> --label <label> | "
          "deps.py report <sdlc_dir> --chain <N> | deps.py mark <sdlc_dir> <goal> <ref> <reason...> | "
@@ -93,16 +103,33 @@ def _is_foreign(text, start):
     return i >= 0 and (text[i].isalnum() or text[i] in "_/-.")
 
 
+def _quoted(text, start):
+    """True when the sentence before the blocking phrase at `start` names a slice code, `#M` or the word
+    slice and says it carries/carry something: the text describes ANOTHER issue's marker. A phrase that
+    begins its line (the goal's own marker line) is never quoted."""
+    line = text.rfind("\n", 0, start) + 1
+    if not text[line:start].strip(" \t>*-_`"):
+        return False
+    cut = max(text.rfind(c, 0, start) for c in ".!?\n") + 1
+    return bool(_QUOTE_RE.search(text[cut:start]))
+
+
 def analyse(goal, title, body, comments):
     """Pure. `comments` is a list of comment body strings. -> list of
     `{"ref", "read_as", "where", "snippets"}`, ordered by `read_as` (edge first), then ref."""
     goal = str(goal).lstrip("#")
     texts = [("body", blocker_scan.strip_unpark_qa((title or "") + "\n" + (body or "")))]
     texts += [("comment", blocker_scan.strip_unpark_qa(c or "")) for c in comments or []]
-    refs = {}
+    refs, quote = {}, {}
     for where, text in texts:
-        explicit = {m.group(2) for m in blocker_scan._EXPLICIT_BLOCK_RE.finditer(text)
-                    if not blocker_scan.is_cross_repo(text, m)}
+        explicit = set()
+        for m in blocker_scan._EXPLICIT_BLOCK_RE.finditer(text):
+            if blocker_scan.is_cross_repo(text, m):
+                continue
+            explicit.add(m.group(2))
+            if where == "body":
+                q = quote.setdefault(m.group(2), [])
+                q.append(_quoted(text, m.start()))
         weak = ({m.group(2) for m in blocker_scan._BLOCK_RE.finditer(text)
                  if not blocker_scan.is_cross_repo(text, m)} | chain_waits.loose_refs(text)) - explicit   # #1902
         for m in _REF_RE.finditer(text):
@@ -118,6 +145,9 @@ def analyse(goal, title, body, comments):
                 rec["where"].append(where)
             if len(rec["snippets"]) < SNIPPETS_PER_REF:
                 rec["snippets"].append(_snippet(text, m.start(), m.end()))
+    for ref, rec in refs.items():
+        if rec["read_as"] == "edge":
+            rec["quoted"] = bool(quote.get(ref)) and all(quote[ref])
     return sorted(refs.values(), key=lambda r: (_RANK[r["read_as"]], int(r["ref"])))
 
 
@@ -127,11 +157,28 @@ def _read(source, goal):
     return data.get("title") or "", data.get("body") or "", comments
 
 
-def report(source, goal):
+def _names_goal(refs, goal):
+    return any(r["ref"] == goal and r["read_as"] != "mention" for r in refs)
+
+
+def report(source, goal, max_reverse=REVERSE_READ_MAX):
+    """Advisory (#1990): each ref read as edge/comment-edge/weak is read once more, up to `max_reverse`
+    refs (rank order, then number); `reverse` is whether it names the goal with a blocking phrase. The
+    eligible refs beyond the bound are listed in `reverse_unchecked`; an unreadable one is `null`."""
+    goal = str(goal).lstrip("#")
     title, body, comments = _read(source, goal)
     refs = analyse(goal, title, body, comments)
     counts = {k: sum(1 for r in refs if r["read_as"] == k) for k in _RANK}
-    return {"goal": str(goal).lstrip("#"), "comments_read": len(comments), "counts": counts, "refs": refs}
+    eligible = [r for r in refs if r["read_as"] != "mention"]
+    for r in eligible[:max_reverse]:
+        try:
+            t, b, c = _read(source, r["ref"])
+            r["reverse"] = _names_goal(analyse(r["ref"], t, b, c), goal)
+        except Exception:
+            r["reverse"] = None
+    return {"goal": goal, "comments_read": len(comments), "counts": counts,
+            "reverse_reads": min(len(eligible), max_reverse),
+            "reverse_unchecked": [r["ref"] for r in eligible[max_reverse:]], "refs": refs}
 
 
 def _plain(reason):
