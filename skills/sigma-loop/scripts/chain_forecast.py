@@ -18,8 +18,8 @@ claimed goal is assumed to merge, until nothing is offered. What is left is the 
 `stuck_reason` over the members left, and its roots are the left members that wait on no other left member.
 
 Not modelled, and said so in the output: the cap (`chain.max_goals`, `max_usd`, `max_minutes`), a goal that
-fails or is parked by its own session, and, for a plan read from the map, the assignee filter (the map holds no
-assignees). Ceiling: O(cycles x members) per call, members bounded by `chain.max_members` (default 100).
+fails or is parked by its own session. A plan read from the map applies the assignee filter from the map's node
+assignees; a member without them is read as not the runner's and counted in a note. Ceiling: O(cycles x members) per call, members bounded by `chain.max_members` (default 100).
 """
 import importlib.util
 import pathlib
@@ -228,7 +228,11 @@ def verdict_for(row, login, filtered):
     `_Judge.verdict` uses. No assignee data (a plan from the map), no filter or no known login: as recorded."""
     base = row.get("base_verdict") or row.get("verdict")
     logins = row.get("assignees")
-    if not filtered or logins is None or base not in ("armed", "held-by-gate"):
+    if not filtered or base not in ("armed", "held-by-gate"):
+        return base
+    if row.get("assignees_unknown"):      # #1993: a map node without the key is never read as a match
+        return "assigned-elsewhere" if login else base
+    if logins is None:
         return base
     gate = label_drain.assignee_gate(logins, login)
     return gate[0] if gate else base
@@ -267,12 +271,16 @@ def forecast(rec, config=None, login=None, held=(), declined=(), assumed=(), cap
     me = login if login is not None else rec.get("runner")
     me = str(me).strip().lstrip("@").casefold() if me else None
     notes = []
-    if rec.get("verdict_basis") == "map-life":
-        notes.append("the assignee filter is not applied: the plan was read from the map, which holds no assignees")
+    if rec.get("verdict_basis") == "map-life" and rec.get("assignee_filter") is None:
+        notes.append("the assignee filter is not applied: the plan was read from the map, and no member's node carries assignees")
     elif filtered and me is None:
         notes.append("the runner's login is unknown, so the assignee filter is not applied; pass --as <login>")
     elif login is not None and rec.get("assignee_filter") is False:
         notes.append("no assignee filter is configured, so --as changes nothing")
+    unknown = sum(1 for r in rec.get("members") or [] if r.get("assignees_unknown"))
+    if filtered and unknown and me:
+        notes.append("%d member%s no assignees on the map (an outside node or a map older than assignees): read as not "
+                     "%s" % (unknown, " has" if unknown == 1 else "s have", "the runner's"))
     if assumed:
         notes.append("%s wait%s on a closed prerequisite's open follow-up or question nobody has answered yet: read as "
                      "the recommended answer, keep waiting" % (", ".join("#%d" % n for n in sorted(assumed)),

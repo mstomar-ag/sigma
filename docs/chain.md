@@ -54,9 +54,10 @@ holding), and the same rule gives the forecast's roots. When more than one membe
 others on a line of its own (`also holding the chain: #a, #b`, at most 6 and a count), and `chain.py status` repeats it;
 the stop line itself is unchanged. A closed prerequisite's open follow-up never counts as a dependent waiting on itself:
 a follow-up names its parent and so waits on it by construction, and asking it to "keep waiting" for itself is no
-question. A plan read from the stored map, with an assignee filter configured and a chain small enough for the live
-read, is planned live instead: the map holds no assignees, and a forecast that cannot apply the filter promises work
-the runner may not take. Before a closed-prerequisite question is answered, the sheet's forecast reads the recommended
+question. A plan read from the stored map, with an assignee filter configured, applies it from the assignees the map
+keeps on each node. A member whose node has none (an outside node, or a map written before the map kept assignees) is
+read as not the runner's and counted in a forecast note. Only a map with no assignees on any member, and a chain small
+enough for the live read, is planned live instead: a forecast that cannot apply the filter promises work the runner may not take. Before a closed-prerequisite question is answered, the sheet's forecast reads the recommended
 answer (keep waiting) and says so in a note.
 
 One `run` cycle reads each issue and each comment page at most once (`chain_reads.py`): a repeat of a GET of one issue
@@ -182,8 +183,8 @@ runner who owns none of the work finishes none of it); the default is whoever pl
 The forecast plays `run` cycle by cycle at the configured width and uses the rules `run` uses: the claim rule and
 the stuck rule live in `chain_forecast.py` and both call them, and the assignee clause is the label drain's own. A
 test plays a real run on a fixture and compares. It assumes every goal a run claims merges, and it does not model
-the cap. A plan read from the map holds no assignees, so there the assignee filter is not applied (the output
-says so). The record keeps each member's assignee logins for this; it is local state and holds no titles or text.
+the cap. A plan read from the map applies the filter from the map's node assignees; a member without them is
+read as not the runner's and the output says how many. A map with no assignees at all says so. The record keeps each member's assignee logins for this; it is local state and holds no titles or text.
 
 ## Member states
 
