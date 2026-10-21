@@ -49,13 +49,20 @@ Reads: 1 listing (label) or the planner's reads (chain), plus per member one iss
 MEASURED: process count only (one), by fake-source tests; no timing and no speedup is claimed. An unreadable
 member prints `{"error": ..., "goal": N}` and the exit code is 2 at the end; none is skipped silently.
 
-Two advisory flags (#1990), never a write and never a reason for `mark` to refuse: `reverse` on an edge,
-comment-edge or weak ref says the OTHER issue also names this goal with a blocking phrase (a two-way wait, a
-deadlock no marker line can show); `quoted` on an `edge` says the body sentence names a slice code, `#M` or
-the word slice as carrying the marker (an epic describing its children, not its own wait). Cost: at most
-`REVERSE_READ_MAX` (10) extra issue reads per goal, each one read plus ceil(comments/100) comment pages; at
-10x refs the cost stays at that number and the rest are listed in `reverse_unchecked` (`reverse_reads` counts
-the reads made). A batch (`--label`/`--chain`) multiplies by its members. Measured on fixtures only.
+Advisory flags (#1990, #1995), never a write and never a reason for `mark` to refuse. The other issue's text
+decides the DIRECTION: only text in which that issue says IT waits on this goal counts. `reverse` on an edge
+or comment-edge ref says so (a two-way wait, a deadlock no marker line can show); on a `weak` ref the same
+text gives `likely-dependent` instead (the goal's weak read is probably the wrong way round: the other issue
+is a dependent, and the sheet says so in words), never `reverse`. A CLOSED ref is not reverse-read; the report
+counts them in `reverse_skipped_closed` and the sheet prints the count. The reverse read alone also counts
+`prerequisite(s)` phrasings ("#N stays a prerequisite", "Prerequisite: #N") as weak; the edge parser and
+blocker_scan's tables are unchanged. `quoted` on an `edge` says the body sentence names a slice code, `#M` or
+the word slice as carrying the marker (an epic describing its children, not its own wait). Cost: one reverse read per non-mention ref,
+at most `REVERSE_READ_MAX` (10) per goal, each one read plus ceil(comments/100) comment pages (a closed ref
+is learned from that same read and adds nothing more); at 10x refs the cost stays at that number and the rest
+are listed in `reverse_unchecked` (`reverse_reads` counts the reads made). A batch (`--label`/`--chain`)
+multiplies by its members: a 63-goal band is at most 63 + 630 = 693 issue reads plus comment pages, which
+is a ceiling, not a measurement. Measured on fixtures only.
 
 `--label` may repeat: the union of the open members, each once, ordered by number. `--sheet` (#1991) prints a markdown
 review sheet instead of JSON lines: per goal its non-`edge` refs (comment-edge, weak, mention) with snippets, and a tally
@@ -118,9 +125,21 @@ def _quoted(text, start):
     return bool(_QUOTE_RE.search(text[cut:start]))
 
 
-def analyse(goal, title, body, comments):
+# #1995: phrases only the REVERSE read adds to `weak` ("#N stays a stage-2 prerequisite", "Prerequisite: #N").
+# The forward parse (`analyse` with reverse=False) and blocker_scan's tables never see them.
+_PREREQ_AFTER_RE = re.compile(r"(?i)\bprerequisites?\b\s*[:\-]?\s*#(\d+)\b")
+_PREREQ_BEFORE_RE = re.compile(r"(?i)#(\d+)\b[^.\n#]{0,30}?\bprerequisites?\b(?!\s+(?:of|for)\s+(?:#|issue\b))")
+
+
+def _prereq_refs(text):
+    return ({m.group(1) for m in _PREREQ_AFTER_RE.finditer(text)}
+            | {m.group(1) for m in _PREREQ_BEFORE_RE.finditer(text)})
+
+
+def analyse(goal, title, body, comments, reverse=False):
     """Pure. `comments` is a list of comment body strings. -> list of
-    `{"ref", "read_as", "where", "snippets"}`, ordered by `read_as` (edge first), then ref."""
+    `{"ref", "read_as", "where", "snippets"}`, ordered by `read_as` (edge first), then ref. `reverse=True`
+    (#1995, the reverse read only) also counts `prerequisite` phrasings as weak."""
     goal = str(goal).lstrip("#")
     texts = [("body", blocker_scan.strip_unpark_qa((title or "") + "\n" + (body or "")))]
     texts += [("comment", blocker_scan.strip_unpark_qa(c or "")) for c in comments or []]
@@ -135,7 +154,8 @@ def analyse(goal, title, body, comments):
                 q = quote.setdefault(m.group(2), [])
                 q.append(_quoted(text, m.start()))
         weak = ({m.group(2) for m in blocker_scan._BLOCK_RE.finditer(text)
-                 if not blocker_scan.is_cross_repo(text, m)} | chain_waits.loose_refs(text)) - explicit   # #1902
+                 if not blocker_scan.is_cross_repo(text, m)} | chain_waits.loose_refs(text)
+                | (_prereq_refs(text) if reverse else set())) - explicit   # #1902
         for m in _REF_RE.finditer(text):
             ref = m.group(1)
             if ref == goal or _is_foreign(text, m.start()):
@@ -156,9 +176,13 @@ def analyse(goal, title, body, comments):
 
 
 def _read(source, goal):
+    return _read_full(source, goal)[:3]
+
+
+def _read_full(source, goal):
     data = source._read_issue(goal, ["title", "body", "state", "comments"], comment_limit=None)
     comments = [c.get("body") or "" for c in (data.get("comments") or []) if isinstance(c, dict)]
-    return data.get("title") or "", data.get("body") or "", comments
+    return data.get("title") or "", data.get("body") or "", comments, str(data.get("state") or "")
 
 
 def _names_goal(refs, goal):
@@ -166,22 +190,33 @@ def _names_goal(refs, goal):
 
 
 def report(source, goal, max_reverse=REVERSE_READ_MAX):
-    """Advisory (#1990): each ref read as edge/comment-edge/weak is read once more, up to `max_reverse`
-    refs (rank order, then number); `reverse` is whether it names the goal with a blocking phrase. The
-    eligible refs beyond the bound are listed in `reverse_unchecked`; an unreadable one is `null`."""
+    """Advisory (#1990, #1995): each ref read as edge/comment-edge/weak is read once more, up to `max_reverse`
+    refs (rank order, then number). The reverse text decides the DIRECTION: only a ref whose own text says
+    it waits on the goal counts. On an edge/comment-edge that is `reverse: true`; on a `weak` ref it is
+    `likely-dependent: true` (the goal's weak read is probably the wrong way round), never `reverse`. A
+    closed ref is not reverse-read and is counted in `reverse_skipped_closed`. The eligible refs beyond the
+    bound are listed in `reverse_unchecked`; an unreadable one is `reverse: null`."""
     goal = str(goal).lstrip("#")
     title, body, comments = _read(source, goal)
     refs = analyse(goal, title, body, comments)
     counts = {k: sum(1 for r in refs if r["read_as"] == k) for k in _RANK}
     eligible = [r for r in refs if r["read_as"] != "mention"]
+    closed = 0
     for r in eligible[:max_reverse]:
         try:
-            t, b, c = _read(source, r["ref"])
-            r["reverse"] = _names_goal(analyse(r["ref"], t, b, c), goal)
+            t, b, c, state = _read_full(source, r["ref"])
+            if state.upper() == "CLOSED":
+                closed += 1
+                continue
+            waits = _names_goal(analyse(r["ref"], t, b, c, reverse=True), goal)
+            if r["read_as"] == "weak" and waits:
+                r["likely-dependent"] = True
+            else:
+                r["reverse"] = waits
         except Exception:
             r["reverse"] = None
     return {"goal": goal, "comments_read": len(comments), "counts": counts,
-            "reverse_reads": min(len(eligible), max_reverse),
+            "reverse_reads": min(len(eligible), max_reverse), "reverse_skipped_closed": closed,
             "reverse_unchecked": [r["ref"] for r in eligible[max_reverse:]], "refs": refs}
 
 
@@ -313,10 +348,15 @@ def sheet_lines(rec):
     out = ["## #%s" % rec["goal"], ""]
     for kind in _SHEET_ORDER:
         for r in (x for x in refs if x["read_as"] == kind):
-            flags = "".join(", %s" % k for k in ("reverse", "quoted") if r.get(k))
-            out.append("- #%s (%s%s): %s" % (r["ref"], kind, flags, " | ".join(r["snippets"]).replace("\n", " ")))
+            flags = "".join(", %s" % k for k in ("reverse", "quoted", "likely-dependent") if r.get(k))
+            note = (" -- probably waits on this goal; the weak read is likely the wrong way round"
+                    if r.get("likely-dependent") else "")
+            out.append("- #%s (%s%s): %s%s" % (r["ref"], kind, flags, " | ".join(r["snippets"]).replace("\n", " "), note))
     tally = sum(1 for r in refs if r["read_as"] == "edge")
-    out += ["", "%d ref(s) already read as an edge: not listed." % tally, ""]
+    out += ["", "%d ref(s) already read as an edge: not listed." % tally]
+    if rec.get("reverse_skipped_closed"):
+        out.append("%d closed ref(s) not reverse-read." % rec["reverse_skipped_closed"])
+    out.append("")
     return out
 
 
