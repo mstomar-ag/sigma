@@ -54,7 +54,8 @@ def test_label_batch_is_one_call_and_each_line_equals_the_single_report(monkeypa
     assert [g["goal"] for g in got] == ["3", "4", "5", "8"]          # ordered by issue number
     for g in got:
         assert g == deps.report(_Source(), g["goal"])
-    assert sorted(src.reads) == ["3", "4", "5", "8"]                  # every member read, none skipped
+    # every member read, none skipped; the only other reads are #1990's reverse reads of the fake's refs
+    assert {"3", "4", "5", "8"} <= set(src.reads) and set(src.reads) <= {"3", "4", "5", "8", "77", "99"}
 
 
 def test_chain_batch_covers_the_goal_and_its_open_prerequisites_only(monkeypatch, capsys):
