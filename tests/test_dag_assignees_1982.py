@@ -260,3 +260,13 @@ def test_apply_view_sorts_and_filters(sdlc, tmp_path):
     assert _apply(index, ROWS, "goal", "alice", "P1") == [10]
     assert _apply(index, ROWS, "goal", "nobody", "") == []
     assert ROWS[0]["goal"] == 30                                             # the input is not reordered in place
+
+
+def test_index_filter_shows_an_open_outside_node_under_its_real_assignee(tmp_path):
+    """#1994: a rebuild keeps the open outside issue's assignees, so the index offers and lists its login.
+    control: drop the assignees line in dag_collect._outside -> the chain reads (unknown) and `dana` is absent."""
+    outside = _issue(9, ["priority:P1"], "", ["dana"])
+    run = Fake([_issue(1, ["sdlc:goal"], "Blocked by: #9", ["alice"]), outside])
+    assert dc.refresh(tmp_path, CONFIG, run, NOW)["status"] == "saved"
+    r = _rows(_index(tmp_path, tmp_path))
+    assert "dana" in r[1]["who"] and "(unknown)" not in r[1]["who"], r

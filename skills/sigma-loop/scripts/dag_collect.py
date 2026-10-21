@@ -7,7 +7,9 @@ the refresh lock and publishes through `dag_store.save`. `dag.py rebuild` is the
 What it reads. Open issues for five label sets (goal, blocked, blocking, parked, follow-up), each its
 own list, through `gh_api.list_issues` (so `sources.fetch_issues_rest`): no assignee argument is ever
 sent, because the map is about structure, not about one owner; each listed issue's own assignees
-are kept as a node field (no extra call; outside nodes have none, which reads as unknown). 2,000 issues per list at most; a list
+are kept as a node field (no extra call). An OPEN outside issue keeps its assignees, priority and life too, from the
+payload its one read already holds (zero extra calls); a closed or merged outside node has none of the three, which
+reads as unknown. 2,000 issues per list at most; a list
 that reaches that cap marks the map `partial`, which `dag_store.usable` refuses. Per issue: life from
 `blockers.classify` plus the closed set of label states, priority from `discovery.priority_rank` with
 the repository's aliases and prefix, edges from `dag_core.edges_from` over title and body, and the
@@ -152,8 +154,26 @@ def _unit(names):
     return None
 
 
-def _outside(run, repo, number, now):
-    """`(node, ok)` for one number outside the lists. Unreadable is `unknown`, never a guess."""
+def _assignees(item):
+    return [a["login"] for a in item["assignees"] if isinstance(a, dict) and isinstance(a.get("login"), str)]
+
+
+def keep_open_fields(node, item, ctx):
+    """An OPEN outside issue keeps its assignees, priority and life from the payload in hand (#1994); a closed
+    one is left as it is. Shared with `dag_check`, so an incremental check and a rebuild give the same node."""
+    if node["state"] != "open":
+        return
+    labels, in_progress, prefix, aliases = ctx
+    names = _names(item)
+    node["life"], node["prio"] = _life(names, labels, in_progress), _prio(names, prefix, aliases)
+    if isinstance(item.get("assignees"), list):
+        node["assignees"] = _assignees(item)
+
+
+def _outside(run, repo, number, now, ctx=None):
+    """`(node, ok)` for one number outside the lists. Unreadable is `unknown`, never a guess. `ctx` is the
+    `(labels, in_progress, prefix, aliases)` the listed nodes use: an OPEN issue then keeps its assignees,
+    priority and life from the payload already read (#1994); a closed one gains nothing."""
     node = {"number": number, "kind": "issue", "state": "unknown", "life": "none", "prio": None,
             "in_corpus": False, "read_at": _iso(now)}
     try:
@@ -163,6 +183,8 @@ def _outside(run, repo, number, now):
     node["updated_at"] = item.get("updated_at") if isinstance(item.get("updated_at"), str) else None
     if "pull_request" not in item:
         node["state"] = "closed" if item.get("state") == "closed" else "open"
+        if ctx is not None:
+            keep_open_fields(node, item, ctx)
         return node, True
     node["kind"] = "pr"
     try:
@@ -247,8 +269,7 @@ def collect(sdlc, config, run=None, now=None, previous=None, cap=LIST_CAP, outsi
         if unit:
             node["unit"] = unit
         if isinstance(it.get("assignees"), list):       # listed with the issue: no extra call
-            node["assignees"] = [a["login"] for a in it["assignees"]
-                                 if isinstance(a, dict) and isinstance(a.get("login"), str)]
+            node["assignees"] = _assignees(it)
         nodes[num] = node
         edges += [(a, b, "body") for a, b, _p in
                   dag_core.edges_from("%s\n%s" % (it.get("title") or "", it.get("body") or ""), num)]
@@ -263,7 +284,7 @@ def collect(sdlc, config, run=None, now=None, previous=None, cap=LIST_CAP, outsi
             nodes[num] = known[num]
         elif reads < limit:
             reads += 1
-            nodes[num], _ok = _outside(counted, repo, num, now)
+            nodes[num], _ok = _outside(counted, repo, num, now, (labels, in_progress, prefix, aliases))
         else:
             rep["unread"].append(num)
             nodes[num] = {"number": num, "kind": "issue", "state": "unknown", "life": "none",

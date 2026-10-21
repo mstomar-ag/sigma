@@ -253,6 +253,12 @@ def _s_label_leaves_corpus(w):
     w.edit(3, [])
 
 
+def _s_label_leaves_corpus_but_keeps_priority(w):
+    """#1994: an issue that leaves the lists but stays open keeps the priority, life and assignees a rebuild reads."""
+    w.edit(2, ["priority:P2", "sdlc:in-progress"])
+    w.issues[2]["assignees"] = [{"login": "dana"}]
+
+
 def _s_pr_merged(w):
     w.prs[5] = {"state": "closed", "merged": True}
     w.touch(5)
@@ -264,7 +270,7 @@ def _s_new_outside_ref(w):
 
 
 SCENARIOS = [_s_label_add, _s_label_remove, _s_comment_only, _s_close, _s_reopen, _s_new_issue,
-             _s_body_edit, _s_label_leaves_corpus, _s_pr_merged, _s_new_outside_ref]
+             _s_body_edit, _s_label_leaves_corpus, _s_label_leaves_corpus_but_keeps_priority, _s_pr_merged, _s_new_outside_ref]
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda f: f.__name__[3:])

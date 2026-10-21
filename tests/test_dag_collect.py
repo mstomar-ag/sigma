@@ -327,3 +327,44 @@ def test_rebuild_verb_prints_call_counts(tmp_path, monkeypatch, capsys):
     assert dag_cli.main(["rebuild", "--sdlc", str(tmp_path)]) == 0
     out = capsys.readouterr().out
     assert "saved" in out and "list 5 read 1 pull 1" in out
+
+
+# --- an open outside node keeps what its one read already holds (#1994) --------------------------------
+
+def _open_outside(logins=("dana",), labels=("priority:P1", "sdlc:in-progress")):
+    it = _issue(9, labels)
+    it["assignees"] = [{"login": x} for x in logins]
+    return it
+
+
+def test_open_outside_issue_keeps_assignees_priority_and_life(tmp_path):
+    """control: drop the assignees line -> no key; drop the _prio call -> prio None; drop the _life call -> life none."""
+    run = Fake([_issue(1, ["sdlc:goal"], "Blocked by: #9"), _open_outside()])
+    n = _by_num(dc.collect(tmp_path, CONFIG, run, NOW))[9]
+    assert n["state"] == "open" and n["assignees"] == ["dana"] and n["prio"] == "P1" and n["life"] == "in-progress", n
+    assert n["in_corpus"] is False
+
+
+def test_closed_outside_issue_gains_no_fields(tmp_path):
+    """control: set the fields before the state check -> a closed node gains assignees/prio/life."""
+    it = _open_outside()
+    it["state"] = "closed"
+    n = _by_num(dc.collect(tmp_path, CONFIG, Fake([_issue(1, ["sdlc:goal"], "Blocked by: #9"), it]), NOW))[9]
+    assert n["state"] == "closed" and "assignees" not in n and n["prio"] is None and n["life"] == "none", n
+
+
+def test_open_outside_issue_without_an_assignees_payload_stays_unknown(tmp_path):
+    """control: write [] when the payload has no list -> unknown reads as unassigned."""
+    it = _open_outside()
+    del it["assignees"]
+    n = _by_num(dc.collect(tmp_path, CONFIG, Fake([_issue(1, ["sdlc:goal"], "Blocked by: #9"), it]), NOW))[9]
+    assert "assignees" not in n
+
+
+def test_the_call_count_is_unchanged_by_keeping_the_payload(tmp_path):
+    """The same world with the outside issue open (new fields) and closed (none) makes the same calls."""
+    def calls(state):
+        it = _open_outside()
+        it["state"] = state
+        return dc.collect(tmp_path, CONFIG, Fake([_issue(1, ["sdlc:goal"], "Blocked by: #9"), it]), NOW)["calls"]
+    assert calls("open") == calls("closed")
