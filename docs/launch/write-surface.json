@@ -4069,7 +4069,7 @@
       "function": "run",
       "rule": "fs-write",
       "count": 3,
-      "gate": "one atomic write per chain page, plus the index with --all, only under --out or the default `.sdlc/state/dag-html/`; an --out inside a git checkout that does not ignore it is refused before any write; reached only by an explicit `dag.py html` run; reads only the stored map, no GitHub call; pages hold issue numbers, state words and titles only from an optional --titles file",
+      "gate": "one atomic write per chain page, plus the index with --all, only under --out or the default `.sdlc/state/dag-html/`; an --out inside a git checkout that does not ignore it is refused before any write; reached only by an explicit `dag.py html` run; reads only the stored map and the titles file, no GitHub call; pages hold issue numbers, state words and titles only from --titles or the file `dag.py titles` made",
       "risk": "low"
     },
     {
@@ -4078,6 +4078,14 @@
       "rule": "fs-write",
       "count": 2,
       "gate": "one atomic write of `chain-plan-<N>.html` only under --out or the default `.sdlc/state/dag-html/`; an --out inside a git checkout that does not ignore it is refused before any write; reached only by an explicit `chain.py html` run on a stored plan record (no record: refused, nothing written); no GitHub call",
+      "risk": "low"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/dag_titles.py",
+      "function": "run",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "discovery.dag.mode is not off and a readable map exists (else refused before any call or write); one atomic replace of `<sdlc>/state/dag-titles.json` after the whole REST listing succeeded (a failed listing keeps the old file), only issue numbers that are map nodes with titles scrubbed and cut at 100 characters, at most 50 list calls; reached only by an explicit `dag.py titles` run; never writes the map or a repository file",
       "risk": "low"
     },
     {
