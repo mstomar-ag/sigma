@@ -148,6 +148,9 @@ def _apply(m, items, config, run, now):
             unit = dag_collect._unit(names)
             if unit:
                 node["unit"] = unit
+            if isinstance(it.get("assignees"), list):   # as `dag_collect.collect` stores them (#1982)
+                node["assignees"] = [a["login"] for a in it["assignees"]
+                                     if isinstance(a, dict) and isinstance(a.get("login"), str)]
             nodes[num] = node
             corpus[num] = it
         elif num in nodes:
