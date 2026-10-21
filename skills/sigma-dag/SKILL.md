@@ -16,6 +16,6 @@ Detailed selection triggers: [selection](references/selection.md). `D` is `pytho
 
 - No argument: run `D report --sdlc .sdlc` and relay stdout verbatim. It reads the stored map only (no network, no write).
 - `<N>`: run `D report --goal <N> --sdlc .sdlc`, the chain behind N.
-- `--html`: run `D html --all --sdlc .sdlc`; `<N> --html`: `D html --goal <N> --sdlc .sdlc`. Print the path it names (the index, or the page) and open it where the host can.
+- `--html`: run `D html --all --sdlc .sdlc`; `<N> --html`: `D html --goal <N> --sdlc .sdlc`. Print the path it names (the index, or the page) and open it where the host can. A goal page also draws the open work waiting on it, muted.
 
 One line with a fix (`rebuild`, `refresh --force`, or the config key) is the answer when there is nothing to read: relay it, run nothing else.

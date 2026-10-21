@@ -48,6 +48,16 @@ O(members + edges) for the rest; dummy slots are skipped (long edges drawn direc
 `DUMMY_CAP`. Measured on one synthetic shape (shallow, no tangle): 400 members 248 KB in 0.06 s, 1,000 members 612 KB in
 0.35 s; a tangled chain is not measured, and `tests/test_dag_html.py` bounds a 400-member page at 1.5 MB. `--all` is
 the sum of its chains, one page each.
+
+THE WORK THAT WAITS ON THE GOAL (#1986). Beyond the prerequisites, a `--goal` page also draws the goal's open
+dependents, transitive, in columns to its right: open issues only (never a closed one or a pull request), nearest
+first and ties by number, drawn muted as state `waiting`, each edge from the goal or another dependent tagged
+`holds`. The heading says how many open issues wait on the goal. `DEPENDENT_CAP` (40) is the most it draws; the
+count left out is written on the page ("N more open issues wait on #G and are not drawn (cap 40)"), never silently
+dropped. The prerequisite half is untouched: `open`, `depth`, `decisions`, `who` and the held-by list count only the
+members `chain.map_closure` returns. Size: the dependents add at most 40 nodes and their edges (about 25 KB) to a page.
+At 10x (400 dependents) and at 100x (4,000) the page still draws 40 and writes one count, so its size does not grow;
+the walk costs O(open dependents + their edges), a few milliseconds at 4,000 (reasoned from the loop, not timed).
 """
 import collections
 import html
@@ -74,6 +84,7 @@ chain_forecast = chain.chain_forecast
 dag_store = dag_chain.dag_store
 dag_core = dag_chain.dag_core
 
+DEPENDENT_CAP = 40              # open dependents of the goal a page draws; the rest are counted and written, not drawn
 MEMBER_CAP = 80                 # open members a page draws readably; over it the page still writes, with a notice
 DUMMY_CAP = 6000                # layout slots for long edges; past it they are drawn direct, and the page says so
 TITLES_MAX_BYTES = 4 * 1024 * 1024
@@ -245,8 +256,26 @@ def build(m, config, goal, titles=None, now=None, fresh=(True, "ok")):
                 nodes[n] = {"n": n, "m": "cycle", "after": [], "why": "in a dependency cycle; the plan refuses it",
                             "life": None, "prio": g.nodes[n].prio, "unit": None, "depth": 0}
     drawn = set(nodes)
-    edges = sorted({(a, b): "explicit" if esrc.get((a, b)) == "body" else "ledger"
-                    for a, b, _s in g.edges if a in drawn and b in drawn}.items())
+    # The work that waits on the goal: open issues only, nearest first (ties by number), at most DEPENDENT_CAP drawn.
+    dist, level, order = {goal: 0}, [goal], []
+    while level:
+        nxt = sorted({d for c in level for d in g.dependents[c]
+                      if d not in dist and d not in drawn and g.nodes[d].kind == "issue" and g.nodes[d].state == "open"})
+        for d in nxt:
+            dist[d] = dist[level[0]] + 1
+        order += nxt
+        level = nxt
+    waiting, left_out = len(order), max(0, len(order) - DEPENDENT_CAP)
+    for n in order[:DEPENDENT_CAP]:
+        nodes[n] = {"n": n, "m": "waiting", "k": "waiting", "after": [], "why": "waits on #%d, directly or through "
+                    "another issue" % goal, "life": g.nodes[n].life, "prio": g.nodes[n].prio, "unit": None,
+                    "depth": nodes[goal]["depth"] + dist[n]}
+    holders = {goal} | {n for n, d in nodes.items() if d["m"] == "waiting"}
+    drawn = set(nodes)
+    edges = sorted({(a, b): "holds" if a in holders and nodes[b]["m"] == "waiting"
+                    else "explicit" if esrc.get((a, b)) == "body" else "ledger"
+                    for a, b, _s in g.edges if a in drawn and b in drawn
+                    and not (nodes[b]["m"] == "waiting" and a not in holders)}.items())
     waits, frees = collections.defaultdict(list), collections.defaultdict(list)
     for (a, b), _t in edges:
         waits[b].append(a)
@@ -254,7 +283,7 @@ def build(m, config, goal, titles=None, now=None, fresh=(True, "ok")):
     for n, d in nodes.items():
         d["waits"], d["frees"] = sorted(waits[n]), sorted(frees[n])
         d["t"] = titles.get(n)
-    open_rows = [d for d in nodes.values() if d["m"] not in ("closed", "outside", "cycle")]
+    open_rows = [d for d in nodes.values() if d["m"] not in ("closed", "outside", "cycle", "waiting")]
     stops = [{"n": s["number"], "m": s["marker"], "why": s["why"]} for s in fc["stops"]]
     ranked = [d["prio"] for d in open_rows if d["prio"]]
     top = min(ranked, key=chain._rank) if ranked else ""
@@ -262,7 +291,7 @@ def build(m, config, goal, titles=None, now=None, fresh=(True, "ok")):
                   for d in open_rows for a in (d["who"] or [None])})
     return {"goal": goal, "nodes": nodes, "edges": [(a, b, t) for (a, b), t in edges], "stops": stops,
             "forecast": fc["line"], "notes": fc["notes"], "reason": fc["reason"], "finish": len(fc["finish"]),
-            "open": len(open_rows), "closed": len(out["done"]), "outside": len(out["externals"]),
+            "waiting": waiting, "left_out": left_out, "open": len(open_rows), "closed": len(out["done"]), "outside": len(out["externals"]),
             "cycles": body["cycles"], "depth": max([d["depth"] for d in open_rows] or [0]),
             "decisions": sum(1 for d in open_rows if d["m"] == "needs decision"), "top": top, "who": who,
             "over_cap": len(open_rows) > MEMBER_CAP, "titled": bool(titles),
@@ -463,6 +492,8 @@ dd button{display:block;width:100%%;text-align:left;margin:3px 0}
 .c-cycle{--c-f:var(--cycle-f);--c-s:var(--cycle-s)}.c-cycle rect{stroke-dasharray:2 3}
 .c-paid{--c-f:var(--paid-f);--c-s:var(--paid-s)}.c-parked{--c-f:var(--parked-f);--c-s:var(--parked-s)}
 .c-notgoal{--c-f:var(--notgoal-f);--c-s:var(--notgoal-s)}.c-awaiting{--c-f:var(--awaiting-f);--c-s:var(--awaiting-s)}
+.c-waiting{--c-f:var(--closed-f);--c-s:var(--closed-s)}.c-waiting rect{stroke-dasharray:3 3}.n.c-waiting{opacity:.62}
+.e.holds{stroke-dasharray:1 5;opacity:.45}
 .sw.c-outside{border-style:dashed}.sw{background:var(--c-f);border-color:var(--c-s)}
 .e{fill:none;stroke:var(--edge);stroke-width:1.4;opacity:.7}
 .e.unconfirmed{stroke-dasharray:6 4}.e.ledger{stroke-dasharray:2 4}
@@ -672,7 +703,10 @@ def _legend(model):
     text = dict(LEGEND, **model.get("legend_text", {}))
     out = "".join('<span><i class="sw c-%s"></i>%s (%d): %s</span>' % (CLASS[k], _esc(k), counts[k], _esc(text[k]))
                   for k, _v in LEGEND if counts[k] or k in ("ready now", "after", "needs decision"))
-    return out + "".join('<span><i class="ln %s"></i>%s: %s</span>' % (k, k, v) for k, v in EDGES)
+    if counts["waiting"]:
+        out += '<span><i class="sw c-waiting"></i>waiting (%d): open work that waits on the goal</span>' % counts["waiting"]
+    edges = EDGES + ((("holds", "waits on the goal (drawn muted)"),) if counts["waiting"] else ())
+    return out + "".join('<span><i class="ln %s"></i>%s: %s</span>' % (k, k, v) for k, v in edges)
 
 
 MAP_HINT = ("Waits written in prose or comments are not in the map, so they are not drawn here. "
@@ -702,14 +736,18 @@ def _header(model, repo):
     if not model["titled"]:
         notices.append("No titles were given (the map holds none), so members are named by number. Pass "
                        "--titles FILE to add them.")
+    if model.get("left_out"):
+        notices.append("%d more open issues wait on #%d and are not drawn (cap %d)."
+                       % (model["left_out"], model["goal"], DEPENDENT_CAP))
     if model.get("simple"):
         notices.append("Layout simplified: this chain is too large for channel routing, so long edges are drawn "
                        "straight and may cross nodes.")
     legend = _legend(model)
     goal = model["nodes"][model["goal"]]
     facts = ("<span><b>%d</b> open members</span><span>depth <b>%d</b></span><span><b>%d</b> closed prerequisites"
-             "</span><span><b>%d</b> need a decision</span><span>map built <b>%s</b>, age <b>%s</b></span>"
+             "</span><span><b>%d</b> need a decision</span>%s<span>map built <b>%s</b>, age <b>%s</b></span>"
              % (model["open"], model["depth"], model["closed"], model["decisions"],
+                "<span><b>%d</b> open issues wait on it</span>" % model["waiting"] if model.get("waiting") else "",
                 _esc(_stamp(model["built_at"])), _age(model["age"]) if model["age"] is not None else "unknown"))
     return ('<header class="top"><h1>Chain for #%d%s <small>%s</small></h1><div class="facts">%s</div>'
             '<div class="held">%s</div><div class="fc">%s</div>%s<div class="hint">%s</div>%s<div class="legend">%s</div>'
