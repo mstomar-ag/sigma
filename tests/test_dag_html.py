@@ -432,7 +432,9 @@ def test_index_lists_members_depth_holders_and_decisions(sdlc):
     out = _run(sdlc, None, True)[2]
     index = (out / "index.html").read_text()
     row = re.search(r'<tr[^>]*><td><a href="chain-10.html">#10</a>.*?</tr>', index, re.S).group(0)
-    assert ">6<" in row and ">3<" in row and "#5 needs decision" in row and "0 of 6" in row
+    cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+    assert cells[1:] == ["6", "3", "#5 needs decision; #6 needs decision", "2", "0 of 6"]   # members, depth, holders, decisions, done
+    assert re.match(r'<tr data-goal="10" data-open="6" data-top="[^"]*" data-who="[^"]+">', row)
     assert index.index("chain-10.html") < index.index("chain-20.html") < index.index("chain-30.html")
 
 
