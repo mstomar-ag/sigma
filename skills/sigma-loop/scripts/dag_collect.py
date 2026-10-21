@@ -6,7 +6,8 @@ the refresh lock and publishes through `dag_store.save`. `dag.py rebuild` is the
 
 What it reads. Open issues for five label sets (goal, blocked, blocking, parked, follow-up), each its
 own list, through `gh_api.list_issues` (so `sources.fetch_issues_rest`): no assignee argument is ever
-sent, because the map is about structure, not about one owner. 2,000 issues per list at most; a list
+sent, because the map is about structure, not about one owner; each listed issue's own assignees
+are kept as a node field (no extra call; outside nodes have none, which reads as unknown). 2,000 issues per list at most; a list
 that reaches that cap marks the map `partial`, which `dag_store.usable` refuses. Per issue: life from
 `blockers.classify` plus the closed set of label states, priority from `discovery.priority_rank` with
 the repository's aliases and prefix, edges from `dag_core.edges_from` over title and body, and the
@@ -233,6 +234,9 @@ def collect(sdlc, config, run=None, now=None, previous=None, cap=LIST_CAP):
         unit = _unit(names)
         if unit:
             node["unit"] = unit
+        if isinstance(it.get("assignees"), list):       # listed with the issue: no extra call
+            node["assignees"] = [a["login"] for a in it["assignees"]
+                                 if isinstance(a, dict) and isinstance(a.get("login"), str)]
         nodes[num] = node
         edges += [(a, b, "body") for a, b, _p in
                   dag_core.edges_from("%s\n%s" % (it.get("title") or "", it.get("body") or ""), num)]
