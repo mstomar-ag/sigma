@@ -297,6 +297,55 @@ def test_map_plan_says_what_it_cannot_know():
     assert fc["finish"] == [1] and any("map" in n for n in fc["notes"]), fc
 
 
+# 4b -- a map plan applies the assignee filter from the map's node assignees (#1993) ----------------------------
+
+def _map_rec(members, flt=True):
+    return {"verdict_basis": "map-life", "runner": "alice", "assignee_filter": flt, "externals": [],
+            "members": [dict({"verdict": "armed", "waits_on": []}, **m) for m in members]}
+
+
+def test_a_map_plan_filters_by_the_nodes_assignees():
+    ch = tca._chain()
+    rec = _map_rec([{"number": 1, "assignees": ["alice"]}, {"number": 2, "assignees": ["bob"]}])
+    fc = ch.chain_forecast.forecast(rec, {}, "alice")
+    assert fc["finish"] == [1] and not any("not applied" in n for n in fc["notes"]), fc
+    assert ch.chain_forecast.forecast(rec, {}, "bob")["finish"] == [2]
+
+
+def test_a_map_member_without_the_key_is_never_a_match_and_is_counted():
+    ch = tca._chain()
+    rec = _map_rec([{"number": 1, "assignees": ["alice"]}, {"number": 2, "assignees_unknown": True},
+                    {"number": 3, "assignees_unknown": True}])
+    fc = ch.chain_forecast.forecast(rec, {}, "alice")
+    assert fc["finish"] == [1], fc
+    assert any(n.startswith("2 members have no assignees on the map") for n in fc["notes"]), fc["notes"]
+    one = ch.chain_forecast.forecast(_map_rec([{"number": 2, "assignees_unknown": True}]), {}, "alice")
+    assert any(n.startswith("1 member has no assignees on the map") for n in one["notes"]), one["notes"]
+
+
+def test_a_map_with_no_assignee_keys_keeps_a_note_with_the_true_reason():
+    ch = tca._chain()
+    rec = {"verdict_basis": "map-life", "runner": None, "assignee_filter": None, "externals": [],
+           "members": [{"number": 1, "verdict": "armed", "waits_on": [], "assignees_unknown": True}]}
+    fc = ch.chain_forecast.forecast(rec, {}, "carol")
+    assert fc["finish"] == [1]
+    assert any("no member's node carries assignees" in n and "holds no assignees" not in n for n in fc["notes"]), fc["notes"]
+
+
+def test_a_map_plan_with_no_filter_configured_says_nothing_about_the_filter():
+    ch = tca._chain()
+    fc = ch.chain_forecast.forecast(_map_rec([{"number": 1, "assignees_unknown": True}], flt=False), {}, "carol")
+    assert fc["finish"] == [1] and not any("not applied" in n or "no assignees" in n for n in fc["notes"]), fc
+
+
+def test_the_live_path_forecast_is_unchanged_by_the_map_fields():
+    ch = tca._chain()
+    rec = {"verdict_basis": "labels", "runner": "alice", "assignee_filter": True, "externals": [],
+           "members": [{"number": 1, "verdict": "armed", "waits_on": [], "assignees": ["alice"]},
+                       {"number": 2, "verdict": "armed", "waits_on": [], "assignees": ["bob"]}]}
+    fc = ch.chain_forecast.forecast(rec, {}, "alice")
+    assert (fc["finish"], fc["notes"]) == ([1], []), fc
+
 # 5 -- the table and the shared rules --------------------------------------------------------------------
 
 def _rows(*specs):
