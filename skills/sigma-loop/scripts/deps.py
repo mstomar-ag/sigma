@@ -35,8 +35,8 @@ the agent and are never stored; they pass through `scrub.scrub` first.
 
 Usage:
   deps.py report <sdlc_dir> <goal>
-  deps.py report <sdlc_dir> --label <label>     every open member of a run label
-  deps.py report <sdlc_dir> --chain <N>         goal N and every open prerequisite the chain planner finds
+  deps.py report <sdlc_dir> --label <label> [--label <label> ...] [--sheet]   every open member of the run label(s)
+  deps.py report <sdlc_dir> --chain <N> [--sheet]   goal N and every open prerequisite the chain planner finds
   deps.py mark <sdlc_dir> <goal> <ref> <reason...>
   deps.py unmark <sdlc_dir> <goal> <ref> <reason...>
 
@@ -56,6 +56,10 @@ the word slice as carrying the marker (an epic describing its children, not its 
 `REVERSE_READ_MAX` (10) extra issue reads per goal, each one read plus ceil(comments/100) comment pages; at
 10x refs the cost stays at that number and the rest are listed in `reverse_unchecked` (`reverse_reads` counts
 the reads made). A batch (`--label`/`--chain`) multiplies by its members. Measured on fixtures only.
+
+`--label` may repeat: the union of the open members, each once, ordered by number. `--sheet` (#1991) prints a markdown
+review sheet instead of JSON lines: per goal its non-`edge` refs (comment-edge, weak, mention) with snippets, and a tally
+of the edges; a review aid, only `mark` writes. Without `--sheet` the JSON lines are byte-identical to before.
 
 Scale: `report` is one issue read plus ceil(comments/100) comment pages, whatever the board size;
 `mark` adds one goal read, one read of the referenced issue, one body write and one comment.
@@ -85,7 +89,7 @@ SNIPPETS_PER_REF = 2
 REVERSE_READ_MAX = 10
 _QUOTE_RE = re.compile(r"(?i)(?:\bS\d+\b|#\d+|\bslices?\b)[^.\n!?]*\bcarr(?:y|ies)\b")
 _RANK = {"edge": 0, "comment-edge": 1, "weak": 2, "mention": 3}
-USAGE = ("usage: deps.py report <sdlc_dir> <goal> | deps.py report <sdlc_dir> --label <label> | "
+USAGE = ("usage: deps.py report <sdlc_dir> <goal> | deps.py report <sdlc_dir> --label <label> [--label <label>...] [--sheet] | "
          "deps.py report <sdlc_dir> --chain <N> | deps.py mark <sdlc_dir> <goal> <ref> <reason...> | "
          "deps.py unmark <sdlc_dir> <goal> <ref> <reason...>")
 
@@ -279,14 +283,60 @@ def _chain_members(sdlc_dir, goal, resolve=None, config=None, now=None):
     return sorted(int(r["number"]) for r in out["members"])
 
 
-def _report_batch(source, numbers):
+def _batch_args(args):
+    """-> (labels, chain or None, sheet) for `--label L` (repeatable), `--chain N`, `--sheet`; None if malformed.
+    `--chain` may be given once and not beside `--label`, as before (#1944)."""
+    labels, chain, sheet, i = [], None, False, 0
+    while i < len(args):
+        if args[i] == "--sheet":
+            sheet, i = True, i + 1
+        elif args[i] == "--label" and i + 1 < len(args):
+            labels.append(args[i + 1]); i += 2
+        elif args[i] == "--chain" and i + 1 < len(args) and chain is None:
+            chain, i = args[i + 1].lstrip("c#"), i + 2
+        else:
+            return None
+    if (not labels and chain is None) or (labels and chain is not None):
+        return None
+    return labels, chain, sheet
+
+
+_SHEET_ORDER = ("comment-edge", "weak", "mention")
+
+
+def sheet_lines(rec):
+    """Markdown for one report object (#1991): non-`edge` refs first, comment-edge then weak then mention, each with
+    its snippets; the `edge` refs are a one-line tally (they are already written)."""
+    if "error" in rec:
+        return ["## #%s" % rec["goal"], "", "unreadable: %s" % rec["error"], ""]
+    refs = rec["refs"]
+    out = ["## #%s" % rec["goal"], ""]
+    for kind in _SHEET_ORDER:
+        for r in (x for x in refs if x["read_as"] == kind):
+            flags = "".join(", %s" % k for k in ("reverse", "quoted") if r.get(k))
+            out.append("- #%s (%s%s): %s" % (r["ref"], kind, flags, " | ".join(r["snippets"]).replace("\n", " ")))
+    tally = sum(1 for r in refs if r["read_as"] == "edge")
+    out += ["", "%d ref(s) already read as an edge: not listed." % tally, ""]
+    return out
+
+
+SHEET_HEADER = ("# Dependency review sheet\n\nThis is a review aid: it changes nothing. Decide per ref, then only "
+                "`deps.py mark` writes a `Blocked by` line.\n")
+
+
+def _report_batch(source, numbers, sheet=False):
     code = 0
+    if sheet:
+        print(SHEET_HEADER)
     for n in sorted(set(int(x) for x in numbers)):
         try:
             rec = report(source, n)
         except Exception as exc:                   # noqa: BLE001 - an unreadable member is reported, never skipped
             rec, code = {"goal": str(n), "error": "%s: %s" % (type(exc).__name__, str(exc)[:200])}, 2
-        print(json.dumps(rec, ensure_ascii=False, sort_keys=True))
+        if sheet:
+            print("\n".join(sheet_lines(rec)))
+        else:
+            print(json.dumps(rec, ensure_ascii=False, sort_keys=True))
     return code
 
 
@@ -302,22 +352,25 @@ def main(argv):
             or (argv[1] == "unmark" and not hasattr(source, "remove_from_body")):
         print("UNSUPPORTED deps.py reads GitHub issues only; this project uses local goal files")
         return 2
-    if argv[1] == "report" and argv[3] in ("--label", "--chain"):
-        if len(argv) != 5:
+    if argv[1] == "report" and argv[3].startswith("--"):
+        opts = _batch_args(argv[3:])
+        if opts is None:
             print(USAGE, file=sys.stderr)
             return 2
+        labels, chain, sheet = opts
         try:
-            if argv[3] == "--label":
-                numbers = _label_members(source, argv[4])
-            else:
-                numbers = _chain_members(argv[2], argv[4].lstrip("c#"))
+            numbers = set()
+            for label in labels:
+                numbers.update(_label_members(source, label))
+            if chain is not None:
+                numbers.update(_chain_members(argv[2], chain))
         except Exception as exc:                   # noqa: BLE001 - a refusal from the shared pieces, shown as is
             print("REFUSED %s" % str(exc)[:300], file=sys.stderr)
             return 2
         if not numbers:
-            print("no open members for %s %s" % (argv[3], argv[4]), file=sys.stderr)
+            print("no open members for %s" % " ".join(argv[3:]), file=sys.stderr)
             return 2
-        return _report_batch(source, numbers)
+        return _report_batch(source, numbers, sheet)
     if argv[1] == "report":
         print(json.dumps(report(source, argv[3]), ensure_ascii=False, sort_keys=True))
         return 0
