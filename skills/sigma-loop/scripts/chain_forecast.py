@@ -272,7 +272,10 @@ def forecast(rec, config=None, login=None, held=(), declined=(), assumed=(), cap
     me = str(me).strip().lstrip("@").casefold() if me else None
     notes = []
     if rec.get("verdict_basis") == "map-life" and rec.get("assignee_filter") is None:
-        notes.append("the assignee filter is not applied: the plan was read from the map, and no member's node carries assignees")
+        if any("assignees" in r for r in rec.get("members") or []):
+            notes.append("the assignee filter is not applied: the plan was read from the map for no runner, so nothing is filtered by assignee")
+        else:
+            notes.append("the assignee filter is not applied: the plan was read from the map, and no member's node carries assignees")
     elif filtered and me is None:
         notes.append("the runner's login is unknown, so the assignee filter is not applied; pass --as <login>")
     elif login is not None and rec.get("assignee_filter") is False:

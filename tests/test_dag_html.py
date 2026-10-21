@@ -453,3 +453,27 @@ def test_the_plan_still_reads_the_same_closure(sdlc):
     assert [e["ref"] for e in out["externals"]] == ["#11"]
     with pytest.raises(chain.ChainRefused):
         chain.map_closure(m, 10, 3, True, NOW)                  # strict: over the bound is refused, not truncated
+
+
+def _with_assignees(nodes, logins):
+    out = []
+    for n in nodes:
+        n = dict(n)
+        if logins is not None:
+            n["assignees"] = list(logins)
+        out.append(n)
+    return out
+
+
+def test_a_page_whose_members_carry_assignees_says_it_is_drawn_for_no_runner(tmp_path):
+    sdlc = _store(tmp_path, _with_assignees(NODES, ["someone"]), EDGES)
+    notes = _model(sdlc, 10)["notes"]
+    assert any("drawn for no runner" in n or "for no runner" in n for n in notes), notes
+    assert not any("no member's node carries assignees" in n for n in notes), notes
+
+
+def test_a_page_whose_members_lack_the_assignee_key_keeps_the_no_assignees_reason(tmp_path):
+    sdlc = _store(tmp_path, _with_assignees(NODES, None), EDGES)
+    notes = _model(sdlc, 10)["notes"]
+    assert any("no member's node carries assignees" in n for n in notes), notes
+    assert not any("for no runner" in n for n in notes), notes
