@@ -88,6 +88,8 @@ python3 skills/sigma-loop/scripts/dag.py html --all [--titles <file>] [--out <di
   states and edge styles; click a member for its number, title, state, why it is held, what it waits on and what
   it frees. Zoom and pan with the buttons, the wheel and a drag; `Fit` shows the whole chain. Light and dark
   themes follow the system, with a `Theme` button.
+- **The work that waits on the goal.** A `--goal` page also draws the goal's open dependents to its right, muted and
+  with edges tagged `holds`, at most 40 (the rest are counted on the page); the heading says how many wait on it.
 - **States** use the plan's own markers (`ready now`, `after #N`, `needs decision`, `someone else's`,
   `checkpoint`, `not workable`) plus `closed` (hidden behind "show closed", on the left), `outside` (an open pull
   request) and `cycle`. From the map alone only a member's life is known, so the markers are the map's reading;
