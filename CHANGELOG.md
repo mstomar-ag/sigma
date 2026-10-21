@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A dag page says why the assignee filter is not applied, truthfully (#1997).** A page is drawn for no runner, so the map-life note now says so when the members' nodes do carry assignees, and keeps the no-assignees reason only when none does. Measured on fixtures only.
 - **The map keeps the assignees, priority and life of an open outside issue (#1994).** An issue named by an edge but carrying none of the five list labels (a checkpoint issue, say) was drawn with an unknown assignee, no priority and no life, although its one read already held them; `dag_collect._outside` now keeps them from that payload, so the index's assignee filter shows it under its real assignee. Zero extra calls (a rebuild makes the same reads); a closed or merged outside node gains no field. Measured on fixtures only.
 - **A chain plan read from the map now applies the assignee filter from the map's node assignees (#1993).** The forecast no longer says the map holds no assignees: with a filter configured it filters by each node's stored assignees; a member whose node has none (an outside node, or a map older than assignees) is read as not the runner's and counted in a note; a map with no assignees on any member keeps a note with the true reason (and a chain small enough for the live read is still planned live then). The live path's output is unchanged. Measured on fixtures only.
 

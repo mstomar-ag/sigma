@@ -72,3 +72,13 @@ def test_label_and_chain_do_not_mix_and_a_bare_flag_is_usage(monkeypatch, capsys
     assert deps.main(["deps.py", "report", "/x", "--label", "a", "--chain", "8"]) == 2
     assert deps.main(["deps.py", "report", "/x", "--label"]) == 2
     assert deps.main(["deps.py", "report", "/x", "--sheet"]) == 2
+
+
+def test_only_a_likely_dependent_ref_gets_the_sentence():
+    sentence = "probably waits on this goal"
+    rec = {"goal": 8, "refs": [
+        {"ref": 9, "read_as": "weak", "likely-dependent": True, "snippets": ["needs #9"]},
+        {"ref": 10, "read_as": "weak", "snippets": ["see #10"]}]}
+    lines = [x for x in deps.sheet_lines(rec) if x.startswith("- #")]
+    assert sentence in lines[0] and lines[0].count(sentence) == 1
+    assert sentence not in lines[1]
