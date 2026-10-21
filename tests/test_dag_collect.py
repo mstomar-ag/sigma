@@ -323,7 +323,7 @@ def test_rebuild_verb_prints_call_counts(tmp_path, monkeypatch, capsys):
     dcm = dag_cli._load("dag_collect")
     monkeypatch.setattr(dag_cli, "_load", lambda name: dcm if name == "dag_collect" else _mod(name))
     real = dcm.refresh
-    monkeypatch.setattr(dcm, "refresh", lambda sdlc: real(sdlc, CONFIG, _world(), NOW))
+    monkeypatch.setattr(dcm, "refresh", lambda sdlc, **kw: real(sdlc, CONFIG, _world(), NOW))
     assert dag_cli.main(["rebuild", "--sdlc", str(tmp_path)]) == 0
     out = capsys.readouterr().out
     assert "saved" in out and "list 5 read 1 pull 1" in out
