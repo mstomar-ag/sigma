@@ -218,6 +218,15 @@ def test_foreign_issue_close_parks():
     assert len(s.parks) == 1 and "hard stop" in s.parks[0][1]
 
 
+def test_foreign_append_to_body_raises_and_neither_writes_nor_parks():
+    """#1984 review: a skipped body write must be a FAILED write (callers record success on return)."""
+    import pytest
+    s = Stub()
+    with pytest.raises(ValueError, match="hard stop"):
+        sources.GitHubSource.append_to_body(s, "5", "**Blocked by:** #9")
+    assert s.parks == []
+
+
 def test_guard_park_does_not_recurse():
     """Red when the guard's own park is guarded again: the park would read and park forever."""
     s = Stub()
@@ -306,3 +315,71 @@ def test_filing_park_keeps_triage_reason_on_a_label_less_issue():
     s2._offboard = lambda goal, comment, **kw: s2.parks.append((goal, comment))
     sources.GitHubSource.park(s2, "7", "x")
     assert "hard stop" in s2.parks[0][1]
+
+
+# -- the feature-ification epic stamp runs inside the filing scope (#1992) --------------------------
+
+class _Edits(Stub):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.edits = []
+
+    def _dag_blockers(self, goal, marker):
+        return None, []
+
+    def _issue_edit_body(self, goal, new_body):
+        self.edits.append((str(goal), new_body))
+
+
+def _stamp(s, issues, scope):
+    """The stamp loop as the doc snippet runs it: one append per ticket, inside `scope(n)`."""
+    for n in issues:
+        with scope(n):
+            sources.GitHubSource.append_to_body(s, str(n), "Feature: x\nBranch: feature/x")
+
+
+def test_epic_only_issue_stamp_lands_inside_the_filing_scope():
+    """Red without the scope: an issue carrying only the epic label is foreign to the guard and the append raises."""
+    import pytest
+    s = _Edits(labels=["epic"])
+    with pytest.raises(ValueError, match="hard stop"):
+        sources.GitHubSource.append_to_body(s, "5", "Feature: x")
+    assert s.edits == []
+    _stamp(s, ["5"], sources.hsg.filing_park)
+    assert [e[0] for e in s.edits] == ["5"] and "Feature: x" in s.edits[0][1]
+
+
+def test_foreign_issue_outside_the_filing_scope_is_still_refused():
+    """The scope exempts only the named ticket; red when it is widened to every issue (the foreign write lands)."""
+    import pytest
+    s = _Edits(labels=["bug"])
+    with sources.hsg.filing_park("5"):
+        with pytest.raises(ValueError, match="hard stop"):
+            sources.GitHubSource.append_to_body(s, "8", "Feature: x")
+    assert s.edits == []
+
+
+def test_widening_the_scope_lets_a_foreign_write_through():
+    """The control for the test above: a scope that covers the foreign number lets the write land."""
+    s = _Edits(labels=["bug"])
+    _stamp(s, ["8"], sources.hsg.filing_park)
+    assert len(s.edits) == 1
+
+
+def _stamp_snippet():
+    import re
+    text = (ROOT / "skills" / "sigma-goal-review" / "references" / "feature-ification.md").read_text()
+    blocks = re.findall(r'```\npython3 -c "\n(.*?)\n"\n```', text, re.S)
+    mine = [b for b in blocks if "append_to_body" in b]
+    assert len(mine) == 1
+    return mine[0]
+
+
+def test_feature_ification_snippet_stamps_inside_the_filing_scope():
+    """Red when the snippet appends outside `filing_park`; also compiles the snippet so it stays valid python."""
+    code = _stamp_snippet().replace("${CLAUDE_SKILL_DIR}", "/x")
+    compile(code, "feature-ification-snippet", "exec")
+    tree = ast.parse(code)
+    withs = [n for n in ast.walk(tree) if isinstance(n, ast.With)]
+    assert any("filing_park" in ast.unparse(w.items[0].context_expr) and
+               any("append_to_body" in ast.unparse(x) for x in w.body) for w in withs)

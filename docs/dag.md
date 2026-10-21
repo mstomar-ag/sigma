@@ -65,7 +65,7 @@ dependency map: age 1m, 6 nodes, 6 edges
 
 `dag.py rebuild` and `dag.py refresh [--force]` read GitHub (needs gh) and publish the map; they are the
 only verbs here that touch the network. `dag.py history [--month YYYY-MM] [--all]` prints the local
-history records, with `--all` adding every writer's records from the ledger worktree.
+history records, with `--all` adding every writer's records from the ledger worktree. `dag.py rebuild` reads every outside number up to 500 (`--outside-max N`, hard cap 2,000, larger values clamped) while the periodic refresh keeps 25, and its report prints `unread N` with the command to run when N is not 0.
 
 ## See a chain: one HTML page per chain
 

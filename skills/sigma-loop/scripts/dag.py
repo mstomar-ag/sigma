@@ -85,21 +85,41 @@ def show(sdlc):
     return line + ", nothing to plan" if ok and not m["nodes"] else line
 
 
-def rebuild(sdlc):
-    """`(line, exit_code)`: the outcome and the call counts by class (list, read, pull)."""
+def _nonneg(text):
+    try:
+        n = int(text)
+    except ValueError:
+        n = -1
+    if n < 0:
+        raise argparse.ArgumentTypeError(f"expected a non-negative integer, got {text!r}")
+    return n
+
+
+def rebuild(sdlc, outside_max=None):
+    """`(line, exit_code)`: the outcome and the call counts by class (list, read, pull). Reads every
+    outside number up to `outside_max` (default `REBUILD_OUTSIDE_MAX`, hard cap `OUTSIDE_HARD_MAX`)."""
     dc = _load("dag_collect")
+    outside_max = dc.REBUILD_OUTSIDE_MAX if outside_max is None else outside_max
     try:                                                # #1957: take the lease, then read here regardless
         cfg = dc.dag_store.state.load_config(sdlc)
         if dc.dag_store.mode(cfg) != "off":
             _load("dag_lease").acquire(sdlc, cfg, time.time(), force=True)
     except Exception:
         pass
-    rep = dc.refresh(sdlc)
+    rep = dc.refresh(sdlc, outside_max=outside_max)
     if rep["status"] == "off":
         return "dag: off", 0
     c = rep["calls"]
     line = (f"dag rebuild: {rep['status']}, calls list {c['list']} read {c['read']} pull {c['pull']}, "
             f"unread {len(rep['unread'])}")
+    if rep.get("clamped"):
+        line += f", --outside-max clamped to {rep['clamped']}"
+    if rep["unread"]:                                   # say what to run, with the number that finishes it
+        want = c["read"] + len(rep["unread"])
+        if want > dc.OUTSIDE_HARD_MAX:
+            line += f", run `dag.py rebuild --outside-max {dc.OUTSIDE_HARD_MAX}` (more outside numbers than the hard cap)"
+        else:
+            line += f", run `dag.py rebuild --outside-max {want}`"
     if rep["partial"]:
         line += ", partial"
     if rep["last_error"]:
@@ -198,6 +218,8 @@ def main(argv=None):
     sp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     rp = sub.add_parser("rebuild", help="read GitHub and publish the map; print call counts by class")
     rp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
+    rp.add_argument("--outside-max", type=_nonneg, default=None, metavar="N",
+                    help="read at most N outside numbers (default 500, hard cap 2000; larger is clamped)")
     fp = sub.add_parser("refresh", help="refresh the map when due (--force: now)")
     fp.add_argument("--force", action="store_true", help="refresh even when the map is fresh")
     fp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
@@ -253,7 +275,7 @@ def main(argv=None):
             print(out)
         return code
     if args.verb == "rebuild":
-        line, code = rebuild(sdlc)
+        line, code = rebuild(sdlc, args.outside_max)
         print(line)
         return code
     if args.verb == "refresh":

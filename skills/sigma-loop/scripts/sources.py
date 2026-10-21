@@ -4009,6 +4009,11 @@ class GitHubSource:
         # (`CycleRefused` names the members; nothing is written), and its edge enters the stored map
         # after the write. Mode `off`, no `.sdlc` directory, or a marker without `Blocked by` skip all
         # of it: the write below is then exactly what it was.
+        # #1984 review: a refusal RAISES (no park, no silent return) -- callers record success when this
+        # returns, so a skipped write must read as a failed one.
+        if hsg.guard_issue_write(self, goal, "append_to_body").blocked:
+            raise ValueError("hard stop: issue #%s was not created or labelled by Sigma; nothing written"
+                             % str(goal).lstrip("#"))
         dag, blockers = self._dag_blockers(goal, marker)
         unchecked = []
         for blocker in blockers:

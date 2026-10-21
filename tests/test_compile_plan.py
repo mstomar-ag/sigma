@@ -1135,3 +1135,23 @@ def test_main_json_carries_parked_only_when_triage_is_on(tmp_path, capsys):
     plan_path.write_text(json.dumps({"issues": [{"key": "a", "title": "x", "body": "b"}]}))
     assert compile_plan.main(["compile_plan.py", str(sdlc), "--plan", str(plan_path), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["parked"] == {}
+
+
+def test_epic_patch_succeeds_under_hard_stops_on_a_fresh_unlabelled_epic():
+    """#1984 review: Sigma's own just-created epic (priority and epic labels only) must not be treated as
+    foreign by the append guard, or its checklist is silently dropped."""
+    class Guarded(FakeSource):
+        goal_label, parked_label = "sdlc:goal", "sdlc:parked"
+        _hs_config = {"work": {"enabled": True}, "rulebook": {"hard_stops": {"enabled": True}}}
+
+        def _read_issue(self, goal, fields, comment_limit=None):
+            return {"labels": [{"name": "epic"}], "body": ""}
+
+        def append_to_body(self, issue, marker):
+            if compile_plan.sources.hsg.guard_issue_write(self, issue, "append_to_body").blocked:
+                raise ValueError("hard stop")
+            super().append_to_body(issue, marker)
+
+    src, report = Guarded(), {"warnings": []}
+    compile_plan._patch_epic_with_subs(src, "200", ["101", "102"], report)
+    assert report["warnings"] == [] and len(src.body_appends) == 1

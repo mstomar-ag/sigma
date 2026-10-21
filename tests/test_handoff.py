@@ -2947,3 +2947,17 @@ def test_cli_track_then_open_scenario_with_fake_gh_1697(tmp_path, monkeypatch):
     assert handoff.main(["handoff.py", "open", str(sdlc), "g.md", "--area", "engine", "--priority", "P1",
                          "--why", "a blocking dependency"]) == 0
     assert [g for g, _t in src.parked] == ["105"]
+
+
+def test_handoff_marker_not_written_when_append_to_body_refuses(tmp_path):
+    """#1984 review: a hard-stop refusal raises, so `marker_written` stays false and the goal is not marked blocked."""
+    sdlc = _project(tmp_path)
+
+    class Refuses(FakeSource):
+        def append_to_body(self, goal, marker):
+            raise ValueError("hard stop: issue not created or labelled by Sigma, nothing written")
+
+    src = Refuses()
+    report = handoff.hand_off(sdlc, ON, "g.md", "engine", "needs a flag", source=src)
+    assert any("machine-readable" in w for w in report["warnings"])
+    assert src.blocked_goals == [] and src.body_appends == []
