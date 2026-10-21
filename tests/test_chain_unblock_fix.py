@@ -200,6 +200,22 @@ def test_a_plan_with_an_assignee_filter_reads_each_members_assignees_so_the_fore
     assert fc["finish"] == [] and fc["notes"] == [], fc
 
 
+def test_a_map_plan_with_an_assignee_filter_and_node_assignees_stays_on_the_map_and_applies_it(tmp_path):
+    """#1993: the map keeps assignees, so no live read is needed; the forecast filters by the nodes' assignees."""
+    import json
+    import test_chain_waits_1902 as tw
+    ch = tw._mod("chain")
+    base = tw._repo(tmp_path)
+    cfgp = pathlib.Path(base) / "config.json"
+    cfg = json.loads(cfgp.read_text())
+    cfg["discovery"]["github"]["assignee"] = "alice"
+    cfgp.write_text(json.dumps(cfg))
+    tw._save_map(base, [dict(tw._mnode(1), assignees=["bob"])], [])
+    p = ch.plan(base, 1, run=tw._fake([tw._goal(1, assignees=["bob"])]), now=tw.NOW)
+    assert p["source"] == "map" and p["assignee_filter"] is True, (p["source"], p.get("source_reason"))
+    fc = ch.chain_forecast.forecast(p, ch._load("state").load_config(base), "alice")
+    assert fc["finish"] == [] and not any("not applied" in n for n in fc["notes"]), fc
+
 def test_a_map_plan_without_an_assignee_filter_stays_on_the_map(tmp_path):
     import test_chain_waits_1902 as tw
     ch = tw._mod("chain")

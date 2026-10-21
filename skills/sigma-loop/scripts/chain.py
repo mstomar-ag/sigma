@@ -143,7 +143,7 @@ the rules `run` uses, not a copy: `chain_forecast.ready_members` (the width plan
 (the stuck line) are called by both, and the assignee clause is `label_drain.assignee_gate`, also called by the
 judge. The record therefore keeps each member's assignee logins, `base_verdict` (the verdict before the assignee
 clause, when that clause decided it), `in_progress` and `blocked`, and the planner's `runner` and `assignee_filter`.
-A plan read from the map holds no assignees, so its forecast says it cannot apply the filter. Not modelled: the cap,
+A plan read from the map takes each member's assignees from the map's nodes (#1993); a member whose node has none is read as not the runner's and counted in a note, and a map with no assignees at all says so. Not modelled: the cap,
 and a goal that fails or is parked by its own session (every claimed goal is assumed to merge). A cycle with goals
 in flight and only members nobody may claim unblocked now waits (width past 1) instead of asking the pick for one.
 
@@ -448,6 +448,7 @@ def map_closure(m, goal, bound=None, strict=True, now=None):
              for a, b, _s in g.edges if a in members and b in members]
     ranks = {n: g.rank(n) for n in members}
     rows = []
+    node_assignees = {n["number"]: n.get("assignees") for n in m["nodes"]}
     for x in keep:
         life = dag_chain._LIFE_OUT.get(g.nodes[x["number"]].life, "unmanaged")
         raw = g.nodes[x["number"]].life
@@ -456,6 +457,11 @@ def map_closure(m, goal, bound=None, strict=True, now=None):
         rows.append({"number": x["number"], "verdict": verdict, "life": life,
                      "prio": g.nodes[x["number"]].prio,
                      "in_progress": raw == "in-progress", "blocked": raw == "blocked"})      # #1907
+        logins = node_assignees.get(x["number"])
+        if isinstance(logins, list):      # #1993: the node's own assignees, as the live path keeps them
+            rows[-1]["assignees"] = sorted({str(a).casefold() for a in logins if a})
+        else:                             # an outside node or a map written before #1982: unknown, not unassigned
+            rows[-1]["assignees_unknown"] = True
     outside = [g.rank(n) for n, nd in g.nodes.items()
                if n not in members and nd.kind == "issue" and nd.state == "open" and nd.life == "goal"]
     out = {"verdict_basis": "map-life", "runner": None, "assignee_filter": None, "map_built_at": int(dag_store.parse_ts(m["header"].get("built_at")) or 0) or None}
@@ -493,11 +499,17 @@ def _plan_map(sdlc, goal, config, ro, source, now, m, bound, cache=None, disk=No
         out["stops"] = ["chain.paid_labels is set, the map holds no labels and the chain is too big for the live "
                         "read: paid steps marked only by a label cannot be found"]
         return out
-    if getattr(source, "assignee", None) and len(rows) <= min(LIVE_MAX_MEMBERS, bound):
-        # a run applies the assignee filter and the map holds no assignees: a forecast from this plan could not apply
-        # it and would promise work the runner may not take. A chain too big for the live read keeps the map plan and
-        # the forecast's note that the filter was not applied.
-        raise _NeedsLive("the assignee filter needs each member's assignees, which the map does not hold")
+    if getattr(source, "assignee", None):
+        if any("assignees" in r for r in rows):
+            # #1993: the map keeps each listed member's assignees, so the forecast applies the filter from them; a
+            # member without the key (an outside node, a map older than #1982) is read as not the runner's.
+            out["assignee_filter"], out["runner"] = True, _runner_login(ro, source)
+        elif len(rows) <= min(LIVE_MAX_MEMBERS, bound):
+            # no member carries assignees (a map older than #1982): the live read has them, and a forecast that
+            # cannot apply the filter would promise work the runner may not take.
+            raise _NeedsLive("the assignee filter needs each member's assignees, and the stored map carries none")
+    else:
+        out["assignee_filter"] = False
     out["stops"] = []
     return out
 
