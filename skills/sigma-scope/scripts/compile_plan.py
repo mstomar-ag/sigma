@@ -338,7 +338,9 @@ def _patch_epic_with_subs(source, epic_number, created_numbers, report):
         return
     lines = [_EPIC_TRACK_TMPL.format(n=n) for n in created_numbers]
     try:
-        source.append_to_body(str(epic_number), "\n".join(lines))
+        # #1984: the epic was just created by Sigma, so the hard-stop append guard must treat it as its own
+        with sources.hsg.filing_park(epic_number):
+            source.append_to_body(str(epic_number), "\n".join(lines))
     except Exception as exc:                                       # noqa: BLE001
         report["warnings"].append(
             f"epic #{epic_number} created, but could not patch its body with its sub-issues: {exc}")

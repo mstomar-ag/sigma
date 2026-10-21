@@ -68,6 +68,7 @@ def _load(name):
 blocker_scan = _load("blocker_scan")
 _scrub = _load("scrub")
 chain_waits = _load("chain_waits")
+_hsg = _load("hard_stop_guard")
 
 _REF_RE = re.compile(r"#(\d+)\b")
 SNIPPET_CHARS = 160
@@ -152,6 +153,10 @@ def mark(source, goal, ref, reason):
         return "REFUSED", "issue %s could not be read (%s)" % (ref, type(exc).__name__)
     if state != "OPEN":
         return "REFUSED", "issue %s is not open (state %s)" % (ref, state or "unknown")
+    if not _hsg.is_sigma_issue(source, goal):       # #1984: read-only; a foreign issue gets no half a gesture
+        return "REFUSED", ("issue %s was not created by Sigma and carries no Sigma label, so nothing was written: "
+                           "write the `Blocked by:` line by hand, as the dependency-writing rule allows, or give "
+                           "the issue a Sigma label first" % goal)
     try:
         source.append_to_body(goal, "**Blocked by:** #%s" % ref)
     except ValueError as exc:                      # dag_insert.CycleRefused is a ValueError
