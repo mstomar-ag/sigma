@@ -11,6 +11,9 @@ LOOP = ROOT / "skills" / "sigma-loop" / "scripts"
 sys.path.insert(0, str(LOOP))
 
 
+_CFG = {"discovery": {"github": {"repo": "fixture-org/fixture-repo"}}}
+
+
 def _mod(name, path):
     spec = importlib.util.spec_from_file_location(name + "_1312", path)
     m = importlib.util.module_from_spec(spec)
@@ -74,7 +77,7 @@ def test_open_commits_only_the_unit_record(tmp_path):
     (tmp_path / "other.txt").write_text("unrelated")
     _git(tmp_path, "add", "other.txt")                       # staged, must stay out of the commit
     report = define.open_unit(sdlc, "voice", "feature", run=_runner(tmp_path), cwd=tmp_path,
-                              base="main")
+                              base="main", config=_CFG)
     assert report["ok"], report
     files = _git(tmp_path, "show", "--name-only", "--format=", "HEAD").split()
     assert files == [str(rec.relative_to(tmp_path))]
@@ -90,7 +93,7 @@ def test_an_uncommittable_record_prints_the_command_and_still_reports_ok(tmp_pat
         if [str(a) for a in argv][:2] == ["git", "commit"]:
             raise RuntimeError("index locked")
         return base(cwd, argv)
-    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, base="main")
+    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, base="main", config=_CFG)
     assert report["ok"], report
     err = capsys.readouterr().err
     assert err.count("\n") == 1 and "git add -- " in err and "git commit -m" in err
@@ -100,7 +103,7 @@ def test_open_on_a_fresh_unit_writes_and_commits_its_record(tmp_path):
     """The documented gesture: no record exists beforehand."""
     sdlc = _repo(tmp_path)
     report = define.open_unit(sdlc, "voice", "feature", run=_runner(tmp_path), cwd=tmp_path,
-                              base="main")
+                              base="main", config=_CFG)
     assert report["ok"], report
     rel = ".sdlc/features/units/voice.json"
     assert _git(tmp_path, "show", "--name-only", "--format=", "HEAD").split() == [rel]
@@ -115,7 +118,7 @@ def test_open_on_a_feature_branch_writes_the_record_but_does_not_commit_it(tmp_p
     _git(tmp_path, "checkout", "-q", "-b", "feature/voice")
     head = _git(tmp_path, "rev-parse", "HEAD")
     report = define.open_unit(sdlc, "voice", "feature", run=_runner(tmp_path), cwd=tmp_path,
-                              base="main")
+                              base="main", config=_CFG)
     assert report["ok"], report
     rel = ".sdlc/features/units/voice.json"
     assert (tmp_path / rel).is_file()
@@ -133,7 +136,7 @@ def test_an_unreadable_branch_fails_closed_and_prints_the_command(tmp_path, caps
             raise RuntimeError("no head")
         return base(cwd, argv)
     head = _git(tmp_path, "rev-parse", "HEAD")
-    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, base="main")
+    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, base="main", config=_CFG)
     assert report["ok"], report
     assert _git(tmp_path, "rev-parse", "HEAD") == head
     assert "git commit -m" in capsys.readouterr().err
@@ -143,9 +146,9 @@ def test_a_committed_unchanged_record_is_not_recommitted(tmp_path):
     sdlc = _repo(tmp_path)
     _record(sdlc)
     run = _runner(tmp_path)
-    define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, base="main")
+    define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, base="main", config=_CFG)
     head = _git(tmp_path, "rev-parse", "HEAD")
-    define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, base="main")
+    define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, base="main", config=_CFG)
     assert _git(tmp_path, "rev-parse", "HEAD") == head
 
 

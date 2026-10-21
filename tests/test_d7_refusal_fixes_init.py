@@ -155,7 +155,8 @@ class _FailingRun:
 def test_define_step_failures_name_the_check(tmp_path, token, expect):
     sdlc = tmp_path / ".sdlc"
     sdlc.mkdir()
-    report = define.open_unit(str(sdlc), "voice", "feature", run=_FailingRun(token, "boom"), cwd=tmp_path, base="main")
+    report = define.open_unit(str(sdlc), "voice", "feature", run=_FailingRun(token, "boom"), cwd=tmp_path, base="main",
+                             config={"discovery": {"github": {"repo": "fixture-org/fixture-repo"}}})
     assert not report["ok"] and "boom" in report["why"] and expect in report["why"]
 
 
