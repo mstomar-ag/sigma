@@ -410,12 +410,12 @@ def test_the_base_precedence_is_the_loops_own(tmp_path):
 
     run = Runner(head="develop")
     define.open_unit(_sdlc(tmp_path / "b"), "u2", "feature", run=run, cwd=tmp_path,
-                     config={"work": {"base": "integration"}})
+                     config=dict(_CFG, work={"base": "integration"}))
     assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("f" * 40 + ":")
     assert ["git", "fetch", "origin", "integration"] in run.calls
 
     run = Runner(head="develop")
-    define.open_unit(_sdlc(tmp_path / "c"), "u3", "feature", run=run, cwd=tmp_path, config={})
+    define.open_unit(_sdlc(tmp_path / "c"), "u3", "feature", run=run, cwd=tmp_path, config=_CFG)
     assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("f" * 40 + ":")
     assert ["git", "fetch", "origin", "develop"] in run.calls
 
@@ -432,7 +432,7 @@ def test_a_detached_checkout_with_no_base_is_REFUSED_rather_than_guessed(tmp_pat
     for head in ("HEAD", ""):
         run = Runner(head=head)
         report = define.open_unit(_sdlc(tmp_path / ("h" + head)), "voice", "feature",
-                                  run=run, cwd=tmp_path, config={})
+                                  run=run, cwd=tmp_path, config=_CFG)
         assert not report["ok"], head
         assert report["steps"][0]["outcome"] == define.REFUSED
         assert not [a for a in run.calls if a[:2] == ["git", "push"]]
@@ -455,7 +455,7 @@ def test_an_empty_configured_base_falls_through_rather_than_pushing_an_empty_ref
     git reads as a DELETE."""
     run = Runner(head="develop")
     define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path,
-                     config={"work": {"base": "   "}})
+                     config=dict(_CFG, work={"base": "   "}))
     pushed = [a for a in run.calls if a[:2] == ["git", "push"]][0][-1]
     assert pushed == "f" * 40 + ":refs/heads/feature/voice"
 
@@ -534,23 +534,23 @@ def test_the_rest_fallback_names_the_configured_repository_not_a_placeholder(tmp
     assert not any("{owner}" in a for a in seen[0])
 
 
-def test_no_configured_repository_refuses_naming_the_key_and_makes_no_label_call(tmp_path):
+def test_no_configured_repository_refuses_naming_the_key_before_anything_runs(tmp_path):
     run = Runner()
     report = define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, config={})
-    assert not report["ok"]
-    step = report["steps"][-1]
-    assert step["step"] == "label" and step["outcome"] == define.REFUSED
-    assert "discovery.github.repo" in step["detail"]
-    assert not [a for a in run.calls if a[:2] == ["gh", "label"]]
+    assert not report["ok"] and report["steps"] == []
+    assert "discovery.github.repo" in report["why"] and "--remote" in report["why"]
+    assert run.calls == []                      # no git push, no ls-remote, no gh call: nothing ran
+    assert not [a for a in run.calls if a[:2] == ["git", "push"]]
 
 
-def test_an_option_shaped_repository_is_refused_and_makes_no_label_call(tmp_path):
+def test_an_option_shaped_repository_is_refused_before_anything_runs(tmp_path):
     cfg = {"discovery": {"github": {"repo": "--web"}}}
     run = Runner()
     report = define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, config=cfg)
-    assert not report["ok"]
-    assert report["steps"][-1]["outcome"] == define.REFUSED
-    assert not [a for a in run.calls if a[:2] == ["gh", "label"]]
+    assert not report["ok"] and report["steps"] == []
+    assert "discovery.github.repo" in report["why"]
+    assert run.calls == []
+    assert not [a for a in run.calls if a[:2] == ["git", "push"]]
 
 
 def test_nothing_in_this_module_opens_an_issue_itself():
@@ -1114,9 +1114,12 @@ def test_the_cli_open_verb_reports_a_failed_step_rather_than_raising(tmp_path):
     import io
     import contextlib
     sdlc = _sdlc(tmp_path)
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(__import__("json").dumps(_CFG), encoding="utf-8")
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        rc = define.main(["define.py", "open", str(sdlc), "--name", "voice", "--type", "feature"])
+        rc = define.main(["define.py", "open", str(sdlc), "--name", "voice", "--type", "feature",
+                          "--config", str(cfg)])
     report = __import__("json").loads(buf.getvalue().strip())
     assert rc == 1 and not report["ok"]
     assert report["steps"][0]["step"] == "branch"

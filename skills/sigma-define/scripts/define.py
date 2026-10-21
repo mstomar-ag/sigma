@@ -381,12 +381,6 @@ def _step_label(ctx):
     carry `feature:voice`. That is REFUSED rather than retried, naming the spelling already there,
     because two casings of one unit is #1638's remaining exposure and this is one of the two doors it
     could enter by (`declare` watches the other)."""
-    if not ctx.repo:
-        raise _Refused("no repository is configured for the unit label: set `discovery.github.repo` "
-                       "(owner/name) in .sdlc/config.json -- `--remote` only chooses where the branch "
-                       "is cut, and guessing gh's default repository is what mislabelled units (#1983)")
-    if not _is_owner_name(ctx.repo):
-        raise _Refused("`discovery.github.repo` must be owner/name, got %r" % ctx.repo)
     for existing in _repo_labels(ctx):
         if existing == ctx.label:
             return EXISTS, existing
@@ -510,6 +504,16 @@ def open_unit(sdlc_dir, name, kind, *, config=None, run=None, cwd=None, remote=N
         return report                     # NOTHING has run: not one command, not one directory
     report["branch"], report["label"] = branch_for(name), label_for(name)
     ctx = _Ctx(sdlc_dir, name, kind, config, run, cwd, remote, base)
+    # #1983: the repository is resolved and checked BEFORE the first step, because the branch step
+    # pushes; refusing at the label step left a pushed branch and no unit.
+    if not ctx.repo:
+        report["why"] = ("no repository is configured for the unit label: set `discovery.github.repo` "
+                         "(owner/name) in .sdlc/config.json -- `--remote` only chooses where the branch "
+                         "is cut, and guessing gh's default repository is what mislabelled units (#1983)")
+        return report                     # NOTHING has run: no git push, no run call at all
+    if not _is_owner_name(ctx.repo):
+        report["why"] = "`discovery.github.repo` must be owner/name, got %r" % ctx.repo
+        return report
     for step in _STEPS:
         try:
             outcome, detail = _RUNNERS[step](ctx)
