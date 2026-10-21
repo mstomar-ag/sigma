@@ -159,6 +159,37 @@ def insert(sdlc, config, number, *, body=None, blockers=(), blocked=(), life=Non
         return "error"
 
 
+def remove(sdlc, config, blocker, blocked):
+    """Take the edge `blocker` -> `blocked` out of the stored map (#1989), and drop the matching unchecked pair.
+    -> `removed`, `absent`, `off`, `nomap`, `busy`, `error`. Never raises. Nodes stay: only the edge goes."""
+    try:
+        config = _config(sdlc, config)
+        if dag_store.mode(config) == "off":
+            return "off"
+        pair = (int(str(blocker).lstrip("#")), int(str(blocked).lstrip("#")))
+        with dag_store.refresh_lock(sdlc, config) as held:
+            if held == "busy":
+                return "busy"
+            m, _why = dag_store.load(sdlc, config)
+            if m is None:
+                return "nomap"
+            kept = [e for e in m["edges"] if (e["blocker"], e["blocked"]) != pair]
+            found = len(kept) != len(m["edges"])
+            if found:
+                m["edges"] = kept
+                ok, why = dag_store.save(sdlc, m, config=config)
+                if not ok:
+                    return "off" if why == "off" else "error"
+        drop_unchecked(sdlc, [list(pair)])
+        return "removed" if found else "absent"
+    except Exception as exc:                            # noqa: BLE001 - an unmark is never failed by the map
+        try:
+            sys.stderr.write("sigma: dependency map remove skipped (%s)\n" % type(exc).__name__)
+        except Exception:                               # noqa: BLE001
+            pass
+        return "error"
+
+
 # ------------------------------------------------------------------ the cycle guard
 
 def default_reader(run, repo=None):

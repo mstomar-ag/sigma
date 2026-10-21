@@ -4031,6 +4031,36 @@ class GitHubSource:
                 dag.record_unchecked(self.sdlc_dir, blocker, int(str(goal).lstrip("#")), self._hs_config)
             dag.insert(self.sdlc_dir, self._hs_config, int(str(goal).lstrip("#")), blockers=blockers)
 
+    def remove_from_body(self, goal, ref):
+        """#1989: take every whole line `**Blocked by:** #<ref>` out of the issue's CURRENT body (nothing else:
+        prose and other forms stay), with the one blank line `append_to_body` put before it. -> lines removed;
+        0 writes nothing. Guarded like `append_to_body`: a foreign issue RAISES, no park. The `["body"]`
+        subscript is the same data-loss protection. The stored map edge and any unchecked pair go after the
+        write (`dag_insert.remove`, which never raises)."""
+        if hsg.guard_issue_write(self, goal, "remove_from_body").blocked:
+            raise ValueError("hard stop: issue #%s was not created or labelled by Sigma; nothing written"
+                             % str(goal).lstrip("#"))
+        ref = str(ref).lstrip("#")
+        body = self._read_issue(goal, ["body"])["body"] or ""
+        marker = "**Blocked by:** #%s" % ref
+        out, removed = [], 0
+        for line in body.split("\n"):
+            if line.strip() == marker:
+                removed += 1
+                if out and not out[-1].strip():
+                    out.pop()
+                continue
+            out.append(line)
+        if not removed:
+            return 0
+        self._issue_edit_body(goal, "\n".join(out))     # REST first; RAISES as append_to_body does
+        try:
+            if self.sdlc_dir and (((self._hs_config.get("discovery") or {}).get("dag") or {}).get("mode") != "off"):
+                self._dag_mod().remove(self.sdlc_dir, self._hs_config, int(ref), int(str(goal).lstrip("#")))
+        except Exception:                                   # noqa: BLE001 - the body is the record; the map follows
+            pass
+        return removed
+
     def _dag_blockers(self, goal, marker):
         """#1616: `(dag_insert module, blocker numbers)` for a marker that carries `Blocked by #N`, else
         `(None, [])`. Loads `dag_insert` only when the map is in play (mode not `off`, a `.sdlc`

@@ -4,6 +4,7 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **`deps.py unmark` takes a wrong `Blocked by` line back (#1989).** It removes the canonical `**Blocked by:** #N` line(s) from the goal's body (an edge written in prose is reported and left alone), drops the edge from the stored map and leaves a note with the reason; `ABSENT` writes nothing, and a foreign issue is refused like `mark` (#1984). Measured on fixtures only.
 - **`dag.py html --goal N` also draws the work that waits on N (#1986).** The page adds N's open dependents, transitive, to the right of N and muted, edges tagged as waiting on N, with the count of open issues waiting in the heading; at most 40 are drawn and the left-out count is written on the page. The prerequisite half is unchanged. Measured only on fixtures; a real board is unmeasured.
 - **`dag.py rebuild` reads every outside number up to a hard cap (#1988).** It reads up to 500 by default, `--outside-max N` sets the number, and anything over the 2,000 hard cap is clamped and said so; the periodic refresh keeps 25. The report prints `unread N` and, when N is not 0, the exact `dag.py rebuild --outside-max` to run. Measured on fixtures only; a real board is unmeasured.
 - **The goal-review feature-ification stamp runs inside the filing scope (#1992).** The snippet's `append_to_body` loop is wrapped in `filing_park`, so with hard stops on an epic-only ticket (not Sigma-owned by label) is stamped instead of raising; a foreign issue is still refused. Tested with a fake source; the end-to-end run is unmeasured.

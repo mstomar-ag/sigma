@@ -391,10 +391,13 @@ comment only a trusted person's. Leaving it out would plan a run that finishes e
 proceed (a private run of Chain's own rules once forecast 26 goals where a reading of the issues said 4 to 6; that run cannot be reproduced from this repository). The price:
 the issue an unconfirmed wait names joins the chain, so `arm` labels it and, if it is an unarmed goal, the label
 question covers it like any other. A cycle made only by prose is refused naming the members and the way out. The
-sheet lists every unconfirmed wait together, once, with the two ways to settle it:
+sheet lists every unconfirmed wait together, once, with the ways to settle it:
 
 - confirm a real one with `deps.py mark <sdlc_dir> <goal> <ref> <reason...>`, which writes the marker every reader
   trusts; run `chain.py plan` again and it is a body edge from then on;
+- lift a wrong `**Blocked by:** #N` line that is already written with `deps.py unmark <sdlc_dir> <goal> <ref> <reason...>`:
+  it removes that one line (an edge written in prose is reported and left to you), drops the stored map edge and
+  leaves a note with the reason;
 - dismiss a wrong one with `backlog_check.py dismiss-text blocked-by <ref>`, posted as a comment on the goal
   with `loop.py note`; the next plan stops reading it (and the gate stops treating it as a finding).
 
@@ -504,6 +507,7 @@ take the `.sdlc` directory as their first argument.
 | `chain.py html <sdlc_dir> <chain> [--out DIR] [--titles FILE]` | `chain.py`, `dag_html.py` | no | one offline page of the stored plan record: every member (prose-read waits dashed), edge and sheet question, numbered as the sheet numbers them; refuses with no plan; `chain-plan-<N>.html` |
 | `deps.py report <sdlc_dir> <goal>` | `deps.py` | reads | every reference in title, body and comments, classified |
 | `deps.py mark <sdlc_dir> <goal> <ref> <reason...>` | `deps.py` | reads, then one body write and one comment | writes `**Blocked by:** #N` |
+| `deps.py unmark <sdlc_dir> <goal> <ref> <reason...>` | `deps.py` | reads, then one body write and one comment | removes the `**Blocked by:** #N` line and the stored map edge; `ABSENT` writes nothing; a prose edge is reported, never edited |
 | `backlog_check.py dismiss-text <kind> <ref> [reason...]` | `backlog_check.py` | no | prints the marker that retires one finding |
 | `chain.py plan <sdlc_dir> <N> [--json]` | `chain.py`, `chain_waits.py` | reads | plan one chain, following and listing its unconfirmed waits; writes the local record |
 | `chain.py plan <sdlc_dir> --longest [--by freeing] [--json]` | `chain.py` | no | offer the top three end goals |
