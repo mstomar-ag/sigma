@@ -81,10 +81,13 @@ config = state.load_config('.sdlc')
 src = sources.get_source('.sdlc', config)
 marker = 'Feature: <name>\n' 'Branch: feature/<name>'
 for n in ('<epic>', '<child1>', '<child2>'):   # every ticket from this pass, epic first
-    src.append_to_body(str(n), marker)
+    with sources.hsg.filing_park(n):
+        src.append_to_body(str(n), marker)
     print('stamped #%s' % n)
 "
 ```
+The append runs inside `filing_park` because an epic or Dossier ticket carries only the `epic` label, which the hard-stop guard does not count as Sigma's own, so with hard stops on the bare append raises; these tickets were just filed by this pass, the same scope `compile_plan.py` uses for its epic patch, and a foreign issue outside the scope is still refused.
+
 The two lines are written literally — `docs/branching-model.md`'s stable, public marker format
 (bare, no fence, no leading indent, its own line) — no import of `feature_stamp.py` needed for text
 this pinned and this short.

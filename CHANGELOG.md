@@ -4,7 +4,11 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+<<<<<<< HEAD
 - **`deps.py unmark` takes a wrong `Blocked by` line back (#1989).** It removes the canonical `**Blocked by:** #N` line(s) from the goal's body (an edge written in prose is reported and left alone), drops the edge from the stored map and leaves a note with the reason; `ABSENT` writes nothing, and a foreign issue is refused like `mark` (#1984). Measured on fixtures only.
+=======
+- **The goal-review feature-ification stamp runs inside the filing scope (#1992).** The snippet's `append_to_body` loop is wrapped in `filing_park`, so with hard stops on an epic-only ticket (not Sigma-owned by label) is stamped instead of raising; a foreign issue is still refused. Tested with a fake source; the end-to-end run is unmeasured.
+>>>>>>> fork/feature/dag-views
 - **`deps.py mark` on an issue Sigma did not create or label now prints REFUSED and writes nothing (#1984).** It asks the read-only Sigma-issue check before any write, so there is no body line and no park; the reason names the two ways forward (write the `Blocked by:` line by hand, or give the issue a Sigma label first). `append_to_body` is guarded like `note`. Measured on fixtures only.
 - **dag html shows assignees; the index sorts and filters (#1982).** The stored map keeps each member's assignees from the listings the refresh already reads (an old map reads as unknown, never unassigned); chain pages show them in the node and the panel; the index shows each chain's top priority and assignee set and sorts and filters by inline script. A login is scrubbed text, never a link. Measured only on fixtures; a real board is unmeasured.
 - **`define.py open` creates and lists the unit label on the configured repository (#1983).** Both `gh label list` and `gh label create` now carry `-R` with `discovery.github.repo` instead of gh's default repository, and the label step refuses, naming that key, when it is unset; `--remote` still chooses only where the branch is cut.
