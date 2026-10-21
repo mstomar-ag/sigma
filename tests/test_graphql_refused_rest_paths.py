@@ -87,9 +87,12 @@ class _RateLimitedList(td.Runner):
         return super().__call__(cwd, argv)
 
 
+_CFG = {"discovery": {"github": {"repo": "fixture-org/fixture-repo"}}}
+
+
 def test_define_open_lists_labels_through_rest_when_the_graphql_list_is_refused(tmp_path):
     run = _RateLimitedList(labels={"feature:voice"})
-    report = td.define.open_unit(td._sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path)
+    report = td.define.open_unit(td._sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, config=_CFG)
     assert report["ok"], report
     assert any(c[:2] == ["gh", "api"] and "labels" in " ".join(c) for c in run.calls)
 
@@ -100,14 +103,14 @@ def test_define_open_failure_names_rate_limit_not_the_gh_login(tmp_path):
             if [str(a) for a in argv][:2] == ["gh", "api"]:
                 raise RuntimeError(RATE)
             return super().__call__(cwd, argv)
-    report = td.define.open_unit(td._sdlc(tmp_path), "voice", "feature", run=Both(), cwd=tmp_path)
+    report = td.define.open_unit(td._sdlc(tmp_path), "voice", "feature", run=Both(), cwd=tmp_path, config=_CFG)
     assert not report["ok"]
     assert "rate limit" in report["why"].lower() and "logged in" not in report["why"], report["why"]
 
 
 def test_define_open_failure_without_rate_limit_keeps_the_login_hint(tmp_path):
     run = td.Runner(fail_on=lambda a: "not logged in" if a[:3] == ["gh", "label", "list"] else None)
-    report = td.define.open_unit(td._sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path)
+    report = td.define.open_unit(td._sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, config=_CFG)
     assert not report["ok"] and "gh auth status" in report["why"]
 
 

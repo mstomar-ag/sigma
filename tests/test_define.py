@@ -122,6 +122,9 @@ class Runner:
         return [a[0] for a in self.calls]
 
 
+_CFG = {"discovery": {"github": {"repo": "fixture-org/fixture-repo"}}}
+
+
 def _sdlc(tmp_path):
     sdlc = tmp_path / ".sdlc"
     (sdlc / "state").mkdir(parents=True)
@@ -130,7 +133,7 @@ def _sdlc(tmp_path):
 
 def _open(tmp_path, name="voice-interview", kind="feature", **kw):
     run = kw.pop("run", None) or Runner()
-    report = define.open_unit(_sdlc(tmp_path), name, kind, run=run, cwd=tmp_path, **kw)
+    report = define.open_unit(_sdlc(tmp_path), name, kind, run=run, cwd=tmp_path, **kw, config=_CFG)
     return report, run
 
 
@@ -228,7 +231,7 @@ def test_the_observed_call_order_matches_the_declared_one(tmp_path):
     a constant is only a comment unless the executor is genuinely driven by it."""
     sdlc = _sdlc(tmp_path)
     run = Runner()
-    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path)
+    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, config=_CFG)
     assert report["ok"], report
     assert [s["step"] for s in report["steps"]] == list(define._STEPS)
     # git (branch) strictly before gh (label); the registry directory is written by neither.
@@ -244,7 +247,7 @@ def test_a_failing_BRANCH_step_never_reaches_the_label_or_the_registry(tmp_path)
     path."""
     sdlc = _sdlc(tmp_path)
     run = Runner(fail_on=lambda a: "no such remote" if a[:2] == ["git", "push"] else None)
-    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path)
+    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, config=_CFG)
     assert not report["ok"]
     assert [s["step"] for s in report["steps"]] == ["branch"]
     assert report["steps"][0]["outcome"] == define.FAILED
@@ -259,7 +262,7 @@ def test_a_failing_LABEL_step_never_reaches_the_registry(tmp_path):
     every registry consumer on the strength of a gesture that did not complete."""
     sdlc = _sdlc(tmp_path)
     run = Runner(fail_on=lambda a: "bad token" if a[:3] == ["gh", "label", "create"] else None)
-    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path)
+    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, config=_CFG)
     assert not report["ok"]
     assert [s["step"] for s in report["steps"]] == ["branch", "label"]
     assert not feature_registry.registry_dir(sdlc).is_dir()
@@ -268,7 +271,7 @@ def test_a_failing_LABEL_step_never_reaches_the_registry(tmp_path):
 def test_a_refused_name_runs_no_step_at_all(tmp_path):
     sdlc = _sdlc(tmp_path)
     run = Runner()
-    report = define.open_unit(sdlc, "a/b", "feature", run=run, cwd=tmp_path)
+    report = define.open_unit(sdlc, "a/b", "feature", run=run, cwd=tmp_path, config=_CFG)
     assert not report["ok"] and report["steps"] == [] and run.calls == []
     assert "a/b" in report["why"]
     assert not feature_registry.registry_dir(sdlc).is_dir()
@@ -276,7 +279,7 @@ def test_a_refused_name_runs_no_step_at_all(tmp_path):
 
 def test_a_refused_TYPE_runs_no_step_at_all(tmp_path):
     run = Runner()
-    report = define.open_unit(_sdlc(tmp_path), "voice", "chore", run=run, cwd=tmp_path)
+    report = define.open_unit(_sdlc(tmp_path), "voice", "chore", run=run, cwd=tmp_path, config=_CFG)
     assert not report["ok"] and report["steps"] == [] and run.calls == []
 
 
@@ -324,7 +327,7 @@ def test_the_existence_check_enumerates_rather_than_searching(tmp_path):
     fails -- so the step fails and the whole gesture stops on a unit that was already correctly
     open."""
     run = Runner()
-    define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path)
+    define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, config=_CFG)
     lists = [a for a in run.calls if a[:3] == ["gh", "label", "list"]]
     assert lists and all("--search" not in a for a in lists), lists
     assert any(a[a.index("--limit") + 1] == str(define._LABEL_PAGE) for a in lists)
@@ -355,7 +358,7 @@ def test_a_create_that_fails_for_ANY_OTHER_reason_still_stops_the_gesture(tmp_pa
     sdlc = _sdlc(tmp_path)
     run = Runner(fail_on=lambda a: ("HTTP 403: Resource not accessible by integration"
                                     if a[:3] == ["gh", "label", "create"] else None))
-    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path)
+    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, config=_CFG)
     assert not report["ok"]
     assert report["steps"][-1]["outcome"] == define.FAILED
     assert not feature_registry.registry_dir(sdlc).is_dir()
@@ -368,7 +371,7 @@ def test_a_DIFFERENT_CASING_of_our_label_is_refused_rather_than_created(tmp_path
     come through."""
     sdlc = _sdlc(tmp_path)
     run = Runner(labels={"feature:Voice"})
-    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path)
+    report = define.open_unit(sdlc, "voice", "feature", run=run, cwd=tmp_path, config=_CFG)
     assert not report["ok"]
     assert report["steps"][-1]["outcome"] == define.REFUSED
 
@@ -388,7 +391,7 @@ def test_a_DIFFERENT_CASING_of_our_label_is_refused_rather_than_created(tmp_path
 def test_an_existing_registry_directory_is_reported_not_recreated(tmp_path):
     sdlc = _sdlc(tmp_path)
     feature_registry.registry_dir(sdlc).mkdir(parents=True)
-    report = define.open_unit(sdlc, "voice", "feature", run=Runner(), cwd=tmp_path)
+    report = define.open_unit(sdlc, "voice", "feature", run=Runner(), cwd=tmp_path, config=_CFG)
     assert report["ok"] and report["steps"][2]["outcome"] == define.EXISTS
 
 
@@ -401,18 +404,18 @@ def test_the_base_precedence_is_the_loops_own(tmp_path):
     different answers to "based on what?"."""
     run = Runner(head="develop")
     define.open_unit(_sdlc(tmp_path / "a"), "u1", "feature", run=run, cwd=tmp_path,
-                     base="release/2")
+                     base="release/2", config=_CFG)
     assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("f" * 40 + ":")
     assert ["git", "fetch", "origin", "release/2"] in run.calls
 
     run = Runner(head="develop")
     define.open_unit(_sdlc(tmp_path / "b"), "u2", "feature", run=run, cwd=tmp_path,
-                     config={"work": {"base": "integration"}})
+                     config=dict(_CFG, work={"base": "integration"}))
     assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("f" * 40 + ":")
     assert ["git", "fetch", "origin", "integration"] in run.calls
 
     run = Runner(head="develop")
-    define.open_unit(_sdlc(tmp_path / "c"), "u3", "feature", run=run, cwd=tmp_path, config={})
+    define.open_unit(_sdlc(tmp_path / "c"), "u3", "feature", run=run, cwd=tmp_path, config=_CFG)
     assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1].startswith("f" * 40 + ":")
     assert ["git", "fetch", "origin", "develop"] in run.calls
 
@@ -429,7 +432,7 @@ def test_a_detached_checkout_with_no_base_is_REFUSED_rather_than_guessed(tmp_pat
     for head in ("HEAD", ""):
         run = Runner(head=head)
         report = define.open_unit(_sdlc(tmp_path / ("h" + head)), "voice", "feature",
-                                  run=run, cwd=tmp_path, config={})
+                                  run=run, cwd=tmp_path, config=_CFG)
         assert not report["ok"], head
         assert report["steps"][0]["outcome"] == define.REFUSED
         assert not [a for a in run.calls if a[:2] == ["git", "push"]]
@@ -440,7 +443,7 @@ def test_an_explicit_base_makes_a_detached_checkout_fine(tmp_path):
     detached worktree with `--base` named is an ordinary, correct way to open a unit."""
     run = Runner(head="HEAD")
     report = define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path,
-                              base="main")
+                              base="main", config=_CFG)
     assert report["ok"]
     assert [a for a in run.calls if a[:2] == ["git", "push"]][0][-1] == \
         "f" * 40 + ":refs/heads/feature/voice"
@@ -452,7 +455,7 @@ def test_an_empty_configured_base_falls_through_rather_than_pushing_an_empty_ref
     git reads as a DELETE."""
     run = Runner(head="develop")
     define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path,
-                     config={"work": {"base": "   "}})
+                     config=dict(_CFG, work={"base": "   "}))
     pushed = [a for a in run.calls if a[:2] == ["git", "push"]][0][-1]
     assert pushed == "f" * 40 + ":refs/heads/feature/voice"
 
@@ -472,9 +475,82 @@ def test_the_label_create_is_exactly_the_shape_the_kit_refuses_everywhere_else()
     Feeding this module's own argv to the kit's own refusal predicate proves two things at once:
     that the call really is the refused shape (so the exception is real, not notional), and that the
     two descriptions cannot drift apart without this failing."""
-    argv = define._label_create_argv("voice", "feature")
+    argv = define._label_create_argv("voice", "feature", "fixture-org/fixture-repo")
     assert argv[0] == "gh"
     assert feature_labels.creates_a_feature_label(argv[1:])
+
+
+def _lists_and_creates(run):
+    lists = [a for a in run.calls if a[:3] == ["gh", "label", "list"]]
+    creates = [a for a in run.calls if a[:3] == ["gh", "label", "create"]]
+    return lists, creates
+
+
+def _repo_of(argv):
+    assert "-R" in argv, argv
+    return argv[argv.index("-R") + 1]
+
+
+def test_the_label_list_carries_the_configured_repository_even_when_remote_names_another(tmp_path):
+    run = Runner()
+    report = define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path,
+                              config=_CFG, remote="fork")
+    assert report["ok"], report
+    lists, _ = _lists_and_creates(run)
+    assert lists and all(_repo_of(a) == "fixture-org/fixture-repo" for a in lists), lists
+
+
+def test_the_label_create_carries_the_configured_repository_even_when_remote_names_another(tmp_path):
+    run = Runner()
+    report = define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path,
+                              config=_CFG, remote="fork")
+    assert report["ok"], report
+    _, creates = _lists_and_creates(run)
+    assert creates and all(_repo_of(a) == "fixture-org/fixture-repo" for a in creates), creates
+
+
+def test_the_repository_never_comes_from_the_remote_option(tmp_path):
+    run = Runner()
+    define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path,
+                     config=_CFG, remote="fork")
+    lists, creates = _lists_and_creates(run)
+    assert all("fork" not in a for a in lists + creates)
+
+
+def test_the_rest_fallback_names_the_configured_repository_not_a_placeholder(tmp_path):
+    def boom(argv):
+        return "graphql down" if argv[:3] == ["gh", "label", "list"] else None
+    inner = Runner(fail_on=boom)
+    seen = []
+
+    def run(cwd, argv):
+        argv = [str(a) for a in argv]
+        if argv[:2] == ["gh", "api"] and "labels" in argv[-1]:
+            seen.append(argv)
+            return ""
+        return inner(cwd, argv)
+    define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, config=_CFG)
+    assert seen and seen[0][-1].startswith("repos/fixture-org/fixture-repo/labels"), seen
+    assert not any("{owner}" in a for a in seen[0])
+
+
+def test_no_configured_repository_refuses_naming_the_key_before_anything_runs(tmp_path):
+    run = Runner()
+    report = define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, config={})
+    assert not report["ok"] and report["steps"] == []
+    assert "discovery.github.repo" in report["why"] and "--remote" in report["why"]
+    assert run.calls == []                      # no git push, no ls-remote, no gh call: nothing ran
+    assert not [a for a in run.calls if a[:2] == ["git", "push"]]
+
+
+def test_an_option_shaped_repository_is_refused_before_anything_runs(tmp_path):
+    cfg = {"discovery": {"github": {"repo": "--web"}}}
+    run = Runner()
+    report = define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, config=cfg)
+    assert not report["ok"] and report["steps"] == []
+    assert "discovery.github.repo" in report["why"]
+    assert run.calls == []
+    assert not [a for a in run.calls if a[:2] == ["git", "push"]]
 
 
 def test_nothing_in_this_module_opens_an_issue_itself():
@@ -1038,9 +1114,12 @@ def test_the_cli_open_verb_reports_a_failed_step_rather_than_raising(tmp_path):
     import io
     import contextlib
     sdlc = _sdlc(tmp_path)
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(__import__("json").dumps(_CFG), encoding="utf-8")
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        rc = define.main(["define.py", "open", str(sdlc), "--name", "voice", "--type", "feature"])
+        rc = define.main(["define.py", "open", str(sdlc), "--name", "voice", "--type", "feature",
+                          "--config", str(cfg)])
     report = __import__("json").loads(buf.getvalue().strip())
     assert rc == 1 and not report["ok"]
     assert report["steps"][0]["step"] == "branch"
@@ -1312,7 +1391,7 @@ def test_a_fresh_clone_cuts_from_the_fetched_remote_base(tmp_path):
     fetched `<remote>/<base>` commit, and the report and the output name that commit."""
     run = Runner(refs={"refs/remotes/origin/main"})
     report = define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path,
-                              base="main", remote="origin")
+                              base="main", remote="origin", config=_CFG)
     assert report["ok"]
     assert _pushed(run) == "f" * 40 + ":refs/heads/feature/voice"
     assert report["base_commit"] == "f" * 40
@@ -1323,7 +1402,7 @@ def test_a_local_base_is_no_longer_the_source(tmp_path):
     """#1504: a local `main` that exists is NOT what the branch is cut from."""
     run = Runner(refs={"refs/heads/main", "refs/remotes/origin/main"})
     define.open_unit(_sdlc(tmp_path), "voice", "feature", run=run, cwd=tmp_path, base="main",
-                     remote="origin")
+                     remote="origin", config=_CFG)
     assert not any(a[:2] == ["git", "show-ref"] for a in run.calls)
     assert _pushed(run) == "f" * 40 + ":refs/heads/feature/voice"
 

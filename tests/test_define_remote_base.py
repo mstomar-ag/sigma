@@ -41,6 +41,8 @@ def _world(tmp_path, ahead=2):
         _commit(other, "r%d" % i)
     _git(other, "push", "-q", "origin", "main")
     (work / ".sdlc").mkdir()
+    (work / ".sdlc" / "config.json").write_text(
+        '{"discovery": {"github": {"repo": "fixture-org/fixture-repo"}}}')
     return work, remote
 
 

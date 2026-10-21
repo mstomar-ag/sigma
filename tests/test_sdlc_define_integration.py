@@ -53,7 +53,7 @@ feature_sync = _mod("feature_sync", LOOP)
 backlog_check = _mod("backlog_check", LOOP)     # the LIVE _BLOCK_RE -- never a hand-copied duplicate
 sources = _mod("sources", LOOP)
 
-LOCAL_CONFIG = {"discovery": {"source": "local-goals"},
+LOCAL_CONFIG = {"discovery": {"source": "local-goals", "github": {"repo": "fixture-org/fixture-repo"}},
                 "ledger": {"enabled": False, "actor": "amy"}}
 UNIT = "voice-interview"
 

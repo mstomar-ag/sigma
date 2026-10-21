@@ -214,11 +214,12 @@ def validate(name, kind):
     return True, None
 
 
-def _label_create_argv(name, kind):
+def _label_create_argv(name, kind, repo):
     """The create invocation, in one place, so the test that proves this module is the kit's ONE
     authorized exception can feed the REAL argv to the kit's own refusal predicate rather than to a
-    re-typed approximation of it."""
-    return ["gh", "label", "create", label_for(name),
+    re-typed approximation of it. `-R <repo>` is the CONFIGURED repository (#1983): without it `gh`
+    acts on its own default repository, which need not be the one the unit's issues live in."""
+    return ["gh", "label", "create", label_for(name), "-R", repo,
             "--description", "%s unit of work: %s" % (kind, name),
             "--color", _LABEL_COLOUR]
 
@@ -250,6 +251,15 @@ class _Ctx(object):
         self.branch = branch_for(name)
         self.label = label_for(name)
         self.base_commit = None
+        self.repo = self._configured_repo()
+
+    def _configured_repo(self):
+        """`discovery.github.repo`, the key the rest of the kit reads, or None when unset. NEVER
+        derived from `--remote`, which chooses only where the branch is cut and pushed (#1983)."""
+        discovery = self.config.get("discovery")
+        github = discovery.get("github") if isinstance(discovery, dict) else None
+        got = github.get("repo") if isinstance(github, dict) else None
+        return got.strip() if isinstance(got, str) and got.strip() else None
 
     def _configured(self, key):
         work = self.config.get("work")
@@ -336,11 +346,11 @@ def _repo_labels(ctx):
     create, and `_already_exists` turns the duplicate into `exists` -- which is precisely why the
     backstop is kept even though this call makes it almost unreachable."""
     try:
-        got = ctx.run(ctx.cwd, ["gh", "label", "list", "--limit", str(_LABEL_PAGE),
+        got = ctx.run(ctx.cwd, ["gh", "label", "list", "-R", ctx.repo, "--limit", str(_LABEL_PAGE),
                                 "--json", "name", "-q", ".[].name"])
     except Exception:                      # noqa: BLE001 - #1398: `gh label list` is GraphQL; REST read
         got = ctx.run(ctx.cwd, ["gh", "api", "--paginate", "-q", ".[].name",
-                                "repos/{owner}/{repo}/labels?per_page=100"])
+                                "repos/%s/labels?per_page=100" % ctx.repo])
     return [ln.strip() for ln in (got or "").splitlines() if ln.strip()]
 
 
@@ -354,6 +364,13 @@ def _already_exists(exc):
     GitHub label names are case-insensitively unique. Matching the phrase rather than the whole
     sentence: the `--force` half is advice and is the half most likely to be reworded."""
     return "already exists" in str(exc).lower()
+
+
+def _is_owner_name(repo):
+    """`owner/name`, plain characters only, neither half option-shaped (no leading `-`)."""
+    parts = repo.split("/")
+    return len(parts) == 2 and all(
+        p and not p.startswith("-") and all(c.isalnum() or c in "_.-" for c in p) for p in parts)
 
 
 def _step_label(ctx):
@@ -383,7 +400,7 @@ def _step_label(ctx):
                 "existing spelling, "
                 "or rename that label first." % (existing, ctx.label))
     try:
-        ctx.run(ctx.cwd, _label_create_argv(ctx.name, ctx.kind))
+        ctx.run(ctx.cwd, _label_create_argv(ctx.name, ctx.kind, ctx.repo))
     except Exception as exc:              # noqa: BLE001 - one failure here is not a failure
         if not _already_exists(exc):
             raise
@@ -487,6 +504,16 @@ def open_unit(sdlc_dir, name, kind, *, config=None, run=None, cwd=None, remote=N
         return report                     # NOTHING has run: not one command, not one directory
     report["branch"], report["label"] = branch_for(name), label_for(name)
     ctx = _Ctx(sdlc_dir, name, kind, config, run, cwd, remote, base)
+    # #1983: the repository is resolved and checked BEFORE the first step, because the branch step
+    # pushes; refusing at the label step left a pushed branch and no unit.
+    if not ctx.repo:
+        report["why"] = ("no repository is configured for the unit label: set `discovery.github.repo` "
+                         "(owner/name) in .sdlc/config.json -- `--remote` only chooses where the branch "
+                         "is cut, and guessing gh's default repository is what mislabelled units (#1983)")
+        return report                     # NOTHING has run: no git push, no run call at all
+    if not _is_owner_name(ctx.repo):
+        report["why"] = "`discovery.github.repo` must be owner/name, got %r" % ctx.repo
+        return report
     for step in _STEPS:
         try:
             outcome, detail = _RUNNERS[step](ctx)
