@@ -38,6 +38,7 @@ Usage:
   deps.py report <sdlc_dir> --label <label>     every open member of a run label
   deps.py report <sdlc_dir> --chain <N>         goal N and every open prerequisite the chain planner finds
   deps.py mark <sdlc_dir> <goal> <ref> <reason...>
+  deps.py unmark <sdlc_dir> <goal> <ref> <reason...>
 
 Batch (#1944): `--label` / `--chain` print one JSON line per member (the exact single-goal object, ordered by
 issue number) from ONE process. Members come from what already lists them: the label drain's scope check and
@@ -75,7 +76,8 @@ SNIPPET_CHARS = 160
 SNIPPETS_PER_REF = 2
 _RANK = {"edge": 0, "comment-edge": 1, "weak": 2, "mention": 3}
 USAGE = ("usage: deps.py report <sdlc_dir> <goal> | deps.py report <sdlc_dir> --label <label> | "
-         "deps.py report <sdlc_dir> --chain <N> | deps.py mark <sdlc_dir> <goal> <ref> <reason...>")
+         "deps.py report <sdlc_dir> --chain <N> | deps.py mark <sdlc_dir> <goal> <ref> <reason...> | "
+         "deps.py unmark <sdlc_dir> <goal> <ref> <reason...>")
 
 
 def _snippet(text, start, end):
@@ -175,6 +177,35 @@ def mark(source, goal, ref, reason):
     return "MARKED", "issue %s now blocks this goal" % ref
 
 
+def unmark(source, goal, ref, reason):
+    """-> ("UNMARKED"|"ABSENT"|"REFUSED", detail). Writes nothing unless the result is UNMARKED."""
+    goal, ref = str(goal).lstrip("#"), str(ref).lstrip("#")
+    if not ref.isdigit() or ref == goal:
+        return "REFUSED", "the reference must be another issue's number"
+    if not _hsg.is_sigma_issue(source, goal):       # #1984: read-only; a foreign issue gets no half a gesture
+        return "REFUSED", ("issue %s was not created by Sigma and carries no Sigma label, so nothing was written: "
+                           "edit the `Blocked by:` line by hand, or give the issue a Sigma label first" % goal)
+    _title, body, _comments = _read(source, goal)
+    marker = "**Blocked by:** #%s" % ref
+    if not any(line.strip() == marker for line in body.split("\n")):
+        if any(r["ref"] == ref for r in blocker_scan.extract_refs(body, self_ref=goal)):
+            return "ABSENT", ("issue %s is written in prose, not as a `Blocked by:` line; it was left alone, "
+                              "edit the sentence by hand" % ref)
+        return "ABSENT", "the body carries no `Blocked by:` line for issue %s" % ref
+    try:
+        source.remove_from_body(goal, ref)
+    except ValueError as exc:
+        return "REFUSED", str(exc)
+    note = "Dependency marker for issue %s removed from the body." % ref
+    if _plain(reason):
+        note += " Reason: " + _plain(reason)
+    try:
+        source.note(goal, note)
+    except Exception as exc:                       # noqa: BLE001 - the removal is the record; the note is narration
+        return "UNMARKED", "marker removed; the explanatory note failed (%s)" % type(exc).__name__
+    return "UNMARKED", "issue %s no longer blocks this goal" % ref
+
+
 def _open_source(sdlc_dir):
     state, sources = _load("state"), _load("sources")
     return sources.get_source(sdlc_dir, state.load_config(sdlc_dir))
@@ -216,11 +247,12 @@ def main(argv):
     if argv[1:] in (["-h"], ["--help"]):
         print(USAGE)
         return 0
-    if len(argv) < 4 or argv[1] not in ("report", "mark") or (argv[1] == "mark" and len(argv) < 5):
+    if len(argv) < 4 or argv[1] not in ("report", "mark", "unmark") or (argv[1] != "report" and len(argv) < 5):
         print(USAGE, file=sys.stderr)
         return 2
     source = _open_source(argv[2])
-    if not hasattr(source, "_read_issue") or not hasattr(source, "append_to_body"):
+    if not hasattr(source, "_read_issue") or not hasattr(source, "append_to_body") \
+            or (argv[1] == "unmark" and not hasattr(source, "remove_from_body")):
         print("UNSUPPORTED deps.py reads GitHub issues only; this project uses local goal files")
         return 2
     if argv[1] == "report" and argv[3] in ("--label", "--chain"):
@@ -242,9 +274,9 @@ def main(argv):
     if argv[1] == "report":
         print(json.dumps(report(source, argv[3]), ensure_ascii=False, sort_keys=True))
         return 0
-    verdict, detail = mark(source, argv[3], argv[4], " ".join(argv[5:]))
+    verdict, detail = (mark if argv[1] == "mark" else unmark)(source, argv[3], argv[4], " ".join(argv[5:]))
     print("%s %s" % (verdict, detail))
-    return 0 if verdict in ("MARKED", "ALREADY") else 2
+    return 0 if verdict in ("MARKED", "ALREADY", "UNMARKED", "ABSENT") else 2
 
 
 if __name__ == "__main__":
