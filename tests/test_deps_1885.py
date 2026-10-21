@@ -4,7 +4,9 @@
 the canonical marker through the source's own guarded `append_to_body`. Controls: each `read_as` row
 goes red if its branch is removed, and `mark` is seen to write nothing on ALREADY and REFUSED.
 """
-import importlib.util, pathlib
+import importlib.util, pathlib, sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 S = pathlib.Path(__file__).resolve().parent.parent / "skills" / "sigma-loop" / "scripts"
 
@@ -169,3 +171,121 @@ def test_append_to_body_on_a_foreign_issue_writes_nothing():
     own._issue_edit_body = lambda goal, body: own.writes.append("edit")
     sources.GitHubSource.append_to_body(own, "5", "x")
     assert own.writes == ["edit"]
+
+
+# -- #1989: unmark takes a canonical `Blocked by` line back ---------------------------------------------
+# Controls (each broken once, seen red): drop the foreign pre-check; remove prose lines too; skip the
+# map removal (test_dag_insert_1989.py); remove a different ref's line (ref 12 vs 123).
+
+class _Unmark(_Guarded):
+    def __init__(self, body, labels=("sdlc:goal",), cfg=_HS_OPEN):
+        super().__init__(body, labels, cfg)
+        self.removed = []
+
+    def remove_from_body(self, goal, ref):
+        self.writes.append("remove")
+        self.removed.append(ref)
+        return 1
+
+
+def test_unmark_removes_the_line_and_posts_a_note_with_the_reason():
+    src = _Unmark("A ticket.\n\n**Blocked by:** #12\n")
+    verdict, _detail = deps.unmark(src, "5", "12", "it was a two-way wait")
+    assert verdict == "UNMARKED" and src.removed == ["12"]
+    assert len(src.notes) == 1 and "two-way wait" in src.notes[0] and "#" not in src.notes[0]
+
+
+def test_unmark_with_no_such_line_is_absent_and_writes_nothing():
+    src = _Unmark("A ticket.\n\n**Blocked by:** #13\n")
+    assert deps.unmark(src, "5", "12", "why")[0] == "ABSENT"
+    assert src.writes == [] and src.notes == []
+
+
+def test_unmark_does_not_confuse_a_longer_number_with_the_ref():
+    src = _Unmark("A ticket.\n\n**Blocked by:** #123\n")
+    assert deps.unmark(src, "5", "12", "why")[0] == "ABSENT" and src.writes == []
+
+
+def test_unmark_reports_a_prose_edge_and_leaves_it_alone():
+    src = _Unmark("This is blocked by #12 until the zone work lands.")
+    verdict, detail = deps.unmark(src, "5", "12", "why")
+    assert verdict == "ABSENT" and "prose" in detail and src.writes == [] and src.notes == []
+
+
+def test_unmark_on_a_foreign_issue_is_refused_and_writes_nothing():
+    src = _Unmark("A hand-filed ticket.\n\n**Blocked by:** #12\n", labels=())
+    verdict, reason = deps.unmark(src, "5", "12", "why")
+    assert verdict == "REFUSED" and src.writes == [] and src.notes == []
+    assert "by hand" in reason and "label" in reason
+
+
+def test_unmark_refuses_a_non_number_and_the_goal_itself():
+    src = _Unmark("x\n\n**Blocked by:** #5\n")
+    assert deps.unmark(src, "5", "x", "why")[0] == "REFUSED"
+    assert deps.unmark(src, "5", "5", "why")[0] == "REFUSED" and src.writes == []
+
+
+def test_unmark_failed_note_still_reports_unmarked():
+    src = _Unmark("A ticket.\n\n**Blocked by:** #12\n")
+    src.note = lambda goal, text: (_ for _ in ()).throw(RuntimeError("x"))
+    verdict, detail = deps.unmark(src, "5", "12", "why")
+    assert verdict == "UNMARKED" and "note failed" in detail
+
+
+class _Gh(_Guarded):
+    """Real `GitHubSource.remove_from_body` over a fake that records the body it would write."""
+    def __init__(self, body, labels=("sdlc:goal",)):
+        super().__init__(body, labels)
+        self.sdlc_dir, self.edits = None, []
+
+    def _issue_edit_body(self, goal, body):
+        self.edits.append(body)
+
+
+def _remove(body, ref="12", labels=("sdlc:goal",)):
+    sources = _mod("sources")
+    s = _Gh(body, labels)
+    n = sources.GitHubSource.remove_from_body(s, "5", ref)
+    return n, s
+
+
+def test_remove_from_body_drops_only_the_line_and_the_blank_mark_added():
+    n, s = _remove("A ticket.\n\nmore text\n\n**Blocked by:** #12\n")
+    assert n == 1 and s.edits == ["A ticket.\n\nmore text\n"]
+
+
+def test_remove_from_body_keeps_a_line_that_is_not_exactly_the_marker():
+    body = "see **Blocked by:** #12 in prose\n**Blocked by:** #123\n**Blocked by:** #12 and more\n"
+    n, s = _remove(body)
+    assert n == 0 and s.edits == []
+
+
+def test_remove_from_body_removes_every_identical_line():
+    n, s = _remove("A.\n\n**Blocked by:** #12\n\n**Blocked by:** #12\n")
+    assert n == 2 and s.edits == ["A.\n"]
+
+
+def test_remove_from_body_on_a_foreign_issue_raises_and_writes_nothing():
+    import pytest
+    sources = _mod("sources")
+    s = _Gh("A.\n\n**Blocked by:** #12\n", labels=())
+    with pytest.raises(ValueError, match="hard stop"):
+        sources.GitHubSource.remove_from_body(s, "5", "12")
+    assert s.edits == [] and "park" not in s.writes
+
+
+def test_unmark_cli_usage_names_unmark(capsys):
+    assert deps.main(["deps.py", "--help"]) == 0
+    assert "unmark" in capsys.readouterr().out
+
+
+def test_remove_from_body_drops_the_stored_map_edge(tmp_path):
+    import test_dag_insert_1616 as t
+    sources = _mod("sources")
+    sdlc = tmp_path / ".sdlc"
+    t._store(sdlc, [t._node(5), t._node(12)], [t._edge(12, 5)])
+    s = _Gh("A.\n\n**Blocked by:** #12\n")
+    s.sdlc_dir = str(sdlc)
+    s._dag_mod = sources.GitHubSource._dag_mod.__get__(s)
+    assert sources.GitHubSource.remove_from_body(s, "5", "12") == 1
+    assert t._edges(sdlc) == set()
