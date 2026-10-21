@@ -96,8 +96,13 @@ python3 skills/sigma-loop/scripts/dag.py html --all [--titles <file>] [--out <di
   the live plan also sees assignees, checkpoints and not-a-goal labels, and the page says so. Edges: solid for
   one written in an issue body, dotted for any other recorded source, dashed for an unconfirmed wait (live plan
   only: a map page has none).
-- **Titles.** The map holds no titles, so a page names members by number unless you pass `--titles <file>`,
-  a JSON object `{"<number>": "<title>"}` (or a list of `{number, title}`, 4 MiB at most). A title is shortened to
+- **Titles.** The map holds no titles and never will; they come from a file beside it. `dag.py titles` reads the
+  open issues' titles once (REST, one call per 100 issues, at most 50 calls: 10 at 1,000 open issues, the cap at
+  5,000 and over, and it says how many were left out) and writes .sdlc/state/dag-titles.json atomically; a failed
+  listing keeps the old file. Only numbers in the map are kept, and a closed member's title is carried over from the
+  earlier file. `dag.py html` reads that file when it exists and makes no GitHub call; `--titles <file>`, a JSON
+  object `{"<number>": "<title>"}` (or a list of `{number, title}`, 4 MiB at most), wins when given. When the file's
+  `read_at` is older than the map's `built_at`, the page says so. Run `titles` before `html`. A title is shortened to
   100 characters and any URL is removed. No issue body is read or written.
 - **Assignees.** The map keeps each member's assignees (from the issue listings the refresh already reads: no extra
   call; at most 20 per member, each a plain login or dropped). A member's node and its panel show them, or

@@ -8,7 +8,8 @@ something open, as `dag.py chains` lists them) and an index page.
 
 What a page holds, and only this: numbers, the optional titles the caller passes, the map's life, priority rank and
 unit token, the forecast markers and the edges. The map holds no title, label text or body, so a title comes only
-from `--titles FILE` (a JSON object `{"<number>": "<title>"}`, or a list of `{"number", "title"}`; 4 MiB at most) and
+from `--titles FILE`, else `<sdlc>/state/dag-titles.json` (made by `dag.py titles`, the one network verb; this
+module reads it and never calls GitHub; named on the page when older than the map) (a JSON object `{"<number>": "<title>"}`, or a list of `{"number", "title"}`; 4 MiB at most) and
 a page without it names members by number. A title is scrubbed: any URL and the letters `http` are neutralised, so
 no page carries a link or a network reference, and it is cut at 100 characters. No issue body is ever read here.
 
@@ -89,6 +90,8 @@ MEMBER_CAP = 80                 # open members a page draws readably; over it th
 DUMMY_CAP = 6000                # layout slots for long edges; past it they are drawn direct, and the page says so
 TITLES_MAX_BYTES = 4 * 1024 * 1024
 TITLE_CHARS = 100
+STALE_TITLES = ("The titles file is older than the map, so a newer member may be named by number. Refresh it "
+                "with dag.py titles.")
 UNASSIGNED, UNKNOWN = "(unassigned)", "(unknown)"    # index tokens: not login-shaped, so no login can collide
 SWEEPS, SWEEPS_BIG = 8, 2
 BIG_SEGMENTS = 3000
@@ -151,7 +154,9 @@ def read_titles(path):
         doc = json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         raise HtmlError(2, "dag html: the titles file is not JSON")
-    if isinstance(doc, dict):
+    if isinstance(doc, dict) and doc.get("schema") == "dag-titles/1" and isinstance(doc.get("titles"), dict):
+        pairs = list(doc["titles"].items())
+    elif isinstance(doc, dict):
         pairs = list(doc.items())
     elif isinstance(doc, list):
         pairs = [(i.get("number"), i.get("title")) for i in doc if isinstance(i, dict)]
@@ -166,6 +171,20 @@ def read_titles(path):
         if isinstance(v, str) and v.strip():
             out[n] = clean_title(v)
     return out
+
+
+def read_titles_file(path):
+    """`(titles, read_at_epoch_or_None)` from the `dag-titles/1` file `dag.py titles` writes. A missing, oversized
+    or unreadable file is `({}, None)`: the page is still drawn, named by number (no refusal for a file the caller
+    did not pass)."""
+    try:
+        titles = read_titles(path)
+        with open(path, "rb") as fh:
+            doc = json.loads(fh.read(TITLES_MAX_BYTES).decode("utf-8"))
+    except (HtmlError, OSError, ValueError):
+        return {}, None
+    at = dag_store.parse_ts(doc.get("read_at")) if isinstance(doc, dict) else None
+    return titles, at
 
 
 def check_out(out_dir):
@@ -734,8 +753,10 @@ def _header(model, repo):
         notices.append("The map is not fresh (%s); this page shows it as stored, age %s. Refresh it with dag.py "
                        "refresh --force." % (why, _age(model["age"]) if model["age"] is not None else "unknown"))
     if not model["titled"]:
-        notices.append("No titles were given (the map holds none), so members are named by number. Pass "
-                       "--titles FILE to add them.")
+        notices.append("No titles were given (the map holds none), so members are named by number. Run "
+                       "dag.py titles, or pass --titles FILE.")
+    if model.get("titles_stale"):
+        notices.append(STALE_TITLES)
     if model.get("left_out"):
         notices.append("%d more open issues wait on #%d and are not drawn (cap %d)."
                        % (model["left_out"], model["goal"], DEPENDENT_CAP))
@@ -833,13 +854,15 @@ function applyView(rows, sort, who, prio) {
 """
 
 
-def render_index(rows, repo, stamp_built, age, fresh, titled):
+def render_index(rows, repo, stamp_built, age, fresh, titled, stale=False):
     """The index page: one row per chain, linking its page."""
     notice = ""
     if not fresh[0]:
         notice += '<div class="notice">The map is not fresh (%s); the pages show it as stored.</div>' % _esc(fresh[1])
     if not titled:
-        notice += '<div class="notice">No titles were given (the map holds none). Pass --titles FILE to add them.</div>'
+        notice += '<div class="notice">No titles were given (the map holds none). Run dag.py titles, or pass --titles FILE.</div>'
+    if stale:
+        notice += '<div class="notice">%s</div>' % _esc(STALE_TITLES)
     trs = []
     for r in rows:
         held = "; ".join("#%d %s" % (s["n"], s["m"]) for s in r["stops"][:4]) or "nothing"
@@ -1123,11 +1146,19 @@ def run(sdlc, goal=None, all_=False, out_dir=None, titles_path=None, now=None):
         return ["dag html: give exactly one of --goal N or --all"], EXIT["refused"]
     try:
         m, _md, config, ok, why = _open(sdlc, now)
-        titles = read_titles(titles_path) if titles_path else {}
+        stale = False
+        if titles_path:
+            titles = read_titles(titles_path)
+        else:
+            titles, read_at = read_titles_file(str(pathlib.Path(sdlc) / "state" / "dag-titles.json"))
+            built = dag_store.parse_ts(m["header"].get("built_at"))
+            stale = bool(titles) and (read_at is None or (built is not None and read_at < built))
         out = pathlib.Path(out_dir) if out_dir else pathlib.Path(sdlc) / "state" / "dag-html"
         check_out(out)
         goals = [goal] if not all_ else end_goals(m)
         models = [build(m, config, n, titles, now, (ok, why)) for n in goals]
+        for model in models:
+            model["titles_stale"] = stale
     except HtmlError as exc:
         return [str(exc)], exc.code
     repo = m["header"].get("repo")
@@ -1150,6 +1181,6 @@ def run(sdlc, goal=None, all_=False, out_dir=None, titles_path=None, now=None):
         t = dag_store.stamp(m)
         dag_store.state.atomic_write_text(
             out / "index.html", render_index(rows, repo, _stamp(dag_store.parse_ts(m["header"].get("built_at"))),
-                                             _age(now - t) if t is not None else "unknown", (ok, why), bool(titles)))
+                                             _age(now - t) if t is not None else "unknown", (ok, why), bool(titles), stale))
         lines.append("wrote %s (%d chains)" % (out / "index.html", len(rows)))
     return lines, EXIT["ok"]
