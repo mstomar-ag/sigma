@@ -2905,7 +2905,7 @@ def test_higher_priority_filing_parks_the_newest_lowest_armed_one_1697(tmp_path)
     assert src.parked == []
     _r, src = _file(tmp_path, None, src=src, priority="P2", priority_requested=True)
     assert [g for g, _t in src.parked] == ["105"]          # the newest P3, not the new P2
-    assert "ai_filed.max_per_goal" in src.parked[0][1] and "ai_filed.max_per_run" in src.parked[0][1]
+    assert "per-goal cap" in src.parked[0][1] and "ai_filed.max_per_goal" in src.parked[0][1]
     assert src.created["goal_label"] is True
     # the parked entry no longer counts: the counter holds five armed filings, so the next P3 is parked itself
     _r, src = _file(tmp_path, None, src=src, priority="P3", priority_requested=True)
@@ -2961,3 +2961,47 @@ def test_handoff_marker_not_written_when_append_to_body_refuses(tmp_path):
     report = handoff.hand_off(sdlc, ON, "g.md", "engine", "needs a flag", source=src)
     assert any("machine-readable" in w for w in report["warnings"])
     assert src.blocked_goals == [] and src.body_appends == []
+
+
+# ---- #2039: the filing-cap park names the limit, the count, or the unreadable counter
+
+def test_per_goal_cap_park_names_limit_and_count_2039(tmp_path):
+    _five_armed(tmp_path, None)
+    _r, src = _file(tmp_path, None, priority="P2", priority_requested=True)
+    reason = src.parked[0][1]
+    assert "per-goal cap: 5 of 5" in reason and "ai_filed.max_per_goal" in reason
+    assert "max_per_run" not in reason
+
+
+def test_per_run_cap_park_names_limit_and_count_2039(tmp_path, monkeypatch):
+    monkeypatch.setattr(handoff, "_run_id", lambda: "run-2039")
+    cfg = {"ai_filed": {"max_per_run": 2}}
+    for i in range(2):
+        _file(tmp_path, cfg, priority="P2", goal=str(i + 100))
+    _r, src = _file(tmp_path, cfg, priority="P2", goal="300")
+    reason = src.parked[0][1]
+    assert "per-run cap: 2 of 2" in reason and "ai_filed.max_per_run" in reason
+    assert "max_per_goal" not in reason
+
+
+def test_unreadable_counter_park_names_relative_path_and_lever_2039(tmp_path):
+    st = tmp_path / "state"
+    st.mkdir()
+    bad = st / "ai_filed_counter.json"
+    bad.write_text("{not json")
+    _r, src = _file(tmp_path, None)
+    reason = src.parked[0][1]
+    assert "state/ai_filed_counter.json" in reason and str(tmp_path) not in reason
+    assert "repair or remove that one file" in reason
+    assert "per-goal" not in reason and "per-run" not in reason
+    assert bad.read_text() == "{not json"          # the filing's bump never overwrites it
+
+
+def test_eviction_reason_names_the_per_goal_cap_2039(tmp_path):
+    src = _NumberedSource()
+    for _ in range(5):
+        _file(tmp_path, None, src=src, priority="P3", priority_requested=True)
+    _r, src = _file(tmp_path, None, src=src, priority="P2", priority_requested=True)
+    reason = src.parked[0][1]
+    assert "per-goal cap: 5 of 5" in reason and "ai_filed.max_per_goal" in reason
+    assert "more urgent" in reason and "max_per_run" not in reason

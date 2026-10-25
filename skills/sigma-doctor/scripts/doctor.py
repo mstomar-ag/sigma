@@ -1147,8 +1147,7 @@ def _ai_filed_rows(cfg, base):
         path = pathlib.Path(base) / ac.limits(cfg)["counter_path"]
         if path.exists() and ac.load(path) is None:
             rows.append(_chk("AI-filed counter is readable", False,
-                             f"{path} is unreadable or mis-shaped, so every AI-filed filing is parked: "
-                             "fix the file or delete it (it is rebuilt on the next filing)."))
+                             ac.cap_reason({"kind": "unreadable"}, ac.limits(cfg)["counter_path"]) + "."))
         return rows
     except Exception:
         return []

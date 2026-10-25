@@ -72,16 +72,40 @@ def load(path):
         return None
 
 
+def cap_cause(counter, goal, run, config, per_goal=True):
+    """-> None when one more filing fits; else why not (#2039): {"kind": "unreadable"} or
+    {"kind": "per_goal"|"per_run", "count": n, "max": m}, the count being the entries that tripped the cap.
+    Checks run unreadable, per-goal (unless `per_goal=False`, the #1553 bypass), per-run."""
+    if counter is None:
+        return {"kind": "unreadable"}
+    lim = limits(config)
+    ents = counter.get("entries", [])
+    if per_goal:
+        n = sum(1 for e in ents if e.get("goal") == str(goal))
+        if n >= lim["max_per_goal"]:
+            return {"kind": "per_goal", "count": n, "max": lim["max_per_goal"]}
+    if run is not None:
+        n = sum(1 for e in ents if e.get("run") == run)
+        if n >= lim["max_per_run"]:
+            return {"kind": "per_run", "count": n, "max": lim["max_per_run"]}
+    return None
+
+
+def cap_reason(cause, rel_counter_path):
+    """The park reason for a `cap_cause` result: names the limit and count, or the unreadable file and the lever.
+    `rel_counter_path` is relative to the .sdlc folder."""
+    if cause["kind"] == "per_goal":
+        return "per-goal cap: %d of %d filings for this goal (ai_filed.max_per_goal)" % (cause["count"], cause["max"])
+    if cause["kind"] == "per_run":
+        return "per-run cap: %d of %d filings in this run (ai_filed.max_per_run)" % (cause["count"], cause["max"])
+    return ("ai_filed counter unreadable: %s cannot be read, so every filing is parked; repair or remove that one file"
+            % rel_counter_path)
+
+
 def over_cap(counter, goal, run, config, per_goal=True):
     """True when one more filing would pass the per-goal or per-run cap, or the counter is unreadable.
     `per_goal=False` skips only the per-goal check (#1553 bypass); the per-run cap and an unreadable counter still count."""
-    if counter is None:
-        return True
-    lim = limits(config)
-    ents = counter.get("entries", [])
-    if per_goal and sum(1 for e in ents if e.get("goal") == str(goal)) >= lim["max_per_goal"]:
-        return True
-    return run is not None and sum(1 for e in ents if e.get("run") == run) >= lim["max_per_run"]
+    return cap_cause(counter, goal, run, config, per_goal) is not None
 
 
 def evictable(counter, goal, new_priority):

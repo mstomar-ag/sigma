@@ -514,17 +514,21 @@ def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text
     # It skips only the per-goal cap; the per-run cap and an unreadable counter still park.
     # #1697: below the bypass, a per-goal cap hit parks the LOWEST priority of the goal (newest among equals): a
     # strictly lower armed filing is parked instead of this one.
-    cap_reason = "ai_filed cap reached (ai_filed.max_per_goal / ai_filed.max_per_run) or counter unreadable"
     plan["prio"] = requested_priority if re.fullmatch(r"P[0-4]", str(requested_priority)) else priority
     bypass = ai_filed_counter.bypasses_cap(requested_priority, config)
-    if plan["kind"] == "arm" and ai_filed_counter.over_cap(counter, key_goal, _run_id(), config, per_goal=not bypass):
+    cause = ai_filed_counter.cap_cause(counter, key_goal, _run_id(), config, per_goal=not bypass) \
+        if plan["kind"] == "arm" else None
+    if cause is not None:
         victim = None
-        if not ai_filed_counter.over_cap(counter, key_goal, _run_id(), config, per_goal=False):
+        if ai_filed_counter.cap_cause(counter, key_goal, _run_id(), config, per_goal=False) is None:
             victim = ai_filed_counter.evictable(counter, key_goal, plan["prio"])
         if victim is None:
-            plan["kind"], plan["priority"], plan["reason"] = "park", None, cap_reason
-        else:
-            plan["evict"], plan["evict_reason"] = victim, cap_reason
+            plan["kind"], plan["priority"] = "park", None
+            plan["reason"] = ai_filed_counter.cap_reason(cause, lim["counter_path"])
+        else:                                   # only a per-goal hit evicts
+            plan["evict"] = victim
+            plan["evict_reason"] = (ai_filed_counter.cap_reason(cause, lim["counter_path"])
+                                    + " - parked to make room for a more urgent filing")
     if plan["kind"] == "arm" and plan["depth"] is not None and plan["depth"] > lim["max_depth"]:
         plan["kind"], plan["priority"], plan["reason"] = "park", None, "ai_filed depth limit reached"
     return plan

@@ -93,3 +93,26 @@ def test_invalid_bypass_priority_reads_as_p1_1553():
     m = _mod()
     for bad in ("P9", 1, None, "p1", True):
         assert m.limits({"ai_filed": {"cap_bypass_priority": bad}})["cap_bypass_priority"] == "P1"
+
+
+def test_cap_cause_names_kind_count_and_max_2039():
+    m = _mod()
+    cfg = {"ai_filed": {"max_per_goal": 2, "max_per_run": 3}}
+    c = {"entries": [{"run": "r1", "goal": "g1", "t": 100}, {"run": "r1", "goal": "g1", "t": 101}]}
+    assert m.cap_cause(c, "g1", "r1", cfg) == {"kind": "per_goal", "count": 2, "max": 2}
+    assert m.cap_cause(c, "g2", "r1", cfg) is None
+    c["entries"].append({"run": "r1", "goal": "g3", "t": 102})
+    assert m.cap_cause(c, "g2", "r1", cfg) == {"kind": "per_run", "count": 3, "max": 3}
+    assert m.cap_cause(c, "g1", "r1", cfg, per_goal=False) == {"kind": "per_run", "count": 3, "max": 3}
+    assert m.cap_cause(None, "g1", "r1", cfg) == {"kind": "unreadable"}
+    assert m.cap_cause(None, "g1", "r1", cfg, per_goal=False) == {"kind": "unreadable"}
+
+
+def test_cap_reason_text_names_limit_count_and_lever_2039():
+    m = _mod()
+    g = m.cap_reason({"kind": "per_goal", "count": 5, "max": 5}, "state/c.json")
+    assert "per-goal cap: 5 of 5" in g and "ai_filed.max_per_goal" in g and "max_per_run" not in g
+    r = m.cap_reason({"kind": "per_run", "count": 20, "max": 20}, "state/c.json")
+    assert "per-run cap: 20 of 20" in r and "ai_filed.max_per_run" in r and "max_per_goal" not in r
+    u = m.cap_reason({"kind": "unreadable"}, "state/c.json")
+    assert "state/c.json" in u and "repair or remove that one file" in u

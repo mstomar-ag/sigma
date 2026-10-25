@@ -8005,7 +8005,8 @@ def test_ai_filed_out_of_range_bucket_gives_a_not_ok_row_naming_the_key(tmp_path
 def test_ai_filed_unreadable_counter_gives_a_not_ok_row_naming_file_and_remedy(tmp_path):
     rows = _ai_filed_names(tmp_path, {"ai_filed": {}}, counter="{not json")
     row = rows["AI-filed counter is readable"]
-    assert row["ok"] is False and "ai_filed_counter.json" in row["fix"] and "delete" in row["fix"]
+    assert row["ok"] is False and "state/ai_filed_counter.json" in row["fix"]
+    assert str(tmp_path) not in row["fix"] and "repair or remove that one file" in row["fix"]
 
 
 def test_ai_filed_missing_or_valid_counter_and_default_config_show_no_row(tmp_path):
