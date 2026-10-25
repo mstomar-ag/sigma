@@ -153,6 +153,15 @@ of one member each, one `parked` decision, and `complete` true. A goal that is n
 `dag: goal 99 is not in the map` and exited 2; a missing map printed `dag: map unusable (missing)` and
 exited 3.
 
+## Unit view
+
+`dag.py report --feature <unit>` (and `--json`) lists one unit's open members. Each member shows its open
+blockers, and a blocker outside the unit is marked `(outside unit)` and listed again under "Outside
+blockers", so a member held from outside never reads free. A closed blocker is not shown. A unit the map does
+not know exits 2 with one line naming the units it does know; a known unit with no open member says so and
+exits 0. `dag.py html --feature <unit>` writes one page, `unit-<unit>.html`, with the outside blockers drawn
+muted and in the legend. Both read the stored map only; `--feature` cannot be combined with `--goal`.
+
 ## Stuck chains
 
 `dag.py stuck` lists decision roots holding other work, most freeing first; `dag.py chains` lists

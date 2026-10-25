@@ -22,19 +22,21 @@
   dag.py stuck [--json] [--sdlc DIR]
                                 decision roots holding other work, most freeing first
 
-  dag.py html (--goal N | --all) [--out DIR] [--titles FILE] [--sdlc DIR]
+  dag.py html (--goal N | --all | --feature UNIT) [--out DIR] [--titles FILE] [--sdlc DIR]
                                 one self-contained, offline HTML page per chain (a goal and its open
-                                prerequisites, the set `chain.py plan` reads), plus an index with `--all`;
+                                prerequisites, the set `chain.py plan` reads), plus an index with `--all`; `--feature UNIT` is one page
+                                of a unit's open members with their outside blockers muted (`unit-<unit>.html`);
                                 default `<sdlc>/state/dag-html/`; reads only the stored map and the titles file `titles` made, no network
                                 (#1924, see dag_html.py)
 
   dag.py titles [--sdlc DIR]    the one network verb of the pair: list open issue titles (REST, at most 50 calls)
                                 into `<sdlc>/state/dag-titles.json`, which `html` reads; never in the map (#1987)
 
-  dag.py report [--goal N] [--md | --json] [--sdlc DIR]
+  dag.py report [--goal N | --feature UNIT] [--md | --json] [--sdlc DIR]
                                 the whole map in one read-only report: state, the doctor's freshness and
                                 shadow lines, stuck and active chains, cycles, chains done this month, where
-                                the files live; `--goal N` is the chain behind N. Stored map only, no network,
+                                the files live; `--goal N` is the chain behind N; `--feature UNIT` is one unit's open members and
+                                their open blockers, outside ones labelled (#2056). Stored map only, no network,
                                 writes nothing; with nothing to read it prints one line with the exact fix
                                 (#1954, see dag_report.py, `/sigma-dag`)
 
@@ -249,13 +251,16 @@ def main(argv=None):
     which = wp.add_mutually_exclusive_group(required=True)
     which.add_argument("--goal", type=int, help="the page of one goal and its open prerequisites")
     which.add_argument("--all", action="store_true", help="a page per end goal, and an index")
+    which.add_argument("--feature", default=None, metavar="UNIT", help="one page of a unit's open members and their outside blockers")
     wp.add_argument("--out", default=None, help="the output directory (default: <sdlc>/state/dag-html)")
     wp.add_argument("--titles", default=None, help="a JSON file of titles, {\"<number>\": \"<title>\"}; the map holds none")
     wp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     ttp = sub.add_parser("titles", help="read open issue titles into <sdlc>/state/dag-titles.json for html pages")
     ttp.add_argument("--sdlc", default=None, help="the .sdlc directory (default: ./.sdlc)")
     pp = sub.add_parser("report", help="the stored map in one read-only report (markdown, or --json)")
-    pp.add_argument("--goal", type=int, default=None, help="the chain behind this goal instead")
+    which_r = pp.add_mutually_exclusive_group()
+    which_r.add_argument("--goal", type=int, default=None, help="the chain behind this goal instead")
+    which_r.add_argument("--feature", default=None, metavar="UNIT", help="one unit's open members and their open blockers")
     fmt = pp.add_mutually_exclusive_group()
     fmt.add_argument("--md", action="store_true", help="markdown (the default)")
     fmt.add_argument("--json", action="store_true", help="the dag-report/1 object")
@@ -267,11 +272,13 @@ def main(argv=None):
         print(out)
         return code
     if args.verb == "report":
-        out, code = _load("dag_report").report(sdlc, args.goal, args.json, chain_text=_chain_text)
+        out, code = _load("dag_report").report(sdlc, args.goal, args.json, chain_text=_chain_text,
+                                                 feature=args.feature)
         print(out, end="" if out.endswith("\n") else "\n")
         return code
     if args.verb == "html":
-        lines, code = _load("dag_html").run(sdlc, args.goal, args.all, args.out, args.titles)
+        lines, code = _load("dag_html").run(sdlc, args.goal, args.all, args.out, args.titles,
+                                              feature=args.feature)
         print("\n".join(lines))
         return code
     if args.verb == "titles":

@@ -7,7 +7,8 @@ nothing and writes nothing. Markdown by default; `as_json` gives schema `dag-rep
 
 Sections: the state (mode, age, node and edge counts, usable), the doctor's freshness verdict and shadow
 comparison line, stuck chains (most freeing first), active chains, cycles, chains completed this month, and
-where the files live. With `goal`, the chain behind that goal instead (the `dag.py chain` text under a heading).
+where the files live. With `goal`, the chain behind that goal instead (the `dag.py chain` text under a heading). With `feature`, one unit's
+open members, each with its open blockers, and every open blocker outside the unit labelled (`unit_facts`, #2056).
 
 When there is nothing to read, ONE line says why and gives the exact fix; the answer is never empty:
 mode `off`; `discovery.dag.mode` not written (the automatic refresh and the doctor rows start only once it
@@ -148,15 +149,63 @@ def _markdown(f):
     return "\n".join(out) + "\n"
 
 
-def report(sdlc, goal=None, as_json=False, now=None, rows=None, chain_text=None):
+def unit_facts(m, unit):
+    """`(facts, None)` for one unit of the stored map, or `(None, line)` when no node carries it. Members are the
+    open issues with `unit`; each lists its OPEN blockers (edge blocker->member), marked outside when the blocker
+    is not of the unit, and `outside` lists those blockers once. A closed blocker is never shown (#2056)."""
+    nodes = {n["number"]: n for n in m["nodes"]}
+    units = sorted({n["unit"] for n in m["nodes"] if n.get("unit")})
+    if unit not in units:
+        return None, "dag: no unit %r in the map; known units: %s" % (unit, ", ".join(units) or "none")
+    members = sorted(n for n, d in nodes.items() if d.get("unit") == unit and d["kind"] == "issue" and d["state"] == "open")
+    blocked_by = {n: [] for n in members}
+    for e in m["edges"]:
+        b, a = e["blocker"], e["blocked"]
+        if a in blocked_by and b in nodes and nodes[b]["state"] == "open":
+            blocked_by[a].append(b)
+
+    def row(n):
+        return {"number": n, "life": nodes[n]["life"], "unit": nodes[n].get("unit")}
+    outside = {}
+    for a, bl in blocked_by.items():
+        for b in bl:
+            if nodes[b].get("unit") != unit:
+                outside.setdefault(b, row(b) | {"blocks": []})["blocks"].append(a)
+    return {"schema": SCHEMA, "feature": unit,
+            "members": [row(n) | {"blockers": [row(b) | {"outside": b in outside} for b in sorted(set(blocked_by[n]))]}
+                        for n in members],
+            "outside": [outside[b] | {"blocks": sorted(outside[b]["blocks"])} for b in sorted(outside)]}, None
+
+
+def _unit_markdown(f):
+    out = ["# Unit %s" % f["feature"], "", "## Members", ""]
+    for r in f["members"]:
+        bl = ", ".join("#%d%s" % (b["number"], " (outside unit)" if b["outside"] else "") for b in r["blockers"])
+        out.append("- #%d (%s): %s" % (r["number"], r["life"], "waits on " + bl if bl else "no open blockers"))
+    out += ["", "## Outside blockers", ""]
+    out += ["- #%d (unit %s, %s) holds %s" % (o["number"], o["unit"] or "none", o["life"], _ids(o["blocks"]))
+            for o in f["outside"]] or ["- none"]
+    return "\n".join(out) + "\n"
+
+
+def report(sdlc, goal=None, as_json=False, now=None, rows=None, chain_text=None, feature=None):
     """`(text, exit_code)`. `rows` ({"freshness", "shadow"}) replaces the doctor's rows (tests); `chain_text`
-    renders a chain (default: `dag.py`'s own)."""
+    renders a chain (default: `dag.py`'s own). `feature` is the unit view: unknown unit exits 2 with one line,
+    a unit with no open member says so (exit 0)."""
     now = time.time() if now is None else now
     config = _config(sdlc)
     line, m, reason = _fix(sdlc, config, now)
     if line:
         return (json.dumps({"schema": SCHEMA, "state": None, "fix": line, "reason": reason}, indent=2,
                            sort_keys=True) if as_json else line), 0
+    if feature is not None:
+        f, why = unit_facts(m, feature)
+        if f is None:
+            return why, 2
+        if not f["members"]:
+            return (json.dumps(f | {"note": "no open members"}, indent=2, sort_keys=True) if as_json
+                    else "dag: unit %s has no open members" % feature), 0
+        return (json.dumps(f, indent=2, sort_keys=True) if as_json else _unit_markdown(f)), 0
     if goal is not None:
         try:
             res = dag_chain.chain(sdlc, goal, now=now)

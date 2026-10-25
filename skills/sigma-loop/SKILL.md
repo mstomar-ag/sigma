@@ -64,8 +64,7 @@ Then repeat until the helper says stop:
    Full: `references/picking.md`.
 3. Otherwise, `deps.py report` (`references/picking.md`), then the **opt-in pre-checks, in order**,
    before any token. Each prints `OFF` (feature disabled), `PROCEED`, or `PARKED <reason>`. On **`PARKED <reason>`**:
-   **Do not research it: loop back to step 1** and take the next goal. (The park counts as one
-   iteration.)
+   **Do not research it: loop back to step 1** and take the next goal.
 
    ```
    result=$(python3 "${CLAUDE_SKILL_DIR}/scripts/loop.py" precheck .sdlc "$goal")        # duplicate  (backlog_check)

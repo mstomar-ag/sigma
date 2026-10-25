@@ -50,6 +50,12 @@ O(members + edges) for the rest; dummy slots are skipped (long edges drawn direc
 0.35 s; a tangled chain is not measured, and `tests/test_dag_html.py` bounds a 400-member page at 1.5 MB. `--all` is
 the sum of its chains, one page each.
 
+THE UNIT PAGE (#2056, `build_unit`, `dag.py html --feature UNIT`). One page for a unit: the per-member chain models
+(`build`, so the closure already pulls in every open outside blocker) merged into one, written as `unit-<unit>.html`
+(the name is sanitised). Nodes whose unit is not the unit are tagged outside context (`k` = `ctx`: muted, dashed,
+a legend entry, not counted in the state legend); the work that waits on a member is not drawn. The model has no
+goal (`goal` is None) and `unit` names the unit; an unknown unit or one with no open member is refused in one line.
+
 THE WORK THAT WAITS ON THE GOAL (#1986). Beyond the prerequisites, a `--goal` page also draws the goal's open
 dependents, transitive, in columns to its right: open issues only (never a closed one or a pull request), nearest
 first and ties by number, drawn muted as state `waiting`, each edge from the goal or another dependent tagged
@@ -61,6 +67,7 @@ At 10x (400 dependents) and at 100x (4,000) the page still draws 40 and writes o
 the walk costs O(open dependents + their edges), a few milliseconds at 4,000 (reasoned from the loop, not timed).
 """
 import collections
+import hashlib
 import html
 import importlib.util
 import json
@@ -317,6 +324,67 @@ def build(m, config, goal, titles=None, now=None, fresh=(True, "ok")):
             "built_at": out["map_built_at"], "age": out["map_age_seconds"], "fresh": fresh, "mode": None}
 
 
+def unit_name(unit):
+    """A file-name-safe form of a unit token; a changed name gets a short hash so two units never share a file."""
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "-", unit).strip("-") or "unit"
+    return safe if safe == unit else "%s-%s" % (safe, hashlib.sha1(unit.encode("utf-8")).hexdigest()[:6])
+
+
+def unit_members(m, unit):
+    """`(members, known_units)`: the open issues of `unit` in the stored map, and every unit the map knows."""
+    units = sorted({n["unit"] for n in m["nodes"] if n.get("unit")})
+    return sorted(n["number"] for n in m["nodes"]
+                  if n.get("unit") == unit and n["kind"] == "issue" and n["state"] == "open"), units
+
+
+def build_unit(m, config, unit, titles=None, now=None, fresh=(True, "ok")):
+    """The model of a unit: the chain models of its open members merged (nodes by number, the deepest column wins,
+    the work waiting on a member dropped), nodes outside the unit tagged `ctx`. Raises HtmlError 2 for an unknown
+    unit or one without an open member."""
+    members, units = unit_members(m, unit)
+    if unit not in units:
+        raise HtmlError(EXIT["refused"], "dag: no unit %r in the map; known units: %s" % (unit, ", ".join(units) or "none"))
+    if not members:
+        raise HtmlError(EXIT["refused"], "dag: unit %s has no open members" % unit)
+    models = [build(m, config, n, titles, now, fresh) for n in members]
+    nodes, edges = {}, {}
+    for md in models:
+        for n, d in md["nodes"].items():
+            if d["m"] == "waiting":
+                continue
+            nodes[n] = dict(d, depth=max(d["depth"], nodes[n]["depth"])) if n in nodes else dict(d)
+        for a, b, t in md["edges"]:
+            if t != "holds":
+                edges[(a, b)] = t
+    edges = {k: t for k, t in edges.items() if k[0] in nodes and k[1] in nodes}
+    waits, frees = collections.defaultdict(list), collections.defaultdict(list)
+    for a, b in edges:
+        waits[b].append(a)
+        frees[a].append(b)
+    for n, d in nodes.items():
+        d["waits"], d["frees"] = sorted(waits[n]), sorted(frees[n])
+        if d["m"] not in ("closed", "outside", "cycle") and d["unit"] != unit:
+            d["k"], d["why"] = "ctx", "outside the unit; " + d["why"]
+    open_rows = [d for d in nodes.values() if d["m"] not in ("closed", "outside", "cycle") and d.get("k") != "ctx"]
+    ctx = sum(1 for d in nodes.values() if d.get("k") == "ctx")
+    stops = {s["n"]: s for md in models for s in md["stops"] if nodes.get(s["n"], {}).get("k") != "ctx"}
+    ranked = [d["prio"] for d in open_rows if d["prio"]]
+    who = sorted({UNKNOWN if d["who"] is None else UNASSIGNED if not d["who"] else a
+                  for d in open_rows for a in (d["who"] or [None])})
+    first = models[0]
+    return {"goal": None, "unit": unit, "nodes": nodes, "edges": sorted((a, b, t) for (a, b), t in edges.items()),
+            "stops": [stops[n] for n in sorted(stops)], "ctx": ctx,
+            "forecast": "Unit %s: %d open members, %d open blockers outside the unit" % (unit, len(open_rows), ctx),
+            "notes": [], "reason": None, "finish": 0, "waiting": 0, "left_out": 0, "open": len(open_rows),
+            "closed": sum(1 for d in nodes.values() if d["m"] == "closed"), "outside": first["outside"],
+            "cycles": first["cycles"] if len(models) == 1 else [c for md in models for c in md["cycles"]],
+            "depth": max([d["depth"] for d in open_rows] or [0]),
+            "decisions": sum(1 for d in open_rows if d["m"] == "needs decision"),
+            "top": min(ranked, key=chain._rank) if ranked else "", "who": who,
+            "over_cap": len(open_rows) > MEMBER_CAP, "titled": bool(titles),
+            "built_at": first["built_at"], "age": first["age"], "fresh": fresh, "mode": None}
+
+
 # ------------------------------------------------------------------ the layout
 
 def _inversions(ys):
@@ -512,6 +580,7 @@ dd button{display:block;width:100%%;text-align:left;margin:3px 0}
 .c-paid{--c-f:var(--paid-f);--c-s:var(--paid-s)}.c-parked{--c-f:var(--parked-f);--c-s:var(--parked-s)}
 .c-notgoal{--c-f:var(--notgoal-f);--c-s:var(--notgoal-s)}.c-awaiting{--c-f:var(--awaiting-f);--c-s:var(--awaiting-s)}
 .c-waiting{--c-f:var(--closed-f);--c-s:var(--closed-s)}.c-waiting rect{stroke-dasharray:3 3}.n.c-waiting{opacity:.62}
+.c-ctx{--c-f:var(--closed-f);--c-s:var(--closed-s)}.c-ctx rect{stroke-dasharray:3 3}.n.c-ctx{opacity:.62}
 .e.holds{stroke-dasharray:1 5;opacity:.45}
 .sw.c-outside{border-style:dashed}.sw{background:var(--c-f);border-color:var(--c-s)}
 .e{fill:none;stroke:var(--edge);stroke-width:1.4;opacity:.7}
@@ -718,12 +787,14 @@ def _node_svg(d, goal, xy, closed_blockers=0, badges=()):
 
 def _legend(model):
     """The colour and edge legend: a state is listed when a node carries it (the first three always)."""
-    counts = collections.Counter(d.get("word") or d["m"] for d in model["nodes"].values())
+    counts = collections.Counter(d.get("word") or d["m"] for d in model["nodes"].values() if d.get("k") != "ctx")
     text = dict(LEGEND, **model.get("legend_text", {}))
     out = "".join('<span><i class="sw c-%s"></i>%s (%d): %s</span>' % (CLASS[k], _esc(k), counts[k], _esc(text[k]))
                   for k, _v in LEGEND if counts[k] or k in ("ready now", "after", "needs decision"))
     if counts["waiting"]:
         out += '<span><i class="sw c-waiting"></i>waiting (%d): open work that waits on the goal</span>' % counts["waiting"]
+    if model.get("ctx"):
+        out += '<span><i class="sw c-ctx"></i>outside the unit (%d): open blocker of a member, drawn muted</span>' % model["ctx"]
     edges = EDGES + ((("holds", "waits on the goal (drawn muted)"),) if counts["waiting"] else ())
     return out + "".join('<span><i class="ln %s"></i>%s: %s</span>' % (k, k, v) for k, v in edges)
 
@@ -764,17 +835,19 @@ def _header(model, repo):
         notices.append("Layout simplified: this chain is too large for channel routing, so long edges are drawn "
                        "straight and may cross nodes.")
     legend = _legend(model)
-    goal = model["nodes"][model["goal"]]
+    goal = model["nodes"].get(model["goal"], {})
+    unit = model.get("unit")
     facts = ("<span><b>%d</b> open members</span><span>depth <b>%d</b></span><span><b>%d</b> closed prerequisites"
              "</span><span><b>%d</b> need a decision</span>%s<span>map built <b>%s</b>, age <b>%s</b></span>"
              % (model["open"], model["depth"], model["closed"], model["decisions"],
                 "<span><b>%d</b> open issues wait on it</span>" % model["waiting"] if model.get("waiting") else "",
                 _esc(_stamp(model["built_at"])), _age(model["age"]) if model["age"] is not None else "unknown"))
-    return ('<header class="top"><h1>Chain for #%d%s <small>%s</small></h1><div class="facts">%s</div>'
+    return ('<header class="top"><h1>%s <small>%s</small></h1><div class="facts">%s</div>'
             '<div class="held">%s</div><div class="fc">%s</div>%s<div class="hint">%s</div>%s<div class="legend">%s</div>'
             '</header>'
-            % (model["goal"], " " + _esc(goal["t"]) if goal.get("t") else "", _esc(repo or ""), facts,
-               _esc(held), _esc(model["forecast"]) + ". Assumes every goal it claims merges; the cap is not modelled.",
+            % ("Unit " + _esc(unit) if unit else "Chain for #%d%s" % (model["goal"], " " + _esc(goal["t"]) if goal.get("t") else ""),
+               _esc(repo or ""), facts, _esc(held),
+               _esc(model["forecast"]) + ("." if unit else ". Assumes every goal it claims merges; the cap is not modelled."),
                fc_notes, _esc(MAP_HINT), "".join('<div class="notice">%s</div>' % _esc(n) for n in notices), legend))
 
 
@@ -802,15 +875,16 @@ def render_page(model, repo=None):
     badges = model.get("badges", {})
     body = "".join(_node_svg(d, model["goal"], xy[d["n"]], sum(1 for w in d["waits"] if nodes[w]["m"] == "closed"),
                              badges.get(d["n"], ())) for d in ordered)
+    label = "Unit " + model["unit"] if model.get("unit") else "Chain for #%d" % model["goal"]
     with_closed = "%d 0 %d %d" % (left, width - left, max(height, closed_h))
-    svg = ('<svg id="g" viewBox="0 0 %d %d" data-closed="%s" role="img" aria-label="Chain for #%d: blockers on the '
+    svg = ('<svg id="g" viewBox="0 0 %d %d" data-closed="%s" role="img" aria-label="%s: blockers on the '
            'left, the work that waits on them on the right"><defs><marker id="arr" viewBox="0 0 10 10" refX="9" '
            'refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs>'
-           '<g>%s</g><g>%s</g></svg>' % (width, height, with_closed, model["goal"], edges, body))
+           '<g>%s</g><g>%s</g></svg>' % (width, height, with_closed, label, edges, body))
     css = CSS % {"light": _vars("light"), "dark": _vars("dark")}
     plan = model.get("plan")
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
-            '<meta name="viewport" content="width=device-width,initial-scale=1"><title>Chain %s#%d</title>'
+            '<meta name="viewport" content="width=device-width,initial-scale=1"><title>%s</title>'
             '<style>%s</style></head><body>%s<main%s><div id="stage"><div id="tools"><button id="zin" title="Zoom in">+'
             '</button><button id="zout" title="Zoom out">\u2212</button><button id="zfit" title="Show the whole '
             'chain">Fit</button><button id="zth" title="Switch light and dark">Theme</button>%s</div>%s</div>'
@@ -818,7 +892,7 @@ def render_page(model, repo=None):
             'what it frees and why it is held. Drag to pan, scroll or + and \u2212 to zoom, Fit shows the whole '
             'chain.</p><dl id="p-body"></dl></aside></main>%s'
             '<script type="application/json" id="data">%s</script><script>%s</script></body></html>\n'
-            % ("plan for " if plan else "for ", model["goal"], css,
+            % ("Unit " + _esc(model["unit"]) if model.get("unit") else "Chain %s#%d" % ("plan for " if plan else "for ", model["goal"]), css,
                _plan_header(model, repo) if plan else _header(model, repo), ' class="plan"' if plan else "",
                '<label><input type="checkbox" id="zcl"> show %d closed</label>' % model["closed"] if model["closed"] else "",
                svg, _questions_html(model) if plan else "", _more_html(model) if plan else "", _data_json(model), JS))
@@ -1138,12 +1212,12 @@ def end_goals(m):
     return sorted(ends)
 
 
-def run(sdlc, goal=None, all_=False, out_dir=None, titles_path=None, now=None):
+def run(sdlc, goal=None, all_=False, out_dir=None, titles_path=None, now=None, feature=None):
     """`(lines, exit_code)`: write the page of `goal`, or every chain's page and the index. Writes only under
-    `out_dir` (default `<sdlc>/state/dag-html`); no GitHub call."""
+    `out_dir` (default `<sdlc>/state/dag-html`); no GitHub call. `feature` writes the one page of that unit."""
     now = time.time() if now is None else now
-    if (goal is None) == (not all_):
-        return ["dag html: give exactly one of --goal N or --all"], EXIT["refused"]
+    if sum(x is not None and x is not False for x in (goal, all_, feature)) != 1:
+        return ["dag html: give exactly one of --goal N, --all or --feature UNIT"], EXIT["refused"]
     try:
         m, _md, config, ok, why = _open(sdlc, now)
         stale = False
@@ -1155,8 +1229,14 @@ def run(sdlc, goal=None, all_=False, out_dir=None, titles_path=None, now=None):
             stale = bool(titles) and (read_at is None or (built is not None and read_at < built))
         out = pathlib.Path(out_dir) if out_dir else pathlib.Path(sdlc) / "state" / "dag-html"
         check_out(out)
-        goals = [goal] if not all_ else end_goals(m)
-        models = [build(m, config, n, titles, now, (ok, why)) for n in goals]
+        if feature is not None:
+            members, units = unit_members(m, feature)
+            if feature in units and not members:
+                return ["dag: unit %s has no open members" % feature], EXIT["ok"]
+            models = [build_unit(m, config, feature, titles, now, (ok, why))]
+        else:
+            goals = [goal] if not all_ else end_goals(m)
+            models = [build(m, config, n, titles, now, (ok, why)) for n in goals]
         for model in models:
             model["titles_stale"] = stale
     except HtmlError as exc:
@@ -1165,8 +1245,11 @@ def run(sdlc, goal=None, all_=False, out_dir=None, titles_path=None, now=None):
     os.makedirs(out, exist_ok=True)
     lines, rows = [], []
     for model in models:
-        name = "chain-%d.html" % model["goal"]
+        name = "unit-%s.html" % unit_name(feature) if feature is not None else "chain-%d.html" % model["goal"]
         dag_store.state.atomic_write_text(out / name, render_page(model, repo))
+        if feature is not None:
+            return ["wrote %s (unit %s, %d open members, %d outside context)"
+                    % (out / name, feature, model["open"], model["ctx"])], EXIT["ok"]
         lines.append("wrote %s (#%d, %d open members, depth %d)" % (out / name, model["goal"], model["open"],
                                                                    model["depth"]))
         if model["over_cap"]:

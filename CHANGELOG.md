@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A unit view of the dependency map (#2056).** `dag.py report --feature <unit>` (markdown or `--json`) and `dag.py html --feature <unit>` show one unit's open members, each with its open blockers, and every open blocker outside the unit as labelled outside context; an unknown unit exits 2 with one line naming the known units, and `/sigma-dag` gains `--feature` and an `argument-hint`. Measured on fixtures only.
+
 ## 1.0.20 — 2026-10-22 — the dependency map's pages show assignees and the work that waits; one-run rebuild, titles without a hand-made file, deps review sheets, unmark and a direction-aware two-way flag
 
 - **A dag page says why the assignee filter is not applied, truthfully (#1997).** A page is drawn for no runner, so the map-life note now says so when the members' nodes do carry assignees, and keeps the no-assignees reason only when none does. Measured on fixtures only.
