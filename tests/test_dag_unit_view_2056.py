@@ -255,3 +255,13 @@ def test_a_merged_pull_request_blocker_is_resolved():
          "edges": [{"blocker": 2, "blocked": 1, "source": "body"}]}
     facts, _ = rep.unit_facts(m, "alpha")
     assert facts["members"][0]["blockers"] == [] and facts["outside"] == []
+
+
+def test_a_blocker_with_no_node_in_the_map_still_blocks():
+    """The core reads an edge endpoint it holds no node for as an unknown issue, which blocks (the control: guard
+    the edge loop with `b in nodes` again and this goes red)."""
+    m = {"nodes": [_node(1, unit="alpha")], "edges": [{"blocker": 99, "blocked": 1, "source": "body"}]}
+    facts, _ = rep.unit_facts(m, "alpha")
+    assert [b["number"] for b in facts["members"][0]["blockers"]] == [99]
+    assert [o["number"] for o in facts["outside"]] == [99]
+    assert "#99" in rep._unit_markdown(facts)

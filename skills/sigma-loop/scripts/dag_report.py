@@ -159,6 +159,8 @@ def unit_facts(m, unit):
     open issues with `unit`; each lists its unresolved blockers (edge blocker->member), marked outside when the blocker
     is not of the unit, and `outside` lists those blockers once. A resolved blocker (closed issue, merged pull request) is never shown (#2056)."""
     nodes = {n["number"]: n for n in m["nodes"]}
+    for e in m["edges"]:                # an endpoint the map holds no node for is unknown, as the core counts it
+        nodes.setdefault(e["blocker"], {"number": e["blocker"], "kind": "issue", "state": "unknown", "life": "unknown"})
     units = sorted({n["unit"] for n in m["nodes"] if n.get("unit")})
     if unit not in units:
         return None, "dag: no unit %r in the map; known units: %s" % (unit, ", ".join(units) or "none")
@@ -166,7 +168,7 @@ def unit_facts(m, unit):
     blocked_by = {n: [] for n in members}
     for e in m["edges"]:
         b, a = e["blocker"], e["blocked"]
-        if a in blocked_by and b in nodes and not _resolved(nodes[b]):
+        if a in blocked_by and not _resolved(nodes[b]):
             blocked_by[a].append(b)
 
     def row(n):
