@@ -1572,10 +1572,12 @@ def _apply(au, tmp_path, cfg, src, rearms, monkeypatch):
     landed = []
 
     def fake_apply(source, actions, apply):
+        out = []                    # like the real one: NEW dicts, the input is never mutated
         for a in actions:
-            a["result"] = "done"
-            landed.append(a)
-        return actions
+            b = dict(a, result="done", error=None)
+            landed.append(b)
+            out.append(b)
+        return out
     monkeypatch.setattr(au.triage, "apply_actions", fake_apply)
     return au.apply_filing_cap_rearms(str(tmp_path), cfg, src, rearms), landed
 

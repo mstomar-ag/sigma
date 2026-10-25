@@ -674,13 +674,15 @@ def apply_filing_cap_rearms(sdlc_dir, config, source, rearms):
     ledger entry, ONE issue comment (best effort). -> the sorted issue numbers whose labels landed."""
     if not rearms:
         return []
+    # `apply_actions` returns NEW dicts (it never mutates its input): copy each outcome back onto the plan.
     flat = [a for r in rearms for a in r["actions"]]
-    triage.apply_actions(source, flat, True)
+    for a, done in zip(flat, triage.apply_actions(source, flat, True)):
+        a["result"], a["error"] = done.get("result"), done.get("error")
     lim = ai_filed_counter.limits(config)
     path = pathlib.Path(str(sdlc_dir)) / lim["counter_path"]
     rid, landed = _run_id(), []
     for r in rearms:
-        if not all(a["result"] == "done" for a in r["actions"]):
+        if r["actions"][0]["result"] != "done":     # the label swap is the re-arm; a failed card move is not
             continue
         landed.append(r["issue"])
         ai_filed_counter.bump(path, rid, r["goal"], time.time(), config, issue=r["issue"], prio=r["prio"])
