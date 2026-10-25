@@ -241,11 +241,9 @@ At STOP, print one machine-readable line FIRST — `LOOP STOP: backlog-empty`, `
 literal resume command — `references/stopping.md`. If anything parked or failed, point the user to the items —
 `.sdlc/state/review-queue.md` in local mode, or the issues labelled `sdlc:parked` in github mode.
 Parking is always correct over forcing an irreversible action to "finish" a goal.
-The self-improving path — closing a knowledge-graph gap instead of stopping when the backlog is
-empty but budget remains — and `supervise_daemon.py`: `references/stopping.md`.
+Closing a knowledge-graph gap when the backlog is empty but budget remains, and `supervise_daemon.py`: `references/stopping.md`.
 
-**Wake-and-work setup (optional).** `ledger.autowatch` is one-time operator setup, not something
-you invoke mid-loop: [`AUTOWATCH.md`](AUTOWATCH.md).
+**Wake-and-work setup (optional).** One-time operator setup for `ledger.autowatch`: [`AUTOWATCH.md`](AUTOWATCH.md).
 
 **Inbound Slack commands (optional).** One-time setup for `slack_commands`:
 [`SLACK_COMMANDS.md`](SLACK_COMMANDS.md).
