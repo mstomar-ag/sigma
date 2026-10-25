@@ -149,10 +149,15 @@ def _markdown(f):
     return "\n".join(out) + "\n"
 
 
+def _resolved(n):
+    """The core's own test (`Graph.resolved`): a closed issue or a merged pull request; anything else still blocks."""
+    return (n["kind"] == "issue" and n["state"] == "closed") or (n["kind"] == "pr" and n["state"] == "merged")
+
+
 def unit_facts(m, unit):
     """`(facts, None)` for one unit of the stored map, or `(None, line)` when no node carries it. Members are the
-    open issues with `unit`; each lists its OPEN blockers (edge blocker->member), marked outside when the blocker
-    is not of the unit, and `outside` lists those blockers once. A closed blocker is never shown (#2056)."""
+    open issues with `unit`; each lists its unresolved blockers (edge blocker->member), marked outside when the blocker
+    is not of the unit, and `outside` lists those blockers once. A resolved blocker (closed issue, merged pull request) is never shown (#2056)."""
     nodes = {n["number"]: n for n in m["nodes"]}
     units = sorted({n["unit"] for n in m["nodes"] if n.get("unit")})
     if unit not in units:
@@ -161,7 +166,7 @@ def unit_facts(m, unit):
     blocked_by = {n: [] for n in members}
     for e in m["edges"]:
         b, a = e["blocker"], e["blocked"]
-        if a in blocked_by and b in nodes and nodes[b]["state"] == "open":
+        if a in blocked_by and b in nodes and not _resolved(nodes[b]):
             blocked_by[a].append(b)
 
     def row(n):

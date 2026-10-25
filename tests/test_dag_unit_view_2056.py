@@ -237,3 +237,21 @@ def test_chain_pages_are_unchanged_by_the_unit_support(sdlc):
     assert code == 0
     page = (sdlc / "state" / "dag-html" / "chain-1.html").read_text()
     assert "c-ctx" not in page.split("</style>")[1] and "outside the unit" not in page.split("</style>")[1]
+
+
+@pytest.mark.parametrize("state,kind", [("unknown", "issue"), ("closed-unmerged", "pr"), ("open", "pr")])
+def test_an_unresolved_blocker_that_is_not_an_open_issue_still_blocks(state, kind):
+    """The core counts only a closed issue or a merged pull request as resolved; the unit view must too, or a
+    blocked member reads free (the control: filter on state == "open" and this goes red for unknown/closed-unmerged)."""
+    m = {"nodes": [_node(1, unit="alpha"), _node(2, state=state, kind=kind, unit="beta")],
+         "edges": [{"blocker": 2, "blocked": 1, "source": "body"}]}
+    facts, _ = rep.unit_facts(m, "alpha")
+    assert [b["number"] for b in facts["members"][0]["blockers"]] == [2]
+    assert [o["number"] for o in facts["outside"]] == [2]
+
+
+def test_a_merged_pull_request_blocker_is_resolved():
+    m = {"nodes": [_node(1, unit="alpha"), _node(2, state="merged", kind="pr", unit="beta")],
+         "edges": [{"blocker": 2, "blocked": 1, "source": "body"}]}
+    facts, _ = rep.unit_facts(m, "alpha")
+    assert facts["members"][0]["blockers"] == [] and facts["outside"] == []
