@@ -16,10 +16,12 @@ import sys
 #: `scope_hold` and `owner_hold` are the gate-hold kinds (written by the two pick gates through `gate_hold`);
 #: `reviewer_down` is a park, not a label: the independent reviewer failed (docs/label-model.md §2c);
 #: `review_post_ambiguous`: a review post's outcome is unknown, so no new generation is published (§2b-iv);
-#: `label_set` (#1578) is the up-front route question for a whole run label, never declared on a park.
+#: `label_set` (#1578) is the up-front route question for a whole run label, never declared on a park;
+#: `filing_cap` (#2040) is a park caused ONLY by the per-goal or per-run filing count, which waits for the
+#: counter (`ai_filed.on_cap: "defer"`), not for a person's decision.
 QKINDS = ("irreversible", "needs_decision", "merge_conflict", "failing_check", "no_evidence",
           "dependency", "review_cap", "quota", "unknown", "scope_hold", "owner_hold", "reviewer_down",
-          "review_post_ambiguous", "label_set")
+          "review_post_ambiguous", "label_set", "filing_cap")
 
 LINE_PREFIX = "sigma-qkind: "
 # The source may append a suffix on the same line (a decision-tier tag), so the kind token ends at
@@ -49,7 +51,27 @@ def parse_line(comment):
 
 def strip_line(comment):
     """`comment` without its machine line(s) and trailing blank space."""
-    return _LINE.sub("", comment or "").strip()
+    return _FILING_GOAL.sub("", _LINE.sub("", comment or "")).strip()
+
+
+FILING_GOAL_PREFIX = "sigma-filing-goal: "
+_FILING_GOAL = re.compile(r"\n?^" + re.escape(FILING_GOAL_PREFIX) + r"([^\n]*)$", re.MULTILINE)
+
+
+def render_filing_goal(key_goal):
+    """#2040: the machine line naming the counter key a `filing_cap` park was counted against ("" -> `none`)."""
+    flat = "".join(str(key_goal or "").split())
+    return FILING_GOAL_PREFIX + (flat or "none")
+
+
+def parse_filing_goal(comment):
+    """The counter key named by the LAST `sigma-filing-goal:` line in `comment` ("" when it says `none`), or
+    None when there is no such line."""
+    found = _FILING_GOAL.findall(comment or "")
+    if not found:
+        return None
+    key = found[-1].strip()
+    return "" if key == "none" else key
 
 
 HARDSTOP_PREFIX = "sigma-hardstop: "

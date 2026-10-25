@@ -133,3 +133,10 @@ head in scratch worktrees, one at a time, and prints base, head, delta and `bett
 the command environment, the limits and the recovery lever are in [quality-delta.md](quality-delta.md).
 With `gates.quality_ratchet.enabled`, `work.py merge` acts on `required` metrics; that section of the same page
 gives the budget, the worst case and the owner-only `work.py quality-waive` verb.
+
+## Filing caps: `ai_filed.on_cap`
+
+`ai_filed.max_per_goal` and `ai_filed.max_per_run` cap how many AI-filed issues are armed. `ai_filed.on_cap` says what a
+park caused only by those counts waits for: `"park"` (default, PROVISIONAL) waits for a person, who is asked to arm it;
+`"defer"` lets the auto-unpark sweep re-arm it, highest priority first, once the counter has room (it needs the
+auto-unpark sweep to be on). A depth, deny-list or unreadable-counter park is never re-armed this way. Any other value reads `"park"`.

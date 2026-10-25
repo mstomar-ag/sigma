@@ -36,8 +36,8 @@ def limits(config):
             v = blk.get(k)
             if isinstance(v, int) and not isinstance(v, bool) and v >= (0 if k == "max_depth" else 1):
                 out[k] = v
-        if blk.get("on_cap") == "park":
-            out["on_cap"] = "park"
+        if blk.get("on_cap") in ("park", "defer"):     # #2040: "defer" re-arms a count-cap park in the sweep
+            out["on_cap"] = blk["on_cap"]
         bp = blk.get("cap_bypass_priority")
         if isinstance(bp, str) and re.fullmatch(r"P[0-4]", bp):
             out["cap_bypass_priority"] = bp

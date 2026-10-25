@@ -514,6 +514,10 @@ def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text
     # It skips only the per-goal cap; the per-run cap and an unreadable counter still park.
     # #1697: below the bypass, a per-goal cap hit parks the LOWEST priority of the goal (newest among equals): a
     # strictly lower armed filing is parked instead of this one.
+    # #2040: the depth limit is checked BEFORE the count cap, so a depth park keeps `needs_decision` and only a
+    # park caused by the count alone declares `filing_cap`.
+    if plan["kind"] == "arm" and plan["depth"] is not None and plan["depth"] > lim["max_depth"]:
+        plan["kind"], plan["priority"], plan["reason"] = "park", None, "ai_filed depth limit reached"
     plan["prio"] = requested_priority if re.fullmatch(r"P[0-4]", str(requested_priority)) else priority
     bypass = ai_filed_counter.bypasses_cap(requested_priority, config)
     cause = ai_filed_counter.cap_cause(counter, key_goal, _run_id(), config, per_goal=not bypass) \
@@ -525,12 +529,12 @@ def _triage_plan(sdlc_dir, config, goal, key_goal, nogoal, source, heading, text
         if victim is None:
             plan["kind"], plan["priority"] = "park", None
             plan["reason"] = ai_filed_counter.cap_reason(cause, lim["counter_path"])
+            if cause["kind"] in ("per_goal", "per_run"):       # #2040: the count alone; an unreadable counter keeps its kind
+                plan["qkind"], plan["key_goal"] = "filing_cap", key_goal
         else:                                   # only a per-goal hit evicts
             plan["evict"] = victim
             plan["evict_reason"] = (ai_filed_counter.cap_reason(cause, lim["counter_path"])
                                     + " - parked to make room for a more urgent filing")
-    if plan["kind"] == "arm" and plan["depth"] is not None and plan["depth"] > lim["max_depth"]:
-        plan["kind"], plan["priority"], plan["reason"] = "park", None, "ai_filed depth limit reached"
     return plan
 
 
@@ -557,6 +561,8 @@ def _triage_finish(sdlc_dir, config, source, plan, issue, key_goal, report):
     a `park` event is appended), then count the filing. Never raises."""
     def _park(target, reason, kind, hardstop=None):
         text = "Parked at filing: %s\n%s" % (reason, qkind.render_line(kind))
+        if kind == "filing_cap":                               # #2040: where the sweep re-counts it
+            text += "\n" + qkind.render_filing_goal(key_goal)
         if hardstop:
             text += "\n" + qkind.render_hardstop(hardstop)
         try:
@@ -579,7 +585,7 @@ def _triage_finish(sdlc_dir, config, source, plan, issue, key_goal, report):
         _park(issue, plan["reason"], plan["qkind"], plan.get("hardstop"))
     elif plan.get("evict"):                                    # #1697: the lowest-priority armed filing yields
         old = plan["evict"]["issue"]
-        if _park(old, plan["evict_reason"], "needs_decision"):
+        if _park(old, plan["evict_reason"], "filing_cap"):
             drop = old
     if plan.get("report"):                                     # #1490: a report for a person, not a loop follow-up
         return

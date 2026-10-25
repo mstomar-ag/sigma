@@ -75,7 +75,7 @@ mechanisms together.
 
     python3 auto_unpark.py sweep <sdlc_dir> [--apply]
 """
-import json, pathlib, sys, importlib.util
+import json, pathlib, re, sys, time, importlib.util
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -94,6 +94,11 @@ triage = _load("triage")          # apply_actions / _execute_action -- reused li
 blockers = _load("blockers")      # #1393: classify() -- the ONE membership-safety policy, not a second
 blocker_scan = _load("blocker_scan")   # #2532: closed_state() -- the rule this file's own
                                         # _ref_is_open originated, now shared rather than sole-owned
+
+
+ai_filed_counter = _load("ai_filed_counter")   # #2040: the count caps a "defer" re-arm is checked against
+qkind = _load("qkind")
+ledger = _load("ledger")
 
 
 _ISSUE_FIELDS = "number,title,body,labels"
@@ -571,6 +576,123 @@ def _raise_blocker_ranks(source, edges, apply):
             pass
 
 
+# ---- #2040: `ai_filed.on_cap: "defer"` -- a park caused ONLY by the filing count waits for the counter ----
+
+#: Posted with every re-arm. A park comment older than it is not re-armed again, so a person who parks the
+#: goal again by label after a re-arm is not overridden by the same old `filing_cap` declaration.
+REARM_MARKER = "<!-- sigma:filing-cap-rearmed -->"
+_REARM_COMMENT = ("Re-armed by Sigma: the filing cap that parked this ({reason}) has room again "
+                  "(ai_filed.on_cap is \"defer\"); re-added {label}.\n" + REARM_MARKER)
+
+
+def _run_id():
+    try:
+        return _load("state").run_identity()
+    except Exception:                                          # noqa: BLE001 - attribution is best effort
+        return None
+
+
+def _prio_of(issue, source):
+    """The issue's priority label as `P0`..`P4`, else None."""
+    prefix = getattr(source, "priority_prefix", "priority:")
+    for n in _label_names(issue):
+        m = re.fullmatch(re.escape(prefix) + r"(P[0-4])", n)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _filing_cap_park(raw_comments):
+    """(reason, filing_goal) of the newest declared `filing_cap` park in `raw_comments`, or None when the
+    newest declaration is another kind, there is no counter key line, or a re-arm note is newer."""
+    if qkind.resolve(raw_comments) != "filing_cap":
+        return None
+    idx = max(i for i, c in enumerate(raw_comments) if qkind.parse_line(c) == "filing_cap")
+    if any(REARM_MARKER in c for c in raw_comments[idx + 1:]):
+        return None
+    goal = qkind.parse_filing_goal(raw_comments[idx])
+    if goal is None:
+        return None
+    first = qkind.strip_line(raw_comments[idx]).splitlines()[0] if qkind.strip_line(raw_comments[idx]) else ""
+    reason = first.split("Parked at filing:", 1)[-1].strip() if first else "filing cap"
+    return reason, goal
+
+
+def compute_filing_cap_rearms(sdlc_dir, config, source, issues, run=None):
+    """Candidates to re-arm, as `[{"issue", "goal", "prio", "reason", "actions"}]`, highest priority first
+    (P0..P4, no label last, then issue number). Empty unless `ai_filed.on_cap` is `defer`, the counter is
+    readable, and a candidate's park is the newest `filing_cap` declaration on a non-exempt, non-gate-held
+    issue. A candidate whose own goal is full stays parked; another goal's may still arm. The pass arms at
+    most `max_per_run` minus the entries already counted for this run, and each planned re-arm counts
+    against the room of the ones after it. Writes nothing."""
+    lim = ai_filed_counter.limits(config)
+    if lim["on_cap"] != "defer":
+        return []
+    counter = ai_filed_counter.load(pathlib.Path(str(sdlc_dir)) / lim["counter_path"])
+    if counter is None:
+        return []
+    rid = _run_id()
+    cands = []
+    for it in issues:
+        if source.parked_label not in _label_names(it):
+            continue
+        n = str(it.get("number"))
+        goal_doc = {"ref": n, "raw": (it.get("title") or "") + "\n" + (it.get("body") or "")}
+        raw = backlog_check._fetch_scrubbed_comments(sdlc_dir, config, goal_doc, run=run)
+        if _is_exempt(raw) or gate_hold.declared_gate_kind(raw):
+            continue
+        park = _filing_cap_park(raw)
+        if park is None:
+            continue
+        prio = _prio_of(it, source)
+        cands.append((int(prio[1]) if prio else 5, int(n) if n.isdigit() else 0, n, prio, park))
+    cands.sort(key=lambda c: (c[0], c[1]))
+    ents = list(counter["entries"])
+    used = sum(1 for e in ents if rid is not None and e.get("run") == rid)
+    room = max(0, lim["max_per_run"] - used)
+    out = []
+    for _rank, _num, n, prio, (reason, goal) in cands:
+        if len(out) >= room:
+            break
+        if ai_filed_counter.over_cap({"entries": ents}, goal, rid, config):
+            continue
+        ents.append({"run": rid, "goal": goal, "t": time.time()})
+        add = [source.goal_label]
+        remove = [source.parked_label]
+        actions = [{"action": "swap-label", "issue": n, "detail": triage._swap_detail(add, remove),
+                    "add": add, "remove": remove, "result": None, "error": None}]
+        if getattr(source, "board_active", False):
+            actions.append({"action": "set-status", "issue": n, "detail": source.col["ready"],
+                            "result": None, "error": None})
+        out.append({"issue": n, "goal": goal, "prio": prio, "reason": reason, "actions": actions,
+                    "action": actions[0]})
+    return out
+
+
+def apply_filing_cap_rearms(sdlc_dir, config, source, rearms):
+    """Enact `rearms` (from `compute_filing_cap_rearms`). Per re-arm that landed: the counter records it, ONE
+    ledger entry, ONE issue comment (best effort). -> the sorted issue numbers whose labels landed."""
+    if not rearms:
+        return []
+    flat = [a for r in rearms for a in r["actions"]]
+    triage.apply_actions(source, flat, True)
+    lim = ai_filed_counter.limits(config)
+    path = pathlib.Path(str(sdlc_dir)) / lim["counter_path"]
+    rid, landed = _run_id(), []
+    for r in rearms:
+        if not all(a["result"] == "done" for a in r["actions"]):
+            continue
+        landed.append(r["issue"])
+        ai_filed_counter.bump(path, rid, r["goal"], time.time(), config, issue=r["issue"], prio=r["prio"])
+        ledger.safe_append(sdlc_dir, "note", r["issue"], config=config,
+                           why="filing_cap re-armed (on_cap defer): " + r["reason"])
+        try:
+            source.note(r["issue"], _REARM_COMMENT.format(reason=r["reason"], label=source.goal_label))
+        except Exception:                                      # noqa: BLE001 - the comment never undoes the re-arm
+            pass
+    return sorted(landed, key=int)
+
+
 _UNPARK_COMMENT = ("Auto-unparked by Sigma — blocker(s) {refs} closed; re-added {label} "
                    "for re-examination.")
 
@@ -634,6 +756,11 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
                                                          open_cache=open_cache, edges_out=edges)
         except Exception:
             blocking_actions = []
+    try:                                                # #2040: a failure here costs this one re-arm pass only
+        rearms = [r for r in compute_filing_cap_rearms(sdlc_dir, config, source, issues, run=run)
+                  if r["issue"] not in resolved]
+    except Exception:                                   # noqa: BLE001
+        rearms = []
     n_unpark = len(unpark_actions)
     actions = unpark_actions + blocking_actions
     # `and actions`, unlike `enact()`'s own unconditional `if apply:` — deliberate, not an oversight.
@@ -642,7 +769,7 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
     # on every unattended pick (`loop.py`'s `_next()`); the overwhelmingly common case is nothing
     # parked at all, and on that case `actions` is already `[]` -- ensuring labels nobody is about
     # to reference would be three pure-waste calls, every single cycle, forever.
-    if apply and actions:
+    if apply and (actions or rearms):
         source._ensure_labels()
     actions = triage.apply_actions(source, actions, apply)
     _raise_blocker_ranks(source, edges, apply)          # #1407: blocker >= blocked, same sweep
@@ -685,8 +812,18 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
                     source.note(n, text)
                 except Exception:
                     pass
-    return {"apply": bool(apply), "checked": len(issues), "eligible": len(resolved),
+    rearmed = []
+    if rearms:
+        if apply:
+            rearmed = apply_filing_cap_rearms(sdlc_dir, config, source, rearms)
+            actions = actions + [a for r in rearms for a in r["actions"]]
+        else:
+            actions = actions + triage.apply_actions(source, [a for r in rearms for a in r["actions"]], False)
+    out = {"apply": bool(apply), "checked": len(issues), "eligible": len(resolved) + len(rearms),
            "actions": actions, "unparked": sorted(unparked, key=int)}
+    if rearms:                                          # #2040: absent when nothing was planned (the old shape)
+        out["rearmed"] = rearmed
+    return out
 
 
 def render_sweep(result):

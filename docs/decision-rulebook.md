@@ -182,7 +182,9 @@ OWNER, MEMBER or COLLABORATOR declaration count. A filing the deny-list parks is
 carries `sigma-hardstop: <class>`. The closed list:
 
 `irreversible`, `needs_decision`, `merge_conflict`, `failing_check`, `no_evidence`, `dependency`, `review_cap`,
-`quota`, `unknown`, `scope_hold`, `owner_hold`, `reviewer_down`, `review_post_ambiguous`, `label_set`.
+`quota`, `unknown`, `scope_hold`, `owner_hold`, `reviewer_down`, `review_post_ambiguous`, `label_set`, `filing_cap`.
+
+`filing_cap` (#2040) is declared only when the per-goal or per-run filing count alone parked a filing (or evicted the lowest-priority armed one); the depth limit, the deny-list and an unreadable counter keep their own kinds. The park comment also carries `sigma-filing-goal: <counter key>`. With `ai_filed.on_cap` set to `defer` the auto-unpark sweep re-arms it, highest priority first, when the counter has room; with the default `park` it waits for a person, who is asked to arm it, never whether it has a real problem.
 
 `label_set` is never declared on a park: it is the one route question `label_drain.py plan` asks per run label (arm the unarmed issues, arm only the ones that can start, or leave them), listed with the other up-front questions and the `ready` field.
 

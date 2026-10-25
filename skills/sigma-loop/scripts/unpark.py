@@ -123,6 +123,12 @@ QUESTIONS = {
                                "split the work?", "options": ["more room", "split it"],
          "gestures": {"more room": "none", "split it": "none"}},
     ],
+    # #2040: a park caused only by the filing count; a person is asked to arm it, never whether it has a blocker.
+    "filing_cap": [
+        {"id": "route", "ask": "This was parked only because of a filing count limit, not a problem: {reason} "
+                               "Arm it now, or leave it parked?", "options": ["arm it", "leave it parked"],
+         "gestures": {"arm it": "unpark", "leave it parked": "keep-parked"}},
+    ],
     "budget": [
         {"id": "route", "ask": "This stopped on a limit, not a problem. Give it more room, or "
                                "split the work?", "options": ["more room", "split it"],

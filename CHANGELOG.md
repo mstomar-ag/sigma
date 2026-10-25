@@ -4,6 +4,8 @@ All notable changes to Sigma are recorded here, newest first.
 
 ## Unreleased
 
+- **A filing park caused only by the count cap can wait for the counter, not a person (#2040).** New park kind `filing_cap` for a per-goal or per-run count park (depth, deny-list and unreadable-counter parks keep their kinds), with a `sigma-filing-goal:` line so the sweep can re-count it. `ai_filed.on_cap` accepts `defer` (default stays `park`, PROVISIONAL, owner to ratify): the auto-unpark sweep then re-arms such parks highest priority first within the room the counter has, bounded by `max_per_run`, each re-arm counted, ledgered and commented once. The unpark review asks to arm it instead of asking about a blocker. Measured on fixtures only.
+
 - **A filing-cap park now names the limit and the count, or the unreadable counter and its lever (#2039).** `Parked at filing:` says `per-goal cap: N of M` with `ai_filed.max_per_goal`, or `per-run cap: N of M` with `ai_filed.max_per_run`; an unreadable counter parks with its own reason naming the counter path relative to `.sdlc` and the lever (repair or remove that one file), and `bump` still never overwrites it. A lowest-priority eviction names the per-goal cap that caused it, and the `/sigma-doctor` row for an unreadable counter uses the same words. Measured on fixtures only (five-filing goal, two-filing run, a corrupt counter file), not against a live run.
 
 ## 1.0.20 — 2026-10-22 — the dependency map's pages show assignees and the work that waits; one-run rebuild, titles without a hand-made file, deps review sheets, unmark and a direction-aware two-way flag

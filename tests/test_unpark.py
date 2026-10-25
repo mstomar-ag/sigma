@@ -693,3 +693,34 @@ def test_declare_label_set_is_refused():
     run = _runner(views={"1": _view(number=1)})
     ok, detail = u.declare(".sdlc", _config(), 1, "label_set", run=run)
     assert not ok and "label_set" in detail and "park" in detail
+
+
+# ---- #2040: a count-cap park is a route question that shows the count and offers to arm
+
+def _filing_cap_brief():
+    u, q = _mod("unpark"), _mod("qkind")
+    text = ("Parked at filing: per-goal cap: 5 of 5 filings for this goal (ai_filed.max_per_goal)\n"
+            + q.render_line("filing_cap") + "\n" + q.render_filing_goal("42"))
+    run = _runner(views={"5": _view(comments=[_park(text)])})
+    return u.brief(".sdlc", _config(), 5, run=run)
+
+
+def test_filing_cap_question_shows_the_count_and_offers_to_arm_2040():
+    b = _filing_cap_brief()
+    assert b["reason_class"] == "filing_cap" and b["kind_declared"] is True
+    route = [x for x in b["questions"] if x["id"] == "route"][0]
+    assert "5 of 5" in route["ask"] and route["options"] == ["arm it", "leave it parked"]
+    assert "sigma-filing-goal" not in b["park_reason"]
+    assert [x["id"] for x in b["questions"]].count("kind") == 0
+
+
+def test_filing_cap_never_asks_about_a_real_blocker_2040():
+    u = _mod("unpark")
+    asks = " ".join(s["ask"] for s in u.QUESTIONS["filing_cap"]) + " ".join(x["ask"] for x in _filing_cap_brief()["questions"])
+    assert "real blocker" not in asks and "any blocker" not in asks
+
+
+def test_filing_cap_gestures_and_bulk_2040():
+    u = _mod("unpark")
+    assert u.option_gestures("filing_cap") == {"arm it": "unpark", "leave it parked": "keep-parked"}
+    assert "filing_cap" not in u.BULK_NEVER

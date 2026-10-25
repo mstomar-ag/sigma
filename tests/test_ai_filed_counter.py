@@ -116,3 +116,11 @@ def test_cap_reason_text_names_limit_count_and_lever_2039():
     assert "per-run cap: 20 of 20" in r and "ai_filed.max_per_run" in r and "max_per_goal" not in r
     u = m.cap_reason({"kind": "unreadable"}, "state/c.json")
     assert "state/c.json" in u and "repair or remove that one file" in u
+
+
+def test_on_cap_defer_is_accepted_and_junk_reads_park_2040():
+    m = _mod()
+    assert m.limits({"ai_filed": {"on_cap": "defer"}})["on_cap"] == "defer"
+    assert m.limits({"ai_filed": {"on_cap": "deferr"}})["on_cap"] == "park"
+    assert m.limits({"ai_filed": {"on_cap": ["defer"]}})["on_cap"] == "park"
+    assert m.limits({})["on_cap"] == "park"

@@ -1446,3 +1446,170 @@ def test_a_non_list_page_is_incomplete_without_fallback(gh_env):
     source = au.sources.GitHubSource(_config(), run=run)
     assert au._fetch_parked_issues_status(source) == ([], False)
     assert run.list_fallbacks == [] and len(rest_list_calls(run)) == 2
+
+
+# ---- #2040: ai_filed.on_cap "defer" re-arms count-cap parks once the counter has room
+
+import time as _time
+
+_FC = "Parked at filing: per-goal cap: 5 of 5 filings for this goal (ai_filed.max_per_goal)\nsigma-qkind: filing_cap\nsigma-filing-goal: %s"
+
+
+class _FcSource:
+    goal_label, parked_label, goal_blocked_label = "sdlc:goal", "sdlc:parked", "sdlc:blocked"
+    in_progress_label, board_active, priority_prefix = "sdlc:in-progress", False, "priority:"
+
+    def __init__(self):
+        self.notes = []
+
+    def note(self, num, text):
+        self.notes.append((str(num), text))
+
+
+def _fc_issue(n, prio=None):
+    labels = ["sdlc:parked"] + (["priority:%s" % prio] if prio else [])
+    return {"number": n, "title": "", "body": "", "labels": [{"name": l} for l in labels]}
+
+
+def _fc_setup(tmp_path, monkeypatch, comments, entries=(), mode="defer", **lim):
+    au = _mod("auto_unpark")
+    cfg = _config()
+    cfg["ai_filed"] = {"on_cap": mode, **lim}
+    cfg["ledger"] = {"enabled": True, "actor": "dana"}
+    st = tmp_path / "state"
+    st.mkdir(exist_ok=True)
+    (st / "ai_filed_counter.json").write_text(json.dumps({"entries": list(entries)}))
+    monkeypatch.setattr(au.backlog_check, "_fetch_scrubbed_comments",
+                        lambda sd, c, g, run=None: comments.get(str(g["ref"]), []))
+    monkeypatch.setattr(au, "_run_id", lambda: "run-1")
+    return au, cfg
+
+
+def _full(goal, n=5, run="other"):
+    return [{"run": run, "goal": goal, "t": _time.time()} for _ in range(n)]
+
+
+def _armed(rearms):
+    return [r["issue"] for r in rearms]
+
+
+def test_default_park_rearms_nothing_2040(tmp_path, monkeypatch):
+    au, cfg = _fc_setup(tmp_path, monkeypatch, {"1": [_FC % "g1"]}, mode="park")
+    assert au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(1)]) == []
+
+
+def test_defer_rearms_when_the_counter_has_room_2040(tmp_path, monkeypatch):
+    au, cfg = _fc_setup(tmp_path, monkeypatch, {"1": [_FC % "g1"]})
+    r = au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(1)])
+    assert _armed(r) == ["1"]
+    assert r[0]["action"]["action"] == "swap-label"
+    assert r[0]["action"]["add"] == ["sdlc:goal"] and r[0]["action"]["remove"] == ["sdlc:parked"]
+
+
+def test_defer_waits_while_the_goal_is_still_full_2040(tmp_path, monkeypatch):
+    au, cfg = _fc_setup(tmp_path, monkeypatch, {"1": [_FC % "g1"]}, entries=_full("g1"))
+    assert au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(1)]) == []
+
+
+def test_full_goal_does_not_block_another_goals_candidate_2040(tmp_path, monkeypatch):
+    au, cfg = _fc_setup(tmp_path, monkeypatch, {"1": [_FC % "g1"], "2": [_FC % "g2"]}, entries=_full("g1"))
+    r = au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(1, "P0"), _fc_issue(2, "P3")])
+    assert _armed(r) == ["2"]
+
+
+def test_highest_priority_is_rearmed_first_2040(tmp_path, monkeypatch):
+    cm = {str(n): [_FC % "g%d" % n] for n in (1, 2, 3, 4)}
+    au, cfg = _fc_setup(tmp_path, monkeypatch, cm)
+    issues = [_fc_issue(1, "P3"), _fc_issue(2, "P1"), _fc_issue(3), _fc_issue(4, "P1")]
+    assert _armed(au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), issues)) == ["2", "4", "1", "3"]
+
+
+def test_never_more_than_max_per_run_in_one_sweep_2040(tmp_path, monkeypatch):
+    cm = {str(n): [_FC % "g%d" % n] for n in (1, 2, 3)}
+    au, cfg = _fc_setup(tmp_path, monkeypatch, cm, max_per_run=2)
+    r = au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(n, "P2") for n in (1, 2, 3)])
+    assert _armed(r) == ["1", "2"]
+
+
+def test_entries_already_counted_for_this_run_shrink_the_bound_2040(tmp_path, monkeypatch):
+    cm = {str(n): [_FC % "g%d" % n] for n in (1, 2, 3)}
+    au, cfg = _fc_setup(tmp_path, monkeypatch, cm, entries=_full("zz", 1, run="run-1"), max_per_run=2)
+    r = au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(n, "P2") for n in (1, 2, 3)])
+    assert _armed(r) == ["1"]
+
+
+def test_per_goal_room_is_consumed_by_earlier_rearms_2040(tmp_path, monkeypatch):
+    cm = {str(n): [_FC % "g1"] for n in (1, 2, 3)}
+    au, cfg = _fc_setup(tmp_path, monkeypatch, cm, entries=_full("g1", 4), max_per_goal=5)
+    r = au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(n, "P2") for n in (1, 2, 3)])
+    assert _armed(r) == ["1"]
+
+
+def test_unreadable_counter_rearms_nothing_2040(tmp_path, monkeypatch):
+    au, cfg = _fc_setup(tmp_path, monkeypatch, {"1": [_FC % "g1"]})
+    (tmp_path / "state" / "ai_filed_counter.json").write_text("{not json")
+    assert au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(1)]) == []
+
+
+def test_exempt_and_other_kind_parks_are_untouched_2040(tmp_path, monkeypatch):
+    cm = {"1": [_FC % "g1", au_marker()], "2": ["Parked at filing: x\nsigma-qkind: needs_decision"],
+          "3": ["Parked by Sigma: nothing declared"], "4": [_FC % "g4" + "\n"]}
+    au, cfg = _fc_setup(tmp_path, monkeypatch, cm)
+    r = au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(n) for n in (1, 2, 3, 4)])
+    assert _armed(r) == ["4"]
+
+
+def au_marker():
+    return _mod("auto_unpark").KEEP_PARKED_MARKER
+
+
+def test_gate_hold_park_is_untouched_2040(tmp_path, monkeypatch):
+    au, cfg = _fc_setup(tmp_path, monkeypatch, {"1": [_FC % "g1" + "\nsigma-qkind: scope_hold"]})
+    assert au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(1)]) == []
+
+
+def _apply(au, tmp_path, cfg, src, rearms, monkeypatch):
+    landed = []
+
+    def fake_apply(source, actions, apply):
+        for a in actions:
+            a["result"] = "done"
+            landed.append(a)
+        return actions
+    monkeypatch.setattr(au.triage, "apply_actions", fake_apply)
+    return au.apply_filing_cap_rearms(str(tmp_path), cfg, src, rearms), landed
+
+
+def test_each_rearm_is_one_swap_one_ledger_entry_one_comment_one_bump_2040(tmp_path, monkeypatch):
+    cm = {"1": [_FC % "g1"], "2": [_FC % "g2"]}
+    au, cfg = _fc_setup(tmp_path, monkeypatch, cm)
+    src = _FcSource()
+    rearms = au.compute_filing_cap_rearms(str(tmp_path), cfg, src, [_fc_issue(1, "P1"), _fc_issue(2, "P2")])
+    done, landed = _apply(au, tmp_path, cfg, src, rearms, monkeypatch)
+    assert done == ["1", "2"]
+    assert [a["action"] for a in landed] == ["swap-label", "swap-label"]
+    assert [n for n, _t in src.notes] == ["1", "2"]
+    assert "per-goal cap" in src.notes[0][1]
+    ents = json.loads((tmp_path / "state" / "ai_filed_counter.json").read_text())["entries"]
+    assert [(e["goal"], e["issue"], e["prio"], e["run"]) for e in ents] == [("g1", "1", "P1", "run-1"), ("g2", "2", "P2", "run-1")]
+    led = _mod("ledger")
+    rows = [e for e in led.read_all(str(tmp_path)) if "per-goal cap" in str(e.get("why"))]
+    assert len(rows) == 2
+
+
+def test_a_dry_run_writes_nothing_2040(tmp_path, monkeypatch):
+    au, cfg = _fc_setup(tmp_path, monkeypatch, {"1": [_FC % "g1"]})
+    before = (tmp_path / "state" / "ai_filed_counter.json").read_text()
+    src = _FcSource()
+    r = au.compute_filing_cap_rearms(str(tmp_path), cfg, src, [_fc_issue(1)])
+    assert _armed(r) == ["1"] and src.notes == []
+    assert (tmp_path / "state" / "ai_filed_counter.json").read_text() == before
+
+
+def test_a_person_who_parks_again_after_a_rearm_is_not_overridden_2040(tmp_path, monkeypatch):
+    au, cfg = _fc_setup(tmp_path, monkeypatch, {"1": [_FC % "g1", "Re-armed by Sigma\n" + au_marker_rearm()]})
+    assert au.compute_filing_cap_rearms(str(tmp_path), cfg, _FcSource(), [_fc_issue(1)]) == []
+
+
+def au_marker_rearm():
+    return _mod("auto_unpark").REARM_MARKER
