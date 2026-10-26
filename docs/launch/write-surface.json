@@ -1873,6 +1873,22 @@
       "risk": "low"
     },
     {
+      "path": "skills/sigma-loop/scripts/resource_guard.py",
+      "function": "write_incident",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "the watcher's refresh on a non-critical to critical transition, or the verify meter's shed; writes one incidents/<utc-stamp>-<n>.json by tmp file and atomic rename under the resource state folder (SIGMA_RESOURCE_DIR, else the XDG state home) outside every repository; at most 64 KB, command lines scrubbed, no environment; any failure is swallowed",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/resource_guard.py",
+      "function": "write_incident",
+      "rule": "fs-remove",
+      "count": 2,
+      "gate": "removes only its own tmp file when the write fails and, past 20 files, the oldest *.json files of that incidents folder; never a directory",
+      "risk": "medium"
+    },
+    {
       "path": "skills/sigma-loop/scripts/resource_lease.py",
       "function": "_atomic_write",
       "rule": "fs-remove",

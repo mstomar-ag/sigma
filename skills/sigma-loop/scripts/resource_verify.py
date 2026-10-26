@@ -119,6 +119,64 @@ def proc_table(proc="/proc"):
     return table
 
 
+def _etime(text):
+    """Seconds from ps `etime`: [[dd-]hh:]mm:ss. 0 when unreadable."""
+    try:
+        days, _, rest = text.rpartition("-")
+        parts = [int(x) for x in rest.split(":")]
+        secs = 0
+        for x in parts:
+            secs = secs * 60 + x
+        return secs + (int(days) * 86400 if days else 0)
+    except ValueError:
+        return 0
+
+
+def process_rows():
+    """[{pid, ppid, rss (bytes), age (s), cmd}] from `ps` (no `e` flag: no environment is printed), or None."""
+    if not (sys.platform == "darwin" or sys.platform.startswith("linux")):
+        return None
+    try:
+        done = subprocess.run(["ps", "-axo", "pid=,ppid=,rss=,etime=,command="], capture_output=True, text=True,
+                              timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    rows = []
+    for line in done.stdout.splitlines():
+        parts = line.split(None, 4)
+        if len(parts) >= 4 and all(p.isdigit() for p in parts[:3]):
+            rows.append({"pid": int(parts[0]), "ppid": int(parts[1]), "rss": int(parts[2]) * 1024,
+                         "age": _etime(parts[3]), "cmd": parts[4] if len(parts) > 4 else ""})
+    return rows
+
+
+def process_cwds(pids):
+    """{pid: working folder} for a few pids: /proc on Linux, one `lsof` call elsewhere. {} when unreadable."""
+    found = {}
+    pids = [int(p) for p in pids if isinstance(p, int) and p > 0]
+    if sys.platform.startswith("linux"):
+        for pid in pids:
+            try:
+                found[pid] = os.readlink("/proc/%d/cwd" % pid)
+            except OSError:
+                pass
+        return found
+    if not pids:
+        return found
+    try:
+        done = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fpn", "-p", ",".join(map(str, pids))],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return found
+    pid = None
+    for line in done.stdout.splitlines():
+        if line[:1] == "p" and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line[:1] == "n" and pid is not None:
+            found[pid] = line[1:]
+    return found
+
+
 def tree_footprint(root_pid, footprint, table=None):
     """Summed footprint of every descendant of `root_pid` (not itself). `table` is [(pid, ppid)] (default: ps)."""
     if table is None:
@@ -186,6 +244,7 @@ class _Meter(threading.Thread):
             os.makedirs(os.path.dirname(stop_path), exist_ok=True)
             with open(stop_path, "w", encoding="utf-8") as fh:
                 fh.write("critical for %d consecutive samples\n" % self.critical_run)
+            self.lease.guard.record_incident(self.lease.state_dir(), "shed", lease_id=self.id)   # #1914: swallows its own failures
 
     def run(self):
         while not self.stop_event.wait(self.gap):

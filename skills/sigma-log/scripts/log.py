@@ -843,15 +843,51 @@ def admission_tail(config, now=None, env=None):
                                        " (observe: not enforced)" if mode == "observe" else "")
 
 
+def incident_tail(config, now=None, env=None):
+    """#1914: `incident 10m ago: <path>` for the newest resource incident file under an hour old, else "".
+
+    The state folder rule and the mode rule are copies of `admission_tail`'s (this skill imports nothing from
+    sigma-loop). Silent when `resource.mode` is "off", the folder is absent, or the newest file is older."""
+    env = os.environ if env is None else env
+    block = config.get("resource") if isinstance(config, dict) else None
+    mode = env.get("SIGMA_RESOURCE_MODE")
+    if mode not in ("enforce", "observe", "off"):
+        mode = (block or {}).get("mode") if isinstance(block, dict) else None
+    if mode == "off":
+        return ""
+    base = env.get("SIGMA_RESOURCE_DIR")
+    if not base:
+        state = env.get("XDG_STATE_HOME") or os.path.join(env.get("HOME") or os.path.expanduser("~"), ".local", "state")
+        base = os.path.join(state, "sigma", "resource")
+    folder = os.path.join(base, "incidents")
+    now = time.time() if now is None else now
+    newest = None
+    try:
+        for name in os.listdir(folder):
+            if name.endswith(".json"):
+                path = os.path.join(folder, name)
+                stamp = os.stat(path).st_mtime
+                if newest is None or stamp > newest[0]:
+                    newest = (stamp, path)
+    except OSError:
+        return ""
+    if newest is None or not 0 <= now - newest[0] < 3600:
+        return ""
+    return "incident %dm ago: %s" % ((now - newest[0]) // 60, newest[1])
+
+
 def slots(sdlc_dir, now=None, render_py=None):
     """The `slots` answer; a held admission is named on every one of them (#1808), not only on a rendered Block A."""
     now = time.time() if now is None else now
     text = _slots(sdlc_dir, now=now, render_py=render_py)
     state, _detail, config = action_log_state(sdlc_dir)
-    if state in (LOG_UNKNOWN, LOG_OFF) or "admission HELD" in text:
+    if state in (LOG_UNKNOWN, LOG_OFF):
         return text
-    admission = admission_tail(config, now)
-    return text + ("; " + admission if admission else "")
+    if "admission HELD" not in text:
+        admission = admission_tail(config, now)
+        text = text + ("; " + admission if admission else "")
+    incident = incident_tail(config, now)
+    return text + ("; " + incident if incident else "")
 
 
 def _slots(sdlc_dir, now=None, render_py=None):

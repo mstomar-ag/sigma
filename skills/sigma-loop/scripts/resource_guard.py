@@ -27,7 +27,7 @@ last three samples and resumes on the higher of the lowest two, after `resume_sa
 seconds apart. `hold.json` (written by atomic rename; a corrupt file reads as open plus a note) lives outside every
 repository.
 
-NOT HERE, ON PURPOSE. No child process, no signal, no gate that stops anything: this module reports facts and
+NOT HERE, ON PURPOSE. No child process (the process-table reader lives in resource_verify.py), no signal, no gate that stops anything: this module reports facts and
 decisions; a caller acts on them.
 """
 import contextlib
@@ -711,6 +711,124 @@ def read_hold(path):
     except ValueError:
         pass
     return open_record, ["hold.json corrupt; read as open"]
+
+
+# ------------------------------------------------------------------------------------------ incidents (#1914)
+INCIDENT_KEEP = 20
+INCIDENT_CAP = 64 * 1024
+INCIDENT_LIMIT = 25
+CMD_CUT = 200
+_SIBLINGS = {}
+
+
+def _sibling_module(name):
+    """A sibling script loaded once by path (this module imports neither at import time)."""
+    if name not in _SIBLINGS:
+        import importlib.util as _util
+        spec = _util.spec_from_file_location(name, os.path.join(os.path.dirname(os.path.abspath(__file__)), name + ".py"))
+        module = _util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _SIBLINGS[name] = module
+    return _SIBLINGS[name]
+
+
+def process_table():
+    """[{pid, ppid, rss, age, cmd[, cwd]}] from the platform reader (resource_verify, which may run `ps`), or None
+    when this platform has none. Never raises. No environment is read."""
+    try:
+        return _sibling_module("resource_verify").process_rows()
+    except Exception:                                    # noqa: BLE001 - an incident record must never break the guard
+        return None
+
+
+def _int(value):
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def snapshot(limit, table=None):
+    """The largest `limit` processes by resident bytes: pid, ppid, rss, age, cwd, cmd (scrubbed, cut at 200 chars).
+    Only those six fields are copied from a row, so nothing else a reader returned (an environment) can reach a
+    file. None when the platform has no process table. `table` is the injectable source (tests fake it)."""
+    got = process_table() if table is None else table
+    if got is None:
+        return None
+    scrub = _sibling_module("scrub").scrub
+    top = sorted(got, key=lambda row: -_int(row.get("rss")))[:max(0, _int(limit))]
+    if table is None and any("cwd" not in row for row in top):
+        try:
+            cwds = _sibling_module("resource_verify").process_cwds([row.get("pid") for row in top])
+        except Exception:                                # noqa: BLE001
+            cwds = {}
+        top = [dict(row, cwd=cwds.get(row.get("pid"))) if "cwd" not in row else row for row in top]
+    out = []
+    for row in top:
+        cwd, cmd = row.get("cwd"), row.get("cmd")
+        out.append({"pid": _int(row.get("pid")), "ppid": _int(row.get("ppid")), "rss": _int(row.get("rss")),
+                    "age": _int(row.get("age")),
+                    "cwd": scrub(str(cwd))[:CMD_CUT] if cwd else None,
+                    "cmd": scrub(str(cmd or ""))[:CMD_CUT]})
+    return out
+
+
+def write_incident(directory, record, now=None, keep=INCIDENT_KEEP, cap=INCIDENT_CAP, _replace=os.replace):
+    """Write `record` as <directory>/incidents/<utc-stamp>-<n>.json by tmp file and atomic rename, trimming its process
+    list to `cap` bytes (and saying so) and pruning the oldest files beyond `keep`. -> path, or None on ANY failure."""
+    folder = os.path.join(directory, "incidents")
+    tmp = None
+    try:
+        record = dict(record, truncated=False)
+        text = json.dumps(record, sort_keys=True)
+        while len(text.encode("utf-8")) > cap and isinstance(record.get("processes"), list) and record["processes"]:
+            record["processes"] = record["processes"][:len(record["processes"]) * 3 // 4]
+            record["truncated"] = True
+            text = json.dumps(record, sort_keys=True)
+        os.makedirs(folder, exist_ok=True)
+        stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime(time.time() if now is None else now))
+        n = 0
+        while os.path.exists(os.path.join(folder, "%s-%d.json" % (stamp, n))):
+            n += 1
+        path = os.path.join(folder, "%s-%d.json" % (stamp, n))
+        tmp = os.path.join(folder, ".%s-%d.%d.tmp" % (stamp, n, os.getpid()))
+        with open(tmp, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _replace(tmp, path)
+        tmp = None
+        names = sorted(name for name in os.listdir(folder) if name.endswith(".json"))
+        for name in names[:max(0, len(names) - keep)]:
+            try:
+                os.unlink(os.path.join(folder, name))
+            except OSError:
+                pass
+        return path
+    except Exception:                                    # noqa: BLE001 - the guard must keep admitting and holding
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        return None
+
+
+def record_incident(directory, why, lease_id=None, table=None, limit=INCIDENT_LIMIT, now=None):
+    """One incident file: why it was written, the shed lease id when there is one, the largest processes."""
+    try:
+        record = {"at": time.time() if now is None else now, "why": why, "lease": lease_id,
+                  "processes": snapshot(limit, table=table) or "unavailable"}
+        return write_incident(directory, record, now=now)
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
+def note_transition(directory, was_critical, is_critical, **kwargs):
+    """Write an incident on the non-critical -> critical transition only (a debounce); -> path or None."""
+    if is_critical and not was_critical:
+        return record_incident(directory, "critical", **kwargs)
+    return None
 
 
 def run(kind, command, root, timeout, goal, **kwargs):

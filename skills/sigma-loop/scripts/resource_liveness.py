@@ -190,7 +190,9 @@ def refresh(sdlc_dir, config=None, env=None, now=None, append=None):
     lease._atomic_write(os.path.join(directory, "last.json"), dict(
         previous, state="hold" if held else "open", reason=decision.reason if held else "ok", at=now,
         since=previous["since"] if keep else (decision.since if held else now),
-        kind=previous.get("kind", "sample"), goal=previous.get("goal", ""), sample=sample.as_dict()))
+        kind=previous.get("kind", "sample"), goal=previous.get("goal", ""), sample=sample.as_dict(),
+        critical=bool(limits.critical)))
+    guard.note_transition(directory, bool(previous.get("critical")), bool(limits.critical), now=now)   # #1914
     was = old.get("state") == "hold"
     if held and not was:
         _note(sdlc_dir, config, "start", "admission HELD: %s (%s)" % (decision.reason, decision.resource), now, append)
