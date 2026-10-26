@@ -204,6 +204,7 @@ gh_session = _load("gh_session")     # #78: tell a Claude Code Remote session's 
                                       # from a real auth failure -- see that module's own docstring.
 post_guard = _load("post_guard")      # #375: opt-in refusal of private-reference text (SIGMA_LEAK_PATTERNS)
 gh_quota = _load("gh_quota")         # #1939: refusal reading + the shared per-account GraphQL bucket
+gh_calls = _load("gh_calls")         # #2019: count each spawned `gh` call by component
 gh_api = _load("gh_api")             # #895: issue READS go REST first (gh_api.read_issue)
 _fx = gh_api.with_remedy             # D7: a failure shown to a human carries its fix (raw reason first)
 feature_labels = _load("feature_labels")   # #1468: the never-create rule for `feature:*` labels.
@@ -763,6 +764,7 @@ def _run_gh(args, binary="gh"):
             exc = RuntimeError("gh " + " ".join(args) + " not run: " + hint)
             exc.hint = hint
             raise exc
+    gh_calls.count(args)                 # #2019: counted when made, so a failing call counts too
     try:
         proc = subprocess.run([binary, *args], capture_output=True, text=True)
     except FileNotFoundError as missing:

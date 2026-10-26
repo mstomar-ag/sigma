@@ -4281,6 +4281,22 @@
       "risk": "medium"
     },
     {
+      "path": "skills/sigma-loop/scripts/gh_calls.py",
+      "function": "flush",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "runs only inside a sigma script that already spawned a gh call, and only when the runtime state directory exists (SIGMA_SDLC_DIR or ./.sdlc): appends one line per hour, component and call class holding counts only (no arguments or issue text) to the gh-calls file there; rotates it by rename at 1 MB; any write failure is swallowed",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/gh_calls.py",
+      "function": "flush",
+      "rule": "fs-write",
+      "count": 1,
+      "gate": "runs only inside a sigma script that already spawned a gh call, and only when the runtime state directory exists (SIGMA_SDLC_DIR or ./.sdlc): appends one line per hour, component and call class holding counts only (no arguments or issue text) to the gh-calls file there; rotates it by rename at 1 MB; any write failure is swallowed",
+      "risk": "medium"
+    },
+    {
       "path": "tools/resource_controls.py",
       "function": "apply_break",
       "rule": "fs-write",

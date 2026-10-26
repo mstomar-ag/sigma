@@ -148,6 +148,7 @@ def _load(name):
 
 gh_session = _load("gh_session")
 post_guard = _load("post_guard")      # #375
+gh_calls = _load("gh_calls")          # #2019: count each spawned `gh` call by component
 
 CACHE_TTL_SECONDS = 900
 CACHE_FILE = "gh-capability.json"
@@ -258,6 +259,7 @@ GH_MISSING_HINT = ('`gh` is not on PATH -- install the GitHub CLI from https://c
 
 def _default_run(args):
     post_guard.check(args)                # #375: opt-in; a no-op unless SIGMA_LEAK_PATTERNS is set
+    gh_calls.count(args)                  # #2019
     try:
         proc = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=120)
     except FileNotFoundError as missing:
@@ -1277,6 +1279,7 @@ def run_gh(args, timeout=120):
     (#895 slice 3b). Unlike `bounded_runner` it never raises on a non-zero exit, so a caller keeps the exit code and
     text. A timeout is the synthetic `(124, "", "gh: the call timed out after Ns")`; every other exception
     (a missing `gh`, say) propagates unchanged."""
+    gh_calls.count(args)                  # #2019
     try:
         proc = subprocess.run(gh_argv(args), capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -1295,6 +1298,7 @@ def bounded_runner(cwd=None, timeout=120, *, popen=None):
     popen = popen or subprocess.run
 
     def run(args):
+        gh_calls.count(args)              # #2019
         try:
             proc = popen(["gh", *args], capture_output=True, text=True, timeout=timeout, cwd=cwd)
         except subprocess.TimeoutExpired as exc:

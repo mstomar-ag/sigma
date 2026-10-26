@@ -49,6 +49,7 @@ def _host_model_config(config):
 state = _load("state")
 sources = _load("sources")          # backlog source: local files or GitHub issues (config-selected)
 legacy = _load("legacy")            # #239: markers written under the plugin's previous name
+gh_calls = _load("gh_calls")      # #2019: component attribution for the GitHub call counter
 pick_trace = _load("pick_trace")    # #1607: opt-in call-count + stage-seconds trace of a pick
 ledger = _load("ledger")            # team record (config-gated, default OFF; every call is fail-open)
 work = _load("work")                # per-goal worktree/branch/PR (config-gated, default OFF)
@@ -1277,7 +1278,8 @@ def _auto_unpark_sweep(sdlc_dir, config, run=None):
     try:
         if sources._auto_unpark(config) == "off":
             return frozenset()
-        result = _load("auto_unpark").sweep_unpark(sdlc_dir, config, apply=True, run=run)
+        with gh_calls.component("auto_unpark"):      # #2019: the run=None path reaches `gh` past every injected runner
+            result = _load("auto_unpark").sweep_unpark(sdlc_dir, config, apply=True, run=run)
         return frozenset((result or {}).get("unparked") or ())
     except Exception as exc:
         print(f"loop.py: auto-unpark sweep failed non-fatally ({exc}) — continuing", file=sys.stderr)
@@ -7257,7 +7259,7 @@ def _validate_event(kind, flags, kind_allowlist=None):
 
 USAGE = ("usage: loop.py start <dir> [--session-pid PID] | start-run <dir> [--session-pid PID] | "
          "next <dir> [--skip a,b] [--feature NAME] [--label NAME] [--session-pid PID] [--trace] | "
-         "pick-trace-report <dir> | meter <dir> [--baseline TOKENS] | "
+         "pick-trace-report <dir> | gh-calls-report <dir> [--hours N] | cost-report <dir> | meter <dir> [--baseline TOKENS] | "
          "next-batch <dir> [--skip a,b] [--feature NAME] [--label NAME] [--session-pid PID] [--max-concurrent N] | "
          "session-active <dir> | prune-state <dir> [--dry-run] [--keep-days N] [--limit N] | session-end <dir> [--session-pid PID] | "
          "claim <dir> <goal> [--session-pid PID] | "
@@ -7805,6 +7807,19 @@ def _dispatch(argv):
         code, line = _meter_line(argv[2], argv[3:])
         print(line, file=sys.stderr if code else sys.stdout)
         return code
+    if len(argv) >= 3 and argv[1] == "gh-calls-report":       # #2019: read-only; reads one state file
+        hours = None
+        if "--hours" in argv:
+            try:
+                hours = float(argv[argv.index("--hours") + 1])
+            except (IndexError, ValueError):
+                print("usage: loop.py gh-calls-report <dir> [--hours N]", file=sys.stderr)
+                return 2
+        sys.stdout.write(gh_calls.report(argv[2], hours))
+        return 0
+    if len(argv) >= 3 and argv[1] == "cost-report":           # #2019: read-only; per-goal and per-lane cost
+        sys.stdout.write(_load("goal_cost").report(argv[2]))
+        return 0
     if len(argv) >= 3 and argv[1] == "pick-trace-report":     # #1607: read-only; reads one state file
         sys.stdout.write(pick_trace.report(argv[2]))
         return 0
