@@ -84,7 +84,7 @@ def _read(path):
 
 def _commands(servers):
     """(command string, args list, env dict) for each MCP server mapping."""
-    for server in (servers or {}).values():
+    for server in servers.values() if isinstance(servers, dict) else ():
         if isinstance(server, dict):
             args = server.get("args") if isinstance(server.get("args"), list) else []
             env = server.get("env") if isinstance(server.get("env"), dict) else {}
@@ -94,13 +94,49 @@ def _commands(servers):
 def _hook_commands(hooks):
     for entries in (hooks or {}).values() if isinstance(hooks, dict) else ():
         for entry in entries if isinstance(entries, list) else ():
-            for hook in (entry.get("hooks") or []) if isinstance(entry, dict) else ():
+            inner = entry.get("hooks") if isinstance(entry, dict) else None
+            for hook in inner if isinstance(inner, list) else ():
                 if isinstance(hook, dict) and isinstance(hook.get("command"), str):
                     yield hook["command"]
 
 
+def _servers(doc):
+    return doc.get("mcpServers") or doc.get("mcp_servers")
+
+
+def _shape_ok(doc):
+    """False when a block the rules read has the wrong type. Reads no value, only types."""
+    servers = _servers(doc)
+    if servers is not None and not isinstance(servers, dict):
+        return False
+    if isinstance(servers, dict):
+        for server in servers.values():
+            if not isinstance(server, dict):
+                return False
+            if server.get("args") is not None and not isinstance(server.get("args"), list):
+                return False
+            if server.get("env") is not None and not isinstance(server.get("env"), dict):
+                return False
+    hooks = doc.get("hooks")
+    if hooks is not None:
+        if not isinstance(hooks, dict):
+            return False
+        for entries in hooks.values():
+            if not isinstance(entries, list):
+                return False
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(entry.get("hooks", []), list):
+                    return False
+    perms = doc.get("permissions")
+    if perms is not None and (not isinstance(perms, dict) or not isinstance(perms.get("allow", []), list)):
+        return False
+    return doc.get("env") is None or isinstance(doc.get("env"), dict)
+
+
 def _r1(doc, _toml, _scrub_module):
-    allow = ((doc.get("permissions") or {}).get("allow") or []) if isinstance(doc.get("permissions"), dict) else []
+    perms = doc.get("permissions")
+    allow = perms.get("allow") if isinstance(perms, dict) else None
+    allow = allow if isinstance(allow, list) else []
     return any(isinstance(a, str) and _ALLOW_ALL.match(a.strip()) for a in allow)
 
 
@@ -112,7 +148,7 @@ def _r2(doc, _toml, _scrub_module):
     for command in _hook_commands(doc.get("hooks")):
         if _runs_bad(command):
             return True
-    for command, args, _env in _commands(doc.get("mcpServers") or doc.get("mcp_servers")):
+    for command, args, _env in _commands(_servers(doc)):
         if _runs_bad(" ".join([command] + args)):
             return True
     return False
@@ -132,13 +168,13 @@ def _unpinned(command, args):
 
 
 def _r3(doc, _toml, _scrub_module):
-    return any(_unpinned(c, a) for c, a, _e in _commands(doc.get("mcpServers") or doc.get("mcp_servers")))
+    return any(_unpinned(c, a) for c, a, _e in _commands(_servers(doc)))
 
 
 def _env_blocks(doc):
     if isinstance(doc.get("env"), dict):
         yield doc["env"]
-    for _c, _a, env in _commands(doc.get("mcpServers") or doc.get("mcp_servers")):
+    for _c, _a, env in _commands(_servers(doc)):
         yield env
 
 
@@ -221,13 +257,21 @@ def scan(project_root, home=None):
             result["not_scanned"].append({"file": shown, "reason": reason})
             continue
         result["scanned"].append(shown)
-        for rule, check in _CHECKS:
-            if rule == "R4" and scrub_module is None:
-                result["not_scanned"].append({"file": shown, "reason": scrub_err})
-                continue
-            if check(doc, kind == "toml", scrub_module):
-                severity, _name, fix = RULES[rule]
-                result["findings"].append({"file": shown, "rule": rule, "severity": severity, "fix": fix})
+        found, bad = [], False
+        try:
+            bad = not _shape_ok(doc)
+            for rule, check in _CHECKS:
+                if rule == "R4" and scrub_module is None:
+                    result["not_scanned"].append({"file": shown, "reason": scrub_err})
+                    continue
+                if check(doc, kind == "toml", scrub_module):
+                    severity, _name, fix = RULES[rule]
+                    found.append({"file": shown, "rule": rule, "severity": severity, "fix": fix})
+        except Exception:                          # noqa: BLE001 - never raise, never echo
+            bad = True
+        result["findings"].extend(found)
+        if bad:
+            result["not_scanned"].append({"file": shown, "reason": "unexpected structure"})
     return result
 
 

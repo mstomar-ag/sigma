@@ -3,6 +3,7 @@ nothing here reads a real home folder or a real agent config."""
 import builtins
 import importlib.util
 import json
+import os
 import pathlib
 import socket
 import subprocess
@@ -100,7 +101,10 @@ def test_not_scanned_rows(tmp_path, monkeypatch):
     home, proj = _dirs(tmp_path)
     _put(proj / ".claude" / "settings.json", "{not json")
     _put(proj / ".mcp.json", {"mcpServers": {}})
-    (proj / ".mcp.json").chmod(0)
+    if os.geteuid() == 0:                      # root reads mode-0 files: use an invalid fixture
+        _put(proj / ".mcp.json", "{broken")
+    else:
+        (proj / ".mcp.json").chmod(0)
     (home / ".codex").mkdir()
     (home / ".codex" / "config.toml").write_text('approval_policy = "never"\n')
     m = _mod()
@@ -108,11 +112,13 @@ def test_not_scanned_rows(tmp_path, monkeypatch):
     try:
         result = m.scan(proj, home=home)
     finally:
-        (proj / ".mcp.json").chmod(0o644)
+        if os.geteuid() != 0:
+            (proj / ".mcp.json").chmod(0o644)
     reasons = {n["file"]: n["reason"] for n in result["not_scanned"]}
     assert reasons[".claude/settings.json"] == "not valid JSON"
     assert reasons["~/.codex/config.toml"] == "toml reader unavailable"
-    assert ".mcp.json" in reasons and reasons[".mcp.json"].startswith("unreadable")
+    assert ".mcp.json" in reasons
+    assert reasons[".mcp.json"].startswith("unreadable") or reasons[".mcp.json"] == "not valid JSON"
     assert result["findings"] == []
 
 
@@ -219,3 +225,63 @@ def test_timing_helper(tmp_path):
     start = time.perf_counter()
     result = _mod().scan(proj, home=home)
     assert result["findings"] == [] and time.perf_counter() - start < 5
+
+
+_SENTINEL = "zz-sentinel-value-zz"
+_WRONG = [
+    (".mcp.json", {"mcpServers": [1]}),
+    (".mcp.json", {"mcpServers": 7}),
+    (".mcp.json", {"mcpServers": _SENTINEL}),
+    (".mcp.json", {"mcpServers": {"a": [_SENTINEL]}}),
+    (".mcp.json", {"mcpServers": {"a": {"command": "npx", "args": _SENTINEL}}}),
+    (".mcp.json", {"mcpServers": {"a": {"command": "x", "env": [_SENTINEL]}}}),
+    (".claude/settings.json", {"hooks": [_SENTINEL]}),
+    (".claude/settings.json", {"hooks": {"Pre": _SENTINEL}}),
+    (".claude/settings.json", {"hooks": {"Pre": [{"hooks": 5}]}}),
+    (".claude/settings.json", {"permissions": [_SENTINEL]}),
+    (".claude/settings.json", {"permissions": {"allow": 5}}),
+    (".claude/settings.json", {"env": [_SENTINEL]}),
+    (".cursor/mcp.json", {"mcpServers": [1]}),
+]
+
+
+@pytest.mark.parametrize("name,doc", _WRONG)
+def test_wrong_typed_value_is_not_scanned_and_keeps_other_findings(tmp_path, name, doc):
+    home, proj = _dirs(tmp_path)
+    _put(proj / name, doc)
+    if name == ".mcp.json":
+        _put(proj / ".claude" / "settings.json", {"permissions": {"allow": ["Bash(*)"]}})
+    else:
+        _put(proj / ".mcp.json", {"mcpServers": {"a": {"command": "npx", "args": ["some-pkg@latest"]}}})
+    result = _mod().scan(proj, home=home)
+    assert {"file": name, "reason": "unexpected structure"} in result["not_scanned"], result
+    assert _SENTINEL not in json.dumps(result)
+    assert "\n".join(_mod().lines(result)).count(_SENTINEL) == 0
+    assert result["findings"], "other files' findings must survive"
+
+
+def test_wrong_typed_toml_tables_are_not_scanned(tmp_path):
+    home, proj = _dirs(tmp_path)
+    (home / ".codex").mkdir()
+    (home / ".codex" / "config.toml").write_text('mcp_servers = "%s"\n' % _SENTINEL)
+    _put(proj / ".claude" / "settings.json", {"permissions": {"allow": ["Bash(*)"]}})
+    result = _mod().scan(proj, home=home)
+    assert {"file": "~/.codex/config.toml", "reason": "unexpected structure"} in result["not_scanned"]
+    assert _rules(result) == ["R1"] and _SENTINEL not in json.dumps(result)
+
+
+def test_a_check_that_raises_is_a_not_scanned_row(tmp_path, monkeypatch):
+    """The per-file guard on its own: even a well-shaped file whose check raises is reported."""
+    home, proj = _dirs(tmp_path)
+    _put(proj / ".mcp.json", {"mcpServers": {}})
+    _put(proj / ".claude" / "settings.json", {"permissions": {"allow": ["Bash(*)"]}})
+    m = _mod()
+
+    def boom(doc, _t, _s):
+        if "mcpServers" in doc:
+            raise RuntimeError(_SENTINEL)
+        return False
+    monkeypatch.setattr(m, "_CHECKS", (("R1", m._r1), ("R3", boom)))
+    result = m.scan(proj, home=home)
+    assert {"file": ".mcp.json", "reason": "unexpected structure"} in result["not_scanned"]
+    assert _rules(result) == ["R1"] and _SENTINEL not in json.dumps(result)
