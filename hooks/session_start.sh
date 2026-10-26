@@ -81,6 +81,14 @@ except Exception:
 PY
 )" || HOOK_COEXIST_NOTICE=""
 fi
+# --- This plugin install has no resource guard (#1913) -----------------------------------------------
+# ACCELERATOR only: the load-bearing check is /sigma-doctor's "resource guard present" row (Python,
+# every host; Cursor has no hooks). One line, only when resource_guard.py is absent from THIS plugin
+# root (a pre-1.0.16 install); it rides the same notice channel as the coexist line above.
+if [ ! -f "$PLUGIN_ROOT/skills/sigma-loop/scripts/resource_guard.py" ]; then
+    HOOK_COEXIST_NOTICE="${HOOK_COEXIST_NOTICE:+$HOOK_COEXIST_NOTICE
+}Tell the user this: this Sigma install has no resource guard (it first shipped in 1.0.16); run /sigma-doctor and update the plugin."
+fi
 # Exported HERE, before the compact tier reads it (PR #2035 review); the tiers below that append
 # to it stay exported, since bash re-exports an exported variable on every assignment.
 export HOOK_COEXIST_NOTICE

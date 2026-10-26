@@ -3263,6 +3263,71 @@ def _install_scope_row(repo_root, installed_plugins_path=None, agents_md=None):
     return _chk(f"sigma install scopes: {head} — {verdict}", False, " ".join(parts))
 
 
+def _plugin_scope_records(installed_plugins_path=None):
+    """#1913: `[(scope, version_text, install_path)]` for every install record of this plugin, or
+    **None** when the registry cannot be read (missing, unreadable, garbled, or no record of us).
+    None is "cannot tell", never "installed nowhere". Unknown fields are ignored."""
+    try:
+        raw = json.loads(pathlib.Path(
+            installed_plugins_path or _default_installed_plugins_path()).read_text(encoding="utf-8"))
+    except Exception:                        # noqa: BLE001 - missing/unreadable/unparseable
+        return None
+    plugins = raw.get("plugins") if isinstance(raw, dict) else None
+    if not isinstance(plugins, dict):
+        return None
+    out = []
+    for pid, entries in plugins.items():
+        if str(pid).split("@")[0] != _PLUGIN or not isinstance(entries, list):
+            continue
+        for e in entries:
+            if isinstance(e, dict):
+                out.append((str(e.get("scope") or "user"), str(e.get("version") or "?"),
+                            str(e.get("installPath") or "path not recorded")))
+    return out or None
+
+
+def _plugin_scope_rows(installed_plugins_path=None):
+    """#1913: one row per install scope (scope, version, path); a WARN row when two scopes list
+    different versions, naming both and the update command for the older one (compared as version
+    tuples, so 1.0.9 is older than 1.0.10 — not as text, and not by mere membership); one UNKNOWN row,
+    never OK, when there is no readable install registry. Read-only; `level` carries the verdict word."""
+    recs = _plugin_scope_records(installed_plugins_path)
+    if recs is None:
+        # ok=True keeps "cannot tell" out of the setup-gap count (an unreadable registry is not a
+        # failed setup), but the printed word is UNKNOWN: this row can never read as OK.
+        return [{"name": "plugin scopes: UNKNOWN (no readable install registry)", "ok": True,
+                 "level": "UNKNOWN",
+                 "fix": "cannot tell which scopes %s is installed under; run `claude plugin list` "
+                        "and check the versions by hand" % _PLUGIN}]
+    rows = [_chk(f"plugin scope: {sc} {ver} ({path})", True, "") for sc, ver, path in recs]
+    parsed = [(_version_tuple(ver), sc, ver) for sc, ver, _p in recs]
+    known = [t for t in parsed if t[0] is not None]
+    if len({t[0] for t in known}) > 1:
+        older = min(known, key=lambda t: t[0])
+        newer = max(known, key=lambda t: t[0])
+        rows.append(dict(_chk(
+            f"plugin scopes differ: {older[1]} {older[2]} vs {newer[1]} {newer[2]}", False,
+            f"update the older scope ({older[1]} {older[2]}): "
+            f"`claude plugin update {_PLUGIN}@{_PLUGIN} --scope {older[1]}` (then restart the session)"),
+            level="WARN"))
+    return rows
+
+
+#: The first release that ships `resource_guard.py`.
+_GUARD_FIRST_VERSION = "1.0.16"
+
+
+def _resource_guard_row(plugin_root=None):
+    """#1913: FAIL when the plugin root this doctor runs from has no `resource_guard.py` (its sibling
+    `loop.py` then runs without the guard). The root is derived from this file's own location."""
+    root = pathlib.Path(plugin_root) if plugin_root else pathlib.Path(__file__).resolve().parents[3]
+    present = (root / "skills" / "sigma-loop" / "scripts" / "resource_guard.py").is_file()
+    row = _chk("resource guard present", present,
+               f"this plugin install has no resource_guard.py; it first shipped in {_GUARD_FIRST_VERSION}: "
+               f"run `claude plugin update {_PLUGIN}@{_PLUGIN}` and restart the session")
+    return dict(row, level="OK" if present else "FAIL")
+
+
 #: Every placeholder in each north-star tier, from the scaffolded template (sdlc_init.py's
 #: `_NORTH_STAR`) — short, distinctive prefixes (not the full strings) so a later wording tweak to
 #: the trailing text doesn't silently break the check. "filled" must clear EVERY tier (F33/#358): a
@@ -4627,6 +4692,9 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
         scope_row = _install_scope_row(base.parent, installed_plugins_path, agents_md)
     if scope_row is not None:
         out.append(scope_row)
+    if plugin_host != "codex":
+        out.extend(_plugin_scope_rows(installed_plugins_path))
+    out.append(_resource_guard_row())
     if codex_cli_row is not None:
         out.append(codex_cli_row)
     # #1648: a WARNING (never a refusal) when Claude and Codex run different Sigma versions. Skipped under
@@ -6972,7 +7040,7 @@ def main(argv):
             # and costs nothing, and the next hand-built row that needs it should not have to
             # rediscover that check() computed the advisory correctly and the printer dropped it
             # (confirmed live by Review, not read from a diff -- see PR discussion #1513).
-            print(f"  [{'OK ' if c['ok'] else 'MISSING'}] {c['name']}" + (f"  ->  {c['fix']}" if c["fix"] else ""))
+            print(f"  [{c.get('level') or ('OK ' if c['ok'] else 'MISSING')}] {c['name']}" + (f"  ->  {c['fix']}" if c["fix"] else ""))
         print(f"\nsigma-doctor: {len(checks) - len(gaps)}/{len(checks)} ready"
               + ("." if not gaps else f"; {len(gaps)} need the one-liner shown above."))
         print("\nfeatures (doctor.py features for the enable one-liners):")
