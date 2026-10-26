@@ -364,13 +364,15 @@ def _supervise(proc, selector, deadline, stop_path, clock):
 
 
 def run_group(command, cwd, timeout, *, shell=False, env=None, stop_path=None, merge=True, tail_bytes=TAIL_BYTES,
-              max_out_bytes=MAX_OUT_BYTES, term_grace=TERM_GRACE_SECONDS, clock=time.monotonic, stdin_path=None):
+              max_out_bytes=MAX_OUT_BYTES, term_grace=TERM_GRACE_SECONDS, clock=time.monotonic, stdin_path=None, on_group=None):
     """Run `command` (an argv list, or a string with shell=True) in `cwd` under a budget of `timeout` seconds, in a
     process group of its own, with stdin closed. -> Result; raises ValueError for a bad budget or grace.
 
     `merge=True` (the verify shape): stderr joins stdout and `out` is the merged tail. `merge=False` (the git shape):
     `out` is stdout alone, up to `max_out_bytes`, and `err` the stderr tail. `env` is used as given (callers pass
     `unattended_env(...)`). `clock` drives only the budget (a test can jump it forward); the stop grace is real time.
+    `on_group(pgid)` is called once, right after the command's group exists (#1917: the verify lease records it);
+    an exception in it is swallowed, the run never depends on it.
     """
     timeout, grace = seconds(timeout), seconds(term_grace, "term_grace")
     refusal = group_refusal()
@@ -396,6 +398,11 @@ def run_group(command, cwd, timeout, *, shell=False, env=None, stop_path=None, m
         finally:
             if stdin_path is not None and stdin_file is not None:
                 stdin_file.close()
+        if on_group is not None:
+            try:
+                on_group(proc.pid)
+            except Exception:                               # noqa: BLE001 - a recorder must never break the run
+                pass
         selector = selectors.DefaultSelector()
         sinks = [_Sink(tail_bytes, "tail")] if merge else [_Sink(max_out_bytes, "head"), _Sink(tail_bytes, "tail")]
         try:

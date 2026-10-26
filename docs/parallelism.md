@@ -170,6 +170,13 @@ constant copied from a laptop, and nothing here ever pauses a process.
   its workers and the most processes of its tree whose footprint was at least a quarter of the largest (a heuristic,
   so helpers do not count). A `verify` admission is also bounded by 1.5 times the largest whole-run peak, kept in the
   ring `verify_run`; with no `verify_run` data the bound is absent.
+- **A killed wrapper.** Before #1917 a `kill -9` of the verify wrapper freed its lease at once (its pid was dead) while the
+  command it started kept running, so a second verify was admitted on top of it: measured by
+  `tests/test_resource_lease_group.py`. The lease now records the command's process group when the command starts, and
+  stays held while any process of that group is alive (a signal-0 probe, never a real signal), until the group is empty
+  or the lease ttl (the verify timeout plus 60 seconds) passes, whichever is first. A lease with no recorded group, or a
+  platform without process groups, follows its pid alone as before. A group that outlives its wrapper therefore holds the
+  lease for at most the ttl; the wrapper's lifeline process stops that group after its grace in the usual case.
 - **What the guard cannot cover.** Tests you run by hand outside the verify wrapper; memory used by other
   programs; a host's own subagent fan-out; Windows (the guard refuses there rather than guess).
 - **Measured or not.** The macOS and Linux calibration runs are recorded in

@@ -117,16 +117,16 @@
       "id": "stale-pid",
       "clause": "stale lease: dead pid",
       "file": "skills/sigma-loop/scripts/resource_lease.py",
-      "old": "not pid_alive(record[\"pid\"]) or expired(record, now)",
-      "new": "expired(record, now)",
+      "old": "return not pid_alive(record[\"pid\"]) or reused(record)",
+      "new": "return reused(record)",
       "test": "tests/test_resource_lease.py::test_dead_pid_lease_is_reclaimed"
     },
     {
       "id": "stale-ttl",
       "clause": "stale lease: expired ttl",
       "file": "skills/sigma-loop/scripts/resource_lease.py",
-      "old": " or expired(record, now) or reused(record)",
-      "new": " or reused(record)",
+      "old": "if record is None or expired(record, now):",
+      "new": "if record is None:",
       "test": "tests/test_resource_lease.py::test_expired_ttl_lease_is_reclaimed"
     },
     {

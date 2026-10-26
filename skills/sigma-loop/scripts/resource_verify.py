@@ -314,6 +314,8 @@ def run(kind, commands, root, timeout, goal, *, config=None, repo=None, env=None
         kwargs = {} if term_grace is None else {"term_grace": term_grace}
         if shedding:
             kwargs["stop_path"] = stop_path
+        if run_group is None:                                    # #1917: the lease learns the command's group id
+            kwargs["on_group"] = lambda pgid: _amend(lease, admitted.id, group=pgid)
         outputs, last, code, shed = [], None, 0, False
         deadline = time.monotonic() + timeout                    # #1768: ONE budget across every command
         try:
