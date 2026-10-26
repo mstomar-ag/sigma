@@ -170,6 +170,16 @@ class Red(Exception):
 _FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 
 
+
+def refuse_degraded_pick(printed):
+    """#2023: `loop.py next` prints `DEGRADED <epoch>` when its backlog read was rate-limited or incomplete.
+    That is neither a goal file nor an empty backlog, so the control is red with the reason, not a bare
+    "not a goal file"."""
+    if str(printed).split()[:1] == ["DEGRADED"]:
+        raise Red("loop next", f"`next` printed {printed!r}: the pick was rate-limited or incomplete, "
+                               "not empty; rerun the control after the stated reset epoch")
+
+
 def _section(text, heading):
     m = re.search(r"(?m)^## " + re.escape(heading) + r"\s*$", text)
     if not m:
@@ -953,6 +963,7 @@ def run_local(sigma, readme_text, root, qs=None, variant="confirm"):
             ["--session-pid", pid]
         for _ in range(5):
             goal = run.step("loop next", nxt, repo, env).stdout.strip()
+            refuse_degraded_pick(goal)
             if not goal or goal == "DONE":
                 break
             if not (repo / goal).is_file():

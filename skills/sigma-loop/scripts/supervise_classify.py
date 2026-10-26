@@ -61,6 +61,10 @@ _DONE = re.compile(
 # the merged stdout+stderr tail `supervise_daemon.py` hands this classifier, exactly as it does today
 # (the masked-GraphQL-failure bug #1084 exists to fix). Anchored the same way as `_DONE`/`_BUDGET`
 # — a marker is a LINE, not a substring.
+# #2023: a degraded pick now prints `DEGRADED <reset-epoch>` (never DONE). It is a bounded wait until that
+# epoch, not a stop and not a crash: the wait is clamped to the same 30 minutes the loop's own wait uses.
+_DEGRADED_PICK = re.compile(r"^\s*DEGRADED\s+(\d{9,12})\s*$", re.I | re.M)
+_DEGRADED_PICK_RANGE = (30, 1800)
 _DONE_DEGRADED = re.compile(r"^\s*DONE \(degraded[^)]*\)\s*$", re.I | re.M)
 # Same anchoring, same reason: the sentence that broke _DONE names `LOOP STOP: budget` in the very
 # same breath, so fixing only the done-arm would leave the identical false-positive one line down.
@@ -150,6 +154,11 @@ def classify(tail_text, attempt=0, now=None, rng=None):
     now = time.time() if now is None else now
     jitter = (rng or random).randint(*_JITTER)
     text = tail_text or ""
+    picked = _DEGRADED_PICK.search(text)
+    if picked:
+        wait = min(max(int(picked.group(1)) - int(now), _DEGRADED_PICK_RANGE[0]), _DEGRADED_PICK_RANGE[1])
+        return ("sleep", wait, "pick degraded (rate-limited or incomplete read) — waiting for the stated "
+                               "reset, not a stop")
     if _DONE_DEGRADED.search(text):
         wait = _DEGRADED_BACKOFF[min(attempt, len(_DEGRADED_BACKOFF) - 1)]
         return ("backoff", wait, "backlog read degraded — could not confirm the backlog is "

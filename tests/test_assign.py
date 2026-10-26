@@ -852,7 +852,7 @@ def test_start_drain_reports_next_failure_without_raising(tmp_path, monkeypatch)
     assert any("could not pick the first goal" in w for w in result["drain"]["warnings"])
 
 
-def test_start_drain_tolerates_a_degraded_done_payload(tmp_path):
+def test_start_drain_tolerates_a_degraded_epoch_payload(tmp_path):
     """#1084 plan-review finding (§4.5): `_start_drain` stores `_next()`'s raw (kind, payload)
     tuple verbatim into `result["picked_kind"]`/`result["picked"]`, then the whole `result`
     dict is JSON-serialized. A `("DONE", "<degraded reason>")` payload -- new as of #1084 -- must
@@ -869,8 +869,8 @@ def test_start_drain_tolerates_a_degraded_done_payload(tmp_path):
     result = assign._start_drain(str(sdlc), _config(ledger_on=False), DegradedSource())
 
     assert result["run_started"] is True
-    assert result["picked_kind"] == "DONE"
-    assert isinstance(result["picked"], str) and "degraded" in result["picked"]
+    assert result["picked_kind"] == "DEGRADED"        # #2023: a degraded read is no longer DONE
+    assert isinstance(result["picked"], int)
     json.dumps(result)          # must not raise -- proves the JSON-serialization path tolerates it
 
 

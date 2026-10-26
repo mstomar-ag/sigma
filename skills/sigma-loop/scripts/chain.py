@@ -1461,7 +1461,7 @@ RUN_USAGE = ("usage: chain.py run <sdlc_dir> <chain> [--session-pid P] [--no-gro
 STUCK_REASONS = ("decision", "held-gate", "claimed", "external", "checkpoint", "rate-limit", "degraded-read",
                  "capped")
 _DEFAULT_PICK_TIMEOUT = 900
-_NO_PICK = ("DONE", "BUDGET", "HANDOFF", "FULL", "HOLD")
+_NO_PICK = ("DONE", "BUDGET", "HANDOFF", "FULL", "HOLD", "DEGRADED")   # #2023: DEGRADED carries `<epoch>`
 
 
 def pick_argv(sdlc_dir, label, session_pid=None, skip=(), max_concurrent=None):
@@ -1481,6 +1481,11 @@ def _default_pick(sdlc_dir, label, session_pid, skip, max_concurrent=None):
                          timeout=_DEFAULT_PICK_TIMEOUT)
     if got.returncode != 0:
         raise RuntimeError("the pick exited %d: %s" % (got.returncode, (got.stderr or "").strip()[-200:]))
+    for line in got.stdout.splitlines():     # #2023: a degraded read is a rate-limited pick, never an empty one
+        word = line.split()[0] if line.split() else ""
+        if word == "DEGRADED":
+            raise RuntimeError("the pick was rate-limited or incomplete (DEGRADED, retry at epoch %s)"
+                               % (line.split()[1] if len(line.split()) > 1 else "unknown"))
     return [int(m.group(0)) for line in got.stdout.splitlines()
             if (m := re.match(r"\d+", line.strip())) and line.strip() not in _NO_PICK]
 

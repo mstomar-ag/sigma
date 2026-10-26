@@ -48,9 +48,9 @@ Then repeat until the helper says stop:
    minutes, or reported tokens — each only when `config.json` sets it), or `HANDOFF` (a goal-count
    or context hand-off, on by default) → STOP, and report the stderr `BUDGET (...)`/`HANDOFF (...)` line, which
    names which ceiling tripped. `HOLD` is never `DONE` or a stop (no claim, no spend): run
-   `resource_lease.py wait --max 540`, then pick again.
+   `resource_lease.py wait --max 540`, then pick again. `DEGRADED <epoch>` (rate-limited, not empty): `loop.py wait-degraded <epoch>` once, repick; a second stops.
 
-   On a terminal line, stop claiming; record active slots before ending. `DONE` does not always mean the backlog is empty: `next`/`next-batch` never hand back a goal
+   On a terminal line, stop claiming; record active slots before ending. `DONE` is not always an empty backlog: `next`/`next-batch` never hand back a goal
    whose own body declares a prerequisite (`**Blocked by:** #N`) that is still OPEN. Report that
    line, do NOT `--skip` past it. Confining a whole run to
    one unit of work is `--feature <name>`, and it is *exclusive*:
@@ -239,7 +239,6 @@ At STOP, print one machine-readable line FIRST — `LOOP STOP: backlog-empty`, `
 `LOOP STOP: handoff` — then report: N done, M parked, K failed. On a `handoff` stop, ALSO relay the
 successor brief verbatim — `references/stopping.md`. If anything parked or failed, point the user to the items —
 `.sdlc/state/review-queue.md` in local mode, or the issues labelled `sdlc:parked` in github mode.
-Parking is always correct over forcing an irreversible action to "finish" a goal.
 Closing a knowledge-graph gap when the backlog is empty but budget remains, and `supervise_daemon.py`: `references/stopping.md`.
 
 **Wake-and-work setup (optional).** One-time operator setup for `ledger.autowatch`: [`AUTOWATCH.md`](AUTOWATCH.md).

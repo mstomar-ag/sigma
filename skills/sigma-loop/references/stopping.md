@@ -7,6 +7,8 @@ gap when the backlog is empty, and what to print and report at STOP.
 
 7. Loop.
 
+**A degraded pick is not an empty backlog.** `next` → `DEGRADED <epoch>` is a rate-limited or incomplete read: never run it as a goal and never take it for `DONE`. `loop.py wait-degraded <epoch>` waits once (bounded), then pick again; a second `DEGRADED` ends the run with `LOOP STOP: degraded`, reported as such.
+
 **Self-improving (optional, gated):** when the backlog is empty (`next` → `DONE`) but the knowledge
 graph is enabled and `kg.py gap list .sdlc` shows open gaps **and** budget remains, you may close the
 loop instead of stopping: take the oldest gap, research it, write the finding to

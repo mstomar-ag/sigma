@@ -1278,6 +1278,10 @@ def _auto_unpark_sweep(sdlc_dir, config, run=None, session_pid=None):
     try:
         if sources._auto_unpark(config) == "off":
             return frozenset()
+        why = sources.gh_quota.rest_deferral(config)         # #2023: below the REST reserve, defer
+        if why:
+            print(f"loop.py: auto-unpark sweep deferred: {why}", file=sys.stderr)
+            return frozenset()
         with gh_calls.component("auto_unpark"):      # #2019: the run=None path reaches `gh` past every injected runner
             result = _load("auto_unpark").sweep_unpark(sdlc_dir, config, apply=True, run=run,
                                                        session_pid=session_pid)
@@ -1391,6 +1395,10 @@ def _reconcile_sweep(sdlc_dir, config, run=None, now=None):
     line. A background reconciliation must never be what stops an unattended pick."""
     try:
         if _reconcile_mode(config) != "off" and _reconcile_due(sdlc_dir, config, now=now):
+            why = sources.gh_quota.rest_deferral(config, now=now)   # #2023: below the REST reserve, defer
+            if why:
+                print(f"loop.py: reconcile sweep deferred: {why}", file=sys.stderr)
+                return frozenset()
             result = _load("reconcile").sweep_reconcile(sdlc_dir, config, apply=True, run=run)
             _reconcile_stamp(sdlc_dir, now=now)
             return frozenset(a["issue"] for a in (result or {}).get("actions", [])
@@ -2672,12 +2680,41 @@ def _read_once(source):
         yield
 
 
+DEGRADED_WAIT_CAP = 1800        # #2023: PROVISIONAL (30 min, the drain rules' bound); owner to ratify
+
+
+def _degraded_epoch(now=None):
+    """#2023: the epoch a degraded pick may be retried at. gh_quota's recorded refusal (a hold written
+    from the refused response's own Retry-After / reset header) when one is held, else now plus gh_quota's
+    bounded primary default. Reads recorded state only: no GitHub call."""
+    now = time.time() if now is None else now
+    quota = sources.gh_quota
+    try:
+        wait = int(quota.held(now=now))
+    except Exception:                                       # noqa: BLE001 - unreadable state -> the default
+        wait = 0
+    return int(now + (wait if wait > 0 else quota.DEFAULT_PRIMARY))
+
+
+def wait_degraded(epoch, now=time.time, sleep=time.sleep, cap=DEGRADED_WAIT_CAP):
+    """#2023: the ONE bounded wait a degraded pick earns. Sleeps until `epoch`, never longer than `cap`
+    seconds (30 minutes), and not at all when the epoch is already past. `now`/`sleep` are injectable so a
+    test runs it on a fake clock. -> seconds waited."""
+    try:
+        until = float(str(epoch).strip())
+    except (TypeError, ValueError):
+        raise ValueError("wait-degraded needs a reset epoch (whole number), got %r" % (epoch,))
+    secs = int(min(max(0.0, until - now()), cap))
+    if secs > 0:
+        sleep(secs)
+    return secs
+
+
 def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True,
                    gate=True, rec=pick_trace.NULL, batch=None, context=None):
     """(kind, goal_or_reason): 'goal' (+marks in_progress, the commit point — second element is
-    the goal ref), 'DONE' (drained — second element None on a genuine empty read, or, #1084, a
-    short degraded-read reason string when `source.read_degraded()` is True — mirrors BUDGET's own
-    shape), 'BUDGET' (second element a short diagnostic naming which ceiling tripped and the
+    the goal ref), 'DONE' (drained — second element None on a genuine empty read; #2023: a degraded read is no
+    longer DONE, it is 'DEGRADED' with the retry epoch as the second element), 'BUDGET' (second element a short diagnostic naming which ceiling tripped and the
     observed-vs-configured numbers, #411 — see `_budget_reason`; never None once budget genuinely
     trips), 'HANDOFF' (#2521, same shape as BUDGET's own diagnostic, from `_handoff_reason` — a
     deliberate, healthy context-bound stop). Precedence, most-checked-first: a REAL resource BUDGET
@@ -2883,7 +2920,9 @@ def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, re
             # #905: the real production chokepoint for the budget-exhaustion run_stop -- both the CLI `next`
             # verb and `run_loop` pass through here, so wiring it once covers both drivers.
             _emit_run_stop_once(sdlc_dir, config, source, stop_class, session_pid=session_pid)
-            return ("DONE", "degraded read — backlog state unknown" if degraded else None)
+            if degraded:                       # #2023: never DONE for a read that gave up
+                return ("DEGRADED", _degraded_epoch())
+            return ("DONE", None)
         # #1499: FIRST, ahead of the lease read and the claim lock below, because the whole defect
         # was ordering -- a goal with an unsatisfied prerequisite used to be claimed and only then
         # discovered to be unworkable. Nothing above this line has touched the goal, so a hold
@@ -6864,6 +6903,7 @@ def run_loop(sdlc_dir, run_goal):
     _ensure_ledger_delivery(sdlc_dir, config)        # ...and notices when that flow has stalled (#2393)
     source = sources.get_source(sdlc_dir, config)   # one source per run (e.g. github labels ensured once)
     done = parked = failed = review = 0
+    degraded_waited = False   # #2023: one wait per degraded read
     poisoned = set()      # F4: goals neither record attempt below could record — skipped for the
                           # REST OF THIS RUN so a doubly-failing source can't spin on one goal forever
     while True:
@@ -6880,6 +6920,14 @@ def run_loop(sdlc_dir, run_goal):
         if kind == "HANDOFF":
             stopped = "handoff"
             break
+        if kind == "DEGRADED":      # #2023: wait ONCE until the reset epoch, then pick again; a second stops
+            if degraded_waited:
+                stopped = "degraded"
+                break
+            degraded_waited = True
+            wait_degraded(goal)
+            continue
+        degraded_waited = False
         result, detail = run_goal(goal)
         # #232: the programmatic driver never passes through the CLI `record done` refusal, so the
         # same rule is applied here: a `done` whose PR is not confirmed merged is recorded `review`
@@ -7079,6 +7127,9 @@ def _print_pick(kind, payload):
     pattern in `supervise_classify.py` (checked before `_DONE` there)."""
     if kind == "goal":
         print(payload)
+        return
+    if kind == "DEGRADED":                  # #2023: the reset epoch rides the token's own line
+        print(f"DEGRADED {payload}")
         return
     print(kind)
     if payload and kind in ("BUDGET", "DONE", "HANDOFF", "FULL", "HOLD"):
@@ -7327,7 +7378,7 @@ USAGE = ("usage: loop.py start <dir> [--session-pid PID] | start-run <dir> [--se
          "escalate <dir> <goal> <tier> --after plan-review|code-review|pr-review | "
          "escalate <dir> <goal> --show | "
          "lane-tier <dir> <goal> <small|medium|large> <current-tier> | "
-         "verify <dir> <goal> | red <dir> <goal> | wait-call <dir> <goal> verify|merge [--max-seconds N] [--run-id ID]")
+         "verify <dir> <goal> | red <dir> <goal> | wait-call <dir> <goal> verify|merge [--max-seconds N] [--run-id ID] | wait-degraded <epoch>")
 
 
 _ESCALATE_USAGE = ("usage: loop.py escalate <dir> <goal> <current-tier> "
@@ -8394,6 +8445,14 @@ def _dispatch(argv):
         return verify_goal(argv[2], argv[3])
     if len(argv) >= 4 and argv[1] == "red":         # #1673: record planned-test reds only; no loop trigger
         return red_goal(argv[2], argv[3])
+    if len(argv) >= 3 and argv[1] == "wait-degraded":   # #2023: the one bounded wait a DEGRADED pick earns
+        try:
+            waited = wait_degraded(argv[2])
+        except ValueError as exc:
+            print(f"loop.py: {exc}", file=sys.stderr)
+            return 2
+        print(f"waited {waited}s")
+        return 0
     if len(argv) >= 2 and argv[1] == "wait-call":   # #1650: bounded wait on a yielded verify / merge call
         return _wait_call(argv)
     print(USAGE, file=sys.stderr)

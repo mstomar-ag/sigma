@@ -1180,6 +1180,27 @@ def _graphql_capability_rows(base, cfg, env=None):
                      "SIGMA_GH_GRAPHQL=on|off." % (res.get("source"), res.get("reason")))}]
 
 
+def _quota_rows(env=None, now=None):
+    """#2023: ONE advisory row with the REST core and GraphQL allowance and reset times recorded for the active
+    identity. Reads gh_quota's state file only: no GitHub call. 'not recorded yet' until a response header was seen."""
+    try:
+        quota = _load_loop_script("gh_quota")
+        got = quota.recorded_quota(env=env)
+    except Exception:                        # noqa: BLE001 - a check that cannot run says nothing
+        return []
+
+    def part(label, key):
+        item = got.get(key)
+        if not item:
+            return "%s: not recorded yet" % label
+        return "%s: %s of %s left, resets at epoch %s" % (label, item.get("remaining"), item.get("limit"),
+                                                          item.get("reset"))
+
+    return [{"name": "GitHub API quota (active identity)", "ok": True,
+             "fix": "%s; %s. Read from headers already seen (no extra call)." % (
+                 part("REST core", "core"), part("GraphQL", "graphql"))}]
+
+
 def _landing_rows(base, cfg, run, which):
     """#974: branch-creation ruleset rows. Silent when fine; one MISSING row per blocking ruleset (named, never its
     id); one hand-built advisory row (ok True, text shown) when anything could not be checked. Gated by the caller on
@@ -4018,6 +4039,7 @@ def check(sdlc_dir=".sdlc", run=None, scheduled_tasks_dir=None, site_packages_di
         _progress("git and gh access")
         out.extend(_preflight_rows(base, cfg, run, which, injected, cheap_only))
         out.extend(_graphql_capability_rows(base, cfg))     # #801: advisory, detection only
+        out.extend(_quota_rows())                           # #2023: recorded quota, no call
         if _block(cfg, "work").get("enabled") and not cheap_only:
             _progress("landing rules")
             out.extend(_landing_rows(base, cfg, run, which))        # #974: branch-creation rulesets

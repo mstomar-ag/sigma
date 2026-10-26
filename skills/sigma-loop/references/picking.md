@@ -176,6 +176,8 @@ goal or context ceiling) → STOP new claims, finish any live goal slots, and re
 `HOLD` (no room) is not a stop, never `DONE`; nothing is claimed, no `budget` spent. Run
 `resource_lease.py wait --max 540`, then pick again.
 
+`DEGRADED <epoch>` (#2023) means the backlog read was rate-limited or incomplete: it is never `DONE`, and nothing is claimed. Run `loop.py wait-degraded <epoch>` (a Python verb, bounded at 30 minutes, PROVISIONAL), pick again once, and on a second `DEGRADED` stop and report it honestly; `run_loop` returns `stopped: degraded`.
+
 `DONE` does not always mean the backlog is empty. `next`/`next-batch` never hand back a goal
 whose own body declares a prerequisite (`**Blocked by:** #N`) that is still OPEN — it is left
 untouched, still `sdlc:goal`, never claimed and never parked, and becomes pickable by itself when

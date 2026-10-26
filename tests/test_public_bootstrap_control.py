@@ -774,6 +774,8 @@ def cmd_api(state, argv, pos, flags, multi):
             out.append({"number": int(number), "state": "open", "labels": [{"name": l} for l in issue["labels"]],
                         "assignees": [{"login": a} for a in issue.get("assignees", [])],
                         "title": issue.get("title", ""), "body": issue.get("body", "")})
+        if "-i" in argv:                     # #2022: a conditional read asks for headers; a 200 with none
+            print("HTTP/2.0 200 OK\n")
         print(json.dumps(out)); return
     m = re.match(r"^repos/%s/rules/branches/([^/?]+)(?:\?.*)?$" % re.escape(repo), endpoint)
     if m and method in ("", "GET"):

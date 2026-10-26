@@ -1206,6 +1206,10 @@ def conditional_get(endpoint, etag=None, fields=None, run=None):
         status, kind = classify(exc)
         raise GhApiError(str(exc), getattr(exc, "hint", None), status, kind) from exc
     status, headers, body = _split_response(out)
+    try:                                   # #2023: learn the quota from headers already received; no extra call
+        _load("gh_quota").note_headers(out)
+    except Exception:                      # noqa: BLE001 - recording never fails a read
+        pass
     if status == 304:
         return {"status": 304, "etag": headers.get("etag") or etag, "body": None, "not_modified": True}
     if rc != 0 or status is None or status >= 300:

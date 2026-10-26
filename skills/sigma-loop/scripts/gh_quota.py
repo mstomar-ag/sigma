@@ -33,10 +33,13 @@ DEFAULT_SECONDARY = 60        # bounded wait when a secondary refusal carries no
 DEFAULT_PRIMARY = 300         # bounded wait when a primary refusal carries no reset header
 MAX_WAIT = 3600               # no wait is ever longer than one hour
 DEFAULT_ACCOUNT = "default"
+DEFAULT_REST_RESERVE_PERCENT = 10   # PROVISIONAL (#2023): owner to ratify; config `gh_quota.rest_reserve_percent`
 
 _REMAINING = re.compile(r"(?im)^\s*x-ratelimit-remaining:\s*(\d+)")
 _RESET = re.compile(r"(?im)^\s*x-ratelimit-reset:\s*(\d+)")
 _RETRY = re.compile(r"(?im)^\s*retry-after:\s*(\d+)")
+_LIMIT = re.compile(r"(?im)^\s*x-ratelimit-limit:\s*(\d+)")
+_RESOURCE = re.compile(r"(?im)^\s*x-ratelimit-resource:\s*([a-z_]+)")
 _SECONDARY = re.compile(r"secondary|abuse", re.I)
 _PRIMARY = re.compile(r"rate limit|too many requests|http 429", re.I)
 
@@ -198,3 +201,72 @@ def held_kind(account=None, env=None):
         return (_read(bucket_path(env))["accounts"].get(account) or {}).get("kind")
     except Exception:                                   # noqa: BLE001
         return None
+
+
+# --- #2023: REST core reserve ---------------------------------------------------------------------------------
+# Learned ONLY from the rate-limit headers a response already carried (`gh api -i`, i.e. gh_api.conditional_get);
+# nothing here makes a GitHub call. Where no header has been seen the quota is UNKNOWN and nothing is deferred.
+
+def note_headers(text, account=None, now=None, env=None):
+    """Record `remaining`/`limit`/`reset` for the resource (core, graphql ...) the response's own headers name.
+    Returns the resource name, or None when the text carries no complete rate-limit header set. Fails open."""
+    head = str(text or "").replace("\r\n", "\n").partition("\n\n")[0]
+    res, rem, lim, rst = (_RESOURCE.search(head), _REMAINING.search(head), _LIMIT.search(head), _RESET.search(head))
+    if not (res and rem and lim and rst):
+        return None
+    resource = res.group(1).lower()
+    now = time.time() if now is None else now
+    account = account or account_key(env)
+
+    def write(entry):
+        seen = entry.get("quota")
+        seen = seen if isinstance(seen, dict) else {}
+        seen[resource] = {"remaining": int(rem.group(1)), "limit": int(lim.group(1)),
+                          "reset": int(rst.group(1)), "seen": now}
+        entry["quota"] = seen
+        entry.setdefault("updated", now)
+        return resource
+
+    return _update(account, write, env)
+
+
+def recorded_quota(account=None, env=None):
+    """-> {resource: {remaining, limit, reset, seen}} from recorded headers; {} when none (never a call)."""
+    account = account or account_key(env)
+    try:
+        got = (_read(bucket_path(env))["accounts"].get(account) or {}).get("quota")
+        return {k: dict(v) for k, v in got.items() if isinstance(v, dict)} if isinstance(got, dict) else {}
+    except Exception:                                   # noqa: BLE001
+        return {}
+
+
+def reserve_percent(config=None):
+    """The configured reserve percentage (`gh_quota.rest_reserve_percent`), 0..100; a bad value reads as default."""
+    block = (config or {}).get("gh_quota") if isinstance(config, dict) else None
+    value = block.get("rest_reserve_percent") if isinstance(block, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 100:
+        return DEFAULT_REST_RESERVE_PERCENT
+    return value
+
+
+def rest_deferral(config=None, account=None, now=None, env=None):
+    """-> None (proceed) or a one-line reason when the recorded REST core allowance is below the reserve.
+
+    The reserve is `reserve_percent` of the limit GitHub REPORTED, never a fixed count. Unknown (no header seen),
+    or a reset that has already passed (the recorded figure is stale), defers nothing."""
+    now = time.time() if now is None else now
+    core = recorded_quota(account, env).get("core")
+    if not core:
+        return None
+    try:
+        remaining, limit, reset = int(core["remaining"]), int(core["limit"]), int(core["reset"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if reset <= now or limit <= 0:
+        return None
+    pct = reserve_percent(config)
+    reserve = int(math.ceil(limit * pct / 100.0))
+    if remaining >= reserve:
+        return None
+    return "REST core %d of %d left, below the %s%% reserve (%d); resets at epoch %d" % (
+        remaining, limit, pct, reserve, reset)
