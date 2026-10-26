@@ -199,7 +199,7 @@ possible return. The cap must also exceed the working corpus, or it never conver
 one issue bigger than the cap re-embeds the overflow (`corpus − cap` calls) on every run instead of
 settling down, so raise the cap rather than let it thrash.
 
-When the machine turns critical, and when a verify is shed, the guard writes one `incidents/<utc-stamp>-<n>.json` next to `hold.json`: the largest processes with pid, parent pid, resident bytes, age, working folder and a scrubbed command line cut at 200 characters, no environment (#1914). At most 64 KB each, the 20 newest kept; `log.py slots` names the newest one under an hour old.
+When the machine turns critical, and when a verify is shed, the guard writes one `incidents/<utc-stamp>-<n>.json` next to `hold.json`: the largest processes with pid, parent pid, resident bytes, age, working folder and a scrubbed command line cut at 200 characters, no environment (#1914). At most 64 KB each, the 20 newest kept; `log.py slots` names the newest one under an hour old. The incident writer reads the process table through `resource_verify` (`ps`, and `lsof` for working folders), each with a timeout; those are the only child processes on this path, and the once-per-transition debounce flag lives in `last.json`, carried forward by the admit writers.
 
 ## Measuring a pick (opt-in, #1607)
 

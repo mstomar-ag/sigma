@@ -431,7 +431,7 @@ def admit(kind, want, repo, goal, pid=None, ttl=None, config=None, now=None, env
             since = previous.get("since") if previous.get("state") == "hold" else now
             _atomic_write(os.path.join(directory, "last.json"), {
                 "state": "hold", "since": since, "reason": choice.reason, "kind": kind, "goal": goal, "at": now,
-                "sample": sample.as_dict()})
+                "sample": sample.as_dict(), "critical": bool(previous.get("critical"))})   # #1914: refresh's debounce
             log_event(directory, {"event": "hold", "kind": kind, "goal": goal, "reason": choice.reason, "at": now})
             return choice
         n, est = choice
@@ -445,7 +445,7 @@ def admit(kind, want, repo, goal, pid=None, ttl=None, config=None, now=None, env
         _atomic_write(os.path.join(directory, "waiting.json"), waiting)
         _atomic_write(os.path.join(directory, "last.json"), {
             "state": "open", "since": now, "reason": "ok", "kind": kind, "goal": goal, "at": now,
-            "sample": sample.as_dict()})
+            "sample": sample.as_dict(), "critical": bool(previous.get("critical"))})   # #1914: refresh's debounce
         log_event(directory, {"event": "grant", "id": lease_id, "kind": kind, "goal": goal, "n": n, "at": now})
         return Grant(n, lease_id)
 

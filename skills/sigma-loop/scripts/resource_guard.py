@@ -27,7 +27,8 @@ last three samples and resumes on the higher of the lowest two, after `resume_sa
 seconds apart. `hold.json` (written by atomic rename; a corrupt file reads as open plus a note) lives outside every
 repository.
 
-NOT HERE, ON PURPOSE. No child process (the process-table reader lives in resource_verify.py), no signal, no gate that stops anything: this module reports facts and
+NOT HERE, ON PURPOSE. No child process (the process-table reader lives in resource_verify.py; the incident writer, via
+resource_verify, runs `ps` and `lsof` with a timeout, the only child processes on this path), no signal, no gate that stops anything: this module reports facts and
 decisions; a caller acts on them.
 """
 import contextlib

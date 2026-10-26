@@ -98,6 +98,24 @@ def test_refresh_writes_on_the_transition_only(state, monkeypatch, tmp_path):
     assert len(_incidents(state)) == 1
 
 
+def test_a_held_admit_between_refreshes_does_not_refire_the_incident(state, monkeypatch, tmp_path):
+    """refresh(critical) -> admit (hold rewrites last.json) -> refresh(critical): still ONE incident file.
+    Control: drop the `critical` carry-forward in resource_lease's hold/grant writers and this goes red."""
+    monkeypatch.setattr(resource_lease, "take_sample", lambda: _sample(1 * GIB))
+    monkeypatch.setattr(guard, "snapshot", lambda limit=20, table=None: [{"pid": 1, "rss": 5}])
+    sdlc = tmp_path / "sdlc"
+    sdlc.mkdir()
+    cfg = {"resource": {"mode": "enforce"}}
+    on = {"SIGMA_RESOURCE_DIR": str(state), "SIGMA_RESOURCE_MODE": "enforce"}
+    quiet = lambda *a, **k: None  # noqa: E731
+    live.refresh(str(sdlc), {"resource": {"mode": "enforce"}}, now=1_700_000_000.0, append=quiet, env=on)
+    assert len(_incidents(state)) == 1
+    choice = resource_lease.admit("verify", 2, "r", "g1", pid=os.getpid(), config=cfg, now=1_700_000_050.0, env=on)
+    assert isinstance(choice, resource_lease.Hold)   # the hold branch ran
+    live.refresh(str(sdlc), cfg, now=1_700_000_100.0, append=quiet, env=on)
+    assert len(_incidents(state)) == 1
+
+
 # ------------------------------------------------------------------------------------------ AC-2
 def test_no_environment_value_reaches_the_file(state, monkeypatch):
     """Control: let `snapshot` copy os.environ into the record and the planted value appears."""
