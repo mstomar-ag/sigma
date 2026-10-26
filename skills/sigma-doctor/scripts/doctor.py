@@ -3333,9 +3333,13 @@ def _host_config_rows(repo_root):
     Read-only and value-free (`host_config_scan`); informational, never a failure of setup."""
     spec = importlib.util.spec_from_file_location("host_config_scan",
                                                   pathlib.Path(__file__).resolve().parent / "host_config_scan.py")
-    scanner = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(scanner)
-    result = scanner.scan(repo_root)
+    try:
+        scanner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(scanner)
+        result = scanner.scan(repo_root)
+    except Exception:                         # noqa: BLE001 - one value-free row, never the text
+        return [{"name": "host config scan: not scanned: scanner error", "ok": False,
+                 "fix": "run host_config_scan.py directly to see the fault", "level": "UNKNOWN"}]
     rows = [{"name": "host config %s %s: %s" % (f["rule"], f["severity"], f["file"]), "ok": False,
              "fix": f["fix"], "level": "WARN"} for f in result["findings"]]
     rows += [{"name": "host config not scanned: %s" % n["file"], "ok": False, "fix": n["reason"],

@@ -285,3 +285,51 @@ def test_a_check_that_raises_is_a_not_scanned_row(tmp_path, monkeypatch):
     result = m.scan(proj, home=home)
     assert {"file": ".mcp.json", "reason": "unexpected structure"} in result["not_scanned"]
     assert _rules(result) == ["R1"] and _SENTINEL not in json.dumps(result)
+
+
+def test_plugin_hook_files_beyond_the_cap_are_a_not_scanned_row(tmp_path):
+    home, proj = _dirs(tmp_path)
+    m = _mod()
+    for i in range(m.MAX_PLUGIN_HOOK_FILES + 3):
+        _put(home / ".claude" / "plugins" / "cache" / "mk" / ("pl%03d" % i) / "1.0.0" / "hooks" / "hooks.json",
+             {"hooks": {}})
+    result = m.scan(proj, home=home)
+    assert {"file": "~/.claude/plugins/cache", "reason": "3 plugin hook files beyond the %d-file cap"
+            % m.MAX_PLUGIN_HOOK_FILES} in result["not_scanned"]
+    assert len(result["scanned"]) == m.MAX_PLUGIN_HOOK_FILES
+
+
+def test_at_the_cap_there_is_no_cap_row(tmp_path):
+    home, proj = _dirs(tmp_path)
+    m = _mod()
+    for i in range(m.MAX_PLUGIN_HOOK_FILES):
+        _put(home / ".claude" / "plugins" / "cache" / "mk" / ("pl%03d" % i) / "1.0.0" / "hooks" / "hooks.json",
+             {"hooks": {}})
+    assert _mod().scan(proj, home=home)["not_scanned"] == []
+
+
+def test_both_server_keys_are_checked_independently(tmp_path):
+    home, proj = _dirs(tmp_path)
+    _put(proj / ".mcp.json", {"mcpServers": {"a": {"command": "npx", "args": ["some-pkg@1.2.3"]}},
+                              "mcp_servers": [1]})
+    result = _mod().scan(proj, home=home)
+    assert {"file": ".mcp.json", "reason": "unexpected structure"} in result["not_scanned"]
+    _put(proj / ".mcp.json", {"mcpServers": {"a": {"command": "npx", "args": ["some-pkg@1.2.3"]}},
+                              "mcp_servers": {"b": {"command": "npx", "args": ["some-pkg@latest"]}}})
+    assert "R3" in _rules(_mod().scan(proj, home=home))
+
+
+def test_doctor_scanner_fault_is_one_unknown_row(tmp_path, monkeypatch):
+    home, proj = _dirs(tmp_path)
+    monkeypatch.setenv("HOME", str(home))
+    spec = importlib.util.spec_from_file_location("doctor_2032b", ROOT / "skills/sigma-doctor/scripts/doctor.py")
+    d = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(d)
+
+    def boom(*a, **k):
+        raise RuntimeError(_SENTINEL)
+    monkeypatch.setattr(importlib.util, "module_from_spec", boom)
+    rows = d._host_config_rows(proj)
+    assert rows == [{"name": "host config scan: not scanned: scanner error", "ok": False,
+                     "fix": "run host_config_scan.py directly to see the fault", "level": "UNKNOWN"}]
+    assert _SENTINEL not in json.dumps(rows)

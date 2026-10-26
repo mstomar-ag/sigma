@@ -82,9 +82,9 @@ def _read(path):
         return None, "unreadable (%s)" % type(exc).__name__
 
 
-def _commands(servers):
-    """(command string, args list, env dict) for each MCP server mapping."""
-    for server in servers.values() if isinstance(servers, dict) else ():
+def _commands(blocks):
+    """(command string, args list, env dict) for each MCP server mapping in each block."""
+    for server in (s for b in blocks if isinstance(b, dict) for s in b.values()):
         if isinstance(server, dict):
             args = server.get("args") if isinstance(server.get("args"), list) else []
             env = server.get("env") if isinstance(server.get("env"), dict) else {}
@@ -101,15 +101,15 @@ def _hook_commands(hooks):
 
 
 def _servers(doc):
-    return doc.get("mcpServers") or doc.get("mcp_servers")
+    """Both server blocks, each checked on its own (a wrong-typed one never hides the other)."""
+    return [doc[k] for k in ("mcpServers", "mcp_servers") if doc.get(k) is not None]
 
 
 def _shape_ok(doc):
     """False when a block the rules read has the wrong type. Reads no value, only types."""
-    servers = _servers(doc)
-    if servers is not None and not isinstance(servers, dict):
-        return False
-    if isinstance(servers, dict):
+    for servers in _servers(doc):
+        if not isinstance(servers, dict):
+            return False
         for server in servers.values():
             if not isinstance(server, dict):
                 return False
@@ -200,14 +200,15 @@ _CHECKS = (("R1", _r1), ("R2", _r2), ("R3", _r3), ("R4", _r4), ("R5", _r5))
 
 
 def _targets(root, home, claude_dir, codex_dir):
-    """(path, kind) for each config that may exist. `kind` is json, toml, presence or hooks."""
+    """`(targets, dropped)`: (path, kind) for each config that may exist, and how many plugin hook
+    files lay beyond the cap. `kind` is json, toml or presence."""
     out = [(root / ".claude" / "settings.json", "json"), (root / ".claude" / "settings.local.json", "json"),
            (claude_dir / "settings.json", "json"), (root / ".mcp.json", "json"),
            (codex_dir / "config.toml", "toml"), (root / ".cursor" / "mcp.json", "json"),
            (root / "AGENTS.md", "presence"), (root / ".cursor" / "rules", "presence")]
     plugins = sorted((claude_dir / "plugins" / "cache").glob("*/*/*/hooks/hooks.json"))
     out += [(p, "json") for p in plugins[:MAX_PLUGIN_HOOK_FILES]]
-    return out
+    return out, max(0, len(plugins) - MAX_PLUGIN_HOOK_FILES)
 
 
 def scan(project_root, home=None):
@@ -229,7 +230,12 @@ def scan(project_root, home=None):
         scrub_module = _scrub()
     except Exception as exc:                      # noqa: BLE001 - report, never raise
         scrub_err = "secret rules unavailable (%s)" % type(exc).__name__
-    for path, kind in _targets(root, home, claude_dir, codex_dir):
+    targets, dropped = _targets(root, home, claude_dir, codex_dir)
+    if dropped:
+        result["not_scanned"].append({"file": _show(claude_dir / "plugins" / "cache", home, root),
+                                      "reason": "%d plugin hook files beyond the %d-file cap"
+                                      % (dropped, MAX_PLUGIN_HOOK_FILES)})
+    for path, kind in targets:
         if not (path.is_file() or (kind == "presence" and path.exists())):
             continue
         shown = _show(path, home, root)
