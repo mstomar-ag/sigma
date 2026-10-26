@@ -1675,6 +1675,43 @@ def _label_scope_ok(source, goal):
     return False
 
 
+def _reread_labels(source, goal):
+    """#2022: one GET of the chosen issue (`fetch_body_labels`, which also refreshes the scope label's view).
+    -> the lower-cased label names, or None when the source cannot read one or the read failed."""
+    fetch = getattr(source, "reread_body_labels", None) or getattr(source, "fetch_body_labels", None)
+    if fetch is None:
+        return None
+    try:
+        data = fetch(goal)
+    except Exception:       # noqa: BLE001 - fail to the list read's labels
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {str((l.get("name") if isinstance(l, dict) else l) or "").lower() for l in (data.get("labels") or [])}
+
+
+def _claimable_now(source, goal, names):
+    """#2022: may the chosen goal still be claimed, per a FRESH read of its labels? It must carry the goal
+    label and none of in-progress / blocked / parked. `names` None (no fresh read) leaves the list's verdict."""
+    if names is None:
+        return True
+    want = lambda l: str(l).lower() if l else None
+    if want(getattr(source, "goal_label", None)) and want(source.goal_label) not in names:
+        why = "no longer carries %s" % source.goal_label
+    else:
+        why = None
+        for attr in ("in_progress_label", "goal_blocked_label", "blocked_label", "parked_label"):
+            lab = want(getattr(source, attr, None))
+            if lab and lab in names:
+                why = "now carries %s" % lab
+                break
+    if why is None:
+        return True
+    print("loop.py: not claiming #%s — it %s since the list was read. Left untouched (no claim); "
+          "taking the next candidate" % (goal, why), file=sys.stderr)
+    return False
+
+
 def _feature_drained_note(source, skip):
     """#1661: the ONE thing a scoped run owes its operator when it stops -- WHICH kind of empty.
 
@@ -2976,21 +3013,18 @@ def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, re
             return admission_stop
         try:
             # #1575: an excluded goal must receive NO write, and `attach_at_pick` can write (attach
-            # label, refusal overlay + comment, no-unit handling). So the scope label is re-checked
-            # from a FRESH read BEFORE it. Cost: ONE extra `fetch_body_labels` read, on label-scoped
-            # runs only (`attach_at_pick` does its own read and cannot share this one); unscoped
-            # runs make exactly the same calls as before. A failed read falls back to the list
-            # read's labels (`scope_label_current`), and unknown means not-in-scope.
-            if getattr(source, "label_scope", None):
-                try:
-                    source.fetch_body_labels(goal)
-                except Exception:       # noqa: BLE001 - fail to the list read's labels, below
-                    pass
-                if not _label_scope_ok(source, goal):
-                    _cancel_goal_slot(sdlc_dir, session_pid, goal)
-                    _release_claim_lock(lock_fd)
-                    skip.add(goal)
-                    continue
+            # label, refusal overlay + comment, no-unit handling). So the claim re-reads the chosen
+            # goal's labels BEFORE it, UNCONDITIONALLY (#2022: one list now serves a whole batch, so a
+            # goal another machine claimed, blocked or parked after that list must be caught here).
+            # Cost: ONE single-issue GET per CLAIMED goal, not per candidate declined earlier. A failed
+            # read falls back to the list read's labels (`scope_label_current`; unknown = not-in-scope).
+            fresh = _reread_labels(source, goal)
+            if not _claimable_now(source, goal, fresh) or not _label_scope_ok(source, goal):
+                getattr(source, "drop_claim_read", lambda g: None)(goal)
+                _cancel_goal_slot(sdlc_dir, session_pid, goal)
+                _release_claim_lock(lock_fd)
+                skip.add(goal)
+                continue
             decision = feature_labels.attach_at_pick(sdlc_dir, source, goal, config)
             unit = _unit_at_pick(sdlc_dir, goal, config, decision)
             proceed = (decision.proceed

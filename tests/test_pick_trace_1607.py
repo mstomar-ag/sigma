@@ -138,6 +138,8 @@ def test_per_stage_counts_equal_the_script(tmp_path, monkeypatch):
         want = {}
         for c in classes:
             want[c] = want.get(c, 0) + 1
+        if stage == "gates":
+            want["read"] = want.get("read", 0) + 1   # #2022: the claim's unconditional label re-read (not scripted)
         assert row["stages"][stage]["calls"] == want, stage
     total = sum(sum(s["calls"].values()) for s in row["stages"].values())
     assert total == len(calls)                       # exactly once per runner call, none added

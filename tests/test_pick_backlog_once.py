@@ -14,6 +14,10 @@ Controls, each run red on its own and restored (the test each turns red):
 * a 304 read as an empty page                                  -> test_a_second_call_sends_the_etag_and_a_304_reuses_the_cache
 * the claim's label re-read removed (it no longer refreshes the labels the list saw) -> test_a_label_lost_after_the_list_is_caught_by_the_claim_reread
 
+* the retry re-served the memoised list (no bypass, empty stored)   -> test_an_empty_first_list_is_re_read_by_the_retry_within_one_scope
+* the claim's unconditional re-read, each clause of `_claimable_now` broken alone (goal label, in-progress,
+  blocked, parked) and the whole re-read removed -> test_a_goal_changed_after_the_list_is_skipped_and_the_next_is_picked
+
 No network and no real `gh`: the runner is an in-memory fake of the issues endpoint. Issue numbers are fixtures.
 """
 import hashlib
@@ -314,3 +318,99 @@ def test_a_label_lost_after_the_list_is_caught_by_the_claim_reread(tmp_path):
     src.mark_in_progress = lambda g: claimed.append(g) or True
     assert _drive(lp, base, cfg, src) == [("goal", "6")]
     assert claimed == ["6"]
+
+
+# -- the retry guard survives the hoist (#447 inside #2022) --------------------------------------------------------
+
+def test_an_empty_first_list_is_re_read_by_the_retry_within_one_scope(tmp_path):
+    lp, base, cfg, src, server = _setup(tmp_path, _backlog(3))
+    src._BACKLOG_READ_RETRY_BASE = 0
+    real, calls = src._fetch_issues_rest, []
+
+    def flaky(labels, cap, assignee=None, **k):
+        calls.append(1)
+        return [] if len(calls) == 1 else real(labels, cap, assignee=assignee, **k)
+    src._fetch_issues_rest = flaky
+    with src.read_once():
+        pending = src._fetch_pending([], set())[1]
+    assert len(calls) == 2 and pending and pending[0]["number"] == 1     # a memoised [] would end as "drained"
+
+
+# -- the claim re-reads the chosen goal before any write, unconditionally (#2022) -------------------------------
+
+def _flip_after_list(src, server, number, add=None, drop=None):
+    """Between the list read and the claim, issue `number` gains `add` / loses `drop` (another machine's write)."""
+    real = src._backlog_list
+
+    def listed(*a, **k):
+        out = real(*a, **k)
+        for row in server.issues:
+            if row["number"] == number:
+                row["labels"] = [l for l in row["labels"] if l["name"] != drop]
+                if add:
+                    row["labels"].append({"name": add})
+        return out
+    src._backlog_list = listed
+
+
+PICKS = {                 # mode -> (scope label, feature, first pick, the next candidate)
+    "unscoped": (None, False, "5", "8"),
+    "feature": (None, True, "5", "3"),
+    "label": ("area:fixture", False, "3", "6"),
+}
+
+
+@pytest.mark.parametrize("mode", sorted(PICKS))
+@pytest.mark.parametrize("flip", ["sdlc:in-progress", "sdlc:parked", "sdlc:blocked", "-sdlc:goal"])
+def test_a_goal_changed_after_the_list_is_skipped_and_the_next_is_picked(tmp_path, mode, flip):
+    scope, feature, first, nxt = PICKS[mode]
+    lp, base, cfg, src, server = _setup(tmp_path, _backlog(), scope=scope)
+    if feature:
+        src.scope_to_feature(FEATURE)
+    if flip.startswith("-"):
+        _flip_after_list(src, server, int(first), drop=flip[1:])
+    else:
+        _flip_after_list(src, server, int(first), add=flip)
+    claimed = []
+    src.mark_in_progress = lambda g: claimed.append(g) or True
+    assert _drive(lp, base, cfg, src) == [("goal", nxt)]
+    assert claimed == [nxt]                                              # the stale one got no write
+
+
+def test_the_claim_reread_is_one_issue_get_per_claimed_goal_not_per_candidate(tmp_path):
+    lp, base, cfg, src, server = _setup(tmp_path, _backlog())
+    assert _drive(lp, base, cfg, src, held=(5, 8), skip=(4,)) == [("goal", "7")]
+    # 5 and 8 were held: never re-read. 7 is read ONCE: the claim's re-read also serves `attach_at_pick`.
+    assert [r for r in server.requests if r[0] == "issue"] == [("issue", 7)]
+
+
+def _failing_read(src, fail):
+    real = src._read_issue
+
+    def read(goal, fields, comment_limit=None):
+        if fail:
+            raise RuntimeError("simulated read failure")
+        return real(goal, fields, comment_limit=comment_limit)
+    src._read_issue = read
+
+
+def test_a_failed_claim_reread_fails_open_to_the_lists_verdict(tmp_path):
+    lp, base, cfg, src, server = _setup(tmp_path, _backlog())
+    _failing_read(src, True)
+    assert _drive(lp, base, cfg, src) == [("goal", "5")]
+
+
+def test_a_successful_claim_reread_lacking_the_goal_label_still_skips(tmp_path):
+    lp, base, cfg, src, server = _setup(tmp_path, _backlog())
+    _flip_after_list(src, server, 5, drop="sdlc:goal")
+    _failing_read(src, False)
+    assert _drive(lp, base, cfg, src) == [("goal", "8")]
+
+
+def test_the_claim_reread_is_shared_with_attach_not_repeated(tmp_path):
+    lp, base, cfg, src, server = _setup(tmp_path, _backlog())
+    calls = []
+    real = src._fetch_body_labels_live
+    src._fetch_body_labels_live = lambda g: calls.append(g) or real(g)
+    assert _drive(lp, base, cfg, src) == [("goal", "5")]
+    assert calls == ["5"]

@@ -190,7 +190,7 @@ parked member is answered; the other rows use the starting state.
 | plan | 4 | 4 | 0 |
 | arm --apply | 16 | 10 | 6 |
 | next --label, before arm | 5 | 5 | 0 |
-| next --label, after arm and answer | 26 | 15 | 11 |
+| next --label, after arm and answer | 25 | 14 | 11 |
 | next, no label | 21 | 10 | 11 |
 
 Reading it: `plan` never writes. A refused start made five reads and no write. The pick inside the

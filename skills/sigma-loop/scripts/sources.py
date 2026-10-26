@@ -2557,18 +2557,30 @@ class GitHubSource:
         if self._pick_memo and self.in_progress_label not in tuple(add):
             self._pick_memo.clear()
 
-    def _backlog_list(self, labels, cap, assignee):
+    def _backlog_list(self, labels, cap, assignee, fresh=False, store_empty=False):
+        """One backlog list, memoised per `read_once` scope. `fresh=True` (a retry attempt of `_fetch_pending`)
+        skips the memo and reads again: a retry that re-served the stored list would defeat the #447 guard
+        against a false "backlog drained". An EMPTY list is stored only with `store_empty` (the caller's LAST
+        retry attempt, i.e. an emptiness the whole retry sequence confirmed); otherwise it is never stored."""
         memo = self._pick_memo
         key = ("list", tuple(labels), cap, assignee)
-        if memo is not None and key in memo:
+        if memo is not None and key in memo and not fresh:
             return list(memo[key])
         if self._etag_run is not None and self.sdlc_dir:
             issues = self._fetch_issues_rest(labels, cap, assignee=assignee, cached=True)
         else:
             issues = self._fetch_issues_rest(labels, cap, assignee=assignee)
         if memo is not None:
-            memo[key] = list(issues)
+            if issues or store_empty:
+                memo[key] = list(issues)
+            else:
+                memo.pop(key, None)
         return issues
+
+    def _backlog_confirmed_empty(self, labels, cap, assignee):
+        """True when this scope already holds an emptiness a full retry sequence confirmed (no re-retry)."""
+        memo = self._pick_memo
+        return memo is not None and memo.get(("list", tuple(labels), cap, assignee)) == []
 
     def _etag_page_get(self, labels, cap, assignee):
         """-> `(page_get, finish)` for `fetch_issues_rest`: each page is a conditional read with that page's own
@@ -2729,7 +2741,8 @@ class GitHubSource:
             # no new state needed.
             unresolved = primary and bool(self.assignee) and login is None
             try:
-                issues = self._backlog_list(labels, self._BACKLOG_FETCH_CAP, login)
+                issues = self._backlog_list(labels, self._BACKLOG_FETCH_CAP, login, fresh=attempt > 0,
+                                           store_empty=last_attempt or not retry_empty)
             except Exception as exc:
                 # F4/F447: this is called first, every iteration — an unguarded raise here crashed
                 # run_loop's while-loop before a single goal could even be picked. A read we can't
@@ -2857,7 +2870,8 @@ class GitHubSource:
             if pending:
                 pending.sort(key=self._pick_key)            # priority, then bug, then oldest-first (see _pick_key)
                 return len(issues), pending
-            if last_attempt or not retry_empty:
+            if last_attempt or not retry_empty or self._backlog_confirmed_empty(
+                    labels, self._BACKLOG_FETCH_CAP, login):
                 return len(issues), None
             # Loud even on the happy path's empty case — an operator watching stderr sees WHY a
             # pick took a few extra seconds instead of silently wondering later why a goal that
@@ -3839,6 +3853,35 @@ class GitHubSource:
         nothing". Malformed JSON on the fallback path degrades rather than raising -- `features.read` is total over
         payload shape, so an unusable payload is honestly an absent declaration. Labels are handed
         back RAW (`[{"name": ...}]`); `features._label_name` reads both shapes this repo produces."""
+        held = self._claim_read.pop(str(goal), None) if self._claim_read else None
+        if held is not None:                          # #2022: the claim's re-read serves this call too
+            if isinstance(held, BaseException):
+                raise held
+            return held
+        return self._fetch_body_labels_live(goal)
+
+    _claim_read = None
+
+    def reread_body_labels(self, goal):
+        """#2022: the claim-time re-read. ONE read of the chosen goal whose outcome (payload OR the
+        exception) is held for the very next `fetch_body_labels(goal)`, so `attach_at_pick` does not
+        pay a second GET and sees the same answer. Re-raises on failure (caller fails open)."""
+        if self._claim_read is None:
+            self._claim_read = {}
+        try:
+            self._claim_read.pop(str(goal), None)
+            data = self.fetch_body_labels(goal)
+        except Exception as exc:        # noqa: BLE001 - held, then re-raised
+            self._claim_read[str(goal)] = exc
+            raise
+        self._claim_read[str(goal)] = data
+        return data
+
+    def drop_claim_read(self, goal):
+        if self._claim_read:
+            self._claim_read.pop(str(goal), None)
+
+    def _fetch_body_labels_live(self, goal):
         data = self._read_issue(goal, ["body", "labels"])
         if self.label_scope:                          # #1575: the claim's own read supersedes the list's
             self._label_seen[str(goal)] = {
