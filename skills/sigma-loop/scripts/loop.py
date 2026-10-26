@@ -7685,6 +7685,20 @@ def _bootstrap_github_labels(sdlc_dir, config):
     return not failed
 
 
+def _print_host_config_findings(sdlc_dir):
+    """#2032: print the read-only host-config findings once on stderr (stdout carries the generation).
+    Informational: never blocks, never parks, never raises."""
+    try:
+        path = _HERE.parent.parent / "sigma-doctor" / "scripts" / "host_config_scan.py"
+        spec = importlib.util.spec_from_file_location("host_config_scan", path)
+        scanner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(scanner)
+        for line in scanner.lines(scanner.scan(pathlib.Path(sdlc_dir).resolve().parent)):
+            print("loop: " + line, file=sys.stderr)
+    except Exception:                         # noqa: BLE001 - a diagnostic never stops a start
+        pass
+
+
 def _dispatch(argv):
     if len(argv) >= 2 and argv[1] in ("start", "next", "next-batch", "claim", "session-end"):
         try:
@@ -7708,6 +7722,7 @@ def _dispatch(argv):
         for warning in _config_warnings(config):
             print("loop: " + warning, file=sys.stderr)       # surface the trap up front, not 40 goals in
         _coexist_notice(argv[2], "loop.py start")            # #314: a notice, never a refusal
+        _print_host_config_findings(argv[2])                 # #2032: informational, once per start
         coexist = _load("coexist")
         coexist.write_owner(argv[2])                         # Sigma owns this state dir now
         offer = coexist.takeover_line(argv[2])               # the dry-run command; never --apply

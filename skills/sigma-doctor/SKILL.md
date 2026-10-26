@@ -39,7 +39,9 @@ to the smaller of `SIGMA_WATCH_CALL_TIMEOUT` and 15s, so a dead host shows as `(
 with "timed out". The session-start setup check never runs `ls-remote` or the owner lookup; only
 this full run does.
 
-Present the checklist plainly. Offer to run a fix that's safe to run for the user, but **never run an
+`host config` rows are a read-only report (never blocks); relay them as printed.
+
+Present the checklist plainly. Offer a safe fix, but **never run an
 interactive login (`gh auth …`) or a package install on their behalf** — hand them the command.
 
 That rule governs acting *unprompted* — silently, or on an assumed yes. It does **not** apply to

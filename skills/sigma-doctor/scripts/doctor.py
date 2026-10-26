@@ -3328,6 +3328,21 @@ def _resource_guard_row(plugin_root=None):
     return dict(row, level="OK" if present else "FAIL")
 
 
+def _host_config_rows(repo_root):
+    """#2032: one WARN row per host-config finding, one UNKNOWN row per config it could not read.
+    Read-only and value-free (`host_config_scan`); informational, never a failure of setup."""
+    spec = importlib.util.spec_from_file_location("host_config_scan",
+                                                  pathlib.Path(__file__).resolve().parent / "host_config_scan.py")
+    scanner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(scanner)
+    result = scanner.scan(repo_root)
+    rows = [{"name": "host config %s %s: %s" % (f["rule"], f["severity"], f["file"]), "ok": False,
+             "fix": f["fix"], "level": "WARN"} for f in result["findings"]]
+    rows += [{"name": "host config not scanned: %s" % n["file"], "ok": False, "fix": n["reason"],
+              "level": "UNKNOWN"} for n in result["not_scanned"]]
+    return rows
+
+
 #: Every placeholder in each north-star tier, from the scaffolded template (sdlc_init.py's
 #: `_NORTH_STAR`) — short, distinctive prefixes (not the full strings) so a later wording tweak to
 #: the trailing text doesn't silently break the check. "filled" must clear EVERY tier (F33/#358): a
@@ -7029,6 +7044,10 @@ def main(argv):
         finally:
             _PROGRESS_ON = False
             _ARCH_SHARED = None
+        try:                                  # #2032: report-only; a scanner fault never stops the check-up
+            checks = list(checks) + _host_config_rows(pathlib.Path(sdlc_arg).resolve().parent)
+        except Exception:                     # noqa: BLE001
+            pass
         gaps = [c for c in checks if not c["ok"]]
         for c in checks:
             # #1513 review fix: show `fix` whenever it's non-empty, not just when `ok` is False.

@@ -51,6 +51,7 @@ and E (elevation of privilege).
 | TM-12 | T6 | Direct-edit bypass (T) | A local sentinel bypasses a hard plan gate when the key is not organization-locked. | `docs/enforcement.md:59` | med | — |
 | TM-13 | T7 | Unbounded model spend (D) | A spawned model process spends beyond a sensible per-invocation budget. | `skills/sigma-loop/scripts/feature_judge.py:167` | low | — |
 | TM-14 | T7 | Unsafe Slack merge (E) | `--unsafe-merge` removes interactive confirmation from a merge request. With unit upkeep off, a non-bot message in the authorized channel lands the unit with no approval; with it on, chat landing goes through the landing engine and needs the same local single-use unit approval, bound to the verified head, and the requester id is recorded. Residual: authority is channel membership alone, and an approval made locally cannot be tied to the person who then types the command. | `skills/sigma-loop/scripts/slack_commands_listen.py:1564` | med | — |
+| TM-15 | T3 | Risky agent host configuration (E) | A host config grants every command, pipes a download into a shell, starts an unpinned MCP package, holds a literal credential in an `env` block, or turns the sandbox and approvals off. | `skills/sigma-doctor/scripts/host_config_scan.py:1` reads the project, user and installed-plugin configs of Claude Code, Codex and Cursor read-only and reports by file, rule and fixed fix text, never a value. Limits: report only, it does not block; prompt and skill prose are not scanned; the rule set is provisional. | med | — |
 
 ## Operational reading
 
