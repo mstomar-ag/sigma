@@ -127,6 +127,8 @@ def _backlog(count=12):
             labels.append("sdlc:parked")
         if n % 3 == 0:
             labels.append("area:fixture")
+        if n in FEATURE_MEMBERS:
+            labels.append("feature:" + FEATURE)
         if n in (5, 8):
             labels.append("priority:P0")
         elif n in (4, 7):
@@ -173,13 +175,19 @@ REPLAY = {
     "label-scoped-next": (dict(skip=(3,)), "area:fixture", None),
     "plain-batch": (dict(held=(5,), skip=(4,)), None, 4),
     "label-scoped-batch": (dict(held=(6,)), "area:fixture", 3),
+    "feature-scoped-next": (dict(held=(5,)), None, None),
+    "feature-scoped-batch": (dict(held=(5,)), None, 4),
 }
+FEATURE = "fixture-unit"
+FEATURE_MEMBERS = (3, 5, 6, 9, 12)        # 9 is parked; 5 is the P0 member
 EXPECTED = {
     "plain-next": [("goal", "5")],
     "held-and-skipped-next": [("goal", "7")],
     "label-scoped-next": [("goal", "6")],
     "plain-batch": [("goal", "8"), ("goal", "7"), ("goal", "1"), ("goal", "3")],
     "label-scoped-batch": [("goal", "3"), ("goal", "12"), ("DONE", None)],
+    "feature-scoped-next": [("goal", "3")],
+    "feature-scoped-batch": [("goal", "3"), ("goal", "6"), ("goal", "12"), ("DONE", None)],
 }
 
 
@@ -187,6 +195,8 @@ EXPECTED = {
 def test_replay_pick_order_is_what_the_per_candidate_code_picked(tmp_path, name):
     kw, scope, batch = REPLAY[name]
     lp, base, cfg, src, server = _setup(tmp_path, _backlog(), scope=scope)
+    if name.startswith("feature-"):
+        src.scope_to_feature(FEATURE)
     picks = _drive(lp, base, cfg, src, batch=batch, **kw)
     print("COUNT", name, len(server.lists()))
     assert picks == EXPECTED[name]

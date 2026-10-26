@@ -2615,8 +2615,9 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
     if hooked:
         saved, source.call_counter = source.call_counter, rec.count_args
     try:
-        return _next_untraced(sdlc_dir, source, config, extra_skip, session_pid, refresh_heartbeat,
-                              gate, rec, batch, context)
+        with _read_once(source):              # #2022: one backlog read for every candidate of this pick
+            return _next_untraced(sdlc_dir, source, config, extra_skip, session_pid, refresh_heartbeat,
+                                  gate, rec, batch, context)
     finally:
         if hooked:
             source.call_counter = saved
@@ -2636,14 +2637,6 @@ def _read_once(source):
 
 def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True,
                    gate=True, rec=pick_trace.NULL, batch=None, context=None):
-    """One pick inside one backlog-read scope (#2022); the pick itself is `_next_untraced_body`."""
-    with _read_once(source):
-        return _next_untraced_body(sdlc_dir, source, config, extra_skip, session_pid, refresh_heartbeat,
-                                   gate, rec, batch, context)
-
-
-def _next_untraced_body(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True,
-                        gate=True, rec=pick_trace.NULL, batch=None, context=None):
     """(kind, goal_or_reason): 'goal' (+marks in_progress, the commit point — second element is
     the goal ref), 'DONE' (drained — second element None on a genuine empty read, or, #1084, a
     short degraded-read reason string when `source.read_degraded()` is True — mirrors BUDGET's own

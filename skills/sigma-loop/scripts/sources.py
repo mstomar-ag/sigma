@@ -825,6 +825,7 @@ def _run_gh(args, binary="gh"):
 
 #: Longest reason a `release()` warning quotes from a failed `gh` call (work.py's `_READ_NOTE_CHARS`).
 _RELEASE_WARNING_CHARS = 200
+_REAL_RUN_GH = _run_gh    # #2022: the real runner, so a patched `_run_gh` (the test seam) is never bypassed
 
 
 def _release_warning_reason(exc):
@@ -999,7 +1000,6 @@ class GitHubSource:
     """Goals are open GitHub issues labelled `goal_label`, ordered by issue number. Status via labels;
     done closes the issue; parked labels + comments it. Talks to GitHub through `run` (default _run_gh)."""
     _pick_memo = None    # #2022: the open `read_once` scope's {query: issues}, else None
-    _memo_keep = False   # #2022: True while a claim writes its own label (that goal is in `skip`)
     _etag_run = None     # #2022: `(rc, out, err)` runner for the page-ETag read; None = no ETag
     call_counter = None  # #1849: class default, so an instance built via __new__ (no __init__) still runs `_run`
     # #1140: `proposed_label` (sdlc:needs-confirmation) is retired from init: it is not bootstrapped
@@ -1208,7 +1208,7 @@ class GitHubSource:
         # distinguishes "not read yet" from "read, and it was empty/absent".
         self._feature_registry_cache = _UNRESOLVED
         self._raw_run = run or _run_gh
-        self._etag_run = gh_api.run_gh if run is None else None   # #2022: only the real runner speaks `-i`
+        self._etag_run = gh_api.run_gh if self._raw_run is _REAL_RUN_GH else None   # #2022: only the real runner speaks `-i`
         self.call_counter = None       # #1607: set by `loop._next` only while a pick trace is on
         self._labels_ready = False
         self._last_goal_raw_count = None   # #230: raw size of the last goal-label read, see census
@@ -1373,6 +1373,7 @@ class GitHubSource:
         saved_unit, saved_label = self.feature, self.feature_label
         saved_degraded = self._last_read_degraded
         self.feature = self.feature_label = None
+        saved_memo, self._pick_memo = self._pick_memo, None   # #2022: the probe is its own fresh, paid read
         try:
             return self.next_pending(skip=skip)
         except Exception as exc:              # noqa: BLE001 - a diagnostic must never break a stop
@@ -1381,6 +1382,7 @@ class GitHubSource:
             return None
         finally:
             self.feature, self.feature_label = saved_unit, saved_label
+            self._pick_memo = saved_memo
             self._last_read_degraded = saved_degraded
 
     def _raw(self, args):
@@ -1854,7 +1856,7 @@ class GitHubSource:
 
         RAISES on final failure -- it does not swallow. Callers decide what a failed lifecycle write
         means; today they cannot, because they are never told."""
-        self._memo_drop()
+        self._memo_drop(add)
         retries = self._LABEL_SWAP_RETRIES if retries is None else retries
         retry_base = self._LABEL_SWAP_RETRY_BASE if retry_base is None else retry_base
         add, remove = [l for l in add if l], [l for l in remove if l]
@@ -2549,8 +2551,10 @@ class GitHubSource:
         finally:
             self._pick_memo = None
 
-    def _memo_drop(self):
-        if self._pick_memo and not self._memo_keep:
+    def _memo_drop(self, add=()):
+        """A label write invalidates the pick scope's lists, except the claim's own `in-progress` write (that
+        goal is in `skip` for every later candidate)."""
+        if self._pick_memo and self.in_progress_label not in tuple(add):
             self._pick_memo.clear()
 
     def _backlog_list(self, labels, cap, assignee):
@@ -3177,14 +3181,6 @@ class GitHubSource:
         return self._feature_registry_cache
 
     def mark_in_progress(self, goal):
-        """The claim. Its own label write keeps the pick scope's lists: the goal is in `skip` for what follows."""
-        keep, self._memo_keep = self._memo_keep, True
-        try:
-            return self._mark_in_progress(goal)
-        finally:
-            self._memo_keep = keep
-
-    def _mark_in_progress(self, goal):
         """Returns whether the claim-label write actually landed (`True`), or genuinely could not
         after exhausting its own retry budget (`False`) -- see `_escalate_claim_label_failure`. Still
         best-effort in the sense that matters most: this NEVER raises, and the caller (`_claim`,
