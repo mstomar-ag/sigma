@@ -152,3 +152,43 @@ def changed_test_files(diff_text):
             continue                        # nothing left to run
         out.append(path)
     return out
+
+
+#: #1999: the files that WATCH the system (hooks, CI, the watcher, the doctor, the ratchet baselines).
+#: Entries ending `/` are directory prefixes, the rest are exact paths. A diff that deletes or
+#: net-removes lines there can blind a monitor while every other check stays green. Advisory only.
+MONITOR_PATHS = (
+    "hooks/",
+    ".github/workflows/",
+    "skills/sigma-loop/scripts/watch_daemon.py",
+    "skills/sigma-loop/scripts/run_with_timeout.py",
+    "skills/sigma-doctor/scripts/doctor.py",
+    "tests/test_no_direct_gh.py",
+    "tests/test_no_direct_gh_prose.py",
+)
+
+
+def _is_monitor(path):
+    return any(path.startswith(m) if m.endswith("/") else path == m for m in MONITOR_PATHS)
+
+
+def monitor_changes(diff_text):
+    """[{"path", "deleted", "removed"}] for monitor files a diff deletes or net-removes lines from.
+
+    PURE: diff text in, findings out, no I/O. NEVER RAISES (bad input yields []). A line removed and
+    re-added in the same file (stripped) is a move, not a removal, like scan(). Two clauses, each
+    pinned alone: a DELETED file is flagged whatever its lines; otherwise net-removed lines > 0.
+    Additions-only changes and non-monitor paths are never flagged."""
+    try:
+        sections = _files(diff_text or "")
+    except Exception:                       # noqa: BLE001 - advisory; see NEVER RAISES
+        return []
+    out = []
+    for path, kind, lines in sections:
+        if not _is_monitor(path):
+            continue
+        readded = {l[1:].strip() for l in lines if l.startswith("+")}
+        removed = sum(1 for l in lines if l.startswith("-") and l[1:].strip() not in readded)
+        if kind == "deleted" or removed > 0:
+            out.append({"path": path, "deleted": kind == "deleted", "removed": removed})
+    return out

@@ -254,6 +254,28 @@ def _evidence_lines(sdlc_dir, goal):
     return out
 
 
+def _goal_diff(sdlc_dir, goal):
+    """The goal branch's diff against its own base (the text `work.py` scans at merge); "" when unreadable."""
+    import subprocess
+    rec = _load("work")._record(sdlc_dir, goal) or {}
+    done = subprocess.run(["git", "diff", "%s...HEAD" % (rec.get("base") or "HEAD")], cwd=_root(sdlc_dir, goal),
+                          capture_output=True, text=True, timeout=60)
+    return done.stdout if done.returncode == 0 else ""
+
+
+def monitor_lines(sdlc_dir, goal):
+    """#1999: brief lines naming monitor files this goal deleted or removed lines from; [] when none or on any
+    fault (fail-open: the brief never breaks on this advisory)."""
+    try:
+        found = _load("tamper_scan").monitor_changes(_goal_diff(sdlc_dir, goal))
+    except Exception:                                 # noqa: BLE001 - advisory
+        return []
+    if not found:
+        return []
+    return ["- Monitor files touched (advisory; state a reason for each removal): " + "; ".join(
+        "%s (%s)" % (f["path"], "deleted" if f["deleted"] else "-%d lines" % f["removed"]) for f in found)]
+
+
 def facts(sdlc_dir, goal):
     """The review brief's `## Test-trust facts` section (code-review and pr-review)."""
     lines = ["## Test-trust facts"]
@@ -266,6 +288,7 @@ def facts(sdlc_dir, goal):
     except (OSError, ValueError) as exc:
         lines.append("- Acceptance criteria: unreachable (%s)" % type(exc).__name__)
     lines += _evidence_lines(sdlc_dir, goal)
+    lines += monitor_lines(sdlc_dir, goal)
     if gate(sdlc_dir)[0]:
         lines.append(
             "Test review is BLOCKING here (`review.test_review`). Begin your output with one line per "

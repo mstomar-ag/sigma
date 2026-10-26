@@ -227,3 +227,87 @@ def test_changed_test_files_dedupes_and_preserves_diff_order():
     tt = _tt()
     two = NEW_TEST_FILE + DELETED_ASSERT + NEW_TEST_FILE
     assert tt.changed_test_files(two) == ["tests/test_new.py", "tests/test_thing.py"]
+
+
+# ------------------------------------------------------------------ #1999: monitor removals
+def _diff(path, body, header=""):
+    return ("diff --git a/%s b/%s\n%sindex 1111111..2222222 100644\n--- a/%s\n+++ b/%s\n%s"
+            % (path, path, header, path, path, body))
+
+
+STALENESS_BLOCK_DELETED = _diff("hooks/session_start.sh", (
+    "@@ -10,6 +10,2 @@ main\n"
+    " echo start\n"
+    "-if watcher_is_stale; then\n"
+    "-  echo 'watcher stale'\n"
+    "-fi\n"
+    " echo done\n"))
+CI_STEP_DROPPED = _diff(".github/workflows/ci.yml", (
+    "@@ -5,5 +5,3 @@ jobs\n"
+    "     steps:\n"
+    "-      - name: ratchet\n"
+    "-        run: pytest tests/test_no_direct_gh.py\n"
+    "       - run: pytest\n"))
+ADDITIONS_ONLY = _diff("hooks/session_start.sh", (
+    "@@ -1,1 +1,3 @@\n echo start\n+echo more\n+echo evenmore\n"))
+NON_MONITOR_REMOVAL = _diff("skills/other/scripts/thing.py", (
+    "@@ -1,3 +1,1 @@\n x = 1\n-y = 2\n-z = 3\n"))
+MONITOR_FILE_DELETED = (
+    "diff --git a/skills/sigma-loop/scripts/run_with_timeout.py "
+    "b/skills/sigma-loop/scripts/run_with_timeout.py\ndeleted file mode 100644\n"
+    "index 1111111..0000000\n--- a/skills/sigma-loop/scripts/run_with_timeout.py\n+++ /dev/null\n"
+    "@@ -1,2 +0,0 @@\n-import os\n-import sys\n")
+
+
+def test_monitor_a_deleted_staleness_block_in_the_session_hook_is_flagged():
+    got = _tt().monitor_changes(STALENESS_BLOCK_DELETED)
+    assert [f["path"] for f in got] == ["hooks/session_start.sh"]
+    assert got[0]["removed"] == 3
+
+
+def test_monitor_a_dropped_ci_workflow_step_is_flagged():
+    got = _tt().monitor_changes(CI_STEP_DROPPED)
+    assert [f["path"] for f in got] == [".github/workflows/ci.yml"]
+
+
+def test_monitor_an_additions_only_diff_is_not_flagged():
+    assert _tt().monitor_changes(ADDITIONS_ONLY) == []
+
+
+def test_monitor_a_non_monitor_path_removal_is_not_flagged():
+    assert _tt().monitor_changes(NON_MONITOR_REMOVAL) == []
+
+
+def test_monitor_a_deleted_monitor_file_is_flagged_as_deleted():
+    got = _tt().monitor_changes(MONITOR_FILE_DELETED)
+    assert len(got) == 1 and got[0]["deleted"] is True
+
+
+def test_monitor_an_emptied_file_deleted_with_no_hunk_lines_is_still_flagged():
+    """The deleted-file clause on its own: no `-` lines exist, so only the marker can flag it."""
+    empty = ("diff --git a/hooks/guard.sh b/hooks/guard.sh\ndeleted file mode 100644\n"
+             "index 1111111..0000000\n")
+    got = _tt().monitor_changes(empty)
+    assert len(got) == 1 and got[0]["deleted"] is True and got[0]["removed"] == 0
+
+
+def test_monitor_a_pure_move_within_a_monitor_file_is_not_a_removal():
+    moved = _diff("hooks/session_start.sh",
+                  "@@ -1,2 +1,2 @@\n-echo a\n-echo b\n+echo b\n+echo a\n")
+    assert _tt().monitor_changes(moved) == []
+
+
+def test_monitor_malformed_input_yields_nothing_rather_than_raising():
+    m = _tt()
+    assert m.monitor_changes("") == [] and m.monitor_changes(None) == []
+
+
+def test_monitor_every_named_path_is_in_the_set_and_flagged_alone():
+    m = _tt()
+    for p in ("hooks/x.sh", ".github/workflows/ci.yml",
+              "skills/sigma-loop/scripts/watch_daemon.py",
+              "skills/sigma-loop/scripts/run_with_timeout.py",
+              "skills/sigma-doctor/scripts/doctor.py",
+              "tests/test_no_direct_gh.py", "tests/test_no_direct_gh_prose.py"):
+        d = _diff(p, "@@ -1,2 +1,1 @@\n keep\n-gone\n")
+        assert [f["path"] for f in m.monitor_changes(d)] == [p], p

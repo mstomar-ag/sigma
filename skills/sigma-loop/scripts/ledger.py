@@ -505,7 +505,7 @@ _INT64_MAX = 2 ** 63 - 1
 PHASE_KINDS = ("goal", "research", "plan", "plan_review", "implement", "review", "retro")
 GATE_KINDS = ("plan_review", "code_review", "post_review", "merge", "decision", "alignment",
               "verify", "risk_security", "risk_contract", "risk_migration", "risk_release",
-              "risk_debug", "test_trust")
+              "risk_debug", "test_trust", "monitor_touch")
 VERDICTS = ("pass", "block", "warn", "absent")
 REASON_CLASSES = ("irreversible", "needs_decision", "merge_conflict", "failing_check",
                    "no_evidence", "dependency", "review_cap", "budget", "backlog-empty",

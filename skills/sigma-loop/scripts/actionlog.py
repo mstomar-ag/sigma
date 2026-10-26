@@ -139,7 +139,7 @@ INTERNAL_FIELDS = {
 #: (work.py's merge/code_review/post_review call sites); mirrors ledger.py's own GATE_KINDS being
 #: wider than what any one emitter actually uses.
 INTERNAL_GATE_KINDS = ("merge", "code_review", "post_review", "test_trust",
-                       "risk_migration", "risk_contract", "risk_security")
+                       "risk_migration", "risk_contract", "risk_security", "monitor_touch")
 #: #1937 adds `test_trust`. This is a THIRD gate vocabulary, narrower than ledger.GATE_KINDS
 #: and contract/vocabulary.json on purpose: it is the set of gates the PYTHON layer
 #: writes, not the set that exists. `test_trust` belongs because work.py writes it from a

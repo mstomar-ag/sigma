@@ -6964,7 +6964,8 @@ def test_merge_emits_gate_for_merge_and_code_review_to_the_action_log(tmp_path):
     assert "outcome reconciled" not in out, out
     entries = actionlog.read_goal(d, goal)
     gates = {e["gate"]: e["verdict"] for e in entries if e["kind"] == "gate"}
-    assert gates == {"merge": "pass", "code_review": "pass", "test_trust": "pass"}
+    assert gates == {"merge": "pass", "code_review": "pass", "test_trust": "pass",
+                     "monitor_touch": "pass"}
 
 
 def test_merge_emits_a_block_gate_to_the_action_log_with_why(tmp_path):
@@ -9345,6 +9346,46 @@ def test_merge_emits_the_test_trust_gate_to_the_action_log(tmp_path):
     assert "test_trust" in gates, f"actionlog never received the gate; got {sorted(gates)}"
     assert gates["test_trust"]["verdict"] == "warn"
     assert "assertions_removed=1" in gates["test_trust"]["why"]
+
+
+_MONITOR_DIFF = (
+    "diff --git a/hooks/session_start.sh b/hooks/session_start.sh\n"
+    "index 1111111..2222222 100644\n"
+    "--- a/hooks/session_start.sh\n"
+    "+++ b/hooks/session_start.sh\n"
+    "@@ -1,3 +1,2 @@\n"
+    " echo start\n"
+    "-watcher_staleness_check\n"
+)
+
+
+def test_monitor_touch_gate_warns_on_a_removed_monitor_line_and_never_blocks(tmp_path):
+    """#1999: advisory. A monitor removal is a `warn` record naming the path; the merge still lands."""
+    ledger = _load("ledger")
+    cfg = {"work": {"enabled": True, "auto_merge": "always"}, **JOURNAL_ON, **ACTIONLOG}
+    d = _sdlc(tmp_path, cfg); goal = _started(d); _evidence(d, goal)
+    run = _runner(_view() + [("diff", _MONITOR_DIFF)] + _perm() + _protected())
+    out = work.merge(d, cfg, goal, run=run, sleep=NOSLEEP)
+    assert out.startswith("PR #7 merged"), out
+    events = _gate_events(journal_events(ledger, d), "monitor_touch")
+    assert len(events) == 1 and events[0]["verdict"] == "warn"
+    assert "hooks/session_start.sh" in events[0]["why"]
+    gates = {e["gate"]: e for e in actionlog.read_goal(d, goal) if e["kind"] == "gate"}
+    assert gates["monitor_touch"]["verdict"] == "warn"
+
+
+def test_monitor_touch_gate_fails_open_when_the_scan_itself_faults(tmp_path, monkeypatch):
+    cfg = {"work": {"enabled": True, "auto_merge": "always"}, **JOURNAL_ON}
+    d = _sdlc(tmp_path, cfg); goal = _started(d); _evidence(d, goal)
+
+    def boom(_diff):
+        raise RuntimeError("scan fault")
+    monkeypatch.setattr(work.tamper_scan, "monitor_changes", boom)
+    run = _runner(_view() + [("diff", _MONITOR_DIFF)] + _perm() + _protected())
+    out = work.merge(d, cfg, goal, run=run, sleep=NOSLEEP)
+    assert out.startswith("PR #7 merged"), out
+    ledger = _load("ledger")
+    assert _gate_events(journal_events(ledger, d), "test_trust")
 
 
 def test_a_bare_emit_token_file_is_refused_without_the_core_naming_any_product():

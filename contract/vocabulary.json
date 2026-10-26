@@ -154,7 +154,8 @@
     "risk_migration",
     "risk_release",
     "risk_debug",
-    "test_trust"
+    "test_trust",
+    "monitor_touch"
   ],
   "phase_kinds": [
     "goal",

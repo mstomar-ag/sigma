@@ -611,3 +611,20 @@ def test_bytecode_and_runner_caches_are_never_production():
                                   "tests/__pycache__/test_more.cpython-313-pytest-8.4.2.pyc",
                                   ".pytest_cache/v/cache/nodeids", "pkg/legacy.pyc"]) is False
     assert dr.production_changed(["tests/test_more.py", "pkg/calc.py"]) is True
+
+
+def test_facts_name_a_touched_monitor_file_and_stay_silent_otherwise(tmp_path, monkeypatch):
+    """#1999: the brief carries the monitor finding; no finding adds no line; a diff fault adds none."""
+    rt = _rt()
+    d = _repo(tmp_path)
+    removal = ("diff --git a/hooks/x.sh b/hooks/x.sh\n--- a/hooks/x.sh\n+++ b/hooks/x.sh\n"
+               "@@ -1,2 +1,1 @@\n keep\n-gone\n")
+    monkeypatch.setattr(rt, "_goal_diff", lambda *_a: removal)
+    assert "hooks/x.sh (-1 lines)" in rt.facts(d, GOAL)
+    monkeypatch.setattr(rt, "_goal_diff", lambda *_a: "")
+    assert "Monitor files" not in rt.facts(d, GOAL)
+
+    def boom(*_a):
+        raise OSError("no git")
+    monkeypatch.setattr(rt, "_goal_diff", boom)
+    assert "Monitor files" not in rt.facts(d, GOAL)

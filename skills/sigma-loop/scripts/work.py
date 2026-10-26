@@ -7266,6 +7266,24 @@ def _emit_test_trust(sdlc_dir, config, goal, rec, run, actionlog):
     ledger.safe_append(sdlc_dir, "gate", goal, config=config, stream=ledger.EVENTS,
                        gate="test_trust", verdict=verdict, why=why)
     actionlog.safe_append(sdlc_dir, goal, "gate", gate="test_trust", verdict=verdict, why=why)
+    _emit_monitor_touch(sdlc_dir, config, goal, diff, actionlog)
+
+
+def _emit_monitor_touch(sdlc_dir, config, goal, diff, actionlog):
+    """#1999: record whether this goal's diff deleted or net-removed lines from a MONITOR file (hooks, CI,
+    the watcher, the doctor, ratchet baselines). Same diff `_emit_test_trust` already read; ADVISORY
+    (`pass`/`warn`, never `block`) and FAIL-OPEN: a scan fault emits nothing rather than touching the merge."""
+    try:
+        found = tamper_scan.monitor_changes(diff)
+        why = None if not found else "; ".join(
+            "%s (%s)" % (f["path"], "deleted" if f["deleted"] else "-%d lines" % f["removed"])
+            for f in found)
+        verdict = "warn" if found else "pass"
+        ledger.safe_append(sdlc_dir, "gate", goal, config=config, stream=ledger.EVENTS,
+                           gate="monitor_touch", verdict=verdict, why=why)
+        actionlog.safe_append(sdlc_dir, goal, "gate", gate="monitor_touch", verdict=verdict, why=why)
+    except Exception:                       # noqa: BLE001 - advisory; never breaks a merge
+        pass
 
 
 #: #1650: slack on the merge receipt's deadline for the untimed `gh`/`git` calls inside `merge()` (D-4, deferred:
