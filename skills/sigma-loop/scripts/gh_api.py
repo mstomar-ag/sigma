@@ -432,7 +432,7 @@ def view_issue(run, number, repo=None, comments="all"):
 # ---------------------------------------------------------------- gh-shape normaliser (#895)
 
 GH_FIELDS = ("number", "title", "state", "stateReason", "author", "closedAt", "body", "labels", "assignees", "comments",
-             "isPullRequest")
+             "isPullRequest", "updatedAt")
 
 
 def _check_fields(fields):
@@ -494,6 +494,9 @@ def to_gh_shape(issue, fields):
             out[f] = _login(issue.get("user"))
         elif f == "closedAt":
             out[f] = issue.get("closed_at")
+        elif f == "updatedAt":                      # #2021: absent stays absent, so a caller can tell "unknown"
+            if issue.get("updated_at"):
+                out[f] = issue["updated_at"]
         elif f == "body":
             if "body" not in issue:
                 raise GhApiError("malformed REST issue: no body key")

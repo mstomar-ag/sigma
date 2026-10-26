@@ -2078,7 +2078,7 @@ def test_auto_unpark_sweep_calls_sweep_unpark_when_enabled(monkeypatch):
     calls = []
 
     class FakeAutoUnpark:
-        def sweep_unpark(self, sdlc_dir, config, apply=False, run=None):
+        def sweep_unpark(self, sdlc_dir, config, apply=False, run=None, **kw):
             calls.append((sdlc_dir, apply))
 
     real_load = lp._load
@@ -2119,7 +2119,7 @@ def test_next_runs_the_sweep_first_but_still_returns_its_own_pick(monkeypatch):
     order = []
 
     class FakeAutoUnpark:
-        def sweep_unpark(self, sdlc_dir, config, apply=False, run=None):
+        def sweep_unpark(self, sdlc_dir, config, apply=False, run=None, **kw):
             order.append("swept")
 
     real_load = lp._load
@@ -2152,7 +2152,7 @@ def test_next_holds_a_just_unparked_goal_back_from_its_own_pick(monkeypatch):
     flipped = {}                        # stand-in for the goal's real GitHub label state post-sweep
 
     class FakeAutoUnpark:
-        def sweep_unpark(self, sdlc_dir, config, apply=False, run=None):
+        def sweep_unpark(self, sdlc_dir, config, apply=False, run=None, **kw):
             assert apply is True        # #1129's sweep is always a live apply, never a dry-run, from _next()
             flipped["42"] = {"sdlc:goal"}                  # the mutation: sdlc:parked -> sdlc:goal, for real
             return {"apply": True, "checked": 1, "eligible": 1,
@@ -2187,11 +2187,11 @@ def test_a_just_unparked_goal_is_pickable_on_the_very_next_next_call(monkeypatch
     lp = _loop()
 
     class FirstCallUnparks:
-        def sweep_unpark(self, sdlc_dir, config, apply=False, run=None):
+        def sweep_unpark(self, sdlc_dir, config, apply=False, run=None, **kw):
             return {"apply": True, "checked": 1, "eligible": 1, "actions": [], "unparked": ["42"]}
 
     class SecondCallFindsNothingLeftToUnpark:
-        def sweep_unpark(self, sdlc_dir, config, apply=False, run=None):
+        def sweep_unpark(self, sdlc_dir, config, apply=False, run=None, **kw):
             return {"apply": True, "checked": 0, "eligible": 0, "actions": [], "unparked": []}
 
     real_load = lp._load

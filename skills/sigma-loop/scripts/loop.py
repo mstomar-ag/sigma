@@ -1250,7 +1250,7 @@ def reclaim_stale_claim_lock(sdlc_dir, goal, config):
     return True
 
 
-def _auto_unpark_sweep(sdlc_dir, config, run=None):
+def _auto_unpark_sweep(sdlc_dir, config, run=None, session_pid=None):
     """#1129/#1394: `discovery.auto_unpark.mode` (default 'on' since #1394), fail-open per-pick
     reconciliation -- re-examines `sdlc:blocked` GitHub issues whose recorded `blocked by #N` targets
     have all closed, and lifts the overlay so a LATER pick can pick one back up. An `sdlc:parked`
@@ -1279,7 +1279,8 @@ def _auto_unpark_sweep(sdlc_dir, config, run=None):
         if sources._auto_unpark(config) == "off":
             return frozenset()
         with gh_calls.component("auto_unpark"):      # #2019: the run=None path reaches `gh` past every injected runner
-            result = _load("auto_unpark").sweep_unpark(sdlc_dir, config, apply=True, run=run)
+            result = _load("auto_unpark").sweep_unpark(sdlc_dir, config, apply=True, run=run,
+                                                       session_pid=session_pid)
         return frozenset((result or {}).get("unparked") or ())
     except Exception as exc:
         print(f"loop.py: auto-unpark sweep failed non-fatally ({exc}) — continuing", file=sys.stderr)
@@ -2772,10 +2773,10 @@ def _next_untraced_body(sdlc_dir, source, config, extra_skip=(), session_pid=Non
         _reconcile_sweep(sdlc_dir, config)
     rec.mark("auto_unpark")
     if batch is None:
-        just_unparked = _auto_unpark_sweep(sdlc_dir, config)
+        just_unparked = _auto_unpark_sweep(sdlc_dir, config, session_pid=session_pid)
     else:
         if batch.get("unparked") is None:
-            batch["unparked"] = frozenset(_auto_unpark_sweep(sdlc_dir, config) or ())
+            batch["unparked"] = frozenset(_auto_unpark_sweep(sdlc_dir, config, session_pid=session_pid) or ())
         just_unparked = batch["unparked"]
     rec.mark("reclaim")
     just_reclaimed = _auto_reclaim_stale_claims(sdlc_dir, source, config)
