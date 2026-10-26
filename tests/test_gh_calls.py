@@ -146,7 +146,7 @@ def test_run_none_sweep_is_counted_under_auto_unpark(gc, tmp_path, monkeypatch):
 
     class Stub:
         @staticmethod
-        def sweep_unpark(sdlc_dir, config, apply=True, run=None):
+        def sweep_unpark(sdlc_dir, config, apply=True, run=None, **kw):
             assert run is None                       # the path no injected runner sees
             loop.sources._run_gh(["api", "x"], binary=fake)
             return {"unparked": []}

@@ -75,7 +75,7 @@ mechanisms together.
 
     python3 auto_unpark.py sweep <sdlc_dir> [--apply]
 """
-import json, pathlib, re, sys, time, importlib.util
+import json, os, pathlib, re, sys, time, importlib.util
 
 _HERE = pathlib.Path(__file__).resolve().parent
 
@@ -101,7 +101,126 @@ qkind = _load("qkind")
 ledger = _load("ledger")
 
 
-_ISSUE_FIELDS = "number,title,body,labels"
+_ISSUE_FIELDS = "number,title,body,labels,updatedAt"
+
+
+# --------------------------------------------------------------------------- #2021: comment reads + interval gate
+
+CACHE_FILE = "auto-unpark-cache.json"
+LAST_FILE = "auto-unpark-last.json"
+CACHE_SCHEMA = "auto-unpark-cache/1"
+CACHE_MAX_ENTRIES = 500          # ceiling on parked issues remembered; entries outside the parked set go first
+DEFAULT_INTERVAL_MINUTES = 10    # PROVISIONAL, owner to ratify; 0 = sweep on every pick
+
+
+def _now():
+    return time.time()
+
+
+def _state_path(sdlc_dir, name):
+    return pathlib.Path(str(sdlc_dir)) / "state" / name
+
+
+def _write_json_atomic(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".%d.tmp" % os.getpid())
+    try:
+        tmp.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+class _CommentReads:
+    """One comment read per issue per sweep, shared by every read site, backed (when `persist`) by a
+    `(number, updated_at) -> scrubbed comments` cache. Lives at the auto_unpark call sites only: the helper
+    it wraps, `backlog_check._fetch_scrubbed_comments`, is shared with precheck, whose goal_doc has no
+    updated_at, so it is never cached there. An EMPTY read is never persisted: the helper fails open to [],
+    which a cache would turn into 'no comments' until the next edit. Every cache failure reads as a miss."""
+
+    def __init__(self, sdlc_dir, persist=False):
+        self.sdlc_dir, self.persist = sdlc_dir, persist
+        self.memo, self.fresh, self.entries = {}, {}, {}
+        if persist:
+            try:
+                data = json.loads(_state_path(sdlc_dir, CACHE_FILE).read_text(encoding="utf-8"))
+                ents = data.get("entries") if data.get("schema") == CACHE_SCHEMA else None
+                self.entries = {str(k): v for k, v in (ents or {}).items()
+                                if isinstance(v, dict) and isinstance(v.get("comments"), list)}
+            except Exception:                                   # noqa: BLE001 - fail open
+                self.entries = {}
+
+    def get(self, config, it, goal_doc, run=None):
+        n = str(it.get("number"))
+        if n in self.memo:
+            return self.memo[n]
+        stamp = it.get("updatedAt")
+        hit = self.entries.get(n)
+        if self.persist and stamp and hit and hit.get("updated_at") == stamp:
+            raw = list(hit["comments"])
+            self.fresh[n] = hit
+        else:
+            raw = backlog_check._fetch_scrubbed_comments(self.sdlc_dir, config, goal_doc, run=run)
+            if self.persist and stamp and raw:
+                self.fresh[n] = {"updated_at": stamp, "comments": list(raw)}
+        self.memo[n] = raw
+        return raw
+
+    def save(self, issues):
+        """Keep only entries for issues in the current parked set, at most CACHE_MAX_ENTRIES."""
+        if not self.persist:
+            return
+        try:
+            parked = {str(i.get("number")) for i in issues}
+            keep = {n: e for n, e in {**self.entries, **self.fresh}.items() if n in parked}
+            if len(keep) > CACHE_MAX_ENTRIES:
+                keep = {n: keep[n] for n in sorted(keep, key=lambda k: -int(k) if k.isdigit() else 0)[:CACHE_MAX_ENTRIES]}
+            _write_json_atomic(_state_path(self.sdlc_dir, CACHE_FILE), {"schema": CACHE_SCHEMA, "entries": keep})
+        except Exception:                                       # noqa: BLE001 - fail open
+            pass
+
+
+def _interval_minutes(config):
+    block = (((config or {}).get("discovery") or {}).get("auto_unpark")) or {}
+    v = block.get("interval_minutes", DEFAULT_INTERVAL_MINUTES) if isinstance(block, dict) else DEFAULT_INTERVAL_MINUTES
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+        return DEFAULT_INTERVAL_MINUTES
+    return v
+
+
+def _session_key(session_pid=None):
+    """Identity of 'the session' for the interval gate: SIGMA_RUN_ID when set, plus the caller's
+    `--session-pid` when loop.py passes one. None (interval only) when neither is known, e.g.
+    chain.py's direct `sweep_unpark` call."""
+    rid = _run_id()
+    if rid is None and session_pid is None:
+        return None
+    return "%s|%s" % (rid, session_pid)
+
+
+def _sweep_due(sdlc_dir, config, now, session_pid=None):
+    """True on the first sweep of a session, after `interval_minutes`, with interval 0, or whenever the
+    gate state cannot be read (fail open: one extra sweep, never a skipped-forever one)."""
+    interval = _interval_minutes(config)
+    if interval == 0:
+        return True
+    try:
+        last = json.loads(_state_path(sdlc_dir, LAST_FILE).read_text(encoding="utf-8"))
+        swept_at, session = float(last["swept_at"]), last.get("session")
+    except Exception:                                           # noqa: BLE001
+        return True
+    sid = _session_key(session_pid)
+    if sid is not None and sid != session:
+        return True
+    return (now - swept_at) >= interval * 60 or now < swept_at
+
+
+def _stamp_sweep(sdlc_dir, now, session_pid=None):
+    try:
+        _write_json_atomic(_state_path(sdlc_dir, LAST_FILE), {"swept_at": now, "session": _session_key(session_pid)})
+    except Exception:                                           # noqa: BLE001 - costs one extra sweep
+        pass
 
 
 def _fetch_parked_issues(source):
@@ -337,7 +456,7 @@ def _map_still_waiting(sdlc_dir, config, number, cache):
         return False
 
 
-def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cache=None):
+def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cache=None, reads=None):
     """(actions, resolved) over every issue in `issues` (already known to carry `parked_label` OR
     `goal_blocked_label` -- see `_fetch_parked_issues`, #1358). `actions` is the enact-shaped,
     action list -- ONE `swap-label` per eligible issue (#1392), plus a card move where a board
@@ -376,6 +495,7 @@ def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cach
     in this module) is exactly the prior, unshared behaviour."""
     actions, resolved = [], {}
     open_cache = open_cache if open_cache is not None else {}
+    reads = reads if reads is not None else _CommentReads(sdlc_dir)
     map_cache = {}
     for it in issues:
         n = str(it.get("number"))
@@ -384,7 +504,7 @@ def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cach
                 and _map_still_waiting(sdlc_dir, config, n, map_cache)):
             continue                                    # #1625: the map shows an open blocker -- no reads
         goal_doc = {"ref": n, "raw": (it.get("title") or "") + "\n" + (it.get("body") or "")}
-        raw_comments = backlog_check._fetch_scrubbed_comments(sdlc_dir, config, goal_doc, run=run)
+        raw_comments = reads.get(config, it, goal_doc, run=run)
         if _is_exempt(raw_comments):
             continue                                    # #1152: deliberate park, opted out -- untouched
         if gate_hold.declared_gate_kind(raw_comments):
@@ -460,7 +580,7 @@ def compute_unpark_actions(sdlc_dir, config, source, issues, run=None, open_cach
 
 
 def compute_blocking_actions(sdlc_dir, config, source, blocked_issues, currently_blocking, run=None,
-                             open_cache=None, edges_out=None):
+                             open_cache=None, edges_out=None, reads=None):
     """#1351: `sdlc:blocking` — derived, self-healing, applied to the BLOCKER issue itself (not the
     blocked goal `compute_unpark_actions` above manages). `blocked_issues` is the SAME list
     `_fetch_parked_issues` already returned for this pass (no second fetch); `currently_blocking` is
@@ -506,10 +626,11 @@ def compute_blocking_actions(sdlc_dir, config, source, blocked_issues, currently
     `to_remove = currently_blocking - live_blocker_refs`."""
     live_blocker_refs = set()
     open_cache = open_cache if open_cache is not None else {}
+    reads = reads if reads is not None else _CommentReads(sdlc_dir)
     for it in blocked_issues:
         n = str(it.get("number"))
         goal_doc = {"ref": n, "raw": (it.get("title") or "") + "\n" + (it.get("body") or "")}
-        raw_comments = backlog_check._fetch_scrubbed_comments(sdlc_dir, config, goal_doc, run=run)
+        raw_comments = reads.get(config, it, goal_doc, run=run)
         extra_text = backlog_check._cap_join_excerpts(
             backlog_check._strip_offboard_prefixes(
                 backlog_check._filter_dismissal_comments(raw_comments)))
@@ -618,7 +739,7 @@ def _filing_cap_park(raw_comments):
     return reason, goal
 
 
-def compute_filing_cap_rearms(sdlc_dir, config, source, issues, run=None):
+def compute_filing_cap_rearms(sdlc_dir, config, source, issues, run=None, reads=None):
     """Candidates to re-arm, as `[{"issue", "goal", "prio", "reason", "actions"}]`, highest priority first
     (P0..P4, no label last, then issue number). Empty unless `ai_filed.on_cap` is `defer`, the counter is
     readable, and a candidate's park is the newest `filing_cap` declaration on a non-exempt, non-gate-held
@@ -632,13 +753,14 @@ def compute_filing_cap_rearms(sdlc_dir, config, source, issues, run=None):
     if counter is None:
         return []
     rid = _run_id()
+    reads = reads if reads is not None else _CommentReads(sdlc_dir)
     cands = []
     for it in issues:
         if source.parked_label not in _label_names(it):
             continue
         n = str(it.get("number"))
         goal_doc = {"ref": n, "raw": (it.get("title") or "") + "\n" + (it.get("body") or "")}
-        raw = backlog_check._fetch_scrubbed_comments(sdlc_dir, config, goal_doc, run=run)
+        raw = reads.get(config, it, goal_doc, run=run)
         if _is_exempt(raw) or gate_hold.declared_gate_kind(raw):
             continue
         park = _filing_cap_park(raw)
@@ -734,8 +856,11 @@ _UNPARK_COMMENT = ("Auto-unparked by Sigma — blocker(s) {refs} closed; re-adde
                    "for re-examination.")
 
 
-def sweep_unpark(sdlc_dir, config, apply=False, run=None):
-    """The whole sweep pass -- `triage.enact()`'s own shape (`sdlc_dir, config, ..., apply=False,
+def sweep_unpark(sdlc_dir, config, apply=False, run=None, force=False, session_pid=None):
+    """`session_pid` (loop.py's `--session-pid`) joins SIGMA_RUN_ID as the interval gate's session
+    identity, so a new session sweeps on its first pick; omitted (chain.py) -> interval only.
+
+    The whole sweep pass -- `triage.enact()`'s own shape (`sdlc_dir, config, ..., apply=False,
     run=None` -> a result dict; dry-run computes and reports, never writes). UNGATED: see this
     module's own docstring for why the `discovery.auto_unpark.mode` config check is the CALLER's
     job, not this function's. Defends its own reach regardless of caller, though: a no-op outside
@@ -777,28 +902,42 @@ def sweep_unpark(sdlc_dir, config, apply=False, run=None):
     issue-number topology: #7 is a parked goal AND is #42's live blocker), and an unrelated failure
     on #7's `sdlc:blocking` edit must never mask #7's own, fully-successful unpark -- checking
     against the combined list would count #7 as "not fully landed" and silently drop its audit
-    comment and cooldown entry over an action that was never part of the unpark decision at all."""
+    comment and cooldown entry over an action that was never part of the unpark decision at all.
+
+    #2021: an APPLYING sweep runs on the first pick of a session and then at most once per
+    `discovery.auto_unpark.interval_minutes` (default 10, provisional; 0 = every pick); a skipped call
+    returns `{"skipped": "interval", ...}` with nothing unparked. The gate is here, not in loop.py, so
+    chain.py's direct call is covered. A dry run and `force=True` (the CLI) are never gated. Each
+    issue's comments are read once per sweep, and not again while its `updated_at` is unchanged."""
     if not mirror.is_github_mode(config):
         return {"apply": bool(apply), "checked": 0, "eligible": 0, "actions": [], "unparked": []}
+    now = _now()
+    if apply and not force and not _sweep_due(sdlc_dir, config, now, session_pid):
+        return {"apply": True, "checked": 0, "eligible": 0, "actions": [], "unparked": [],
+                "skipped": "interval"}
     source = sources.GitHubSource(config, run=run)
     issues, complete = _fetch_parked_issues_status(source)
     open_cache = {}
+    reads = _CommentReads(sdlc_dir, persist=True)
     unpark_actions, resolved = compute_unpark_actions(sdlc_dir, config, source, issues, run=run,
-                                                       open_cache=open_cache)
+                                                       open_cache=open_cache, reads=reads)
     blocking_actions, edges = [], []
     if complete:
         try:
             currently_blocking = _fetch_blocking_issues(source)
             blocking_actions = compute_blocking_actions(sdlc_dir, config, source, issues,
                                                          currently_blocking, run=run,
-                                                         open_cache=open_cache, edges_out=edges)
+                                                         open_cache=open_cache, edges_out=edges, reads=reads)
         except Exception:
             blocking_actions = []
     try:                                                # #2040: a failure here costs this one re-arm pass only
-        rearms = [r for r in compute_filing_cap_rearms(sdlc_dir, config, source, issues, run=run)
+        rearms = [r for r in compute_filing_cap_rearms(sdlc_dir, config, source, issues, run=run, reads=reads)
                   if r["issue"] not in resolved]
     except Exception:                                   # noqa: BLE001
         rearms = []
+    reads.save(issues)
+    if apply:
+        _stamp_sweep(sdlc_dir, now, session_pid)
     n_unpark = len(unpark_actions)
     actions = unpark_actions + blocking_actions
     # `and actions`, unlike `enact()`'s own unconditional `if apply:` — deliberate, not an oversight.
@@ -899,7 +1038,7 @@ _SWEEP_USAGE = "usage: auto_unpark.py sweep <sdlc_dir> [--apply]"
 
 
 def sweep_cmd(sdlc_dir, config, argv_tail, run=None):
-    result = sweep_unpark(sdlc_dir, config, apply=("--apply" in argv_tail), run=run)
+    result = sweep_unpark(sdlc_dir, config, apply=("--apply" in argv_tail), run=run, force=True)
     print(render_sweep(result))
     return 1 if any(a["result"] == "failed" for a in result["actions"]) else 0
 

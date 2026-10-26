@@ -1609,6 +1609,22 @@
       "risk": "high"
     },
     {
+      "path": "skills/sigma-loop/scripts/auto_unpark.py",
+      "function": "_write_json_atomic",
+      "rule": "fs-remove",
+      "count": 1,
+      "gate": "the sweep's own state under .sdlc/state (auto-unpark-cache.json and auto-unpark-last.json), written atomically (temp file beside it, then replace); reached only by the auto-unpark sweep, which the loop gates on discovery.auto_unpark.mode and which chain.py and the sweep verb call directly; fail-open, an unwritable file costs one extra sweep; the temp file is removed only if the replace did not consume it",
+      "risk": "medium"
+    },
+    {
+      "path": "skills/sigma-loop/scripts/auto_unpark.py",
+      "function": "_write_json_atomic",
+      "rule": "fs-write",
+      "count": 2,
+      "gate": "the sweep's own state under .sdlc/state (auto-unpark-cache.json and auto-unpark-last.json), written atomically (temp file beside it, then replace); reached only by the auto-unpark sweep, which the loop gates on discovery.auto_unpark.mode and which chain.py and the sweep verb call directly; fail-open, an unwritable file costs one extra sweep; the temp file is removed only if the replace did not consume it",
+      "risk": "medium"
+    },
+    {
       "path": "skills/sigma-loop/scripts/loop.py",
       "function": "_reconcile_stamp",
       "rule": "fs-write",

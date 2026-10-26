@@ -59,7 +59,7 @@ def _counting(lp, sweeps):
         return m
 
     lp._load = load
-    lp._auto_unpark_sweep = lambda sdlc_dir, config, run=None: sweeps.append(1) or frozenset()
+    lp._auto_unpark_sweep = lambda sdlc_dir, config, run=None, **kw: sweeps.append(1) or frozenset()
     return loads
 
 
@@ -98,7 +98,7 @@ def test_two_independent_chains_fill_two_slots_with_roots(tmp_path):
 
 def test_a_goal_the_sweep_just_unparked_is_not_picked_in_the_same_batch(tmp_path):
     base, lp, cfg = _setup(tmp_path, [], {ROOT_A, ROOT_B, ROOT_C})
-    lp._auto_unpark_sweep = lambda sdlc_dir, config, run=None: frozenset({"10"})
+    lp._auto_unpark_sweep = lambda sdlc_dir, config, run=None, **kw: frozenset({"10"})
     src = _board([ROOT_A, ROOT_B, ROOT_C])
     picks = lp.next_batch(base, src, cfg, max_concurrent=3)
     assert picks == [("goal", "20"), ("goal", "30"), ("DONE", None)]
@@ -146,7 +146,7 @@ def test_a_closed_gate_batch_never_loads_dag_order(tmp_path, case, kw):
     loaded = []
     real = lp._load
     lp._load = lambda name: loaded.append(name) or real(name)
-    lp._auto_unpark_sweep = lambda sdlc_dir, config, run=None: frozenset()
+    lp._auto_unpark_sweep = lambda sdlc_dir, config, run=None, **kw: frozenset()
     picks = lp.next_batch(base, _board([1, 2]), pg._cfg(lp, base), max_concurrent=2)
     assert [p[0] for p in picks] == ["goal", "goal"]
     assert "dag_order" not in loaded

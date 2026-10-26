@@ -20,8 +20,20 @@ def rest_list_calls(run):
     return [c for c in run.calls if gqlfake.rest_list_params(c) is not None]
 
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _sweep_state_in_tmp(tmp_path, monkeypatch):
+    """#2021: the sweep writes its cache and interval stamp under the sdlc dir these tests name as a
+    relative `.sdlc`; run from a tmp cwd so that is never the repo's own."""
+    monkeypatch.chdir(tmp_path)
+
+
 def _config(**gh):
-    return {"discovery": {"source": "github", "github": {"repo": "acme/widget", **gh}}}
+    """interval_minutes 0: the sweep runs on every call, as these tests assume (#2021 gate)."""
+    return {"discovery": {"source": "github", "github": {"repo": "acme/widget", **gh},
+                          "auto_unpark": {"interval_minutes": 0}}}
 
 
 def _local_config():
