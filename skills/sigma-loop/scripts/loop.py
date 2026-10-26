@@ -2622,8 +2622,27 @@ def _next(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_hea
         rec.end()
 
 
+@contextlib.contextmanager
+def _read_once(source):
+    """#2022: the source's one-pick read scope when it has one (`GitHubSource.read_once`); else a no-op."""
+    scope = getattr(source, "read_once", None)
+    if scope is None:
+        yield
+        return
+    with scope():
+        yield
+
+
 def _next_untraced(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True,
                    gate=True, rec=pick_trace.NULL, batch=None, context=None):
+    """One pick inside one backlog-read scope (#2022); the pick itself is `_next_untraced_body`."""
+    with _read_once(source):
+        return _next_untraced_body(sdlc_dir, source, config, extra_skip, session_pid, refresh_heartbeat,
+                                   gate, rec, batch, context)
+
+
+def _next_untraced_body(sdlc_dir, source, config, extra_skip=(), session_pid=None, refresh_heartbeat=True,
+                        gate=True, rec=pick_trace.NULL, batch=None, context=None):
     """(kind, goal_or_reason): 'goal' (+marks in_progress, the commit point — second element is
     the goal ref), 'DONE' (drained — second element None on a genuine empty read, or, #1084, a
     short degraded-read reason string when `source.read_degraded()` is True — mirrors BUDGET's own
@@ -3175,20 +3194,21 @@ def next_batch(sdlc_dir, source, config, max_concurrent=None, extra_skip=(), ses
             if held >= slots:                # no free slot: a read-only answer, nothing is claimed
                 return [("FULL", "no free slots, %d in flight" % held)]
             slots -= held
-    for _ in range(slots):
-        kind, goal = _next(sdlc_dir, source, config, extra_skip=skip, session_pid=session_pid,
-                           refresh_heartbeat=False, gate=False, batch=batch, context=context)
-        if kind != "goal":
-            picks.append((kind, goal))
-            break
-        picks.append(("goal", goal))
-        skip.add(goal)
-        ranks = getattr(source, "dag_chain_ranks", None)
-        if ranks is not None:
-            try:
-                ranks.mark_in_flight(goal)
-            except Exception:                   # noqa: BLE001 - an order term never stops a batch
-                pass
+    with _read_once(source):                  # #2022: each backlog list is read once for the whole batch
+        for _ in range(slots):
+            kind, goal = _next(sdlc_dir, source, config, extra_skip=skip, session_pid=session_pid,
+                               refresh_heartbeat=False, gate=False, batch=batch, context=context)
+            if kind != "goal":
+                picks.append((kind, goal))
+                break
+            picks.append(("goal", goal))
+            skip.add(goal)
+            ranks = getattr(source, "dag_chain_ranks", None)
+            if ranks is not None:
+                try:
+                    ranks.mark_in_flight(goal)
+                except Exception:                   # noqa: BLE001 - an order term never stops a batch
+                    pass
     return picks
 
 

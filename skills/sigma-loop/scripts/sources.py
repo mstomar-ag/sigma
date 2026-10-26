@@ -9,7 +9,7 @@ status transitions are recorded, behind four ops: next_pending / mark_in_progres
 GitHubSource reaches GitHub only through an injectable `run` callable, so it is unit-testable
 without the network or `gh`.
 """
-import json, pathlib, importlib.util, re, sys, time
+import contextlib, hashlib, json, os, pathlib, importlib.util, re, sys, time
 from datetime import datetime, timezone
 
 _UNRESOLVED = object()   # #1216: "not yet resolved", distinct from a resolved None
@@ -39,7 +39,7 @@ _REST_PAGE_SIZE = 100    # GitHub REST's own per-page ceiling for the issues-lis
 
 
 def fetch_issues_rest(run, repo, labels, cap, state="open", sort="created", direction="asc",
-                       assignee=None, page_size=_REST_PAGE_SIZE):
+                       assignee=None, page_size=_REST_PAGE_SIZE, page_get=None):
     """#1829/#1833: paginated `gh api repos/{owner}/{repo}/issues` GET — the shared REST-fetch
     primitive every graphql-search-billed `gh issue list --label ...` (or bare `--search`) call
     site in this kit migrates to. `GitHubSource._fetch_issues_rest` below is a thin wrapper over
@@ -82,6 +82,10 @@ def fetch_issues_rest(run, repo, labels, cap, state="open", sort="created", dire
     FILTERED count silently re-indexes into the wrong raw offset the moment one page contains a
     filtered item.
 
+    #2022: `page_get(args)`, when given, answers each page request instead of `run` (it returns the
+    page's JSON text); `GitHubSource` passes one that sends the page's stored ETag. Absent, `run`
+    is called exactly as before.
+
     Raises on the first transport failure or unparseable response — does not retry internally.
     Retrying (when a caller wants it) is that caller's own concern, exactly as it was before this
     was extracted out of `GitHubSource`."""
@@ -98,7 +102,7 @@ def fetch_issues_rest(run, repo, labels, cap, state="open", sort="created", dire
                  "-f", "page=%d" % page]                                    # exact-list) expect
         if assignee:
             args += ["-f", "assignee=%s" % assignee]
-        raw = run(args)
+        raw = page_get(args) if page_get is not None else run(args)
         page_items = json.loads(raw or "[]")
         got = len(page_items)
         collected.extend(i for i in page_items if isinstance(i, dict) and "pull_request" not in i)
@@ -106,6 +110,39 @@ def fetch_issues_rest(run, repo, labels, cap, state="open", sort="created", dire
             break
         page += 1
     return collected[:cap]
+
+
+ETAG_FILE = "pick-backlog-etags.json"
+_ETAG_KEYS_MAX = 8                    # distinct list queries kept; the least recently used go first
+_ETAG_BYTES_MAX = 4 * 1024 * 1024     # a store past this is not written (the read stays unconditional)
+
+
+def _etag_load(path):
+    """`{key: {"page": {"etag", "body"}}}` from `path`; ANY trouble (absent, corrupt, wrong shape) -> `{}`."""
+    try:
+        data = json.loads(pathlib.Path(path).read_text())
+        if not isinstance(data, dict):
+            return {}
+        return {k: v for k, v in data.items() if isinstance(v, dict)}
+    except Exception:                                  # noqa: BLE001 - fail open: read unconditionally
+        return {}
+
+
+def _etag_save(path, store):
+    """Atomic, bounded write; any failure is swallowed (the next read is simply unconditional)."""
+    try:
+        while len(store) > _ETAG_KEYS_MAX:
+            store.pop(next(iter(store)))
+        text = json.dumps(store)
+        if len(text) > _ETAG_BYTES_MAX:
+            return
+        target = pathlib.Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".%d.tmp" % os.getpid())
+        tmp.write_text(text)
+        os.replace(tmp, target)
+    except Exception:                                  # noqa: BLE001
+        pass
 
 
 def render_label_report(repo, results):
@@ -961,6 +998,9 @@ BOARD_COLUMNS = (("backlog", "Backlog"), ("ready", "Ready"), ("in_progress", "In
 class GitHubSource:
     """Goals are open GitHub issues labelled `goal_label`, ordered by issue number. Status via labels;
     done closes the issue; parked labels + comments it. Talks to GitHub through `run` (default _run_gh)."""
+    _pick_memo = None    # #2022: the open `read_once` scope's {query: issues}, else None
+    _memo_keep = False   # #2022: True while a claim writes its own label (that goal is in `skip`)
+    _etag_run = None     # #2022: `(rc, out, err)` runner for the page-ETag read; None = no ETag
     call_counter = None  # #1849: class default, so an instance built via __new__ (no __init__) still runs `_run`
     # #1140: `proposed_label` (sdlc:needs-confirmation) is retired from init: it is not bootstrapped
     # here. It is created ON DEMAND (`ensure_label`) when a queued proposal is filed by
@@ -1168,6 +1208,7 @@ class GitHubSource:
         # distinguishes "not read yet" from "read, and it was empty/absent".
         self._feature_registry_cache = _UNRESOLVED
         self._raw_run = run or _run_gh
+        self._etag_run = gh_api.run_gh if run is None else None   # #2022: only the real runner speaks `-i`
         self.call_counter = None       # #1607: set by `loop._next` only while a pick trace is on
         self._labels_ready = False
         self._last_goal_raw_count = None   # #230: raw size of the last goal-label read, see census
@@ -1516,12 +1557,14 @@ class GitHubSource:
         return gh_api.edit_issue(self._run, self._n(number), body=body, **self._write_kw())
 
     def _issue_add_labels(self, number, labels):
+        self._memo_drop()
         labels = [labels] if isinstance(labels, str) else list(labels)
         verified = self._require_feature_labels(labels)
         return gh_api.add_labels(self._run, self._n(number), labels, feature_labels_exist=verified,
                                  **self._write_kw())
 
     def _issue_remove_label(self, number, label):
+        self._memo_drop()
         return gh_api.remove_label(self._run, self._n(number), label, **self._write_kw())
 
     def _issue_add_assignees(self, number, assignees):
@@ -1811,6 +1854,7 @@ class GitHubSource:
 
         RAISES on final failure -- it does not swallow. Callers decide what a failed lifecycle write
         means; today they cannot, because they are never told."""
+        self._memo_drop()
         retries = self._LABEL_SWAP_RETRIES if retries is None else retries
         retry_base = self._LABEL_SWAP_RETRY_BASE if retry_base is None else retry_base
         add, remove = [l for l in add if l], [l for l in remove if l]
@@ -2224,6 +2268,16 @@ class GitHubSource:
         return False
 
     def _board_queue(self):
+        """#2022: `_board_queue_read`, once per `read_once` scope (GraphQL: no ETag, only this hoist)."""
+        memo = self._pick_memo
+        if memo is not None and "board" in memo:
+            return memo["board"]
+        board = self._board_queue_read()
+        if memo is not None:
+            memo["board"] = board
+        return board
+
+    def _board_queue_read(self):
         """`(ready_numbers_in_board_order, carded_open_numbers)`, or None to use the label queue.
 
         ONE server-filtered read. `gh project item-list --query` filters SERVER-SIDE (verified:
@@ -2480,7 +2534,82 @@ class GitHubSource:
     _BACKLOG_FETCH_CAP = 200
     _REST_PAGE_SIZE = _REST_PAGE_SIZE    # class-attr alias of the module default (tests patch either)
 
-    def _fetch_issues_rest(self, labels, cap, assignee=None):
+    @contextlib.contextmanager
+    def read_once(self):
+        """#2022: ONE pick scope. Inside it each distinct backlog list (and the board read) is requested once and
+        every candidate the pick looks at filters that payload, instead of re-listing per held or skipped
+        candidate. Re-entrant (the inner scope joins the outer). A label write other than the claim's own
+        drops the stored lists (`_memo_drop`), so a sweep's change is never hidden behind a stale list."""
+        if self._pick_memo is not None:
+            yield
+            return
+        self._pick_memo = {}
+        try:
+            yield
+        finally:
+            self._pick_memo = None
+
+    def _memo_drop(self):
+        if self._pick_memo and not self._memo_keep:
+            self._pick_memo.clear()
+
+    def _backlog_list(self, labels, cap, assignee):
+        memo = self._pick_memo
+        key = ("list", tuple(labels), cap, assignee)
+        if memo is not None and key in memo:
+            return list(memo[key])
+        if self._etag_run is not None and self.sdlc_dir:
+            issues = self._fetch_issues_rest(labels, cap, assignee=assignee, cached=True)
+        else:
+            issues = self._fetch_issues_rest(labels, cap, assignee=assignee)
+        if memo is not None:
+            memo[key] = list(issues)
+        return issues
+
+    def _etag_page_get(self, labels, cap, assignee):
+        """-> `(page_get, finish)` for `fetch_issues_rest`: each page is a conditional read with that page's own
+        stored ETag (`gh_api.conditional_get`); a 304 answers with the stored page. `finish()` writes only the
+        pages this read saw. Any store trouble means an unconditional read."""
+        path = pathlib.Path(self.sdlc_dir) / "state" / ETAG_FILE
+        store = _etag_load(path)
+        key = hashlib.sha1(json.dumps([self.repo, list(labels), cap, assignee, self._REST_PAGE_SIZE]).encode()
+                           ).hexdigest()[:16]
+        old = store.get(key) or {}
+        seen, changed = {}, [False]
+
+        def run(args):
+            if self.call_counter is not None:
+                self.call_counter(args)
+            return self._etag_run(args)
+
+        def page_get(args):
+            fields = {}
+            for i, a in enumerate(args):
+                if a == "-f" and "=" in args[i + 1]:
+                    k, _, v = args[i + 1].partition("=")
+                    fields[k] = v
+            page = str(fields.get("page", "1"))
+            cached = old.get(page) if isinstance(old.get(page), dict) else None
+            etag = cached.get("etag") if cached and isinstance(cached.get("body"), list) else None
+            resp = gh_api.conditional_get(args[1], etag=etag, fields=fields, run=run)
+            if resp["not_modified"] and etag:
+                seen[page] = cached
+                return json.dumps(cached["body"])
+            if resp["not_modified"]:                      # a 304 we did not ask for: read it unconditionally
+                resp = gh_api.conditional_get(args[1], fields=fields, run=run)
+            if resp["etag"]:
+                seen[page] = {"etag": resp["etag"], "body": resp["body"]}
+                changed[0] = True
+            return json.dumps(resp["body"])
+
+        def finish():
+            if changed[0] or set(seen) != set(old):
+                store.pop(key, None)
+                store[key] = seen
+                _etag_save(path, store)
+        return page_get, finish
+
+    def _fetch_issues_rest(self, labels, cap, assignee=None, cached=False):
         """#1829/#1833: this instance's own goal-label(s)/open/oldest-first REST fetch — a thin
         binding of the module-level `fetch_issues_rest` (this file's top) to `self._run` and
         `self.repo`, through THIS class's existing `self._run()` chokepoint (the same DI/test-
@@ -2502,6 +2631,12 @@ class GitHubSource:
         retry loop is the sole retry authority for this read; a second retry layer here would
         double the backoff silently and make `_BACKLOG_READ_RETRIES` stop meaning what its name
         says."""
+        if cached and self._etag_run is not None and self.sdlc_dir:     # #2022: per-page ETag across calls
+            page_get, finish = self._etag_page_get(labels, cap, assignee)
+            issues = fetch_issues_rest(self._run, self.repo, labels, cap, assignee=assignee,
+                                       page_size=self._REST_PAGE_SIZE, page_get=page_get)
+            finish()
+            return issues
         return fetch_issues_rest(self._run, self.repo, labels, cap,
                                   assignee=assignee, page_size=self._REST_PAGE_SIZE)
 
@@ -2590,7 +2725,7 @@ class GitHubSource:
             # no new state needed.
             unresolved = primary and bool(self.assignee) and login is None
             try:
-                issues = self._fetch_issues_rest(labels, self._BACKLOG_FETCH_CAP, assignee=login)
+                issues = self._backlog_list(labels, self._BACKLOG_FETCH_CAP, login)
             except Exception as exc:
                 # F4/F447: this is called first, every iteration — an unguarded raise here crashed
                 # run_loop's while-loop before a single goal could even be picked. A read we can't
@@ -3042,6 +3177,14 @@ class GitHubSource:
         return self._feature_registry_cache
 
     def mark_in_progress(self, goal):
+        """The claim. Its own label write keeps the pick scope's lists: the goal is in `skip` for what follows."""
+        keep, self._memo_keep = self._memo_keep, True
+        try:
+            return self._mark_in_progress(goal)
+        finally:
+            self._memo_keep = keep
+
+    def _mark_in_progress(self, goal):
         """Returns whether the claim-label write actually landed (`True`), or genuinely could not
         after exhausting its own retry budget (`False`) -- see `_escalate_claim_label_failure`. Still
         best-effort in the sense that matters most: this NEVER raises, and the caller (`_claim`,
