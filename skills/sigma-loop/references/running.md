@@ -47,8 +47,8 @@ logging a second, differently-computed value here would silently contradict the 
 recorded. A defaulted tier matches nothing and correctly carries no signal — pass it empty or
 omit it. **Per-step `resolve-step` below is UNCHANGED** — it stays prose-invoked, since a plan
 step's free text has no structured, goal-agnostic artifact code could read on its own.
-**`agent_dispatch --role phase/goal-slot/slice` below stays prose-invoked:** whether a phase ran as its own dispatched subagent or inline is the host's decision and no code here sits inside it. A silent regression to inline breaks maker≠checker, so since #684 `loop.py record ... done` refuses a goal whose action log lacks the phases (below). The goal-slot tier is captured at pick time, like the phase tier (`references/picking.md` step 1a).
-Then run **each phase as its own subagent** with that host's model override. Before dispatch, hold
+**`agent_dispatch --role phase/goal-slot/slice` below stays prose-invoked:** whether a phase ran as a subagent or inline is the host's decision. A silent regression to inline breaks maker≠checker, so since #684 `loop.py record ... done` refuses a goal whose action log lacks the phases (below). The goal-slot tier is captured at pick time, like the phase tier (`references/picking.md` step 1a).
+Then run **each phase as its own subagent** with that host's model override.  Reviewer phases: `predict.py resolve-phase <phase> <tier> .sdlc` (#2020). Before dispatch, hold
 the canonical portable pair (`<tier-or-off>`, `<effort>`) selected for this goal; Claude's Task tool
 accepts the tier directly: pass that exact Task `model` selector to
 `phase_report.py start --requested-model <selector>` too, so the step banner can name what was

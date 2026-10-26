@@ -129,7 +129,7 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/predict.py" resolve-profile "<goal>" .sdlc
 For a GitHub issue number, pass its actual title and body as the first argument — **the title on
 the first line**, e.g. from
 `gh api repos/{owner}/{repo}/issues/N --jq '.title + "\n\n" + (.body // "")'`
-(POSIX shell, run by the calling skill, which grants `gh api`; the `--jq` puts the title first) — and the issue
+(POSIX shell, run by the calling skill; `--jq` puts the title first) — and the issue
 number as a final argument: `python3 "${CLAUDE_SKILL_DIR}/scripts/predict.py" resolve
 "<title-then-body text>" .sdlc "<issue-number>"`. This classifies the text while recording
 `model_choice` under the issue ID. The three-argument local-file form above is unchanged.
@@ -177,14 +177,15 @@ so the recommendation you are shown is the one the loop will act on.
 **Why per-phase subagents, one tier per goal:** the main session cannot switch its own model mid-run,
 but work run as a **subagent** can take a `model` override. So under `auto`, `/sigma-loop` runs **each of
 the goal's phases as its own subagent** at the predicted tier (the design: "the rest of the steps run
-with that model") — one subagent per phase, **not one for the whole goal**. That granularity is what
-lets a **review phase run as a fresh sibling of the maker phase it checks** (`config.review.independent`
-— the maker is never the checker) instead of inheriting the maker's context, and it lets a mechanical
+with that model") — one subagent per phase, **not one for the whole goal**. That lets a **review phase run as a fresh sibling of the maker phase it checks** (`config.review.independent`) and a mechanical
 step drop to a cheaper tier via `resolve-step`. `/sigma-goal` surfaces the recommendation and pauses
 at each gate; if an approved phase runs inline it uses the session model, while every dispatched
-Codex phase passes its tier (or `off`) and the canonical effort to `host-model`. With `model_selection: off`, that resolver
-selects the versioned ordinary-work default (`sonnet` → Terra) rather than inheriting its parent
-session's arbitrary model.
+Codex phase passes its tier (or `off`) and the canonical effort to `host-model`. With `off`, that resolver selects the versioned ordinary-work default (`sonnet` → Terra).
+
+**Reviewer floor (#2020).** Under `auto`, plan-review, review and pr-review phases run at
+`max(goal tier, floor)`: `predict.py resolve-phase <phase> <tier> .sdlc` prints it (`off` when not
+auto). `model_selection_reviewer_floor` defaults to `sonnet`; the price ceiling still wins. New
+installs ship `auto`; a config without the key stays `off`. Saving: not measured.
 
 ## Two granularities, two axes (0.6)
 
@@ -219,8 +220,7 @@ now calls `why` itself at pick time and makes ONE literal `ledger.safe_append(..
 ...)` call directly — a genuine, code-detectable call site, unlike `resolve`'s own
 subprocess-shells-to-`loop.py-emit` path above, which is why `model_choice` no longer needs a
 static-checker waiver on that side either. This does not replace `resolve`/`resolve_step`'s own
-recording described above — both can fire for the same goal (harmless: `resolve` is deterministic,
-and a duplicate ledger entry is not a correctness problem) — it closes the gap where NEITHER fired
+recording — both can fire for the same goal (harmless: a duplicate ledger entry) — it closes the gap where NEITHER fired
 unless a calling skill's own prose remembered to invoke `resolve` by hand, which issue #1627
 measured as happening almost never.
 

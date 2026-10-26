@@ -781,6 +781,44 @@ def resolve_profile(goal_text, sdlc_dir=".sdlc", goal=None):
     return {"model": tier, "effort": effort}
 
 
+#: #2020: the reviewer phases (loop vocabulary and the underscore spellings) and the flat config key
+#: for their floor. A FLAT sibling of `model_selection`, like the ceiling key above.
+_REVIEWER_PHASES = ("plan-review", "plan_review", "review", "code-review", "code_review",
+                    "pr-review", "pr_review")
+_REVIEWER_FLOOR_KEY = "model_selection_reviewer_floor"
+_REVIEWER_FLOOR_DEFAULT = "sonnet"
+
+
+def reviewer_floor(cfg):
+    """The configured reviewer floor tier; junk or an unknown tier reads as the default."""
+    try:
+        raw = cfg.get(_REVIEWER_FLOOR_KEY)
+    except AttributeError:
+        return _REVIEWER_FLOOR_DEFAULT
+    tier = raw.strip().lower() if isinstance(raw, str) else None
+    return tier if tier in _TIER_PRICE_ORDER else _REVIEWER_FLOOR_DEFAULT
+
+
+def phase_tier(tier, phase, cfg):
+    """THE single seam for the reviewer floor (#2020): the tier `phase` runs at, given the tier
+    resolved for the goal. Under `auto`, a reviewer phase resolves to max(tier, floor); signals
+    raise it, never lower it. The ceiling (`model_selection_max_tier`) wins over the floor, so the
+    floor is clamped to it first. `off`/absent: returned unchanged (the floor cannot lower cost
+    there). Every other phase is returned unchanged."""
+    if _model_selection(cfg) != "auto" or phase not in _REVIEWER_PHASES:
+        return tier
+    floor = _TIER_PRICE_ORDER[min(_price_rank(reviewer_floor(cfg)), _price_rank(max_tier(cfg)))]
+    return max(tier, floor, key=_price_rank)
+
+
+def resolve_phase(phase, tier, sdlc_dir=".sdlc"):
+    """The tier for `phase` given the goal's tier, or None when `model_selection` is not auto."""
+    cfg = _cfg(sdlc_dir)
+    if _model_selection(cfg) != "auto":
+        return None
+    return phase_tier(tier, phase, cfg)
+
+
 def resolve_step(step_text, sdlc_dir=".sdlc", goal=None):
     """Per-STEP resolution: {model, effort} honoring the same config gate, else None.
     Lets a mechanical step inside a hard goal run cheaper than the goal's ceiling.
@@ -869,7 +907,8 @@ def _read_goal(arg):
 
 USAGE = ("usage: predict.py '<goal>' [sdlc_dir] | resolve '<goal>' [sdlc_dir] | "
          "resolve-profile '<goal>' [sdlc_dir] | "
-         "resolve-step '<step>' [sdlc_dir] [goal] | why '<goal>' [sdlc_dir] | "
+         "resolve-step '<step>' [sdlc_dir] [goal] | "
+         "resolve-phase <phase> <tier> [sdlc_dir] | why '<goal>' [sdlc_dir] | "
          "host-model codex <tier-or-off> [.sdlc] [--effort low|medium|high]")
 
 
@@ -932,6 +971,13 @@ def main(argv):
             return 2
         print(tier or "off")
         return 0
+    # resolve-phase: the goal's tier floored for a reviewer phase (#2020), or `off`.
+    if len(argv) >= 4 and argv[1] == "resolve-phase":
+        if argv[3] not in _TIER_PRICE_ORDER:
+            print(f"predict.py: unknown tier {argv[3]!r}", file=sys.stderr)
+            return 2
+        print(resolve_phase(argv[2], argv[3], argv[4] if len(argv) > 4 else ".sdlc") or "off")
+        return 0
     # resolve-step: the per-step pair — `model=<tier> effort=<low|medium|high>` or `off`.
     # issue #1030: an OPTIONAL 4th positional argument is the goal id -- step text can never double
     # as one the way resolve's own goal_text can, so this is a genuinely new argument, not a reuse
@@ -972,7 +1018,7 @@ def main(argv):
         print(f"effort={effort} in={e_where} hits={e_hits} signal={e_signal}" if e_signal
               else f"effort={effort} signal=")
         return 0
-    if len(argv) < 2 or argv[1] in ("resolve", "resolve-step", "why"):
+    if len(argv) < 2 or argv[1] in ("resolve", "resolve-step", "resolve-phase", "why"):
         print(USAGE, file=sys.stderr)
         return 2
     # The bare verb takes the same optional trailing sdlc_dir (#1601). It is /sigma-model's headline
